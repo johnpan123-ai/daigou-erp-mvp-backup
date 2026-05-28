@@ -1,0 +1,35 @@
+:root {
+  /* Light Theme Colors based on mockup */
+  --color-bg-base: #F8F9FA;
+  --color-bg-surface: #FFFFFF;
+  --color-bg-surface-active: #F3F4F6;
+  --color-bg-surface-hover: #F9FAFB;
+  
+  --color-border: #E5E7EB;
+  
+  --color-text-primary: #1F2937;
+  --color-text-secondary: #4B5563;
+  --color-text-muted: #9CA3AF;
+  --color-text-inverse: #FFFFFF;
+  
+  --color-primary: #3B82F6;
+  --color-primary-hover: #2563EB;
+  --color-primary-subtle: rgba(59, 130, 246, 0.15);
+  
+  --color-success: #10B981;
+  --color-success-subtle: rgba(16, 185, 129, 0.15);
+
+  --color-warning: #F59E0B;
+  --color-warning-subtle: rgba(245, 158, 11, 0.15);
+
+  --color-danger: #EF4444;
+  --color-danger-subtle: rgba(239, 68, 68, 0.15);
+
+  --color-info: #3B82F6;
+  --color-info-subtle: rgba(59, 130, 246, 0.15);
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+}
