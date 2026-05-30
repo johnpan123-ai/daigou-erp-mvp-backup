@@ -110,7 +110,16 @@ export default function PurchaseRecords() {
                       <td style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
                         {isEditing ? (
                           <input className="input" style={{ width: '100%' }} value={editForm.title || ''} onChange={e => setEditForm({...editForm, title: e.target.value})} />
-                        ) : g.title}
+                        ) : (
+                          <div className="flex items-center gap-sm">
+                            <span>{g.normalized_title || g.title}</span>
+                            {g.listing_type && (
+                              <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                {g.listing_type}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td>
                         {isEditing ? (

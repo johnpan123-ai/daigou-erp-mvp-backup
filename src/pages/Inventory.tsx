@@ -8,10 +8,11 @@ import { EmptyState } from '../components/empty/EmptyState';
 interface InventoryGroup {
   title: string;
   skus: InventoryItem[];
-  totalStock: number;
   totalSold: number;
   minPrice: number;
   maxPrice: number;
+  latest_listed_at: string;
+  max_item_code: string;
 }
 
 export default function Inventory() {
@@ -44,9 +45,17 @@ export default function Inventory() {
     setIsImporting(true);
     try {
       const parsedItems = await parseMyAcgFile(file);
-      await db.upsertInventory(parsedItems);
+      const stats = await db.upsertInventory(parsedItems);
       await loadItems();
-      alert(`成功匯入/更新 ${parsedItems.length} 筆商品主檔`);
+      
+      const report = `本次匯入結果：
+- SKU 總讀取：${stats.total}
+- 新增 SKU：${stats.newCount}
+- 更新 SKU：${stats.updatedCount}
+- 跳過 SKU：${stats.unchangedCount}
+- 母體商品數：${stats.groupCount}`;
+
+      alert(report);
     } catch (err) {
       console.error(err);
       alert('匯入失敗，請確認檔案格式是否正確');
@@ -72,24 +81,45 @@ export default function Inventory() {
   const groups = useMemo(() => {
     const map = new Map<string, InventoryGroup>();
     for (const item of items) {
-      if (!map.has(item.product_title)) {
-        map.set(item.product_title, {
-          title: item.product_title,
+      const groupKey = item.normalized_product_title || item.product_title;
+      if (!map.has(groupKey)) {
+        map.set(groupKey, {
+          title: groupKey,
           skus: [],
-          totalStock: 0,
           totalSold: 0,
           minPrice: Infinity,
-          maxPrice: -Infinity
+          maxPrice: -Infinity,
+          latest_listed_at: '',
+          max_item_code: ''
         });
       }
-      const g = map.get(item.product_title)!;
+      const g = map.get(groupKey)!;
       g.skus.push(item);
-      g.totalStock += item.myacg_available_quantity;
       g.totalSold += item.myacg_sold_quantity;
       if (item.final_price < g.minPrice) g.minPrice = item.final_price;
       if (item.final_price > g.maxPrice) g.maxPrice = item.final_price;
+      
+      const listedAt = item.myacg_listed_at || '';
+      if (listedAt > g.latest_listed_at) g.latest_listed_at = listedAt;
+      if (item.myacg_item_code > g.max_item_code) g.max_item_code = item.myacg_item_code;
     }
-    return Array.from(map.values()).sort((a, b) => b.totalSold - a.totalSold);
+    
+    // Sort groups
+    const sortedGroups = Array.from(map.values()).sort((a, b) => {
+      // 1. latest_listed_at DESC
+      if (a.latest_listed_at !== b.latest_listed_at) {
+        return b.latest_listed_at.localeCompare(a.latest_listed_at);
+      }
+      // 2. max_item_code DESC
+      return b.max_item_code.localeCompare(a.max_item_code);
+    });
+
+    // Sort SKUs within each group
+    sortedGroups.forEach(g => {
+      g.skus.sort((a, b) => a.myacg_item_code.localeCompare(b.myacg_item_code));
+    });
+
+    return sortedGroups;
   }, [items]);
 
   // Pagination on Groups
@@ -183,10 +213,10 @@ export default function Inventory() {
                   </th>
                   <th style={{ width: '40px' }}></th>
                   <th>母體商品名稱 (Product Title)</th>
-                  <th style={{ width: '100px', textAlign: 'center' }}>SKU 款數</th>
-                  <th style={{ width: '100px', textAlign: 'right' }}>總庫存</th>
-                  <th style={{ width: '100px', textAlign: 'right' }}>總銷售</th>
-                  <th style={{ width: '200px', textAlign: 'right' }}>價格範圍</th>
+                  <th style={{ width: '130px', textAlign: 'center' }}>最新刊登</th>
+                  <th style={{ width: '80px', textAlign: 'center' }}>款數</th>
+                  <th style={{ width: '80px', textAlign: 'right' }}>總銷售</th>
+                  <th style={{ width: '180px', textAlign: 'right' }}>價格範圍</th>
                 </tr>
               </thead>
               <tbody>
@@ -218,9 +248,20 @@ export default function Inventory() {
                         <td style={{ textAlign: 'center' }}>
                           {isExpanded ? <ChevronDown size={18} className="text-muted"/> : <ChevronRight size={18} className="text-muted"/>}
                         </td>
-                        <td style={{ fontWeight: 600 }}>{g.title}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          <div className="flex items-center gap-sm">
+                            <span>{g.title}</span>
+                            {g.skus[0]?.listing_type && (
+                              <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                {g.skus[0].listing_type}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '13px' }}>
+                          {g.latest_listed_at ? g.latest_listed_at.split(' ')[0] : '-'}
+                        </td>
                         <td style={{ textAlign: 'center' }}>{g.skus.length}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{g.totalStock}</td>
                         <td style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{g.totalSold}</td>
                         <td style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>
                           NT${g.minPrice === g.maxPrice ? g.minPrice : `${g.minPrice}~${g.maxPrice}`}
@@ -244,7 +285,9 @@ export default function Inventory() {
                               <span style={{ fontWeight: 500 }}>{sku.raw_variant_name}</span>
                             </div>
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 500 }}>{sku.myacg_available_quantity}</td>
+                          <td style={{ textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '12px' }}>
+                            {sku.myacg_listed_at ? sku.myacg_listed_at.split(' ')[0] : '-'}
+                          </td>
                           <td style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{sku.myacg_sold_quantity}</td>
                           <td style={{ textAlign: 'right' }}>NT${sku.final_price}</td>
                         </tr>

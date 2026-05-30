@@ -2,6 +2,7 @@ export interface InventoryItem {
   myacg_item_code: string; // PK
   product_id?: string;
   product_title: string;
+  normalized_product_title?: string;
   raw_variant_name: string;
   listing_type: string;
   final_price: number;
@@ -70,6 +71,8 @@ export interface ProductGroup {
   purchase_date: string;
   priority: 'High' | 'Medium' | 'Low';
   title: string;
+  normalized_title?: string;
+  listing_type?: string;
   closing_date: string;
   release_month: string;
   has_official_site: boolean;
@@ -102,6 +105,46 @@ export interface ProductVariant {
 
   note: string;
   sort_order: number;
+}
+
+export function normalizeProductTitle(title: string): string {
+  if (!title) return '';
+  let cleanTitle = title;
+
+  // Protect 代理版
+  cleanTitle = cleanTitle.replace(/代理版/g, '___DAILIBAN___');
+
+  // Patterns to remove
+  const patterns = [
+    /【小河馬日本代購】/g,
+    /【小河馬代購】/g,
+    /預購/g,
+    /現貨/g,
+    /日本代購/g,
+    /現地代購/g,
+    /再版/g,
+    /預約/g,
+    /日版/g,
+    /代理/g, 
+    /\d{2}年\d{2}月/g,
+    /\d{4}年\d{2}月/g,
+  ];
+
+  for (const p of patterns) {
+    cleanTitle = cleanTitle.replace(p, '');
+  }
+
+  // Restore 代理版
+  cleanTitle = cleanTitle.replace(/___DAILIBAN___/g, '代理版');
+  
+  return cleanTitle.trim().replace(/\s+/g, ' '); // Clean up extra spaces
+}
+
+export function determineListingType(title: string): string {
+  if (title.includes('代理版')) return '代理版';
+  if (title.includes('現貨')) return '現貨';
+  if (title.includes('現地代購')) return '現地代購';
+  return '一般預購';
 }
 
 export function resolveMyacgSpecs(rawNames: string[]): Record<string, { category_label: string | null, variant_label: string }> {
@@ -142,9 +185,17 @@ export function resolveMyacgSpecs(rawNames: string[]): Record<string, { category
   return result;
 }
 
+export interface ImportStats {
+  total: number;
+  newCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  groupCount: number;
+}
+
 export interface DatabaseAdapter {
   getInventory(): Promise<InventoryItem[]>;
-  upsertInventory(items: InventoryItem[]): Promise<void>;
+  upsertInventory(items: InventoryItem[]): Promise<ImportStats>;
   
   getSalesOrders(): Promise<SalesOrder[]>;
   saveSalesOrders(items: SalesOrder[]): Promise<void>;
@@ -174,6 +225,7 @@ export interface DatabaseAdapter {
   clearPurchaseRecords(): Promise<void>;
   createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void>;
   reparseProductVariants(): Promise<void>;
+  reparseProductTitles(): Promise<void>;
 }
 
 // Helper for local storage
@@ -202,13 +254,49 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     saveData('erp_inventory', items);
   }
 
-  async upsertInventory(items: InventoryItem[]): Promise<void> {
+  async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     const current = await this.getInventory();
     const currentMap = new Map(current.map(i => [i.myacg_item_code, i]));
+    
+    let newCount = 0;
+    let updatedCount = 0;
+    let unchangedCount = 0;
+    const groupSet = new Set<string>();
+
     for (const item of items) {
-      currentMap.set(item.myacg_item_code, { ...currentMap.get(item.myacg_item_code), ...item });
+      item.normalized_product_title = normalizeProductTitle(item.product_title);
+      item.listing_type = determineListingType(item.product_title);
+      groupSet.add(item.normalized_product_title);
+
+      const existing = currentMap.get(item.myacg_item_code);
+      if (!existing) {
+        newCount++;
+        currentMap.set(item.myacg_item_code, item);
+      } else {
+        const isChanged = 
+          existing.product_title !== item.product_title ||
+          existing.raw_variant_name !== item.raw_variant_name ||
+          existing.final_price !== item.final_price ||
+          existing.myacg_available_quantity !== item.myacg_available_quantity ||
+          existing.myacg_sold_quantity !== item.myacg_sold_quantity ||
+          existing.myacg_listed_at !== item.myacg_listed_at;
+        
+        if (isChanged) {
+          updatedCount++;
+        } else {
+          unchangedCount++;
+        }
+        currentMap.set(item.myacg_item_code, { ...existing, ...item });
+      }
     }
     await this.saveInventory(Array.from(currentMap.values()));
+    return {
+      total: items.length,
+      newCount,
+      updatedCount,
+      unchangedCount,
+      groupCount: groupSet.size
+    };
   }
 
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
@@ -240,6 +328,8 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         group = {
           id: crypto.randomUUID(),
           title: title,
+          normalized_title: normalizeProductTitle(title),
+          listing_type: determineListingType(title),
           priority: 'Low',
           purchase_date: '',
           closing_date: '',
@@ -251,6 +341,13 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         };
         groups.push(group);
         groupsUpdated = true;
+      } else {
+        // Just in case it's an old group without normalized_title
+        if (!group.normalized_title) {
+          group.normalized_title = normalizeProductTitle(title);
+          group.listing_type = determineListingType(title);
+          groupsUpdated = true;
+        }
       }
 
       // We should resolve specs using ALL variants in this group + new items
@@ -410,6 +507,36 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
     if (categoriesUpdated) await this.saveProductCategories(categories);
     if (variantsUpdated) await this.saveProductVariants(variants);
+  }
+
+  async reparseProductTitles(): Promise<void> {
+    const inventory = await this.getInventory();
+    const groups = await this.getProductGroups();
+
+    let invUpdated = false;
+    for (const item of inventory) {
+      const normalized = normalizeProductTitle(item.product_title);
+      const lType = determineListingType(item.product_title);
+      if (item.normalized_product_title !== normalized || item.listing_type !== lType) {
+        item.normalized_product_title = normalized;
+        item.listing_type = lType;
+        invUpdated = true;
+      }
+    }
+
+    let groupsUpdated = false;
+    for (const group of groups) {
+      const normalized = normalizeProductTitle(group.title);
+      const lType = determineListingType(group.title);
+      if (group.normalized_title !== normalized || group.listing_type !== lType) {
+        group.normalized_title = normalized;
+        group.listing_type = lType;
+        groupsUpdated = true;
+      }
+    }
+
+    if (invUpdated) await this.saveInventory(inventory);
+    if (groupsUpdated) await this.saveProductGroups(groups);
   }
 
   async getSalesOrders(): Promise<SalesOrder[]> {

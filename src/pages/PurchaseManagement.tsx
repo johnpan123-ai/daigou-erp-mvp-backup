@@ -6,6 +6,8 @@ import type {
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
 } from '../lib/db';
 import { ChevronRight, ChevronDown, Plus, X, ArrowLeft } from 'lucide-react';
+import PurchaseBatchTab from '../components/PurchaseBatchTab';
+import PrivateOrderTab from '../components/PrivateOrderTab';
 
 export default function PurchaseManagement() {
   const { id } = useParams<{ id: string }>();
@@ -23,16 +25,18 @@ export default function PurchaseManagement() {
   const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
   
   // UI States
+  const [activeTab, setActiveTab] = useState<'worksheet' | 'purchase_batches' | 'private_orders'>('worksheet');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [expandedOrderRows, setExpandedOrderRows] = useState<Set<string>>(new Set());
 
-  // Modal: Private Order
   const [showPrivateOrderModal, setShowPrivateOrderModal] = useState(false);
+  const [editingPoId, setEditingPoId] = useState<string | null>(null);
   const [poForm, setPoForm] = useState({ customer_name: '', contact: '', note: '' });
   const [poLines, setPoLines] = useState<{ variant_id: string, quantity: number, amount: number, note: string }[]>([]);
 
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
   const [batchLines, setBatchLines] = useState<{ variant_id: string, quantity: number, cost: number, note: string }[]>([]);
 
@@ -107,8 +111,24 @@ export default function PurchaseManagement() {
 
   // --- Modal Logic: Private Order ---
   const openPrivateOrderModal = () => {
+    setEditingPoId(null);
     setPoForm({ customer_name: '', contact: '', note: '' });
     setPoLines(variants.map(v => ({ variant_id: v.id, quantity: 0, amount: 0, note: '' })));
+    setShowPrivateOrderModal(true);
+  };
+
+  const handleEditOrder = (order: PrivateOrder) => {
+    setEditingPoId(order.id);
+    setPoForm({ customer_name: order.customer_name, contact: order.contact || '', note: order.note || '' });
+    setPoLines(variants.map(v => {
+      const existing = privateOrderItems.find(i => i.product_variant_id === v.id && i.private_order_id === order.id);
+      return {
+        variant_id: v.id,
+        quantity: existing ? existing.quantity : 0,
+        amount: existing ? existing.amount : 0,
+        note: existing?.note || ''
+      };
+    }));
     setShowPrivateOrderModal(true);
   };
 
@@ -122,30 +142,48 @@ export default function PurchaseManagement() {
     const validLines = poLines.filter(l => l.quantity > 0);
     if (!group || !poForm.customer_name.trim() || validLines.length === 0) return;
     
-    const newPoId = crypto.randomUUID();
-    const newPo: PrivateOrder = {
-      id: newPoId,
-      product_group_id: group.id,
-      customer_name: poForm.customer_name,
-      contact: poForm.contact,
-      note: poForm.note,
-      created_at: new Date().toISOString().slice(0, 10)
-    };
-
-    const newItems: PrivateOrderItem[] = validLines.map(line => ({
-      id: crypto.randomUUID(),
-      private_order_id: newPoId,
-      product_variant_id: line.variant_id,
-      quantity: line.quantity,
-      amount: line.amount,
-      note: line.note
-    }));
-
     const allPOs = await db.getPrivateOrders();
     const allPOItems = await db.getPrivateOrderItems();
-    
-    await db.savePrivateOrders([...allPOs, newPo]);
-    await db.savePrivateOrderItems([...allPOItems, ...newItems]);
+
+    if (editingPoId) {
+      const idx = allPOs.findIndex(o => o.id === editingPoId);
+      if (idx !== -1) {
+        allPOs[idx] = { ...allPOs[idx], customer_name: poForm.customer_name, contact: poForm.contact, note: poForm.note };
+      }
+      const newPOItems = allPOItems.filter(i => i.private_order_id !== editingPoId);
+      const updatedItems: PrivateOrderItem[] = validLines.map(line => ({
+        id: crypto.randomUUID(),
+        private_order_id: editingPoId,
+        product_variant_id: line.variant_id,
+        quantity: line.quantity,
+        amount: line.amount,
+        note: line.note
+      }));
+      await db.savePrivateOrders(allPOs);
+      await db.savePrivateOrderItems([...newPOItems, ...updatedItems]);
+    } else {
+      const newPoId = crypto.randomUUID();
+      const newPo: PrivateOrder = {
+        id: newPoId,
+        product_group_id: group.id,
+        customer_name: poForm.customer_name,
+        contact: poForm.contact,
+        note: poForm.note,
+        created_at: new Date().toISOString().slice(0, 10)
+      };
+
+      const newItems: PrivateOrderItem[] = validLines.map(line => ({
+        id: crypto.randomUUID(),
+        private_order_id: newPoId,
+        product_variant_id: line.variant_id,
+        quantity: line.quantity,
+        amount: line.amount,
+        note: line.note
+      }));
+      
+      await db.savePrivateOrders([...allPOs, newPo]);
+      await db.savePrivateOrderItems([...allPOItems, ...newItems]);
+    }
     
     setShowPrivateOrderModal(false);
     await loadData();
@@ -153,8 +191,24 @@ export default function PurchaseManagement() {
 
   // --- Modal Logic: Purchase Batch ---
   const openBatchModal = () => {
+    setEditingBatchId(null);
     setBatchForm({ name: '', date: new Date().toISOString().slice(0, 10), note: '' });
     setBatchLines(variants.map(v => ({ variant_id: v.id, quantity: 0, cost: 0, note: '' })));
+    setShowBatchModal(true);
+  };
+
+  const handleEditBatch = (batch: PurchaseBatch) => {
+    setEditingBatchId(batch.id);
+    setBatchForm({ name: batch.name, date: batch.date, note: batch.note || '' });
+    setBatchLines(variants.map(v => {
+      const existing = purchaseBatchItems.find(i => i.product_variant_id === v.id && i.purchase_batch_id === batch.id);
+      return {
+        variant_id: v.id,
+        quantity: existing ? existing.quantity : 0,
+        cost: existing ? existing.cost : 0,
+        note: existing?.note || ''
+      };
+    }));
     setShowBatchModal(true);
   };
 
@@ -168,30 +222,48 @@ export default function PurchaseManagement() {
     const validLines = batchLines.filter(l => l.quantity > 0);
     if (!group || !batchForm.name.trim() || validLines.length === 0) return;
     
-    const newBatchId = crypto.randomUUID();
-    const newBatch: PurchaseBatch = {
-      id: newBatchId,
-      product_group_id: group.id,
-      name: batchForm.name,
-      date: batchForm.date,
-      note: batchForm.note,
-      created_at: new Date().toISOString()
-    };
-
-    const newItems: PurchaseBatchItem[] = validLines.map(line => ({
-      id: crypto.randomUUID(),
-      purchase_batch_id: newBatchId,
-      product_variant_id: line.variant_id,
-      quantity: line.quantity,
-      cost: line.cost,
-      note: line.note
-    }));
-
     const allBatches = await db.getPurchaseBatches();
     const allBatchItems = await db.getPurchaseBatchItems();
-    
-    await db.savePurchaseBatches([...allBatches, newBatch]);
-    await db.savePurchaseBatchItems([...allBatchItems, ...newItems]);
+
+    if (editingBatchId) {
+      const idx = allBatches.findIndex(b => b.id === editingBatchId);
+      if (idx !== -1) {
+        allBatches[idx] = { ...allBatches[idx], name: batchForm.name, date: batchForm.date, note: batchForm.note };
+      }
+      const newItems = allBatchItems.filter(i => i.purchase_batch_id !== editingBatchId);
+      const updatedItems: PurchaseBatchItem[] = validLines.map(line => ({
+        id: crypto.randomUUID(),
+        purchase_batch_id: editingBatchId,
+        product_variant_id: line.variant_id,
+        quantity: line.quantity,
+        cost: line.cost,
+        note: line.note
+      }));
+      await db.savePurchaseBatches(allBatches);
+      await db.savePurchaseBatchItems([...newItems, ...updatedItems]);
+    } else {
+      const newBatchId = crypto.randomUUID();
+      const newBatch: PurchaseBatch = {
+        id: newBatchId,
+        product_group_id: group.id,
+        name: batchForm.name,
+        date: batchForm.date,
+        note: batchForm.note,
+        created_at: new Date().toISOString()
+      };
+
+      const newItems: PurchaseBatchItem[] = validLines.map(line => ({
+        id: crypto.randomUUID(),
+        purchase_batch_id: newBatchId,
+        product_variant_id: line.variant_id,
+        quantity: line.quantity,
+        cost: line.cost,
+        note: line.note
+      }));
+
+      await db.savePurchaseBatches([...allBatches, newBatch]);
+      await db.savePurchaseBatchItems([...allBatchItems, ...newItems]);
+    }
     
     setShowBatchModal(false);
     await loadData();
@@ -251,7 +323,6 @@ export default function PurchaseManagement() {
   variants.forEach(v => {
     const inv = inventoryMap.get(v.myacg_item_code);
     const price = inv ? inv.final_price : 0;
-    const stock = inv ? inv.myacg_available_quantity : 0;
     
     const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
     const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
@@ -264,7 +335,7 @@ export default function PurchaseManagement() {
     const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
     const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
     
-    const needToBuy = Math.max(totalDemand - totalPurchased - stock, 0);
+    const needToBuy = Math.max(totalDemand - totalPurchased, 0);
 
     totalDemandItems += totalDemand;
     totalPurchasedItems += totalPurchased;
@@ -290,8 +361,13 @@ export default function PurchaseManagement() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827' }}>
-            {group.title}
+          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {group.normalized_title || group.title}
+            {group.listing_type && (
+              <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
+                {group.listing_type}
+              </span>
+            )}
           </h1>
           
           {/* Small Summary Strip */}
@@ -311,29 +387,49 @@ export default function PurchaseManagement() {
           
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#fff', padding: '0 16px' }}>
-            <div style={{ padding: '16px 24px', color: '#2563eb', fontWeight: 600, borderBottom: '2px solid #2563eb', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              代購工作規格表 (Airtable 模式)
+            <div 
+              style={{ padding: '16px 24px', cursor: 'pointer', fontWeight: 600, color: activeTab === 'worksheet' ? '#2563eb' : '#64748b', borderBottom: activeTab === 'worksheet' ? '2px solid #2563eb' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => setActiveTab('worksheet')}
+            >
+              代購工作規格表
+            </div>
+            <div 
+              style={{ padding: '16px 24px', cursor: 'pointer', fontWeight: 600, color: activeTab === 'purchase_batches' ? '#2563eb' : '#64748b', borderBottom: activeTab === 'purchase_batches' ? '2px solid #2563eb' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => setActiveTab('purchase_batches')}
+            >
+              採購批次紀錄
+            </div>
+            <div 
+              style={{ padding: '16px 24px', cursor: 'pointer', fontWeight: 600, color: activeTab === 'private_orders' ? '#2563eb' : '#64748b', borderBottom: activeTab === 'private_orders' ? '2px solid #2563eb' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: '8px' }}
+              onClick={() => setActiveTab('private_orders')}
+            >
+              私下登記紀錄
             </div>
             
             <div style={{ flex: 1 }} />
             
             {/* Table Actions */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fdf2f8', color: '#db2777', borderColor: '#fbcfe8' }} onClick={openPrivateOrderModal}>
-                <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} />
-                私下登記
-              </button>
-              <button className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 12px' }} onClick={openBatchModal}>
-                <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} />
-                新增採購批次
-              </button>
-              <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', margin: '0 8px' }}></div>
-              <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fff' }} onClick={() => setExpandedGroups(new Set(Object.keys(groupedVariants)))}>展開群組</button>
-              <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fff' }} onClick={() => setExpandedGroups(new Set())}>收合群組</button>
+              {activeTab === 'worksheet' && (
+                <>
+                  <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fdf2f8', color: '#db2777', borderColor: '#fbcfe8' }} onClick={openPrivateOrderModal}>
+                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} />
+                    私下登記
+                  </button>
+                  <button className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 12px' }} onClick={openBatchModal}>
+                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} />
+                    新增採購批次
+                  </button>
+                  <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', margin: '0 8px' }}></div>
+                  <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fff' }} onClick={() => setExpandedGroups(new Set(Object.keys(groupedVariants)))}>展開群組</button>
+                  <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fff' }} onClick={() => setExpandedGroups(new Set())}>收合群組</button>
+                </>
+              )}
             </div>
           </div>
 
           {/* Table Wrapper */}
+          {activeTab === 'worksheet' && (
           <div style={{ overflowX: 'auto', backgroundColor: '#fff', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', fontFamily: 'system-ui, sans-serif' }}>
               
@@ -360,7 +456,6 @@ export default function PurchaseManagement() {
                     
                     const inv = inventoryMap.get(v.myacg_item_code);
                     const price = inv ? inv.final_price : 0;
-                    const stock = inv ? inv.myacg_available_quantity : 0;
                     
                     const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
                     const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
@@ -373,8 +468,8 @@ export default function PurchaseManagement() {
                     const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
                     const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
                     
-                    const needToBuy = Math.max(totalDemand - totalPurchased - stock, 0);
-                    const excessBuy = Math.max(totalPurchased + stock - totalDemand, 0);
+                    const needToBuy = Math.max(totalDemand - totalPurchased, 0);
+                    const excessBuy = Math.max(totalPurchased - totalDemand, 0);
 
                     const displayName = v.variant_name;
 
@@ -393,10 +488,10 @@ export default function PurchaseManagement() {
                           <td style={tdStyle('right')}>¥ {price}</td>
                           
                           <td style={{...tdStyle('center', false, '#fef2f2'), fontWeight: 600, color: '#dc2626'}}>
-                            {needToBuy > 0 ? needToBuy : ''}
+                            {needToBuy > 0 ? needToBuy : '-'}
                           </td>
                           <td style={{...tdStyle('center', false, '#fff7ed'), fontWeight: 600, color: '#ea580c'}}>
-                            {excessBuy > 0 ? excessBuy : ''}
+                            {excessBuy > 0 ? excessBuy : '-'}
                           </td>
                           
                           {/* MyACG Inline Edit */}
@@ -426,6 +521,7 @@ export default function PurchaseManagement() {
                         </tr>
                         {isOrderExpanded && <OrderDetailsSubRow 
                           variant={v} 
+                          debugAvailableQuantity={inventoryMap.get(v.myacg_item_code)?.myacg_available_quantity || 0}
                           privateOrders={privateOrders}
                           vPrivateItems={vPrivateItems}
                           purchaseBatches={purchaseBatches}
@@ -440,9 +536,6 @@ export default function PurchaseManagement() {
                   let pMyacg = 0, pWaca = 0, pManual = 0, pNeed = 0, pExcess = 0;
                   
                   groupItems.forEach(v => {
-                    const inv = inventoryMap.get(v.myacg_item_code);
-                    const stock = inv ? inv.myacg_available_quantity : 0;
-                    
                     const mDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
                     const wDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
                     
@@ -457,8 +550,8 @@ export default function PurchaseManagement() {
                     const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
                     const tPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
                     
-                    pNeed += Math.max(tDemand - tPurchased - stock, 0);
-                    pExcess += Math.max(tPurchased + stock - tDemand, 0);
+                    pNeed += Math.max(tDemand - tPurchased, 0);
+                    pExcess += Math.max(tPurchased - tDemand, 0);
                   });
 
                   return (
@@ -478,10 +571,10 @@ export default function PurchaseManagement() {
                         <td style={tdStyle('right', true)}>-</td>
                         
                         <td style={{...tdStyle('center', false, '#fef2f2'), fontWeight: 600, color: '#dc2626'}}>
-                          {pNeed > 0 ? pNeed : ''}
+                          {pNeed > 0 ? pNeed : '-'}
                         </td>
                         <td style={{...tdStyle('center', false, '#fff7ed'), fontWeight: 600, color: '#ea580c'}}>
-                          {pExcess > 0 ? pExcess : ''}
+                          {pExcess > 0 ? pExcess : '-'}
                         </td>
                         
                         <td style={tdStyle('center', true)}>{pMyacg > 0 ? pMyacg : ''}</td>
@@ -494,7 +587,6 @@ export default function PurchaseManagement() {
                         const isOrderExpanded = expandedOrderRows.has(v.id);
                         const inv = inventoryMap.get(v.myacg_item_code);
                         const price = inv ? inv.final_price : 0;
-                        const stock = inv ? inv.myacg_available_quantity : 0;
                         
                         const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
                         const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
@@ -507,8 +599,8 @@ export default function PurchaseManagement() {
                         const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
                         const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
                         
-                        const needToBuy = Math.max(totalDemand - totalPurchased - stock, 0);
-                        const excessBuy = Math.max(totalPurchased + stock - totalDemand, 0);
+                        const needToBuy = Math.max(totalDemand - totalPurchased, 0);
+                        const excessBuy = Math.max(totalPurchased - totalDemand, 0);
 
                         const isLastChild = i === groupItems.length - 1;
                         const childBorderBottom = isLastChild ? '1px solid #cbd5e1' : '1px solid #f1f5f9';
@@ -531,10 +623,10 @@ export default function PurchaseManagement() {
                               <td style={tdStyle('right')}>¥ {price}</td>
                               
                               <td style={{...tdStyle('center', false, '#fef2f2'), fontWeight: 600, color: '#dc2626'}}>
-                                {needToBuy > 0 ? needToBuy : ''}
+                                {needToBuy > 0 ? needToBuy : '-'}
                               </td>
                               <td style={{...tdStyle('center', false, '#fff7ed'), fontWeight: 600, color: '#ea580c'}}>
-                                {excessBuy > 0 ? excessBuy : ''}
+                                {excessBuy > 0 ? excessBuy : '-'}
                               </td>
 
                               <td style={tdStyle('center', false, '#f8fafc')}>
@@ -557,11 +649,12 @@ export default function PurchaseManagement() {
                               </td>
                               
                               <td style={tdStyle('center', false, '#fdf2f8')}>
-                                <span style={{ fontWeight: 600, color: '#db2777' }}>{privateDemand > 0 ? privateDemand : ''}</span>
+                                <span style={{ fontWeight: 600, color: '#db2777' }}>{privateDemand > 0 ? privateDemand : '-'}</span>
                               </td>
                             </tr>
                             {isOrderExpanded && <OrderDetailsSubRow 
                                 variant={v} 
+                                debugAvailableQuantity={inventoryMap.get(v.myacg_item_code)?.myacg_available_quantity || 0}
                                 privateOrders={privateOrders}
                                 vPrivateItems={vPrivateItems}
                                 purchaseBatches={purchaseBatches}
@@ -577,6 +670,29 @@ export default function PurchaseManagement() {
               </tbody>
             </table>
           </div>
+          )}
+
+          {/* Render Purchase Batch Tab */}
+          {activeTab === 'purchase_batches' && (
+            <PurchaseBatchTab 
+              batches={purchaseBatches} 
+              batchItems={purchaseBatchItems} 
+              variants={variants} 
+              onRefresh={loadData} 
+              onEditBatch={handleEditBatch}
+            />
+          )}
+
+          {/* Render Private Order Tab */}
+          {activeTab === 'private_orders' && (
+            <PrivateOrderTab 
+              orders={privateOrders} 
+              orderItems={privateOrderItems} 
+              variants={variants} 
+              onRefresh={loadData} 
+              onEditOrder={handleEditOrder}
+            />
+          )}
         </div>
 
       </div>
@@ -586,7 +702,7 @@ export default function PurchaseManagement() {
         <div style={modalOverlayStyle}>
           <div style={{ ...modalStyle, maxWidth: '800px' }}>
             <div style={modalHeaderStyle}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>新增私下登記</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{editingPoId ? '編輯私下登記' : '新增私下登記'}</h3>
               <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowPrivateOrderModal(false)}>
                 <X size={18} />
               </button>
@@ -685,7 +801,9 @@ export default function PurchaseManagement() {
             </div>
             <div style={modalFooterStyle}>
               <button className="btn btn-outline" onClick={() => setShowPrivateOrderModal(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleAddPrivateOrderSubmit} disabled={!poForm.customer_name.trim() || !poLines.some(l => l.quantity > 0)}>確認建立私下登記</button>
+              <button className="btn btn-primary" onClick={handleAddPrivateOrderSubmit} disabled={!poForm.customer_name.trim() || !poLines.some(l => l.quantity > 0)}>
+                {editingPoId ? '儲存變更' : '確認建立私下登記'}
+              </button>
             </div>
           </div>
         </div>
@@ -696,7 +814,7 @@ export default function PurchaseManagement() {
         <div style={modalOverlayStyle}>
           <div style={{ ...modalStyle, maxWidth: '800px' }}>
             <div style={modalHeaderStyle}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>新增採購批次</h3>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{editingBatchId ? '編輯採購批次' : '新增採購批次'}</h3>
               <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowBatchModal(false)}>
                 <X size={18} />
               </button>
@@ -806,14 +924,16 @@ export default function PurchaseManagement() {
 }
 
 function OrderDetailsSubRow({ 
-  variant, 
+  variant,
+  debugAvailableQuantity,
   privateOrders,
   vPrivateItems,
   purchaseBatches,
   vBatchItems,
   colSpan 
 }: { 
-  variant: ProductVariant, 
+  variant: ProductVariant,
+  debugAvailableQuantity: number,
   privateOrders: PrivateOrder[],
   vPrivateItems: PrivateOrderItem[],
   purchaseBatches: PurchaseBatch[],
@@ -825,6 +945,14 @@ function OrderDetailsSubRow({
   const poMap = new Map(privateOrders.map(po => [po.id, po]));
   const batchMap = new Map(purchaseBatches.map(b => [b.id, b]));
 
+  const myacgDemand = (variant.myacg_auto_quantity || 0) + (variant.myacg_manual_adjustment || 0);
+  const wacaDemand = (variant.waca_auto_quantity || 0) + (variant.waca_manual_adjustment || 0);
+  const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
+  const totalDemand = myacgDemand + wacaDemand + privateDemand;
+  const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+  const needToBuy = Math.max(totalDemand - totalPurchased, 0);
+  const excessBuy = Math.max(totalPurchased - totalDemand, 0);
+
   return (
     <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
       <td></td>
@@ -834,6 +962,33 @@ function OrderDetailsSubRow({
           
           {/* Left: Demand Sources */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+
+            {/* Debug Formula Section */}
+            <div style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', padding: '12px', borderRadius: '6px' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '8px' }}>計算公式核對</div>
+              
+              {/* Row 1: Demands Breakdown */}
+              <div style={{ display: 'flex', gap: '16px', fontSize: '13px', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px dashed #cbd5e1' }}>
+                <div><span style={{ color: '#64748b' }}>買動漫訂單:</span> <span style={{ fontWeight: 600 }}>{myacgDemand}</span></div>
+                <div><span style={{ color: '#64748b' }}>WACA 訂單:</span> <span style={{ fontWeight: 600 }}>{wacaDemand}</span></div>
+                <div><span style={{ color: '#64748b' }}>私下登記:</span> <span style={{ fontWeight: 600 }}>{privateDemand}</span></div>
+                <div style={{ marginLeft: '8px', borderLeft: '1px solid #cbd5e1', paddingLeft: '16px' }}>
+                  <span style={{ color: '#64748b' }}>買動漫上架庫存 (不參與計算):</span> <span style={{ fontWeight: 600, color: '#94a3b8' }}>{debugAvailableQuantity}</span>
+                </div>
+              </div>
+
+              {/* Row 2: Final Calc */}
+              <div style={{ display: 'flex', gap: '16px', fontSize: '13px' }}>
+                <div><span style={{ color: '#64748b' }}>總需求:</span> <span style={{ fontWeight: 600 }}>{totalDemand}</span></div>
+                <div><span style={{ color: '#64748b' }}>已採購 (批次加總):</span> <span style={{ fontWeight: 600, color: '#2563eb' }}>{totalPurchased}</span></div>
+                <div style={{ marginLeft: '8px', borderLeft: '1px solid #cbd5e1', paddingLeft: '16px' }}>
+                  <span style={{ color: '#64748b' }}>還缺:</span> <span style={{ fontWeight: 600, color: '#dc2626' }}>{needToBuy}</span>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b' }}>多買:</span> <span style={{ fontWeight: 600, color: '#ea580c' }}>{excessBuy}</span>
+                </div>
+              </div>
+            </div>
             
             {/* Platform Breakdowns */}
             <div style={{ display: 'flex', gap: '16px' }}>

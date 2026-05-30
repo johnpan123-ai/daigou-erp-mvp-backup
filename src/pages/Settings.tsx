@@ -181,6 +181,22 @@ export default function Settings() {
 
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
+                <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新整理商品標題</div>
+                <div className="text-xs text-muted">清理商品名稱中多餘的促銷/代購文字，僅保留商品主體。不影響原始名稱。</div>
+              </div>
+              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} onClick={async () => {
+                if (confirm('確定要重新整理所有商品標題嗎？')) {
+                  await db.reparseProductTitles();
+                  alert('清理完成');
+                  await loadCounts();
+                }
+              }}>
+                清理標題
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+              <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>清空訂購紀錄資料</div>
                 <div className="text-xs text-muted">只清除訂購紀錄 (Group/Category/Variant)，不影響商品主檔。</div>
               </div>
