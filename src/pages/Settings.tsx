@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { db } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
+import { getProviderMode } from '../providers/providerMode';
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database } from 'lucide-react';
 
 export default function Settings() {
@@ -20,12 +21,12 @@ export default function Settings() {
 
   const loadCounts = async () => {
     const [inv, so, soi, pg, pc, pv] = await Promise.all([
-      db.getInventory(),
-      db.getSalesOrders(),
-      db.getSalesOrderItems(),
-      db.getProductGroups(),
-      db.getProductCategories(),
-      db.getProductVariants()
+      dataProvider.getInventory(),
+      dataProvider.getSalesOrders(),
+      dataProvider.getSalesOrderItems(),
+      dataProvider.getProductGroups(),
+      dataProvider.getProductCategories(),
+      dataProvider.getProductVariants()
     ]);
     
     setCounts({
@@ -39,7 +40,7 @@ export default function Settings() {
   };
 
   const handleExport = async () => {
-    await db.exportData();
+    await dataProvider.exportData();
   };
 
   const handleImportClick = () => {
@@ -52,7 +53,7 @@ export default function Settings() {
 
     try {
       const text = await file.text();
-      const success = await db.importData(text);
+      const success = await dataProvider.importData(text);
       if (success) {
         alert('資料還原成功！');
         await loadCounts();
@@ -68,7 +69,7 @@ export default function Settings() {
 
   const handleClearPurchaseRecords = async () => {
     if (confirm('確定要清空所有「訂購紀錄」(ProductGroup / Category / Variant) 嗎？\n您的「商品主檔」(Inventory) 將會保留。')) {
-      await db.clearPurchaseRecords();
+      await dataProvider.clearPurchaseRecords();
       alert('訂購紀錄已清空。');
       await loadCounts();
     }
@@ -77,7 +78,7 @@ export default function Settings() {
   const handleClear = async () => {
     if (confirm('警告：確定要清空所有資料嗎？此操作無法復原！\n強烈建議先點擊「匯出 JSON 備份」。')) {
       if (confirm('請再次確認，真的要清空所有資料庫？')) {
-        await db.clearData();
+        await dataProvider.clearData();
         alert('資料已全數清空。');
         await loadCounts();
       }
@@ -170,7 +171,7 @@ export default function Settings() {
               </div>
               <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} onClick={async () => {
                 if (confirm('確定要重新解析商品規格？不會刪除任何訂單與採購資料。')) {
-                  await db.reparseProductVariants();
+                  await dataProvider.reparseProductVariants();
                   alert('解析完成');
                   await loadCounts();
                 }
@@ -186,7 +187,7 @@ export default function Settings() {
               </div>
               <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} onClick={async () => {
                 if (confirm('確定要重新整理所有商品標題嗎？')) {
-                  await db.reparseProductTitles();
+                  await dataProvider.reparseProductTitles();
                   alert('清理完成');
                   await loadCounts();
                 }
@@ -214,6 +215,74 @@ export default function Settings() {
                 <Trash2 size={16} /> 清空 Reset
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* 資料來源模式 */}
+        <div className="card flex-col" style={{ gridColumn: 'span 3' }}>
+          <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Database size={18} className="text-primary" /> 
+            資料來源模式
+          </h3>
+          <p className="text-muted text-sm" style={{ marginBottom: '16px' }}>
+            設定系統的資料讀寫來源。目前系統雲端化規劃中，目前預設並強制為「本地模式」。
+          </p>
+          
+          <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: 'var(--color-text)' }}>
+            目前模式：{getProviderMode() === 'local' ? '本地模式' : getProviderMode() === 'cloud' ? '雲端模式' : '備援模式'}
+          </div>
+
+          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <label style={{ 
+              border: '2px solid var(--color-primary)', 
+              borderRadius: '8px', 
+              padding: '16px', 
+              flex: '1', 
+              minWidth: '200px', 
+              cursor: 'pointer',
+              position: 'relative',
+              backgroundColor: 'rgba(134, 59, 255, 0.05)'
+            }}>
+              <input type="radio" checked readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px' }}>本地模式（可用）</div>
+              <div className="text-xs text-muted">使用瀏覽器 LocalStorage/IndexedDB 儲存資料，完全在本地執行。</div>
+            </label>
+
+            <label 
+              onClick={() => alert('此模式尚未啟用，之後會在雲端化階段開放。')}
+              style={{ 
+                border: '1px solid var(--color-border)', 
+                borderRadius: '8px', 
+                padding: '16px', 
+                flex: '1', 
+                minWidth: '200px', 
+                cursor: 'pointer',
+                opacity: '0.6',
+                position: 'relative'
+              }}
+            >
+              <input type="radio" checked={false} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className="font-semibold text-muted" style={{ fontSize: '15px', marginBottom: '4px' }}>雲端模式（尚未啟用）</div>
+              <div className="text-xs text-muted">與 Supabase 雲端資料庫同步，支援多使用者即時協同編輯。</div>
+            </label>
+
+            <label 
+              onClick={() => alert('此模式尚未啟用，之後會在雲端化階段開放。')}
+              style={{ 
+                border: '1px solid var(--color-border)', 
+                borderRadius: '8px', 
+                padding: '16px', 
+                flex: '1', 
+                minWidth: '200px', 
+                cursor: 'pointer',
+                opacity: '0.6',
+                position: 'relative'
+              }}
+            >
+              <input type="radio" checked={false} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className="font-semibold text-muted" style={{ fontSize: '15px', marginBottom: '4px' }}>備援模式（尚未啟用）</div>
+              <div className="text-xs text-muted">雲端模式無法連線時，自動切換至本地快取編輯，並在連線後自動同步。</div>
+            </label>
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { PrivateOrder, PrivateOrderItem, ProductVariant } from '../lib/db';
-import { db } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
 
 interface PrivateOrderTabProps {
@@ -25,11 +25,11 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
   const handleDeleteOrder = async (order: PrivateOrder) => {
     if (!window.confirm(`確定刪除此私下登記？底下明細也會一起刪除。`)) return;
     
-    const allOrders = await db.getPrivateOrders();
-    const allItems = await db.getPrivateOrderItems();
+    const allOrders = await dataProvider.getPrivateOrders();
+    const allItems = await dataProvider.getPrivateOrderItems();
     
-    await db.savePrivateOrders(allOrders.filter(o => o.id !== order.id));
-    await db.savePrivateOrderItems(allItems.filter(i => i.private_order_id !== order.id));
+    await dataProvider.savePrivateOrders(allOrders.filter(o => o.id !== order.id));
+    await dataProvider.savePrivateOrderItems(allItems.filter(i => i.private_order_id !== order.id));
     
     onRefresh();
   };

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { PurchaseBatch, PurchaseBatchItem, ProductVariant } from '../lib/db';
-import { db } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
 
 interface PurchaseBatchTabProps {
@@ -25,11 +25,11 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
   const handleDeleteBatch = async (batch: PurchaseBatch) => {
     if (!window.confirm(`確定刪除此採購批次？底下明細也會一起刪除。`)) return;
     
-    const allBatches = await db.getPurchaseBatches();
-    const allItems = await db.getPurchaseBatchItems();
+    const allBatches = await dataProvider.getPurchaseBatches();
+    const allItems = await dataProvider.getPurchaseBatchItems();
     
-    await db.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
-    await db.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
+    await dataProvider.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
+    await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
     
     onRefresh();
   };

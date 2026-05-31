@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { db, calculateFinalMyacgDemand } from '../lib/db';
+import { calculateFinalMyacgDemand } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2 } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
@@ -304,13 +305,13 @@ export default function PurchaseRecords() {
 
   const loadData = async () => {
     const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
-      db.getProductGroups(),
-      db.getProductVariants(),
-      db.getProductCategories(),
-      db.getPurchaseBatchItems(),
-      db.getPrivateOrderItems(),
-      db.getInventory(),
-      db.getSalesOrderItems()
+      dataProvider.getProductGroups(),
+      dataProvider.getProductVariants(),
+      dataProvider.getProductCategories(),
+      dataProvider.getPurchaseBatchItems(),
+      dataProvider.getPrivateOrderItems(),
+      dataProvider.getInventory(),
+      dataProvider.getSalesOrderItems()
     ]);
     setGroups(fetchedGroups);
     setVariants(fetchedVars);
@@ -332,7 +333,7 @@ export default function PurchaseRecords() {
       return g;
     });
     setGroups(updatedGroups);
-    await db.saveProductGroups(updatedGroups);
+    await dataProvider.saveProductGroups(updatedGroups);
   };
 
   const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca', totalValue: number) => {
@@ -344,7 +345,7 @@ export default function PurchaseRecords() {
     if (groupVars.length === 0) return;
     const targetVar = groupVars[0];
     
-    const allVars = await db.getProductVariants();
+    const allVars = await dataProvider.getProductVariants();
     const dbTarget = allVars.find(v => v.id === targetVar.id);
     
     if (dbTarget) {
@@ -356,7 +357,7 @@ export default function PurchaseRecords() {
         dbTarget.waca_manual_adjustment = totalValue - auto;
       }
       
-      await db.saveProductVariants(allVars);
+      await dataProvider.saveProductVariants(allVars);
       setVariants(variants.map(v => v.id === targetVar.id ? dbTarget : v));
     }
   };
@@ -367,7 +368,7 @@ export default function PurchaseRecords() {
 
     const updatedGroups = groups.filter(g => g.id !== groupId);
     setGroups(updatedGroups);
-    await db.saveProductGroups(updatedGroups);
+    await dataProvider.saveProductGroups(updatedGroups);
   };
 
   const handleRowClick = (id: string, e: React.MouseEvent) => {

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { db, normalizeProductTitle } from '../lib/db';
+import { normalizeProductTitle } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, SalesOrder, SalesOrderItem, ImportBatch } from '../lib/db';
 import { Upload, ListOrdered, X, CheckCircle, AlertTriangle, FileBox, FileText, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { parseMyAcgOrderFile } from '../utils/myacgParser';
@@ -44,7 +45,7 @@ export default function OrdersImport() {
   }, []);
 
   const loadBatches = async () => {
-    const data = await db.getImportBatches();
+    const data = await dataProvider.getImportBatches();
     // Sort from newest to oldest
     data.sort((a, b) => new Date(b.imported_at).getTime() - new Date(a.imported_at).getTime());
     setBatches(data);
@@ -77,11 +78,11 @@ export default function OrdersImport() {
       const validItems = rawItems.filter(i => !i.order_status.includes('已取消'));
       const cancelledSkipped = totalOrdersRead - validItems.length;
 
-      const allVariants = await db.getProductVariants();
-      const allInventory = await db.getInventory();
-      const allGroups = await db.getProductGroups();
-      const existingOrders = await db.getSalesOrders();
-      const existingOrderItems = await db.getSalesOrderItems();
+      const allVariants = await dataProvider.getProductVariants();
+      const allInventory = await dataProvider.getInventory();
+      const allGroups = await dataProvider.getProductGroups();
+      const existingOrders = await dataProvider.getSalesOrders();
+      const existingOrderItems = await dataProvider.getSalesOrderItems();
 
       // Deduplication
       const existingItemKeys = new Set(existingOrderItems.map(i => `${i.order_id}_${i.myacg_item_code}_${i.variant_name || ''}_${i.price || 0}`));
@@ -290,12 +291,12 @@ export default function OrdersImport() {
     setIsImporting(true);
     try {
       // Save Main Data
-      await db.saveProductGroups(report.pendingGroups);
-      await db.saveProductVariants(report.pendingVariants);
-      const currentOrders = await db.getSalesOrders();
-      await db.saveSalesOrders([...currentOrders, ...report.pendingOrders]);
-      const currentOrderItems = await db.getSalesOrderItems();
-      await db.saveSalesOrderItems([...currentOrderItems, ...report.pendingOrderItems]);
+      await dataProvider.saveProductGroups(report.pendingGroups);
+      await dataProvider.saveProductVariants(report.pendingVariants);
+      const currentOrders = await dataProvider.getSalesOrders();
+      await dataProvider.saveSalesOrders([...currentOrders, ...report.pendingOrders]);
+      const currentOrderItems = await dataProvider.getSalesOrderItems();
+      await dataProvider.saveSalesOrderItems([...currentOrderItems, ...report.pendingOrderItems]);
 
       // Save ImportBatch
       const newBatch: ImportBatch = {
@@ -321,8 +322,8 @@ export default function OrdersImport() {
         }
       };
 
-      const currentBatches = await db.getImportBatches();
-      await db.saveImportBatches([...currentBatches, newBatch]);
+      const currentBatches = await dataProvider.getImportBatches();
+      await dataProvider.saveImportBatches([...currentBatches, newBatch]);
       
       await loadBatches();
 

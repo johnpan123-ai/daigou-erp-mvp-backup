@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db, getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
+import { getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import type { 
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
@@ -283,7 +284,7 @@ export default function PurchaseManagement() {
 
   const loadData = async () => {
     if (!id) return;
-    const allGroups = await db.getProductGroups();
+    const allGroups = await dataProvider.getProductGroups();
     const g = allGroups.find(x => x.id === id);
     if (!g) {
       navigate('/purchase-records');
@@ -291,8 +292,8 @@ export default function PurchaseManagement() {
     }
     setGroup(g);
 
-    const allVars = await db.getProductVariants();
-    const allCats = await db.getProductCategories();
+    const allVars = await dataProvider.getProductVariants();
+    const allCats = await dataProvider.getProductCategories();
     const catMap = new Map(allCats.map(c => [c.id, c]));
     setCategoryMap(catMap);
 
@@ -343,13 +344,13 @@ export default function PurchaseManagement() {
 
     setVariants(groupVars);
 
-    const inventory = await db.getInventory();
+    const inventory = await dataProvider.getInventory();
     const invMap = new Map(inventory.map(i => [i.myacg_item_code, i]));
     setInventoryMap(invMap);
 
     // Fetch new architecture data
-    const allPrivateOrders = await db.getPrivateOrders();
-    const allPrivateOrderItems = await db.getPrivateOrderItems();
+    const allPrivateOrders = await dataProvider.getPrivateOrders();
+    const allPrivateOrderItems = await dataProvider.getPrivateOrderItems();
     const groupPrivateOrders = allPrivateOrders.filter(po => po.product_group_id === id);
     const groupPoIds = new Set(groupPrivateOrders.map(po => po.id));
     const groupPrivateOrderItems = allPrivateOrderItems.filter(poi => groupPoIds.has(poi.private_order_id));
@@ -357,8 +358,8 @@ export default function PurchaseManagement() {
     setPrivateOrders(groupPrivateOrders);
     setPrivateOrderItems(groupPrivateOrderItems);
 
-    const allBatches = await db.getPurchaseBatches();
-    const allBatchItems = await db.getPurchaseBatchItems();
+    const allBatches = await dataProvider.getPurchaseBatches();
+    const allBatchItems = await dataProvider.getPurchaseBatchItems();
     const groupBatches = allBatches.filter(b => b.product_group_id === id);
     const groupBatchIds = new Set(groupBatches.map(b => b.id));
     const groupBatchItems = allBatchItems.filter(bi => groupBatchIds.has(bi.purchase_batch_id));
@@ -367,7 +368,7 @@ export default function PurchaseManagement() {
     setPurchaseBatches(groupBatches);
     setPurchaseBatchItems(groupBatchItems);
 
-    const allSOI = await db.getSalesOrderItems();
+    const allSOI = await dataProvider.getSalesOrderItems();
     const groupSOI = allSOI.filter(i => {
       const iCode = i.myacg_item_code;
       return groupVars.some(v => 
@@ -383,7 +384,7 @@ export default function PurchaseManagement() {
 
   const handleUpdatePlatformDemand = async (vId: string, platform: 'myacg' | 'waca', totalValue: number) => {
     if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
-    const allVars = await db.getProductVariants();
+    const allVars = await dataProvider.getProductVariants();
     const target = allVars.find(v => v.id === vId);
     if (target) {
       if (platform === 'myacg') {
@@ -393,7 +394,7 @@ export default function PurchaseManagement() {
         const auto = target.waca_auto_quantity || 0;
         target.waca_manual_adjustment = totalValue - auto;
       }
-      await db.saveProductVariants(allVars);
+      await dataProvider.saveProductVariants(allVars);
       setVariants(variants.map(v => v.id === vId ? target : v));
     }
   };
@@ -431,8 +432,8 @@ export default function PurchaseManagement() {
     const validLines = poLines.filter(l => l.quantity > 0);
     if (!group || !poForm.customer_name.trim() || validLines.length === 0) return;
     
-    const allPOs = await db.getPrivateOrders();
-    const allPOItems = await db.getPrivateOrderItems();
+    const allPOs = await dataProvider.getPrivateOrders();
+    const allPOItems = await dataProvider.getPrivateOrderItems();
 
     if (editingPoId) {
       const idx = allPOs.findIndex(o => o.id === editingPoId);
@@ -448,8 +449,8 @@ export default function PurchaseManagement() {
         amount: line.amount,
         note: line.note
       }));
-      await db.savePrivateOrders(allPOs);
-      await db.savePrivateOrderItems([...newPOItems, ...updatedItems]);
+      await dataProvider.savePrivateOrders(allPOs);
+      await dataProvider.savePrivateOrderItems([...newPOItems, ...updatedItems]);
     } else {
       const newPoId = crypto.randomUUID();
       const newPo: PrivateOrder = {
@@ -470,8 +471,8 @@ export default function PurchaseManagement() {
         note: line.note
       }));
       
-      await db.savePrivateOrders([...allPOs, newPo]);
-      await db.savePrivateOrderItems([...allPOItems, ...newItems]);
+      await dataProvider.savePrivateOrders([...allPOs, newPo]);
+      await dataProvider.savePrivateOrderItems([...allPOItems, ...newItems]);
     }
     
     setShowPrivateOrderModal(false);
@@ -520,8 +521,8 @@ export default function PurchaseManagement() {
     const validLines = batchLines.filter(l => l.quantity > 0);
     if (!group || !batchForm.name.trim() || validLines.length === 0) return;
     
-    const allBatches = await db.getPurchaseBatches();
-    const allBatchItems = await db.getPurchaseBatchItems();
+    const allBatches = await dataProvider.getPurchaseBatches();
+    const allBatchItems = await dataProvider.getPurchaseBatchItems();
 
     if (editingBatchId) {
       const idx = allBatches.findIndex(b => b.id === editingBatchId);
@@ -537,8 +538,8 @@ export default function PurchaseManagement() {
         cost: line.cost,
         note: line.note
       }));
-      await db.savePurchaseBatches(allBatches);
-      await db.savePurchaseBatchItems([...newItems, ...updatedItems]);
+      await dataProvider.savePurchaseBatches(allBatches);
+      await dataProvider.savePurchaseBatchItems([...newItems, ...updatedItems]);
     } else {
       const newBatchId = crypto.randomUUID();
       const newBatch: PurchaseBatch = {
@@ -559,8 +560,8 @@ export default function PurchaseManagement() {
         note: line.note
       }));
 
-      await db.savePurchaseBatches([...allBatches, newBatch]);
-      await db.savePurchaseBatchItems([...allBatchItems, ...newItems]);
+      await dataProvider.savePurchaseBatches([...allBatches, newBatch]);
+      await dataProvider.savePurchaseBatchItems([...allBatchItems, ...newItems]);
     }
     
     setShowBatchModal(false);

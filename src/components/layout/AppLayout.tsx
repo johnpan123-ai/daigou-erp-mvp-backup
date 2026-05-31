@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
+import { getProviderMode } from '../../providers/providerMode';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 
 interface SidebarItemProps {
@@ -84,6 +85,46 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-semibold text-secondary">WorkSpace /</span>
             )}
             <h2 style={{ fontSize: '14px', margin: 0, fontWeight: 600 }}>主系統</h2>
+            {(() => {
+              const mode = getProviderMode();
+              let modeLabel = '本地模式';
+              let badgeColor = '#319795';
+              let badgeBg = '#e6fffa';
+              let badgeBorder = '#b2f5ea';
+
+              if (mode === 'cloud') {
+                modeLabel = '雲端模式尚未啟用';
+                badgeColor = '#d69e2e';
+                badgeBg = '#fefcbf';
+                badgeBorder = '#fef08a';
+              } else if (mode === 'fallback') {
+                modeLabel = '備援模式';
+                badgeColor = '#3182ce';
+                badgeBg = '#ebf8ff';
+                badgeBorder = '#bee3f8';
+              }
+
+              return (
+                <span className="badge flex items-center gap-xs" style={{ 
+                  fontSize: '11px', 
+                  padding: '2px 8px', 
+                  borderRadius: '12px', 
+                  backgroundColor: badgeBg, 
+                  color: badgeColor, 
+                  border: `1px solid ${badgeBorder}`,
+                  fontWeight: 500
+                }}>
+                  <span style={{ 
+                    width: '6px', 
+                    height: '6px', 
+                    borderRadius: '50%', 
+                    backgroundColor: badgeColor, 
+                    display: 'inline-block' 
+                  }}></span>
+                  {modeLabel}
+                </span>
+              );
+            })()}
           </div>
 
           {/* Viewport Switcher (Dev Tool) */}

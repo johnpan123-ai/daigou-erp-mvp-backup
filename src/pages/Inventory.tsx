@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { db } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { Upload, RefreshCw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
@@ -50,9 +50,9 @@ export default function Inventory() {
   }, []);
 
   const loadItems = async () => {
-    const data = await db.getInventory();
+    const data = await dataProvider.getInventory();
     setItems(data);
-    const groups = await db.getProductGroups();
+    const groups = await dataProvider.getProductGroups();
     setProductGroups(groups);
     
     const now = new Date();
@@ -75,10 +75,10 @@ export default function Inventory() {
     setIsImporting(true);
     try {
       const parsedItems = await parseMyAcgFile(file);
-      const stats = await db.upsertInventory(parsedItems);
+      const stats = await dataProvider.upsertInventory(parsedItems);
       
       // Sync ProductGroups with new inventory
-      const syncStats = await db.syncProductGroupsWithInventory();
+      const syncStats = await dataProvider.syncProductGroupsWithInventory();
       await loadItems();
       
       const report = `本次匯入結果：\n- SKU 總筆數：${stats.total}\n- 新增 SKU：${stats.newCount}\n- 更新 SKU：${stats.updatedCount}\n- 補齊既有訂購紀錄 SKU：${syncStats.filledVariantsCount}\n- 受影響 ProductGroup：${syncStats.affectedGroupsCount}`;
@@ -96,7 +96,7 @@ export default function Inventory() {
   const handleCreatePurchaseRecords = async () => {
     if (selectedSkus.size === 0) return;
     try {
-      await db.createPurchaseRecordFromInventory(Array.from(selectedSkus));
+      await dataProvider.createPurchaseRecordFromInventory(Array.from(selectedSkus));
       alert(`已將 ${selectedSkus.size} 筆 SKU 建立/匯入訂購紀錄。`);
       setSelectedSkus(new Set());
       await loadItems(); // Refresh the "Added" status

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db, calculateFinalMyacgDemand } from '../lib/db';
+import { calculateFinalMyacgDemand } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { ClipboardList, AlertTriangle, Clock, CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react';
 
@@ -77,13 +78,13 @@ export default function Dashboard() {
     setIsLoading(true);
     try {
       const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
-        db.getProductGroups().catch(() => []),
-        db.getProductVariants().catch(() => []),
-        db.getProductCategories().catch(() => []),
-        db.getPurchaseBatchItems().catch(() => []),
-        db.getPrivateOrderItems().catch(() => []),
-        db.getInventory().catch(() => []),
-        db.getSalesOrderItems().catch(() => [])
+        dataProvider.getProductGroups().catch(() => []),
+        dataProvider.getProductVariants().catch(() => []),
+        dataProvider.getProductCategories().catch(() => []),
+        dataProvider.getPurchaseBatchItems().catch(() => []),
+        dataProvider.getPrivateOrderItems().catch(() => []),
+        dataProvider.getInventory().catch(() => []),
+        dataProvider.getSalesOrderItems().catch(() => [])
       ]);
       setGroups(fetchedGroups || []);
       setVariants(fetchedVars || []);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db } from '../lib/db';
+import { dataProvider } from '../providers/dataProvider';
 import type { ProductVariant } from '../lib/db';
 import { AlertTriangle, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -19,16 +19,16 @@ export default function Purchasing() {
   }, []);
 
   const loadData = async () => {
-    const allGroups = await db.getProductGroups();
+    const allGroups = await dataProvider.getProductGroups();
     const groupMap = new Map(allGroups.map(g => [g.id, g]));
 
     // Legacy fallback mapping
-    const allCategories = await db.getProductCategories();
+    const allCategories = await dataProvider.getProductCategories();
     const catToGroupMap = new Map(allCategories.map(c => [c.id, c.product_group_id]));
 
-    const allVariants = await db.getProductVariants();
-    const allPrivateOrderItems = await db.getPrivateOrderItems();
-    const allPurchaseBatchItems = await db.getPurchaseBatchItems();
+    const allVariants = await dataProvider.getProductVariants();
+    const allPrivateOrderItems = await dataProvider.getPrivateOrderItems();
+    const allPurchaseBatchItems = await dataProvider.getPurchaseBatchItems();
     
     const items: (OverviewItem & { diff: number })[] = allVariants.map(v => {
       const groupId = v.product_group_id || catToGroupMap.get(v.product_category_id || '');
