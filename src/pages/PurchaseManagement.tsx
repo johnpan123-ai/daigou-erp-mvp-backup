@@ -126,6 +126,27 @@ export default function PurchaseManagement() {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
   const [categoryMap, setCategoryMap] = useState<Map<string, ProductCategory>>(new Map());
+
+  const [variantDefaultJpyCosts, setVariantDefaultJpyCosts] = useState<Record<string, number>>(() => {
+    try {
+      const stored = localStorage.getItem('variant_default_jpy_costs');
+      return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const handleUpdateDefaultJpyCost = (variantId: string, valStr: string) => {
+    const val = valStr === '' ? null : parseInt(valStr);
+    const updated = { ...variantDefaultJpyCosts };
+    if (val === null || isNaN(val) || val <= 0) {
+      delete updated[variantId];
+    } else {
+      updated[variantId] = val;
+    }
+    setVariantDefaultJpyCosts(updated);
+    localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
+  };
   
   // Data for calculation
   const [salesOrderItems, setSalesOrderItems] = useState<any[]>([]);
@@ -372,7 +393,12 @@ export default function PurchaseManagement() {
     setEditingBatchId(null);
     setOnlyShowShortage(false);
     setBatchForm({ name: '', date: new Date().toISOString().slice(0, 10), note: '' });
-    setBatchLines(variants.map(v => ({ variant_id: v.id, quantity: 0, cost: 0, note: '' })));
+    setBatchLines(variants.map(v => {
+      const defCost = variantDefaultJpyCosts[v.id];
+      const latCost = getLatestJpyCost(v.id);
+      const initialCost = (defCost !== undefined && defCost !== null) ? defCost : (latCost || 0);
+      return { variant_id: v.id, quantity: 0, cost: initialCost, note: '' };
+    }));
     setShowBatchModal(true);
   };
 
@@ -485,6 +511,24 @@ export default function PurchaseManagement() {
   let jpyNeedToBuy = 0;
   let jpyPurchased = 0;
 
+  const batchMap = new Map(purchaseBatches.map(b => [b.id, b]));
+
+  const getLatestJpyCost = (variantId: string): number | null => {
+    const items = purchaseBatchItems.filter(item => item.product_variant_id === variantId && item.cost > 0);
+    if (items.length === 0) return null;
+    
+    items.sort((a, b) => {
+      const batchA = batchMap.get(a.purchase_batch_id);
+      const batchB = batchMap.get(b.purchase_batch_id);
+      if (!batchA || !batchB) return 0;
+      const dateCompare = (batchA.date || '').localeCompare(batchB.date || '');
+      if (dateCompare !== 0) return dateCompare;
+      return (batchA.created_at || '').localeCompare(batchB.created_at || '');
+    });
+    
+    return items[items.length - 1].cost;
+  };
+
   variants.forEach(v => {
     const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
     const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
@@ -505,10 +549,11 @@ export default function PurchaseManagement() {
     totalShortage += needToBuy;
     totalExcess += excessBuy;
 
-    const inv = inventoryMap.get(v.myacg_item_code);
-    const price = inv ? inv.final_price : 0;
-    jpyNeedToBuy += needToBuy * price;
-    jpyPurchased += vPurchased * price;
+    const defaultCost = variantDefaultJpyCosts[v.id];
+    const latestCost = getLatestJpyCost(v.id);
+    const activeCost = (defaultCost !== undefined && defaultCost !== null) ? defaultCost : (latestCost || 0);
+    jpyNeedToBuy += needToBuy * activeCost;
+    jpyPurchased += vBatchItems.reduce((sum, item) => sum + (item.quantity * (item.cost || 0)), 0);
   });
 
   const jpyTotalDemand = jpyNeedToBuy + jpyPurchased;
@@ -989,8 +1034,8 @@ export default function PurchaseManagement() {
               // SINGLE ITEM RENDERING
               if (groupKey.startsWith('__single__')) {
                 const v = groupItems[0];
-                const inv = inventoryMap.get(v.myacg_item_code);
-                const price = inv ? inv.final_price : 0;
+                
+                
                 
                 return (
                   <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
@@ -1026,7 +1071,41 @@ export default function PurchaseManagement() {
                             </div>
                           </td>
                           <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                            ¥ {price}
+                            {editMode ? (
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="-"
+                                style={{
+                                  width: '80px',
+                                  height: '28px',
+                                  textAlign: 'right',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '4px',
+                                  fontSize: '14px',
+                                  fontWeight: 600,
+                                  color: '#1E293B',
+                                  backgroundColor: '#ffffff',
+                                  padding: '0 8px',
+                                  margin: '0 0 0 auto',
+                                  display: 'block'
+                                }}
+                                value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
+                                onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
+                              />
+                            ) : (
+                              (() => {
+                                const defCost = variantDefaultJpyCosts[v.id];
+                                if (defCost !== undefined && defCost !== null) {
+                                  return `¥ ${defCost}`;
+                                }
+                                const latCost = getLatestJpyCost(v.id);
+                                if (latCost !== null) {
+                                  return `¥ ${latCost}`;
+                                }
+                                return '-';
+                              })()
+                            )}
                           </td>
                           <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                             {renderStatusBadge(pNeed, pExcess, pDemand)}
@@ -1190,12 +1269,8 @@ export default function PurchaseManagement() {
                             });
                             
                             return filteredList.map((v, i) => {
-                              const inv = Array.from(inventoryMap.values()).find(item => 
-                                item.myacg_item_code === v.myacg_item_code ||
-                                (getBaseSku(item.myacg_item_code) === getBaseSku(v.myacg_item_code) &&
-                                 (item.myacg_item_code === getBaseSku(item.myacg_item_code) || v.myacg_item_code === getBaseSku(v.myacg_item_code)))
-                              );
-                              const price = inv ? inv.final_price : 0;
+                              
+                              
                               
                               const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
                               const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
@@ -1221,7 +1296,43 @@ export default function PurchaseManagement() {
                                     SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
                                   </div>
                                 </td>
-                                <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>¥ {price}</td>
+                                <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                                    {editMode ? (
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        placeholder="-"
+                                        style={{
+                                          width: '80px',
+                                          height: '28px',
+                                          textAlign: 'right',
+                                          border: '1px solid #cbd5e1',
+                                          borderRadius: '4px',
+                                          fontSize: '14px',
+                                          fontWeight: 600,
+                                          color: '#1E293B',
+                                          backgroundColor: '#ffffff',
+                                          padding: '0 8px',
+                                          margin: '0 0 0 auto',
+                                          display: 'block'
+                                        }}
+                                        value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
+                                        onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
+                                      />
+                                    ) : (
+                                      (() => {
+                                        const defCost = variantDefaultJpyCosts[v.id];
+                                        if (defCost !== undefined && defCost !== null) {
+                                          return `¥ ${defCost}`;
+                                        }
+                                        const latCost = getLatestJpyCost(v.id);
+                                        if (latCost !== null) {
+                                          return `¥ ${latCost}`;
+                                        }
+                                        return '-';
+                                      })()
+                                    )}
+                                  </td>
                                 
                                 <td style={{ padding: '12px', textAlign: 'center' }}>
                                   {renderStatusBadge(needToBuy, excessBuy, totalDemand)}
