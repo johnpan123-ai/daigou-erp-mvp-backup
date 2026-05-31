@@ -147,6 +147,54 @@ export default function PurchaseManagement() {
     setVariantDefaultJpyCosts(updated);
     localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
   };
+
+  const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
+    try {
+      const stored = localStorage.getItem('variant_default_twd_costs');
+      return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const handleUpdateDefaultTwdCost = (variantId: string, valStr: string) => {
+    const val = valStr === '' ? null : parseInt(valStr);
+    const updated = { ...variantDefaultTwdCosts };
+    if (val === null || isNaN(val) || val <= 0) {
+      delete updated[variantId];
+    } else {
+      updated[variantId] = val;
+    }
+    setVariantDefaultTwdCosts(updated);
+    localStorage.setItem('variant_default_twd_costs', JSON.stringify(updated));
+  };
+
+  const cleanDailiTitle = (title: string): string => {
+    if (!title) return '';
+    let res = title;
+    res = res.replace(/【小河馬日本代購】/g, '');
+    res = res.replace(/【小河馬代購】/g, '');
+    const keywords = ['預購', '現貨', '日本代購', '現地代購', '再版', '預約', '日版', '代理版', '代理'];
+    keywords.forEach(kw => {
+      res = res.replaceAll(kw, '');
+    });
+    res = res.replace(/\d{2,4}年\d{1,2}月/g, '');
+    res = res.replace(/\s+/g, ' ').trim();
+    return res;
+  };
+
+  const getDailiVariantModalName = (v: ProductVariant) => {
+    const name = v.variant_name || '';
+    const trimmed = name.trim();
+    if (trimmed !== '' && trimmed !== '單品' && trimmed !== '一箱') {
+      return trimmed;
+    }
+    const cleanedGroup = cleanDailiTitle(group?.normalized_title || group?.title || '');
+    if (cleanedGroup) {
+      return cleanedGroup;
+    }
+    return v.myacg_item_code || '未命名規格';
+  };
   
   // Data for calculation
   const [salesOrderItems, setSalesOrderItems] = useState<any[]>([]);
@@ -393,9 +441,11 @@ export default function PurchaseManagement() {
     setEditingBatchId(null);
     setOnlyShowShortage(false);
     setBatchForm({ name: '', date: new Date().toISOString().slice(0, 10), note: '' });
+    
+    const isDaili = group?.listing_type === '代理版';
     setBatchLines(variants.map(v => {
-      const defCost = variantDefaultJpyCosts[v.id];
-      const latCost = getLatestJpyCost(v.id);
+      const defCost = isDaili ? variantDefaultTwdCosts[v.id] : variantDefaultJpyCosts[v.id];
+      const latCost = getLatestBatchCost(v.id);
       const initialCost = (defCost !== undefined && defCost !== null) ? defCost : (latCost || 0);
       return { variant_id: v.id, quantity: 0, cost: initialCost, note: '' };
     }));
@@ -511,9 +561,16 @@ export default function PurchaseManagement() {
   let jpyNeedToBuy = 0;
   let jpyPurchased = 0;
 
+  // Daili specific metric variables
+  let dailiTotalOrderAmount = 0;
+  let dailiNeedToBuyCost = 0;
+  let dailiPurchasedCost = 0;
+
+  const isDaili = group?.listing_type === '代理版';
+
   const batchMap = new Map(purchaseBatches.map(b => [b.id, b]));
 
-  const getLatestJpyCost = (variantId: string): number | null => {
+  const getLatestBatchCost = (variantId: string): number | null => {
     const items = purchaseBatchItems.filter(item => item.product_variant_id === variantId && item.cost > 0);
     if (items.length === 0) return null;
     
@@ -549,15 +606,30 @@ export default function PurchaseManagement() {
     totalShortage += needToBuy;
     totalExcess += excessBuy;
 
+    // JPY Standard
     const defaultCost = variantDefaultJpyCosts[v.id];
-    const latestCost = getLatestJpyCost(v.id);
+    const latestCost = getLatestBatchCost(v.id);
     const activeCost = (defaultCost !== undefined && defaultCost !== null) ? defaultCost : (latestCost || 0);
     jpyNeedToBuy += needToBuy * activeCost;
     jpyPurchased += vBatchItems.reduce((sum, item) => sum + (item.quantity * (item.cost || 0)), 0);
+
+    // Daili TWD
+    const invItem = inventoryMap.get(v.myacg_item_code);
+    const finalPrice = invItem?.final_price ?? 0;
+    dailiTotalOrderAmount += vTotalDemand * finalPrice;
+
+    const defaultTwdCost = variantDefaultTwdCosts[v.id];
+    const latestTwdCost = getLatestBatchCost(v.id);
+    const activeTwdCost = (defaultTwdCost !== undefined && defaultTwdCost !== null) ? defaultTwdCost : (latestTwdCost || 0);
+    dailiNeedToBuyCost += needToBuy * activeTwdCost;
+    dailiPurchasedCost += vBatchItems.reduce((sum, item) => sum + (item.quantity * (item.cost || 0)), 0);
   });
 
   const jpyTotalDemand = jpyNeedToBuy + jpyPurchased;
   const estimatedTwd = jpyTotalDemand * exchangeRate;
+
+  const dailiTotalCost = dailiNeedToBuyCost + dailiPurchasedCost;
+  const dailiGrossProfit = dailiTotalOrderAmount - dailiTotalCost;
 
 
 
@@ -799,59 +871,113 @@ export default function PurchaseManagement() {
                 <DollarSign size={20} color="#10b981" />
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{totalOrdersAmount.toLocaleString()}</span>
-                <span style={{ fontSize: '13px', color: '#64748b' }}>NTD</span>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{(isDaili ? dailiTotalOrderAmount : totalOrdersAmount).toLocaleString()}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>NT$</span>
               </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>訂單商品總額</div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>{isDaili ? '總需求數量 × 買動漫售價' : '訂單商品總額'}</div>
             </div>
 
-            {/* 1. 待採購日幣 */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購日幣</div>
-                <DollarSign size={20} color="#ef4444" />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>¥ {jpyNeedToBuy.toLocaleString()}</span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前還要花多少日幣</div>
-            </div>
+            {isDaili ? (
+              <>
+                {/* 待採購成本 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購成本</div>
+                    <DollarSign size={20} color="#ef4444" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>NT$ {dailiNeedToBuyCost.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>缺少數量 × 台幣成本</div>
+                </div>
 
-            {/* 2. 已採購日幣 */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購日幣</div>
-                <CheckSquare size={20} color="#2563eb" />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>¥ {jpyPurchased.toLocaleString()}</span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前已花掉多少日幣</div>
-            </div>
+                {/* 已採購成本 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購成本</div>
+                    <CheckSquare size={20} color="#2563eb" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>NT$ {dailiPurchasedCost.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>採購批次已付台幣成本</div>
+                </div>
 
-            {/* 3. 總需求日幣 */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求日幣</div>
-                <Package size={20} color="#16a34a" />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>¥ {jpyTotalDemand.toLocaleString()}</span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>整批商品總成本(日幣)</div>
-            </div>
+                {/* 總成本 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總成本</div>
+                    <Package size={20} color="#16a34a" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>NT$ {dailiTotalCost.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>待採購成本 + 已採購成本</div>
+                </div>
 
-            {/* 4. 預估台幣 */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>預估台幣</div>
-                <DollarSign size={20} color="#ca8a04" />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>NTD {Math.round(estimatedTwd).toLocaleString()}</span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>總需求日幣 × 匯率 {exchangeRate}</div>
-            </div>
+                {/* 預估毛利 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>預估毛利</div>
+                    <DollarSign size={20} color="#ca8a04" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>NT$ {dailiGrossProfit.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>訂單總金額 - 總成本</div>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* 1. 待採購日幣 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購日幣</div>
+                    <DollarSign size={20} color="#ef4444" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>¥ {jpyNeedToBuy.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前還要花多少日幣</div>
+                </div>
+
+                {/* 2. 已採購日幣 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購日幣</div>
+                    <CheckSquare size={20} color="#2563eb" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>¥ {jpyPurchased.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前已花掉多少日幣</div>
+                </div>
+
+                {/* 3. 總需求日幣 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求日幣</div>
+                    <Package size={20} color="#16a34a" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>¥ {jpyTotalDemand.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>整批商品總成本(日幣)</div>
+                </div>
+
+                {/* 4. 預估台幣 */}
+                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>預估台幣</div>
+                    <DollarSign size={20} color="#ca8a04" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>NTD {Math.round(estimatedTwd).toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>總需求日幣 × 匯率 {exchangeRate}</div>
+                </div>
+              </>
+            )}
 
           </div>
         )}
@@ -1040,26 +1166,55 @@ export default function PurchaseManagement() {
                 return (
                   <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
-                      <colgroup>
-                        <col style={{ width: '30%' }} />
-                        <col style={{ width: '11%' }} />
-                        <col style={{ width: '13%' }} />
-                        <col style={{ width: '11%' }} />
-                        <col style={{ width: '11%' }} />
-                        <col style={{ width: '12%' }} />
-                        <col style={{ width: '12%' }} />
-                      </colgroup>
-                      <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
-                        <tr>
-                          <th style={{ padding: '8px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>單價</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
-                        </tr>
-                      </thead>
+                      {isDaili ? (
+                        <>
+                          <colgroup>
+                            <col style={{ width: '30%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '9%' }} />
+                            <col style={{ width: '9%' }} />
+                            <col style={{ width: '9%' }} />
+                            <col style={{ width: '9%' }} />
+                          </colgroup>
+                          <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
+                            <tr>
+                              <th style={{ padding: '8px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫售價</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>成本</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
+                            </tr>
+                          </thead>
+                        </>
+                      ) : (
+                        <>
+                          <colgroup>
+                            <col style={{ width: '30%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '13%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '11%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '12%' }} />
+                          </colgroup>
+                          <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
+                            <tr>
+                              <th style={{ padding: '8px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>單價</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
+                              <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
+                            </tr>
+                          </thead>
+                        </>
+                      )}
                       <tbody>
                         <tr>
                           <td style={{ padding: '10px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1070,43 +1225,88 @@ export default function PurchaseManagement() {
                               SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
                             </div>
                           </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                            {editMode ? (
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="-"
-                                style={{
-                                  width: '80px',
-                                  height: '28px',
-                                  textAlign: 'right',
-                                  border: '1px solid #cbd5e1',
-                                  borderRadius: '4px',
-                                  fontSize: '14px',
-                                  fontWeight: 600,
-                                  color: '#1E293B',
-                                  backgroundColor: '#ffffff',
-                                  padding: '0 8px',
-                                  margin: '0 0 0 auto',
-                                  display: 'block'
-                                }}
-                                value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
-                                onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
-                              />
-                            ) : (
-                              (() => {
-                                const defCost = variantDefaultJpyCosts[v.id];
-                                if (defCost !== undefined && defCost !== null) {
-                                  return `¥ ${defCost}`;
-                                }
-                                const latCost = getLatestJpyCost(v.id);
-                                if (latCost !== null) {
-                                  return `¥ ${latCost}`;
-                                }
-                                return '-';
-                              })()
-                            )}
-                          </td>
+                          {isDaili ? (
+                            <>
+                              <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                                NT$ {(inventoryMap.get(v.myacg_item_code)?.final_price ?? 0).toLocaleString()}
+                              </td>
+                              <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                                {editMode ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    placeholder="-"
+                                    style={{
+                                      width: '80px',
+                                      height: '28px',
+                                      textAlign: 'right',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '4px',
+                                      fontSize: '14px',
+                                      fontWeight: 600,
+                                      color: '#1E293B',
+                                      backgroundColor: '#ffffff',
+                                      padding: '0 8px',
+                                      margin: '0 0 0 auto',
+                                      display: 'block'
+                                    }}
+                                    value={variantDefaultTwdCosts[v.id] !== undefined ? variantDefaultTwdCosts[v.id] : ''}
+                                    onChange={e => handleUpdateDefaultTwdCost(v.id, e.target.value)}
+                                  />
+                                ) : (
+                                  (() => {
+                                    const defCost = variantDefaultTwdCosts[v.id];
+                                    if (defCost !== undefined && defCost !== null) {
+                                      return `NT$ ${defCost}`;
+                                    }
+                                    const latCost = getLatestBatchCost(v.id);
+                                    if (latCost !== null) {
+                                      return `NT$ ${latCost}`;
+                                    }
+                                    return '-';
+                                  })()
+                                )}
+                              </td>
+                            </>
+                          ) : (
+                            <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                              {editMode ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="-"
+                                  style={{
+                                    width: '80px',
+                                    height: '28px',
+                                    textAlign: 'right',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '4px',
+                                    fontSize: '14px',
+                                    fontWeight: 600,
+                                    color: '#1E293B',
+                                    backgroundColor: '#ffffff',
+                                    padding: '0 8px',
+                                    margin: '0 0 0 auto',
+                                    display: 'block'
+                                  }}
+                                  value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
+                                  onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
+                                />
+                              ) : (
+                                (() => {
+                                  const defCost = variantDefaultJpyCosts[v.id];
+                                  if (defCost !== undefined && defCost !== null) {
+                                    return `¥ ${defCost}`;
+                                  }
+                                  const latCost = getLatestBatchCost(v.id);
+                                  if (latCost !== null) {
+                                    return `¥ ${latCost}`;
+                                  }
+                                  return '-';
+                                })()
+                              )}
+                            </td>
+                          )}
                           <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                             {renderStatusBadge(pNeed, pExcess, pDemand)}
                           </td>
@@ -1237,26 +1437,55 @@ export default function PurchaseManagement() {
                   {isExpanded && (
                     <div style={{ borderTop: '1px solid #f1f5f9' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
-                        <colgroup>
-                          <col style={{ width: '30%' }} />
-                          <col style={{ width: '11%' }} />
-                          <col style={{ width: '13%' }} />
-                          <col style={{ width: '11%' }} />
-                          <col style={{ width: '11%' }} />
-                          <col style={{ width: '12%' }} />
-                          <col style={{ width: '12%' }} />
-                        </colgroup>
-                        <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
-                          <tr>
-                            <th style={{ padding: '10px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>單價</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
-                          </tr>
-                        </thead>
+                        {isDaili ? (
+                          <>
+                            <colgroup>
+                              <col style={{ width: '30%' }} />
+                              <col style={{ width: '11%' }} />
+                              <col style={{ width: '11%' }} />
+                              <col style={{ width: '12%' }} />
+                              <col style={{ width: '9%' }} />
+                              <col style={{ width: '9%' }} />
+                              <col style={{ width: '9%' }} />
+                              <col style={{ width: '9%' }} />
+                            </colgroup>
+                            <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
+                              <tr>
+                                <th style={{ padding: '10px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫售價</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>成本</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
+                              </tr>
+                            </thead>
+                          </>
+                        ) : (
+                          <>
+                            <colgroup>
+                              <col style={{ width: '30%' }} />
+                              <col style={{ width: '11%' }} />
+                              <col style={{ width: '13%' }} />
+                              <col style={{ width: '11%' }} />
+                              <col style={{ width: '11%' }} />
+                              <col style={{ width: '12%' }} />
+                              <col style={{ width: '12%' }} />
+                            </colgroup>
+                            <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
+                              <tr>
+                                <th style={{ padding: '10px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>單價</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
+                              </tr>
+                            </thead>
+                          </>
+                        )}
                         <tbody>
                           {(() => {
                             const filteredList = groupItems.filter(v => {
@@ -1269,9 +1498,6 @@ export default function PurchaseManagement() {
                             });
                             
                             return filteredList.map((v, i) => {
-                              
-                              
-                              
                               const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
                               const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
                               
@@ -1292,111 +1518,156 @@ export default function PurchaseManagement() {
                                     <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.variant_name}>
                                       <HighlightText text={parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name} highlight={searchTerm} />
                                     </div>
-                                  <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
-                                    SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
-                                  </div>
-                                </td>
-                                <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                    {editMode ? (
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        placeholder="-"
-                                        style={{
-                                          width: '80px',
-                                          height: '28px',
-                                          textAlign: 'right',
-                                          border: '1px solid #cbd5e1',
-                                          borderRadius: '4px',
-                                          fontSize: '14px',
-                                          fontWeight: 600,
-                                          color: '#1E293B',
-                                          backgroundColor: '#ffffff',
-                                          padding: '0 8px',
-                                          margin: '0 0 0 auto',
-                                          display: 'block'
-                                        }}
-                                        value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
-                                        onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
-                                      />
-                                    ) : (
-                                      (() => {
-                                        const defCost = variantDefaultJpyCosts[v.id];
-                                        if (defCost !== undefined && defCost !== null) {
-                                          return `¥ ${defCost}`;
-                                        }
-                                        const latCost = getLatestJpyCost(v.id);
-                                        if (latCost !== null) {
-                                          return `¥ ${latCost}`;
-                                        }
-                                        return '-';
-                                      })()
-                                    )}
+                                    <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
+                                      SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
+                                    </div>
                                   </td>
+                                  {isDaili ? (
+                                    <>
+                                      <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                                        NT$ {(inventoryMap.get(v.myacg_item_code)?.final_price ?? 0).toLocaleString()}
+                                      </td>
+                                      <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                                        {editMode ? (
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            placeholder="-"
+                                            style={{
+                                              width: '80px',
+                                              height: '28px',
+                                              textAlign: 'right',
+                                              border: '1px solid #cbd5e1',
+                                              borderRadius: '4px',
+                                              fontSize: '14px',
+                                              fontWeight: 600,
+                                              color: '#1E293B',
+                                              backgroundColor: '#ffffff',
+                                              padding: '0 8px',
+                                              margin: '0 0 0 auto',
+                                              display: 'block'
+                                            }}
+                                            value={variantDefaultTwdCosts[v.id] !== undefined ? variantDefaultTwdCosts[v.id] : ''}
+                                            onChange={e => handleUpdateDefaultTwdCost(v.id, e.target.value)}
+                                          />
+                                        ) : (
+                                          (() => {
+                                            const defCost = variantDefaultTwdCosts[v.id];
+                                            if (defCost !== undefined && defCost !== null) {
+                                              return `NT$ ${defCost}`;
+                                            }
+                                            const latCost = getLatestBatchCost(v.id);
+                                            if (latCost !== null) {
+                                              return `NT$ ${latCost}`;
+                                            }
+                                            return '-';
+                                          })()
+                                        )}
+                                      </td>
+                                    </>
+                                  ) : (
+                                    <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
+                                      {editMode ? (
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          placeholder="-"
+                                          style={{
+                                            width: '80px',
+                                            height: '28px',
+                                            textAlign: 'right',
+                                            border: '1px solid #cbd5e1',
+                                            borderRadius: '4px',
+                                            fontSize: '14px',
+                                            fontWeight: 600,
+                                            color: '#1E293B',
+                                            backgroundColor: '#ffffff',
+                                            padding: '0 8px',
+                                            margin: '0 0 0 auto',
+                                            display: 'block'
+                                          }}
+                                          value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
+                                          onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
+                                        />
+                                      ) : (
+                                        (() => {
+                                          const defCost = variantDefaultJpyCosts[v.id];
+                                          if (defCost !== undefined && defCost !== null) {
+                                            return `¥ ${defCost}`;
+                                          }
+                                          const latCost = getLatestBatchCost(v.id);
+                                          if (latCost !== null) {
+                                            return `¥ ${latCost}`;
+                                          }
+                                          return '-';
+                                        })()
+                                      )}
+                                    </td>
+                                  )}
                                 
-                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  {renderStatusBadge(needToBuy, excessBuy, totalDemand)}
-                                </td>
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    {renderStatusBadge(needToBuy, excessBuy, totalDemand)}
+                                  </td>
 
-                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  <input 
-                                    type="number" 
-                                    style={{ 
-                                      width: '64px', 
-                                      height: '28px', 
-                                      textAlign: 'center', 
-                                      border: '1px solid #cbd5e1', 
-                                      borderRadius: '4px', 
-                                      fontSize: '14px', 
-                                      fontWeight: 600, 
-                                      color: editMode ? '#1E293B' : '#64748b', 
-                                      backgroundColor: editMode ? '#ffffff' : '#f8fafc',
-                                      cursor: editMode ? 'text' : 'not-allowed',
-                                      margin: '0 auto', 
-                                      display: 'block' 
-                                    }} 
-                                    value={myacgDemand || ''}
-                                    placeholder="0"
-                                    onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
-                                    disabled={!editMode}
-                                  />
-                                </td>
-                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  <input 
-                                    type="number" 
-                                    style={{ 
-                                      width: '64px', 
-                                      height: '28px', 
-                                      textAlign: 'center', 
-                                      border: '1px solid #cbd5e1', 
-                                      borderRadius: '4px', 
-                                      fontSize: '14px', 
-                                      fontWeight: 600, 
-                                      color: editMode ? '#1E293B' : '#64748b', 
-                                      backgroundColor: editMode ? '#ffffff' : '#f8fafc',
-                                      cursor: editMode ? 'text' : 'not-allowed',
-                                      margin: '0 auto', 
-                                      display: 'block' 
-                                    }} 
-                                    value={wacaDemand || ''}
-                                    placeholder="0"
-                                    onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
-                                    disabled={!editMode}
-                                  />
-                                </td>
-                                
-                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  <span style={{ fontSize: '14px', fontWeight: 600, color: privateDemand > 0 ? '#1E293B' : '#94a3b8', backgroundColor: privateDemand > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>
-                                    {privateDemand > 0 ? privateDemand : '-'}
-                                  </span>
-                                </td>
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <input 
+                                      type="number" 
+                                      style={{ 
+                                        width: '64px', 
+                                        height: '28px', 
+                                        textAlign: 'center', 
+                                        border: '1px solid #cbd5e1', 
+                                        borderRadius: '4px', 
+                                        fontSize: '14px', 
+                                        fontWeight: 600, 
+                                        color: editMode ? '#1E293B' : '#64748b', 
+                                        backgroundColor: editMode ? '#ffffff' : '#f8fafc',
+                                        cursor: editMode ? 'text' : 'not-allowed',
+                                        margin: '0 auto', 
+                                        display: 'block' 
+                                      }} 
+                                      value={myacgDemand || ''}
+                                      placeholder="0"
+                                      onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
+                                      disabled={!editMode}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <input 
+                                      type="number" 
+                                      style={{ 
+                                        width: '64px', 
+                                        height: '28px', 
+                                        textAlign: 'center', 
+                                        border: '1px solid #cbd5e1', 
+                                        borderRadius: '4px', 
+                                        fontSize: '14px', 
+                                        fontWeight: 600, 
+                                        color: editMode ? '#1E293B' : '#64748b', 
+                                        backgroundColor: editMode ? '#ffffff' : '#f8fafc',
+                                        cursor: editMode ? 'text' : 'not-allowed',
+                                        margin: '0 auto', 
+                                        display: 'block' 
+                                      }} 
+                                      value={wacaDemand || ''}
+                                      placeholder="0"
+                                      onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
+                                      disabled={!editMode}
+                                    />
+                                  </td>
+                                  
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <span style={{ fontSize: '14px', fontWeight: 600, color: privateDemand > 0 ? '#1E293B' : '#94a3b8', backgroundColor: privateDemand > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>
+                                      {privateDemand > 0 ? privateDemand : '-'}
+                                    </span>
+                                  </td>
 
-                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  <span style={{ fontSize: '14px', fontWeight: 600, color: totalPurchased > 0 ? '#1E293B' : '#94a3b8' }}>
-                                    {totalPurchased > 0 ? totalPurchased : '-'}
-                                  </span>
-                                </td>
-                              </tr>
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                    <span style={{ fontSize: '14px', fontWeight: 600, color: totalPurchased > 0 ? '#1E293B' : '#94a3b8' }}>
+                                      {totalPurchased > 0 ? totalPurchased : '-'}
+                                    </span>
+                                  </td>
+                                </tr>
                               );
                             });
                           })()}
@@ -1713,8 +1984,9 @@ export default function PurchaseManagement() {
                 <thead>
                   <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
                     <th style={{ padding: '8px', textAlign: 'left', fontWeight: 500 }}>商品規格</th>
+                    <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>缺口</th>
                     <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>數量</th>
-                    <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '100px' }}>實支單價(日幣)</th>
+                    <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '120px' }}>{isDaili ? '成本（台幣）' : '實支單價（日幣）'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1731,43 +2003,56 @@ export default function PurchaseManagement() {
                       rows.push(
                         <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '8px' }}>
-                              <span>{formatVariantOption(v)}</span>
-                              {shortage > 0 && (
-                                <span style={{
-                                  backgroundColor: '#FEE2E2',
-                                  color: '#DC2626',
-                                  border: '1px solid #fecaca',
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                  缺 {shortage}
-                                </span>
-                              )}
-                              {shortage < 0 && (
-                                <span style={{
-                                  backgroundColor: '#EFF6FF',
-                                  color: '#2563EB',
-                                  border: '1px solid #bfdbfe',
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                  多買 {Math.abs(shortage)}
-                                </span>
-                              )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <div style={{ fontWeight: 600, color: '#1e293b' }}>
+                                {isDaili ? getDailiVariantModalName(v) : formatVariantOption(v)}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                                SKU: {v.myacg_item_code}
+                              </div>
                             </div>
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            {shortage > 0 && (
+                              <span style={{
+                                backgroundColor: '#FEE2E2',
+                                color: '#DC2626',
+                                border: '1px solid #fecaca',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap'
+                              }}>
+                                缺 {shortage}
+                              </span>
+                            )}
+                            {shortage < 0 && (
+                              <span style={{
+                                backgroundColor: '#EFF6FF',
+                                color: '#2563EB',
+                                border: '1px solid #bfdbfe',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap'
+                              }}>
+                                多買 {Math.abs(shortage)}
+                              </span>
+                            )}
+                            {shortage === 0 && (
+                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>-</span>
+                            )}
                           </td>
                           <td style={{ padding: '8px', textAlign: 'center' }}>
                             <input className="input" type="number" min="0" value={batchLines[idx]?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
                           </td>
                           <td style={{ padding: '8px', textAlign: 'right' }}>
-                            <input className="input" type="number" min="0" value={batchLines[idx]?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
+                              {!isDaili && <span style={{ color: '#64748b' }}>¥</span>}
+                              <input className="input" type="number" min="0" value={batchLines[idx]?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '80px', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1776,7 +2061,7 @@ export default function PurchaseManagement() {
                     if (!hasAnyVisible) {
                       return (
                         <tr>
-                          <td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
+                          <td colSpan={4} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
                             目前無任何缺口商品
                           </td>
                         </tr>
