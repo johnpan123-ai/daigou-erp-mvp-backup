@@ -4,6 +4,7 @@ import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X,
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
+import { useRole } from '../../auth/useRole';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 
 interface SidebarItemProps {
@@ -40,6 +41,7 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { mode, setMode, isMobile } = useViewport();
   const { user, loading, signOut } = useAuth();
+  const { role, displayName, isProfileLoading } = useRole();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
@@ -133,7 +135,21 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-md">
             {/* Supabase Auth Status */}
             {(() => {
-              if (loading) {
+              const currentMode = getProviderMode();
+              
+              if (currentMode === 'local') {
+                return (
+                  <div className="flex items-center gap-sm text-xs" style={{ borderRight: '1px solid var(--color-border)', paddingRight: '12px', marginRight: '4px' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>本地端</span>
+                    <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>本地管理員</span>
+                    <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
+                      owner
+                    </span>
+                  </div>
+                );
+              }
+
+              if (loading || isProfileLoading) {
                 return <span className="text-xs text-muted">載入中...</span>;
               }
 
@@ -149,9 +165,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               }
 
               return (
-                <div className="flex items-center gap-sm">
-                  <span className="text-xs font-medium" style={{ color: 'var(--color-text)' }} title={user.email}>
-                    {user.email}
+                <div className="flex items-center gap-sm text-xs" style={{ borderRight: '1px solid var(--color-border)', paddingRight: '12px', marginRight: '4px' }}>
+                  <div className="flex flex-col items-end gap-2xs hide-on-mobile" style={{ lineHeight: '1.2' }}>
+                    <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                      {displayName || '未命名'}
+                    </span>
+                    <span className="text-muted" style={{ fontSize: '10px' }}>
+                      {user.email}
+                    </span>
+                  </div>
+                  <span className="badge" style={{ 
+                    backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
+                    color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
+                    border: '1px solid currentColor', 
+                    padding: '1px 6px', 
+                    borderRadius: '4px', 
+                    fontSize: '10px',
+                    textTransform: 'uppercase'
+                  }}>
+                    {role || 'viewer'}
                   </span>
                   <button 
                     onClick={signOut} 

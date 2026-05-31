@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     disabled_at timestamptz,
     
     -- 保留約束
-    CONSTRAINT email_format_check CHECK (email ~* '^[A-Za-z0-9._%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}$')
+    CONSTRAINT email_format_check CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
 -- 3. 自動更新 updated_at 欄位的 Trigger 函數與觸發器 (使用 safe schema resolution)

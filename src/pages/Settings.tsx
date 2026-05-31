@@ -2,8 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode } from '../providers/providerMode';
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database } from 'lucide-react';
+import { useAuth } from '../auth/AuthProvider';
+import { useRole } from '../auth/useRole';
 
 export default function Settings() {
+  const { user } = useAuth();
+  const { role, displayName } = useRole();
+  const currentMode = getProviderMode();
+
   const [counts, setCounts] = useState({
     inventory: 0,
     salesOrders: 0,
@@ -370,6 +376,49 @@ export default function Settings() {
             </div>
           );
         })()}
+
+        {/* 使用者身分與權限 */}
+        <div className="card flex-col" style={{ gridColumn: 'span 3', marginTop: '16px' }}>
+          <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <SettingsIcon size={18} className="text-primary" /> 
+            目前登入者身分與權限
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', backgroundColor: 'var(--color-bg-base)', padding: '16px', borderRadius: '8px' }}>
+            <div>
+              <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>目前登入者 (Email)</span>
+              <strong style={{ fontSize: '15px' }}>{user?.email || '未登入 (Offline)'}</strong>
+            </div>
+            <div>
+              <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>顯示名稱 (Display Name)</span>
+              <strong style={{ fontSize: '15px' }}>{displayName || '無'}</strong>
+            </div>
+            <div>
+              <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>目前角色 (Role)</span>
+              <div>
+                <span className="badge" style={{ 
+                  backgroundColor: role === 'owner' ? '#ebf8ff' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
+                  color: role === 'owner' ? '#2b6cb0' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
+                  border: '1px solid currentColor', 
+                  padding: '2px 8px', 
+                  borderRadius: '4px', 
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  display: 'inline-block',
+                  marginTop: '2px'
+                }}>
+                  {role || 'viewer'}
+                </span>
+              </div>
+            </div>
+            <div>
+              <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>資料來源模式 (Provider Mode)</span>
+              <strong style={{ fontSize: '15px', color: 'var(--color-primary)' }}>
+                {currentMode === 'local' ? '本地模式 (Local)' : currentMode === 'cloud' ? '雲端模式 (Cloud)' : '備援模式 (Fallback)'}
+              </strong>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
