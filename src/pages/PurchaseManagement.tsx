@@ -787,33 +787,61 @@ export default function PurchaseManagement() {
     });
   });
 
+  const getGroupSortOrder = (_key: string, items: ProductVariant[]) => {
+    const itemSorts = items
+      .map(v => Number(v.sort_order ?? (v as any).import_sort_index ?? 9999))
+      .filter(n => Number.isFinite(n));
+
+    if (itemSorts.length > 0) {
+      return Math.min(...itemSorts);
+    }
+
+    return 999999;
+  };
+
+  const getGroupMinSku = (items: ProductVariant[]) => {
+    return items
+      .map(v => v.myacg_item_code || '')
+      .filter(Boolean)
+      .sort(compareNatural)[0] || '';
+  };
+
+  // Debug table logging
+  const debugInfo = Object.entries(groupedVariants).map(([key, items]) => {
+    const isCat = key.startsWith('category:');
+    const title = isCat ? key.slice('category:'.length) : (items[0]?.raw_variant_name || items[0]?.variant_name || '');
+    return {
+      key,
+      title,
+      minSku: getGroupMinSku(items),
+      sortOrder: getGroupSortOrder(key, items),
+      isCategory: isCat,
+      itemCount: items.length
+    };
+  });
+  console.table(debugInfo);
+
   let sortedGroupEntries = Object.entries(groupedVariants).sort(([keyA, itemsA], [keyB, itemsB]) => {
-    let sortA = 9999;
-    let sortB = 9999;
-
-    const isCatA = keyA.startsWith('category:');
-    const isCatB = keyB.startsWith('category:');
-
-    const titleA = isCatA ? keyA.slice('category:'.length) : (itemsA[0]?.raw_variant_name || itemsA[0]?.variant_name || '');
-    const titleB = isCatB ? keyB.slice('category:'.length) : (itemsB[0]?.raw_variant_name || itemsB[0]?.variant_name || '');
-
-    if (isCatA) {
-      const catObj = Array.from(categoryMap.values()).find(c => c.title === titleA);
-      if (catObj) sortA = catObj.sort_order ?? 9999;
-    } else if (itemsA[0]) {
-      sortA = itemsA[0].sort_order ?? 9999;
-    }
-
-    if (isCatB) {
-      const catObj = Array.from(categoryMap.values()).find(c => c.title === titleB);
-      if (catObj) sortB = catObj.sort_order ?? 9999;
-    } else if (itemsB[0]) {
-      sortB = itemsB[0].sort_order ?? 9999;
-    }
+    const sortA = getGroupSortOrder(keyA, itemsA);
+    const sortB = getGroupSortOrder(keyB, itemsB);
 
     if (sortA !== sortB) return sortA - sortB;
 
-    return titleA.localeCompare(titleB, undefined, { numeric: true, sensitivity: 'base' });
+    const skuA = getGroupMinSku(itemsA);
+    const skuB = getGroupMinSku(itemsB);
+
+    const skuCompare = compareNatural(skuA, skuB);
+    if (skuCompare !== 0) return skuCompare;
+
+    const isCatA = keyA.startsWith('category:');
+    const isCatB = keyB.startsWith('category:');
+    const titleA = isCatA ? keyA.slice('category:'.length) : (itemsA[0]?.raw_variant_name || itemsA[0]?.variant_name || '');
+    const titleB = isCatB ? keyB.slice('category:'.length) : (itemsB[0]?.raw_variant_name || itemsB[0]?.variant_name || '');
+
+    return titleA.localeCompare(titleB, undefined, {
+      numeric: true,
+      sensitivity: 'base'
+    });
   });
 
   if (sortMode === 'shortage') {

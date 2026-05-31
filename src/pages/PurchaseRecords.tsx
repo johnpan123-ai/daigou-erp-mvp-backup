@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Search } from 'lucide-react';
+import { Receipt, Search, Trash2 } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -361,6 +361,15 @@ export default function PurchaseRecords() {
     }
   };
 
+  const handleDeleteGroup = async (groupId: string, groupTitle: string) => {
+    const confirmDelete = window.confirm(`您確定要刪除商品群組「${groupTitle}」嗎？\n此動作將會從訂購紀錄中移除此群組。`);
+    if (!confirmDelete) return;
+
+    const updatedGroups = groups.filter(g => g.id !== groupId);
+    setGroups(updatedGroups);
+    await db.saveProductGroups(updatedGroups);
+  };
+
   const handleRowClick = (id: string, e: React.MouseEvent) => {
     // Don't navigate if clicking inputs/buttons
     if ((e.target as HTMLElement).tagName === 'INPUT' || 
@@ -556,8 +565,9 @@ export default function PurchaseRecords() {
               <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
+                    {editMode && <th style={{ width: '6%', textAlign: 'center' }}>刪除</th>}
                     <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '23%' }}>商品名稱</th>
+                    <th style={{ width: editMode ? '17%' : '23%' }}>商品名稱</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>私下登記</th>
@@ -580,6 +590,32 @@ export default function PurchaseRecords() {
                         onClick={(e) => handleRowClick(g.id, e)}
                         style={{ cursor: 'pointer' }}
                       >
+                        {editMode && (
+                          <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                            <button 
+                              onClick={() => handleDeleteGroup(g.id, g.normalized_title || g.title)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                borderRadius: '4px',
+                                transition: 'all 0.2s'
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                            >
+                              <Trash2 size={14} />
+                              <span>刪除</span>
+                            </button>
+                          </td>
+                        )}
                         <td style={{ textAlign: 'center', fontWeight: 600 }}>
                           {status.text}
                         </td>
@@ -683,8 +719,9 @@ export default function PurchaseRecords() {
               <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
+                    {editMode && <th style={{ width: '6%', textAlign: 'center' }}>刪除</th>}
                     <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '25%' }}>商品名稱</th>
+                    <th style={{ width: editMode ? '19%' : '25%' }}>商品名稱</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
@@ -708,6 +745,32 @@ export default function PurchaseRecords() {
                         onClick={(e) => handleRowClick(g.id, e)}
                         style={{ cursor: 'pointer' }}
                       >
+                        {editMode && (
+                          <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                            <button 
+                              onClick={() => handleDeleteGroup(g.id, g.normalized_title || g.title)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                borderRadius: '4px',
+                                transition: 'all 0.2s'
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                            >
+                              <Trash2 size={14} />
+                              <span>刪除</span>
+                            </button>
+                          </td>
+                        )}
                         <td style={{ textAlign: 'center', fontWeight: 600 }}>
                           {status.text}
                         </td>

@@ -60,7 +60,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="sidebar-section-title">
             主選單
           </div>
-          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label="Dashboard" onClick={() => setIsMobileMenuOpen(false)} />
+          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label="主頁面" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="商品清單匯入" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/purchase-records" icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
