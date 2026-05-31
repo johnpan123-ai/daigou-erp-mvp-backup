@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db } from '../lib/db';
+import { db, getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
 import type { 
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
@@ -255,8 +255,14 @@ export default function PurchaseManagement() {
     setPurchaseBatchItems(groupBatchItems);
 
     const allSOI = await db.getSalesOrderItems();
-    const groupVariantCodes = new Set(groupVars.map(v => v.myacg_item_code));
-    const groupSOI = allSOI.filter(i => groupVariantCodes.has(i.myacg_item_code));
+    const groupSOI = allSOI.filter(i => {
+      const iCode = i.myacg_item_code;
+      return groupVars.some(v => 
+        v.myacg_item_code === iCode || 
+        (getBaseSku(v.myacg_item_code) === getBaseSku(iCode) && 
+         (v.myacg_item_code === getBaseSku(v.myacg_item_code) || iCode === getBaseSku(iCode)))
+      );
+    });
 
     setSalesOrderItems(groupSOI);
   };
@@ -268,7 +274,7 @@ export default function PurchaseManagement() {
     const target = allVars.find(v => v.id === vId);
     if (target) {
       if (platform === 'myacg') {
-        const auto = target.myacg_auto_quantity || 0;
+        const auto = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
         target.myacg_manual_adjustment = totalValue - auto;
       } else {
         const auto = target.waca_auto_quantity || 0;
@@ -469,7 +475,7 @@ export default function PurchaseManagement() {
   let jpyPurchased = 0;
 
   variants.forEach(v => {
-    const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+    const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
     const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
     
     const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
@@ -555,7 +561,7 @@ export default function PurchaseManagement() {
   if (sortMode === 'shortage') {
     sortedGroupEntries = sortedGroupEntries.sort(([, itemsA], [, itemsB]) => {
       const getShortage = (items: ProductVariant[]) => items.reduce((sum, v) => {
-        const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+        const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
         const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
         const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
         const totalPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
@@ -840,7 +846,7 @@ export default function PurchaseManagement() {
               // Compute Group Aggregates
               let pMyacg = 0, pWaca = 0, pManual = 0, pNeed = 0, pExcess = 0, pPurchased = 0, pDemand = 0;
               groupItems.forEach(v => {
-                const mDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+                const mDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
                 const wDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
                 const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
                 const priDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -1062,10 +1068,14 @@ export default function PurchaseManagement() {
                         </thead>
                         <tbody>
                           {groupItems.map((v, i) => {
-                            const inv = inventoryMap.get(v.myacg_item_code);
+                            const inv = Array.from(inventoryMap.values()).find(item => 
+                              item.myacg_item_code === v.myacg_item_code ||
+                              (getBaseSku(item.myacg_item_code) === getBaseSku(v.myacg_item_code) &&
+                               (item.myacg_item_code === getBaseSku(item.myacg_item_code) || v.myacg_item_code === getBaseSku(v.myacg_item_code)))
+                            );
                             const price = inv ? inv.final_price : 0;
                             
-                            const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+                            const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
                             const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
                             
                             const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
@@ -1078,6 +1088,24 @@ export default function PurchaseManagement() {
                             
                             const needToBuy = Math.max(totalDemand - totalPurchased, 0);
                             const excessBuy = Math.max(totalPurchased - totalDemand, 0);
+
+                            if (v.myacg_item_code.includes('G07073119')) {
+                              const orderedQty = salesOrderItems.filter(soi => 
+                                soi.myacg_item_code === v.myacg_item_code ||
+                                (getBaseSku(soi.myacg_item_code) === getBaseSku(v.myacg_item_code) &&
+                                 (soi.myacg_item_code === getBaseSku(soi.myacg_item_code) || v.myacg_item_code === getBaseSku(v.myacg_item_code)))
+                              ).reduce((sum, item) => sum + item.quantity, 0);
+
+                              console.log(`SKU: ${v.myacg_item_code}\n完整 variant:`, {
+                                myacg_item_code: v.myacg_item_code,
+                                myacg_auto_quantity: calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems),
+                                myacg_quantity: myacgDemand,
+                                myacg_sold_quantity: inv ? inv.myacg_sold_quantity : undefined,
+                                ordered_quantity: orderedQty,
+                                purchase_quantity: totalPurchased,
+                                finalDemand: totalDemand
+                              });
+                            }
 
                             return (
                               <tr key={v.id} style={{ borderBottom: i === groupItems.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
@@ -1182,7 +1210,7 @@ export default function PurchaseManagement() {
             }
 
             const itemsWithShortage = groupItems.map(v => {
-              const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+              const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
               const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
               const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
               const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);

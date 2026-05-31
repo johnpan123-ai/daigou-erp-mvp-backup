@@ -9,6 +9,7 @@ export interface InventoryItem {
   final_price: number;
   myacg_available_quantity: number;
   myacg_sold_quantity: number;
+  myacg_demand_quantity?: number;
   myacg_listed_at: string;
 }
 
@@ -107,6 +108,7 @@ export interface ProductVariant {
   
   // Platform demands
   myacg_auto_quantity?: number;
+  effective_myacg_quantity?: number;
   myacg_manual_adjustment?: number;
   waca_auto_quantity?: number;
   waca_manual_adjustment?: number;
@@ -288,6 +290,101 @@ const saveData = <T>(key: string, data: T) => {
   localStorage.setItem(key, JSON.stringify(data));
 };
 
+export const getBaseSku = (code: string): string => {
+  if (!code) return '';
+  const clean = code.trim().toUpperCase();
+  const parts = clean.split('_');
+  // If the last part is a number or variant index, strip it
+  if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) {
+    return parts.slice(0, -1).join('_');
+  }
+  return clean;
+};
+
+export const findMatchingInventoryItem = (variantCode: string, inventory: InventoryItem[]): InventoryItem | undefined => {
+  if (!variantCode) return undefined;
+  const cleanCode = variantCode.trim().toUpperCase();
+  
+  // 1. Try exact case-insensitive match
+  let matched = inventory.find(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
+  if (matched) return matched;
+  
+  // 2. Try base SKU case-insensitive match
+  const baseVariant = getBaseSku(cleanCode);
+  matched = inventory.find(i => {
+    const iCode = i.myacg_item_code.trim().toUpperCase();
+    const baseI = getBaseSku(iCode);
+    return baseI === baseVariant && 
+      (iCode === baseI || cleanCode === baseVariant);
+  });
+  if (matched) return matched;
+
+  // 3. Fallback: match any inventory item sharing the same base SKU
+  return inventory.find(i => {
+    const iCode = i.myacg_item_code.trim().toUpperCase();
+    return getBaseSku(iCode) === baseVariant;
+  });
+};
+
+export const findMatchingVariant = (itemCode: string, variants: ProductVariant[]): ProductVariant | undefined => {
+  if (!itemCode) return undefined;
+  const cleanCode = itemCode.trim().toUpperCase();
+  
+  // 1. Try exact case-insensitive match
+  let matched = variants.find(v => v.myacg_item_code.trim().toUpperCase() === cleanCode);
+  if (matched) return matched;
+  
+  // 2. Try base SKU case-insensitive match
+  const baseItem = getBaseSku(cleanCode);
+  matched = variants.find(v => {
+    const vCode = v.myacg_item_code.trim().toUpperCase();
+    const baseV = getBaseSku(vCode);
+    return baseV === baseItem && 
+      (vCode === baseV || cleanCode === baseItem);
+  });
+  if (matched) return matched;
+
+  // 3. Fallback: match any variant sharing the same base SKU
+  return variants.find(v => {
+    const vCode = v.myacg_item_code.trim().toUpperCase();
+    return getBaseSku(vCode) === baseItem;
+  });
+};
+
+export const calculateFinalMyacgDemand = (
+  variantCode: string, 
+  inventory: InventoryItem[], 
+  salesOrderItems: SalesOrderItem[]
+): number => {
+  const invItem = findMatchingInventoryItem(variantCode, inventory);
+  const inventoryDemand = invItem ? (invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity) : undefined;
+  
+  // Calculate orderDemand
+  const cleanCode = variantCode.trim().toUpperCase();
+  const baseVariant = getBaseSku(cleanCode);
+  let orderDemand = 0;
+  
+  for (const item of salesOrderItems) {
+    if (item.order_status && item.order_status.includes('已取消')) continue;
+    const itemCode = item.myacg_item_code.trim().toUpperCase();
+    const baseItem = getBaseSku(itemCode);
+    if (
+      itemCode === cleanCode ||
+      (baseItem === baseVariant && (itemCode === baseItem || cleanCode === baseVariant)) ||
+      (baseItem === baseVariant)
+    ) {
+      orderDemand += item.quantity;
+    }
+  }
+
+  const finalMyacgDemand =
+    inventoryDemand != null && inventoryDemand > 0
+      ? inventoryDemand
+      : orderDemand;
+
+  return finalMyacgDemand;
+};
+
 export class LocalStorageAdapter implements DatabaseAdapter {
   async getInventory(): Promise<InventoryItem[]> {
     return loadData<InventoryItem[]>('erp_inventory', []);
@@ -322,6 +419,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
           existing.final_price !== item.final_price ||
           existing.myacg_available_quantity !== item.myacg_available_quantity ||
           existing.myacg_sold_quantity !== item.myacg_sold_quantity ||
+          existing.myacg_demand_quantity !== item.myacg_demand_quantity ||
           existing.myacg_listed_at !== item.myacg_listed_at;
         
         if (isChanged) {
@@ -434,6 +532,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
             variant_name: spec.variant_label,
             raw_variant_name: item.raw_variant_name,
             myacg_auto_quantity: 0,
+            effective_myacg_quantity: 0,
             waca_auto_quantity: 0,
             note: '',
             sort_order: variants.filter(v => v.product_group_id === group!.id).length
@@ -589,15 +688,22 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
       const existingVariants = variants.filter(v => v.product_group_id === group.id || 
          (v.product_category_id && categories.some(c => c.id === v.product_category_id && c.product_group_id === group.id)));
-      const existingCodes = new Set(existingVariants.map(v => v.myacg_item_code));
 
-      const missingItems = matchingItems.filter(item => !existingCodes.has(item.myacg_item_code));
+      const missingItems = matchingItems.filter(item => {
+        const baseItem = getBaseSku(item.myacg_item_code);
+        const hasVariant = existingVariants.some(v => 
+          v.myacg_item_code === item.myacg_item_code ||
+          (getBaseSku(v.myacg_item_code) === baseItem && 
+           (v.myacg_item_code === getBaseSku(v.myacg_item_code) || item.myacg_item_code === baseItem))
+        );
+        return !hasVariant;
+      });
       
       let groupChanged = false;
 
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
-        const invItem = matchingItems.find(i => i.myacg_item_code === v.myacg_item_code);
+        const invItem = findMatchingInventoryItem(v.myacg_item_code, matchingItems);
         if (invItem) {
           if (v.catalog_missing !== false || v.sort_order !== (invItem.import_sort_index ?? 9999)) {
             v.catalog_missing = false;
@@ -647,6 +753,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
                 product_title: item.product_title,
                 variant_name: spec ? spec.variant_label : (item.raw_variant_name || ''),
                 myacg_auto_quantity: 0,
+                effective_myacg_quantity: 0,
                 note: '',
                 sort_order: item.import_sort_index ?? 9999,
                 catalog_missing: false
@@ -659,7 +766,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         for (const item of matchingItems) {
             if (missingItems.includes(item)) continue; 
             
-            const existingVar = variants.find(v => v.myacg_item_code === item.myacg_item_code);
+            const existingVar = findMatchingVariant(item.myacg_item_code, variants);
             if (existingVar) {
                 const spec = resolved[item.raw_variant_name || ''];
                 if (spec && spec.category_label) {
@@ -709,6 +816,9 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         await this.saveProductVariants(variants);
     }
 
+    // Recalculate auto quantities based on new inventory sold numbers
+    await this.getProductVariants();
+
     return { filledVariantsCount, affectedGroupsCount };
   }
 
@@ -756,42 +866,8 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
     saveData('erp_sales_order_items', items);
-    
-    const orders = await this.getSalesOrders();
-    const orderMap = new Map(orders.map(o => [o.id, o]));
-
-    // Recalculate platform_demand for all variants
-    const variants = await this.getProductVariants();
-    
-    // Reset all platform_demand
-    for (const v of variants) {
-      v.myacg_auto_quantity = 0;
-      v.waca_auto_quantity = 0;
-    }
-
-    let variantsUpdated = false;
-    for (const item of items) {
-      if (item.order_status && item.order_status.includes('已取消')) continue;
-      
-      const order = orderMap.get(item.order_id);
-      if (!order) continue;
-      
-      const platform = order.platform || 'myacg'; 
-      
-      for (const v of variants) {
-        if (v.myacg_item_code === item.myacg_item_code) {
-          
-          if (platform === 'myacg') v.myacg_auto_quantity = (v.myacg_auto_quantity || 0) + item.quantity;
-          if (platform === 'waca' || platform === 'ruten') v.waca_auto_quantity = (v.waca_auto_quantity || 0) + item.quantity;
-          
-          variantsUpdated = true;
-        }
-      }
-    }
-    
-    if (variantsUpdated) {
-      await this.saveProductVariants(variants);
-    }
+    // Trigger recalculation and persistence of variant auto quantities
+    await this.getProductVariants();
   }
 
   async getProductGroups(): Promise<ProductGroup[]> {
@@ -810,36 +886,107 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     saveData('erp_product_categories', categories);
   }
 
+
+
   async getProductVariants(): Promise<ProductVariant[]> {
-    // Dynamically update demands just in case
     const variants = loadData<ProductVariant[]>('erp_product_variants', []);
     const salesOrderItems = await this.getSalesOrderItems();
     const orders = await this.getSalesOrders();
     const orderMap = new Map(orders.map(o => [o.id, o]));
+    const inventory = await this.getInventory();
     
-    // Reset platform_demand
-    for (const v of variants) {
-      v.myacg_auto_quantity = 0;
-      v.waca_auto_quantity = 0;
-    }
+    // 1. Calculate orders demand for myacg
+    const myacgOrderDemandMap = new Map<string, number>();
+    // 2. Calculate orders demand for waca
+    const wacaOrderDemandMap = new Map<string, number>();
 
-    let changed = false;
     for (const item of salesOrderItems) {
       if (item.order_status && item.order_status.includes('已取消')) continue;
-      
       const order = orderMap.get(item.order_id);
       if (!order) continue;
       const platform = order.platform || 'myacg';
+      const cleanItemCode = item.myacg_item_code.trim().toUpperCase();
+      if (platform === 'myacg') {
+        myacgOrderDemandMap.set(cleanItemCode, (myacgOrderDemandMap.get(cleanItemCode) || 0) + item.quantity);
+      } else if (platform === 'waca' || platform === 'ruten') {
+        myacgOrderDemandMap.set(cleanItemCode, (myacgOrderDemandMap.get(cleanItemCode) || 0) + item.quantity);
+      }
+    }
+
+    const getOrderDemandForVariant = (variantCode: string, demandMap: Map<string, number>): number => {
+      const cleanCode = variantCode.trim().toUpperCase();
       
-      for (const v of variants) {
-        if (v.myacg_item_code === item.myacg_item_code) {
-          
-          if (platform === 'myacg') v.myacg_auto_quantity = (v.myacg_auto_quantity || 0) + item.quantity;
-          if (platform === 'waca' || platform === 'ruten') v.waca_auto_quantity = (v.waca_auto_quantity || 0) + item.quantity;
-          
-          changed = true;
-          break;
+      // 1. Exact match (case-insensitive)
+      for (const [code, qty] of demandMap.entries()) {
+        if (code.trim().toUpperCase() === cleanCode) {
+          return qty;
         }
+      }
+      
+      // 2. Fuzzy base SKU match
+      const baseVariant = getBaseSku(cleanCode);
+      let sum = 0;
+      let matched = false;
+      for (const [code, qty] of demandMap.entries()) {
+        const normCode = code.trim().toUpperCase();
+        const baseNorm = getBaseSku(normCode);
+        if (baseNorm === baseVariant && 
+            (normCode === baseNorm || cleanCode === baseVariant)) {
+          sum += qty;
+          matched = true;
+        }
+      }
+      if (matched) return sum;
+
+      // 3. Fallback: match any order code sharing the same base SKU
+      for (const [code, qty] of demandMap.entries()) {
+        const normCode = code.trim().toUpperCase();
+        if (getBaseSku(normCode) === baseVariant) {
+          sum += qty;
+          matched = true;
+        }
+      }
+      return matched ? sum : 0;
+    };
+
+    let changed = false;
+    for (const v of variants) {
+      // Find matching inventory item using fuzzy matching helpers
+      const invItem = findMatchingInventoryItem(v.myacg_item_code, inventory);
+      const myacgOrderDemand = getOrderDemandForVariant(v.myacg_item_code, myacgOrderDemandMap);
+      
+      const effectiveMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+
+      if (invItem) {
+        const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;
+        if (inventoryDemand == null || inventoryDemand === 0) {
+          console.warn(`找到 SKU 但 myacg_sold_quantity 為空: ${v.myacg_item_code}`);
+        }
+      } else {
+        console.warn(`找不到 InventoryItem 對應 SKU: ${v.myacg_item_code}`);
+      }
+
+      console.log(
+        `[Debug db.ts getProductVariants]\n` +
+        `SKU: ${v.myacg_item_code}\n` +
+        `商品名稱: ${v.product_title}${v.variant_name ? ' - ' + v.variant_name : ''}\n` +
+        `Inventory 已售數量: ${invItem ? (invItem.myacg_sold_quantity || 0) : '未找到'}\n` +
+        `Inventory 需求數量: ${invItem ? (invItem.myacg_demand_quantity || 0) : '未找到'}\n` +
+        `訂單匯入數量: ${myacgOrderDemand}\n` +
+        `最後採用數量: ${effectiveMyacg}`
+      );
+
+      const newWacaAuto = getOrderDemandForVariant(v.myacg_item_code, wacaOrderDemandMap);
+
+      if (
+        v.effective_myacg_quantity !== effectiveMyacg || 
+        v.myacg_auto_quantity !== effectiveMyacg || 
+        v.waca_auto_quantity !== newWacaAuto
+      ) {
+        v.effective_myacg_quantity = effectiveMyacg;
+        v.myacg_auto_quantity = effectiveMyacg;
+        v.waca_auto_quantity = newWacaAuto;
+        changed = true;
       }
     }
 

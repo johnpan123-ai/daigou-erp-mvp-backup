@@ -1,6 +1,88 @@
 import * as XLSX from 'xlsx';
 import type { InventoryItem } from '../lib/db';
 
+const getSoldQty = (rowData: any) => {
+  const normKeys = Object.keys(rowData).map(k => ({
+    original: k,
+    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+  }));
+  const keys = [
+    '已售', '已售數量', '售出數量', '售出', '銷售', '銷售數量', 
+    '總銷售數量', '總銷售已售數量', '總銷售'
+  ];
+  for (const k of keys) {
+    const match = normKeys.find(nk => nk.normalized === k);
+    if (match) {
+      const val = rowData[match.original];
+      if (val !== undefined && val !== null && val !== '') {
+        return parseInt(String(val).replace(/[^0-9]/g, '') || '0', 10);
+      }
+    }
+  }
+  return 0;
+};
+
+const getAvailableQty = (rowData: any) => {
+  const normKeys = Object.keys(rowData).map(k => ({
+    original: k,
+    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+  }));
+  const keys = ['庫存', '庫存數量', '可用數量', '剩餘數量', '庫存可用數量', '可用'];
+  for (const k of keys) {
+    const match = normKeys.find(nk => nk.normalized === k);
+    if (match) {
+      const val = rowData[match.original];
+      if (val !== undefined && val !== null && val !== '') {
+        return parseInt(String(val).replace(/[^0-9]/g, '') || '0', 10);
+      }
+    }
+  }
+  return 0;
+};
+
+const getDemandQty = (rowData: any) => {
+  const normKeys = Object.keys(rowData).map(k => ({
+    original: k,
+    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+  }));
+  const keys = ['需求', '需求數量', '買動漫需求', '平台需求'];
+  for (const k of keys) {
+    const match = normKeys.find(nk => nk.normalized === k);
+    if (match) {
+      const val = rowData[match.original];
+      if (val !== undefined && val !== null && val !== '') {
+        return parseInt(String(val).replace(/[^0-9]/g, '') || '0', 10);
+      }
+    }
+  }
+  return 0;
+};
+
+const getValueByKeys = (rowData: any, keys: string[]): string => {
+  const normKeys = Object.keys(rowData).map(k => ({
+    original: k,
+    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+  }));
+  const cleanKeys = keys.map(k => k.replace(/[\s\u00a0\u200b\/]+/g, ''));
+  for (const cleanKey of cleanKeys) {
+    const match = normKeys.find(nk => nk.normalized === cleanKey);
+    if (match) {
+      const val = rowData[match.original];
+      if (val !== undefined && val !== null && val !== '') {
+        return String(val).trim();
+      }
+    }
+  }
+  return '';
+};
+
+const codeKeys = ['商品編號', '商品代碼', '商品序號', '商品代號', '商品ID', 'SKU'];
+const titleKeys = ['商品名稱', '名稱', '標題'];
+const specKeys = ['規格項目', '規格', '項目', '規格項目'];
+const typeKeys = ['商品種類', '種類', '商品類型', '類型'];
+const priceKeys = ['價格', '單價', '售價', '價格單價'];
+const listedKeys = ['刊登時間', '上架時間', '刊登日期'];
+
 export async function parseMyAcgFile(file: File): Promise<InventoryItem[]> {
   const text = await file.text();
   
@@ -13,6 +95,10 @@ export async function parseMyAcgFile(file: File): Promise<InventoryItem[]> {
   return parseXlsxFile(file);
 }
 
+const normalizeRowKey = (key: string): string => {
+  return String(key).replace(/[\s\u00a0\u200b]+/g, ' ').trim();
+};
+
 function parseHtmlTable(html: string): InventoryItem[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
@@ -22,7 +108,7 @@ function parseHtmlTable(html: string): InventoryItem[] {
   let headers: string[] = [];
 
   rows.forEach((row, index) => {
-    const cells = Array.from(row.querySelectorAll('th, td')).map(cell => cell.textContent?.trim() || '');
+    const cells = Array.from(row.querySelectorAll('th, td')).map(cell => cell.textContent?.replace(/[\s\u00a0\u200b]+/g, ' ').trim() || '');
     
     if (index === 0) {
       headers = cells;
@@ -34,18 +120,22 @@ function parseHtmlTable(html: string): InventoryItem[] {
       return acc;
     }, {} as Record<string, string>);
 
+    const code = getValueByKeys(rowData, codeKeys);
+    const title = getValueByKeys(rowData, titleKeys);
+
     // Ensure we have the minimum required fields
-    if (rowData['商品編號'] && rowData['商品名稱']) {
+    if (code && title) {
       items.push({
-        myacg_item_code: rowData['商品編號'],
-        product_id: rowData['商品編號'] || '',
-        product_title: rowData['商品名稱'],
-        raw_variant_name: rowData['規格/項目'] || '',
-        listing_type: rowData['商品種類'] || '',
-        final_price: parseInt(rowData['價格']?.replace(/[^0-9]/g, '') || '0', 10),
-        myacg_available_quantity: parseInt(rowData['庫存']?.replace(/[^0-9]/g, '') || '0', 10),
-        myacg_sold_quantity: parseInt(rowData['已售']?.replace(/[^0-9]/g, '') || '0', 10),
-        myacg_listed_at: rowData['刊登時間'] || '',
+        myacg_item_code: code,
+        product_id: code,
+        product_title: title,
+        raw_variant_name: getValueByKeys(rowData, specKeys),
+        listing_type: getValueByKeys(rowData, typeKeys),
+        final_price: parseInt(getValueByKeys(rowData, priceKeys).replace(/[^0-9]/g, '') || '0', 10),
+        myacg_available_quantity: getAvailableQty(rowData),
+        myacg_sold_quantity: getSoldQty(rowData),
+        myacg_demand_quantity: getDemandQty(rowData),
+        myacg_listed_at: getValueByKeys(rowData, listedKeys),
         import_sort_index: index,
       });
     }
@@ -66,18 +156,30 @@ async function parseXlsxFile(file: File): Promise<InventoryItem[]> {
         
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as any[];
         
-        const items: InventoryItem[] = jsonData.map((rowData, index) => ({
-          myacg_item_code: String(rowData['商品編號'] || ''),
-          product_id: String(rowData['商品編號'] || ''),
-          product_title: String(rowData['商品名稱'] || ''),
-          raw_variant_name: String(rowData['規格/項目'] || ''),
-          listing_type: String(rowData['商品種類'] || ''),
-          final_price: parseInt(String(rowData['價格'] || '0').replace(/[^0-9]/g, ''), 10),
-          myacg_available_quantity: parseInt(String(rowData['庫存'] || '0').replace(/[^0-9]/g, ''), 10),
-          myacg_sold_quantity: parseInt(String(rowData['已售'] || '0').replace(/[^0-9]/g, ''), 10),
-          myacg_listed_at: String(rowData['刊登時間'] || ''),
-          import_sort_index: index,
-        })).filter(item => item.myacg_item_code && item.product_title);
+        const items: InventoryItem[] = jsonData.map((rawRow, index) => {
+          const rowData: any = {};
+          for (const key of Object.keys(rawRow)) {
+            const normKey = normalizeRowKey(key);
+            rowData[normKey] = rawRow[key];
+          }
+
+          const code = getValueByKeys(rowData, codeKeys);
+          const title = getValueByKeys(rowData, titleKeys);
+
+          return {
+            myacg_item_code: code,
+            product_id: code,
+            product_title: title,
+            raw_variant_name: getValueByKeys(rowData, specKeys),
+            listing_type: getValueByKeys(rowData, typeKeys),
+            final_price: parseInt(getValueByKeys(rowData, priceKeys).replace(/[^0-9]/g, '') || '0', 10),
+            myacg_available_quantity: getAvailableQty(rowData),
+            myacg_sold_quantity: getSoldQty(rowData),
+            myacg_demand_quantity: getDemandQty(rowData),
+            myacg_listed_at: getValueByKeys(rowData, listedKeys),
+            import_sort_index: index,
+          };
+        }).filter(item => item.myacg_item_code && item.product_title);
         
         resolve(items);
       } catch (err) {
