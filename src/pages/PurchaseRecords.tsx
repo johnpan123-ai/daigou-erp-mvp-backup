@@ -320,6 +320,32 @@ export default function PurchaseRecords() {
     await db.saveProductGroups(updatedGroups);
   };
 
+  const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca', totalValue: number) => {
+    if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
+    
+    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
+    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
+    
+    if (groupVars.length === 0) return;
+    const targetVar = groupVars[0];
+    
+    const allVars = await db.getProductVariants();
+    const dbTarget = allVars.find(v => v.id === targetVar.id);
+    
+    if (dbTarget) {
+      if (platform === 'myacg') {
+        const auto = calculateFinalMyacgDemand(dbTarget.myacg_item_code, inventory, salesOrderItems);
+        dbTarget.myacg_manual_adjustment = totalValue - auto;
+      } else {
+        const auto = dbTarget.waca_auto_quantity || 0;
+        dbTarget.waca_manual_adjustment = totalValue - auto;
+      }
+      
+      await db.saveProductVariants(allVars);
+      setVariants(variants.map(v => v.id === targetVar.id ? dbTarget : v));
+    }
+  };
+
   const handleRowClick = (id: string, e: React.MouseEvent) => {
     // Don't navigate if clicking inputs/buttons
     if ((e.target as HTMLElement).tagName === 'INPUT' || 
@@ -555,10 +581,34 @@ export default function PurchaseRecords() {
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {details.myacg}
+                          {editMode ? (
+                            <input 
+                              type="number"
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
+                              value={details.myacg} 
+                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'myacg', parseInt(e.target.value) || 0)} 
+                              onClick={e => e.stopPropagation()}
+                              min={0}
+                            />
+                          ) : (
+                            details.myacg
+                          )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {details.waca}
+                          {editMode ? (
+                            <input 
+                              type="number"
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
+                              value={details.waca} 
+                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value) || 0)} 
+                              onClick={e => e.stopPropagation()}
+                              min={0}
+                            />
+                          ) : (
+                            details.waca
+                          )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
                           {details.privateOrder}
@@ -619,19 +669,21 @@ export default function PurchaseRecords() {
                 <thead>
                   <tr>
                     <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '28%' }}>商品名稱</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>需求</th>
+                    <th style={{ width: '25%' }}>商品名稱</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>缺口</th>
                     <th style={{ width: '12%', textAlign: 'center' }}>購買結單日</th>
                     <th style={{ width: '12%', textAlign: 'center' }}>官方結單日</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>發售月份</th>
-                    <th style={{ width: '6%', textAlign: 'center' }}>官網</th>
+                    <th style={{ width: '7%', textAlign: 'center' }}>發售月份</th>
+                    <th style={{ width: '4%', textAlign: 'center' }}>官網</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAndSortedGroups.map(g => {
-                    const details = getGroupDemandAndPurchased(g.id);
+                    const details = getGroupPlatformDetails(g.id);
+                    const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
 
@@ -657,13 +709,40 @@ export default function PurchaseRecords() {
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {details.demand}
+                          {editMode ? (
+                            <input 
+                              type="number"
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
+                              value={details.myacg} 
+                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'myacg', parseInt(e.target.value) || 0)} 
+                              onClick={e => e.stopPropagation()}
+                              min={0}
+                            />
+                          ) : (
+                            details.myacg
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
+                          {editMode ? (
+                            <input 
+                              type="number"
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
+                              value={details.waca} 
+                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value) || 0)} 
+                              onClick={e => e.stopPropagation()}
+                              min={0}
+                            />
+                          ) : (
+                            details.waca
+                          )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {details.purchased}
                         </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: details.gap > 0 ? '#ef4444' : '#166534' }}>
-                          缺 {details.gap}
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: demandAndPurchased.gap > 0 ? '#ef4444' : '#166534' }}>
+                          缺 {demandAndPurchased.gap}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {editMode ? (
