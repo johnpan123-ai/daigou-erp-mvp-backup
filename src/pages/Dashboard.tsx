@@ -224,23 +224,35 @@ export default function Dashboard() {
   };
 
   // --- Date helpers ---
-  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const parseDateStr = (dateStr: string) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
 
-  const getRemainingDays = (closingDate: string | undefined | null) => {
-    if (!closingDate) return { text: '-', days: 999 };
-    const todayTime = new Date(today).getTime();
-    const closingTime = new Date(closingDate).getTime();
-    const diffDays = Math.ceil((closingTime - todayTime) / (1000 * 60 * 60 * 24));
+  const getTargetClosingDate = (g: ProductGroup) => {
+    if (g.purchase_date && g.purchase_date.trim() !== '') {
+      return { date: g.purchase_date.trim(), type: 'purchase' as const };
+    }
+    if (g.closing_date && g.closing_date.trim() !== '') {
+      return { date: g.closing_date.trim(), type: 'closing' as const };
+    }
+    return null;
+  };
+
+  const today = useMemo(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }, []);
+
+  const getRemainingDays = (dateStr: string | undefined | null) => {
+    if (!dateStr) return { text: '-', days: 999 };
+    const diffTime = parseDateStr(dateStr).getTime() - parseDateStr(today).getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
     return {
       text: diffDays < 0 ? '已過期' : `剩 ${diffDays} 天`,
       days: diffDays
     };
-  };
-
-  const getWeekdayStr = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    const days = ['日', '一', '二', '三', '四', '五', '六'];
-    return days[date.getDay()] || '';
   };
 
   // --- Dynamic Stats Computations ---
@@ -254,8 +266,10 @@ export default function Dashboard() {
 
     groupsList.forEach(g => {
       if (!g) return;
-      const isActive = !g.closing_date || g.closing_date >= today;
+      const target = getTargetClosingDate(g);
       const details = getGroupDemandAndPurchased(g.id);
+      
+      const isActive = !target || target.date >= today;
 
       if (isActive) {
         activeCount++;
@@ -265,8 +279,8 @@ export default function Dashboard() {
         }
 
         // 即將結單 (7天內)
-        if (g.closing_date) {
-          const { days } = getRemainingDays(g.closing_date);
+        if (target) {
+          const { days } = getRemainingDays(target.date);
           if (days >= 0 && days <= 7) {
             urgent7Count++;
             if (days <= 3) {
@@ -300,44 +314,59 @@ export default function Dashboard() {
     };
   }, [groups, variants, inventory]);
 
-  // Urgent Groups (closing in <= 7 days)
+  // Urgent Groups (closing in <= 7 days, or overdue with gap)
   const urgentGroups = useMemo(() => {
     const groupsList = groups || [];
-    const list = groupsList.filter(g => {
-      if (!g) return false;
-      const isActive = !g.closing_date || g.closing_date >= today;
-      if (!isActive || !g.closing_date) return false;
-      const { days } = getRemainingDays(g.closing_date);
-      return days >= 0 && days <= 7;
+    const eligibleList: {
+      group: ProductGroup;
+      targetDate: string;
+      targetType: 'purchase' | 'closing';
+      gap: number;
+      diffDays: number;
+    }[] = [];
+
+    groupsList.forEach(g => {
+      if (!g) return;
+      const target = getTargetClosingDate(g);
+      if (!target) return;
+
+      const { gap } = getGroupDemandAndPurchased(g.id);
+      const { days } = getRemainingDays(target.date);
+
+      const isEligible = (days >= 0 && days <= 7) || (days < 0 && gap > 0);
+      if (isEligible) {
+        eligibleList.push({
+          group: g,
+          targetDate: target.date,
+          targetType: target.type,
+          gap,
+          diffDays: days
+        });
+      }
     });
 
-    // Sort by closing date ascending (soonest first)
-    return list.sort((a, b) => {
-      const dateA = a?.closing_date || '';
-      const dateB = b?.closing_date || '';
-      return dateA.localeCompare(dateB);
-    });
-  }, [groups, today]);
+    // Sort according to rules:
+    // 1. 缺口 > 0 優先
+    // 2. 結單日期越近越前面
+    // 3. 缺口數越大越前面
+    eligibleList.sort((a, b) => {
+      const hasGapA = a.gap > 0;
+      const hasGapB = b.gap > 0;
 
-  const getProductGroupImage = (title: any): string => {
-    const lower = (title && typeof title === 'string') ? title.toLowerCase() : '';
-    if (lower.includes('拉普拉斯') || lower.includes('laplus')) {
-      return '/images/media__1779972258138.jpg';
-    }
-    if (lower.includes('凱婆') || lower.includes('ensky') || lower.includes('rubber')) {
-      return '/images/media__1779972936721.jpg';
-    }
-    if (lower.includes('萊莎') || lower.includes('kdcolle') || lower.includes('ryza')) {
-      return '/images/media__1779977460775.jpg';
-    }
-    if (lower.includes('藍沢') || lower.includes('aizawa') || lower.includes('emma') || lower.includes('墊')) {
-      return '/images/media__1779977695776.jpg';
-    }
-    if (lower.includes('沁音') || lower.includes('korone') || lower.includes('red bull') || lower.includes('紅牛')) {
-      return '/images/media__1779971780071.jpg';
-    }
-    return '/images/media__1780211165420.png'; // cardboard box
-  };
+      if (hasGapA !== hasGapB) {
+        return hasGapA ? -1 : 1;
+      }
+
+      const dateCompare = a.targetDate.localeCompare(b.targetDate);
+      if (dateCompare !== 0) {
+        return dateCompare;
+      }
+
+      return b.gap - a.gap;
+    });
+
+    return eligibleList.slice(0, 5);
+  }, [groups, today, variants, inventory, salesOrderItems, batchItems, privateOrderItems]);
 
   return (
     <div className="dashboard-container">
@@ -350,10 +379,11 @@ export default function Dashboard() {
       />
       <style>{`
         .dashboard-container {
-          padding: 24px;
-          max-width: 1450px;
-          width: calc(100% - 48px);
-          margin: 0 auto;
+          width: 100%;
+          max-width: none;
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
           font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           color: #1e293b;
           display: flex;
@@ -550,7 +580,7 @@ export default function Dashboard() {
         }
 
         .category-img-container {
-          width: 45%;
+          width: 35%;
           height: 100%;
           border-radius: 12px;
           overflow: hidden;
@@ -571,9 +601,9 @@ export default function Dashboard() {
         }
 
         .category-img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
+          max-width: 90%;
+          max-height: 90%;
+          object-fit: contain;
           transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
@@ -724,100 +754,58 @@ export default function Dashboard() {
           text-decoration: underline;
         }
 
-        .urgent-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-          gap: 16px;
-        }
-
-        .urgent-card {
+        .urgent-table-container {
           background: #ffffff;
           border: 1px solid #e2e8f0;
           border-radius: 16px;
-          padding: 16px;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          cursor: pointer;
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-          position: relative;
-        }
-
-        .urgent-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 20px rgba(0,0,0,0.04);
-          border-color: #cbd5e1;
-        }
-
-        .urgent-thumbnail-container {
-          position: relative;
-          flex-shrink: 0;
-        }
-
-        .urgent-thumbnail {
-          width: 64px;
-          height: 64px;
-          border-radius: 12px;
-          object-fit: cover;
-          background-color: #f8fafc;
-          border: 1px solid #e2e8f0;
-        }
-
-        .urgent-info {
-          display: flex;
-          flex-direction: column;
-          flex: 1;
-          min-width: 0;
-        }
-
-        .urgent-remaining-badge {
-          font-size: 11px;
-          font-weight: 700;
-          margin-bottom: 2px;
-        }
-
-        .urgent-date {
-          font-size: 11px;
-          color: #64748b;
-          margin-bottom: 4px;
-        }
-
-        .urgent-title {
-          font-size: 13px;
-          font-weight: 600;
-          color: #1e293b;
-          margin: 0 0 4px 0;
-          white-space: nowrap;
           overflow: hidden;
-          text-overflow: ellipsis;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         }
 
-        .urgent-badge-row {
-          display: flex;
-          gap: 4px;
-          margin-bottom: 4px;
+        .urgent-table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: left;
+          font-size: 13px;
         }
 
-        .urgent-badge {
-          background-color: #e2e8f0;
+        .urgent-table th {
+          padding: 14px 20px;
+          font-weight: 600;
           color: #475569;
-          font-size: 10px;
-          padding: 1px 6px;
-          border-radius: 4px;
-          font-weight: 500;
-        }
-
-        .urgent-gap {
           font-size: 12px;
-          font-weight: 700;
-          color: #ef4444;
+          background-color: #f8fafc;
+          border-bottom: 1px solid #e2e8f0;
         }
 
-        .urgent-chevron {
-          color: #94a3b8;
-          display: flex;
-          align-items: center;
-          margin-left: 4px;
+        .urgent-table tr {
+          border-bottom: 1px solid #f1f5f9;
+          transition: background-color 0.2s ease;
+          height: 68px;
+        }
+
+        .urgent-table tbody tr:hover {
+          background-color: #f8fafc;
+        }
+
+        .urgent-table tbody tr:last-child {
+          border-bottom: none;
+        }
+
+        .urgent-table td {
+          padding: 12px 20px;
+          vertical-align: middle;
+          color: #1e293b;
+        }
+
+        .urgent-table-title {
+          font-size: 13.5px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0;
+          line-height: 1.4;
+          white-space: normal;
+          word-break: break-all;
         }
       `}</style>
 
@@ -1039,41 +1027,107 @@ export default function Dashboard() {
             🎉 太棒了！目前沒有即將結單或需要處理的商品。
           </div>
         ) : (
-          <div className="urgent-grid">
-            {urgentGroups.map(g => {
-              if (!g) return null;
-              const { gap } = getGroupDemandAndPurchased(g.id);
-              const remaining = getRemainingDays(g.closing_date);
-              const isVeryUrgent = remaining.days <= 3;
-              const imageUrl = getProductGroupImage(g.title);
+          <div className="urgent-table-container">
+            <table className="urgent-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '15%', paddingLeft: '24px' }}>結單類型</th>
+                  <th style={{ width: '45%' }}>商品名稱</th>
+                  <th style={{ width: '13%', textAlign: 'center' }}>結單日期</th>
+                  <th style={{ width: '10%', textAlign: 'center' }}>剩餘天數</th>
+                  <th style={{ width: '10%', textAlign: 'center' }}>缺口數量</th>
+                  <th style={{ width: '10%', textAlign: 'center' }}>狀態</th>
+                  <th style={{ width: '2%', paddingRight: '24px' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {urgentGroups.map(item => {
+                  const g = item.group;
+                  if (!g) return null;
+                  const gap = item.gap;
+                  const targetDate = item.targetDate;
+                  const targetType = item.targetType;
+                  const diffDays = item.diffDays;
+                  const remainingText = diffDays < 0 ? '已過期' : `${diffDays} 天`;
 
-              return (
-                <div key={g.id} className="urgent-card" onClick={() => navigate(`/purchase-records/${g.id}`)}>
-                  <div className="urgent-thumbnail-container">
-                    <img className="urgent-thumbnail" src={imageUrl} alt={g.title} />
-                  </div>
-                  <div className="urgent-info">
-                    <span 
-                      className="urgent-remaining-badge"
-                      style={{ color: isVeryUrgent ? '#dc2626' : '#ea580c' }}
-                    >
-                      {isVeryUrgent ? '🔥 ' : ''}{remaining.text}
-                    </span>
-                    <span className="urgent-date">{g.closing_date} ({getWeekdayStr(g.closing_date)})</span>
-                    <h4 className="urgent-title" title={g.title}>{g.normalized_title || g.title}</h4>
-                    <div className="urgent-badge-row">
-                      {g.listing_type && (
-                        <span className="urgent-badge">{g.listing_type}</span>
-                      )}
-                    </div>
-                    <span className="urgent-gap">缺口 {gap}</span>
-                  </div>
-                  <div className="urgent-chevron">
-                    <ChevronRight size={18} />
-                  </div>
-                </div>
-              );
-            })}
+                  // Determine tags
+                  const tags = [];
+                  if (g.listing_type) {
+                    tags.push(g.listing_type);
+                  } else {
+                    if (isProxyProduct(g)) {
+                      tags.push('代理版');
+                    } else {
+                      tags.push('一般預購');
+                    }
+                  }
+                  if (isHololiveProduct(g)) {
+                    tags.push('Hololive');
+                  } else if (isVspoProduct(g)) {
+                    tags.push('VSPO');
+                  }
+
+                  return (
+                    <tr key={g.id} onClick={() => navigate(`/purchase-records/${g.id}`)} style={{ cursor: 'pointer' }}>
+                      <td style={{ paddingLeft: '24px' }}>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '4px 12px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          borderRadius: '9999px',
+                          backgroundColor: targetType === 'purchase' ? '#eff6ff' : '#f0fdf4',
+                          color: targetType === 'purchase' ? '#2563eb' : '#16a34a',
+                          border: targetType === 'purchase' ? '1px solid #bfdbfe' : '1px solid #bbf7d0'
+                        }}>
+                          {targetType === 'purchase' ? '購買結單' : '官方結單'}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="urgent-table-title">{g.normalized_title || g.title}</span>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                            {tags.map((tag, i) => (
+                              <span key={i} style={{ backgroundColor: '#f1f5f9', color: '#475569', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                        {targetDate}
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
+                        {remainingText}
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
+                        缺口 {gap}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '4px 10px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          borderRadius: '9999px',
+                          backgroundColor: '#fffbeb',
+                          color: '#d97706',
+                          border: '1px solid #fef3c7'
+                        }}>
+                          進行中
+                        </span>
+                      </td>
+                      <td style={{ paddingRight: '24px', textAlign: 'right' }}>
+                        <ChevronRight size={16} style={{ color: '#94a3b8' }} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
