@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -17,60 +17,8 @@ export default function Dashboard() {
 
   const navigate = useNavigate();
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [activeCategoryForUpload, setActiveCategoryForUpload] = useState<string | null>(null);
-  const [categoryImages, setCategoryImages] = useState<Record<string, string>>({
-    all: '',
-    hololive: '',
-    vspo: '',
-    agency: '',
-    other: ''
-  });
-
-  const DEFAULT_IMAGES: Record<string, string> = {
-    all: '/images/all_products.png',
-    hololive: '/images/hololive.png',
-    vspo: '/images/vspo.png',
-    agency: '/images/proxy.png',
-    other: '/images/other.png'
-  };
-
-  const triggerImageUpload = (categoryKey: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setActiveCategoryForUpload(categoryKey);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-      fileInputRef.current.click();
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeCategoryForUpload) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        localStorage.setItem(`dashboard_category_img_${activeCategoryForUpload}`, dataUrl);
-        setCategoryImages(prev => ({
-          ...prev,
-          [activeCategoryForUpload]: dataUrl
-        }));
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   useEffect(() => {
     loadData();
-    setCategoryImages({
-      all: localStorage.getItem('dashboard_category_img_all') || '',
-      hololive: localStorage.getItem('dashboard_category_img_hololive') || '',
-      vspo: localStorage.getItem('dashboard_category_img_vspo') || '',
-      agency: localStorage.getItem('dashboard_category_img_agency') || '',
-      other: localStorage.getItem('dashboard_category_img_other') || ''
-    });
   }, []);
 
   const loadData = async () => {
@@ -341,24 +289,16 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-container">
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept="image/*" 
-        style={{ display: 'none' }} 
-      />
       <style>{`
         .dashboard-container {
           padding: 24px;
-          max-width: 1450px;
-          width: calc(100% - 48px);
+          max-width: 1400px;
           margin: 0 auto;
           font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           color: #1e293b;
           display: flex;
           flex-direction: column;
-          gap: 24px;
+          gap: 32px;
         }
 
         .dashboard-header {
@@ -430,7 +370,7 @@ export default function Dashboard() {
         /* KPI Cards Grid */
         .kpi-grid {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
           gap: 20px;
         }
 
@@ -438,9 +378,7 @@ export default function Dashboard() {
           background: #ffffff;
           border: 1px solid #e2e8f0;
           border-radius: 16px;
-          padding: 16px 20px;
-          height: 110px;
-          box-sizing: border-box;
+          padding: 20px;
           display: flex;
           align-items: center;
           gap: 16px;
@@ -522,101 +460,73 @@ export default function Dashboard() {
 
         .category-grid {
           display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 20px;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 16px;
         }
 
         .category-card {
-          display: flex;
-          align-items: center;
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
+          height: 150px;
           border-radius: 16px;
+          position: relative;
           overflow: hidden;
           cursor: pointer;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          height: 160px;
-          position: relative;
-          padding: 10px;
-          box-sizing: border-box;
-          gap: 10px;
+          border: 1px solid #e2e8f0;
         }
 
         .category-card:hover {
           transform: translateY(-4px);
-          box-shadow: 0 12px 20px -8px rgba(37, 99, 235, 0.15), 0 4px 12px -2px rgba(0, 0, 0, 0.04);
-          border-color: #2563eb;
+          box-shadow: 0 12px 24px -10px rgba(0,0,0,0.12);
         }
 
-        .category-img-container {
-          width: 45%;
-          height: 100%;
-          border-radius: 12px;
-          overflow: hidden;
-          position: relative;
-          flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
-          background-color: #f8fafc;
-        }
-
-        .category-img-overlay {
+        .category-bg-image {
           position: absolute;
-          inset: 0;
-          pointer-events: none;
-          z-index: 1;
-        }
-
-        .category-img {
+          top: 0;
+          left: 0;
           width: 100%;
           height: 100%;
-          object-fit: cover;
-          transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+          background-size: cover;
+          background-position: center;
+          transition: transform 0.5s ease;
+          opacity: 0.15; /* Subtly visible character backgrounds */
         }
 
-        .category-card:hover .category-img {
-          transform: scale(1.08);
+        .category-card:hover .category-bg-image {
+          transform: scale(1.05);
+          opacity: 0.22;
         }
 
-        .category-info {
-          flex: 1;
+        .category-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: linear-gradient(180deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.95) 100%);
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 100%;
-          min-width: 0;
-          padding: 4px 0;
+          padding: 16px;
           box-sizing: border-box;
         }
 
-        .category-info-top {
+        .category-card-content {
           display: flex;
           flex-direction: column;
         }
 
         .category-name {
-          font-size: 13.5px;
+          font-size: 14px;
           font-weight: 700;
           color: #334155;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          transition: color 0.2s ease;
-        }
-
-        .category-card:hover .category-name {
-          color: #2563eb;
         }
 
         .category-count {
           font-size: 24px;
           font-weight: 800;
           color: #0f172a;
-          margin-top: 2px;
-          line-height: 1;
+          margin-top: 4px;
         }
 
         .category-count span {
@@ -626,59 +536,21 @@ export default function Dashboard() {
           margin-left: 2px;
         }
 
-        .category-link {
-          font-size: 11px;
-          font-weight: 700;
-          color: #2563eb;
-          display: inline-flex;
-          align-items: center;
-          gap: 2px;
-          transition: all 0.2s ease;
-          opacity: 0.85;
-          white-space: nowrap;
-        }
-
-        .category-card:hover .category-link {
-          opacity: 1;
-          transform: translateX(3px);
-          color: #1d4ed8;
-        }
-
-        .category-footer-row {
+        .category-btn {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
           display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 6px;
-          margin-top: auto;
-          width: 100%;
-        }
-
-        .btn-change-image {
-          font-size: 10px;
-          padding: 2px 6px;
-          border-radius: 4px;
-          background: #f8fafc;
-          border: 1px solid #cbd5e1;
-          color: #64748b;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          font-weight: 600;
-          display: inline-flex;
           align-items: center;
-          white-space: nowrap;
-          margin-top: 2px;
+          justify-content: center;
+          color: #ffffff;
+          align-self: flex-end;
+          transition: transform 0.2s ease;
         }
 
-        .btn-change-image:hover {
-          background: #f1f5f9;
-          color: #1e293b;
-          border-color: #94a3b8;
+        .category-card:hover .category-btn {
+          transform: scale(1.1);
         }
-
-        .btn-change-image:active {
-          transform: scale(0.95);
-        }
-
 
         /* Urgent section */
         .urgent-section {
@@ -898,125 +770,70 @@ export default function Dashboard() {
         <div className="category-grid">
           {/* 全部商品 */}
           <div className="category-card" onClick={() => navigate('/purchase-records?tab=all')}>
-            <div className="category-img-container" style={{ backgroundColor: '#eff6ff' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.all || DEFAULT_IMAGES.all} alt="全部商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
+            <div className="category-bg-image" style={{ backgroundImage: `url('/images/media__1780194889129.png')` }} />
+            <div className="category-overlay">
+              <div className="category-card-content">
                 <span className="category-name">全部商品</span>
                 <span className="category-count">{categoryCounts.all}<span>項</span></span>
               </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('all', e)}
-                >
-                  更換圖片
-                </button>
+              <div className="category-btn" style={{ backgroundColor: '#2563eb' }}>
+                <ChevronRight size={16} />
               </div>
             </div>
           </div>
 
           {/* Hololive商品 */}
           <div className="category-card" onClick={() => navigate('/purchase-records?tab=hololive')}>
-            <div className="category-img-container" style={{ backgroundColor: '#f5f3ff' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(139, 92, 246, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.hololive || DEFAULT_IMAGES.hololive} alt="Hololive商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
+            <div className="category-bg-image" style={{ backgroundImage: `url('/images/media__1780194889254.png')` }} />
+            <div className="category-overlay">
+              <div className="category-card-content">
                 <span className="category-name">Hololive商品</span>
                 <span className="category-count">{categoryCounts.hololive}<span>項</span></span>
               </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('hololive', e)}
-                >
-                  更換圖片
-                </button>
+              <div className="category-btn" style={{ backgroundColor: '#06b6d4' }}>
+                <ChevronRight size={16} />
               </div>
             </div>
           </div>
 
           {/* VSPO商品 */}
           <div className="category-card" onClick={() => navigate('/purchase-records?tab=vspo')}>
-            <div className="category-img-container" style={{ backgroundColor: '#fff1f2' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(244, 63, 94, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.vspo || DEFAULT_IMAGES.vspo} alt="VSPO商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
+            <div className="category-bg-image" style={{ backgroundImage: `url('/images/media__1780196241737.png')` }} />
+            <div className="category-overlay">
+              <div className="category-card-content">
                 <span className="category-name">VSPO商品</span>
                 <span className="category-count">{categoryCounts.vspo}<span>項</span></span>
               </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('vspo', e)}
-                >
-                  更換圖片
-                </button>
+              <div className="category-btn" style={{ backgroundColor: '#8b5cf6' }}>
+                <ChevronRight size={16} />
               </div>
             </div>
           </div>
 
           {/* 代理版商品 */}
           <div className="category-card" onClick={() => navigate('/purchase-records?tab=agency')}>
-            <div className="category-img-container" style={{ backgroundColor: '#fff7ed' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(249, 115, 22, 0.12) 0%, rgba(249, 115, 22, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.agency || DEFAULT_IMAGES.agency} alt="代理版商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
+            <div className="category-bg-image" style={{ backgroundImage: `url('/images/media__1780197034370.png')` }} />
+            <div className="category-overlay">
+              <div className="category-card-content">
                 <span className="category-name">代理版商品</span>
                 <span className="category-count">{categoryCounts.proxy}<span>項</span></span>
               </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('agency', e)}
-                >
-                  更換圖片
-                </button>
+              <div className="category-btn" style={{ backgroundColor: '#f97316' }}>
+                <ChevronRight size={16} />
               </div>
             </div>
           </div>
 
           {/* 其他商品 */}
           <div className="category-card" onClick={() => navigate('/purchase-records?tab=other')}>
-            <div className="category-img-container" style={{ backgroundColor: '#f8fafc' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.12) 0%, rgba(100, 116, 139, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.other || DEFAULT_IMAGES.other} alt="其他商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
+            <div className="category-bg-image" style={{ backgroundImage: `url('/images/media__1780211165420.png')` }} />
+            <div className="category-overlay">
+              <div className="category-card-content">
                 <span className="category-name">其他商品</span>
                 <span className="category-count">{categoryCounts.other}<span>項</span></span>
               </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('other', e)}
-                >
-                  更換圖片
-                </button>
+              <div className="category-btn" style={{ backgroundColor: '#64748b' }}>
+                <ChevronRight size={16} />
               </div>
             </div>
           </div>
@@ -1035,7 +852,7 @@ export default function Dashboard() {
           </a>
         </div>
         {urgentGroups.length === 0 ? (
-          <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', borderRadius: '16px', border: '1px dashed #e2e8f0', color: '#64748b', fontSize: '14px', boxSizing: 'border-box' }}>
+          <div style={{ padding: '32px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: '16px', border: '1px dashed #e2e8f0', color: '#64748b', fontSize: '14px' }}>
             🎉 太棒了！目前沒有即將結單或需要處理的商品。
           </div>
         ) : (
