@@ -33,13 +33,6 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
     onRefresh();
   };
 
-  const handleDeleteItem = async (item: PurchaseBatchItem) => {
-    if (!window.confirm('確定要刪除這筆明細嗎？')) return;
-    const allItems = await db.getPurchaseBatchItems();
-    await db.savePurchaseBatchItems(allItems.filter(i => i.id !== item.id));
-    onRefresh();
-  };
-
   const variantMap = new Map(variants.map(v => [v.id, v]));
 
   if (batches.length === 0) {

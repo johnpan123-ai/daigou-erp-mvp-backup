@@ -33,13 +33,6 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
     onRefresh();
   };
 
-  const handleDeleteItem = async (item: PrivateOrderItem) => {
-    if (!window.confirm('確定要刪除這筆明細嗎？')) return;
-    const allItems = await db.getPrivateOrderItems();
-    await db.savePrivateOrderItems(allItems.filter(i => i.id !== item.id));
-    onRefresh();
-  };
-
   const variantMap = new Map(variants.map(v => [v.id, v]));
 
   if (orders.length === 0) {

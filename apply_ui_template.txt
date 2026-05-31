@@ -1,403 +1,3 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { db } from '../lib/db';
-import type { 
-  ProductGroup, ProductVariant, InventoryItem, ProductCategory,
-  PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
-} from '../lib/db';
-import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, ShoppingCart, DollarSign } from 'lucide-react';
-import PurchaseBatchTab from '../components/PurchaseBatchTab';
-import PrivateOrderTab from '../components/PrivateOrderTab';
-
-
-const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
-  if (!text) return null;
-  if (!highlight.trim()) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
-  return (
-    <>
-      {parts.map((part, i) => 
-        part.toLowerCase() === highlight.toLowerCase() ? (
-          <span key={i} style={{ backgroundColor: '#fef08a', padding: '0 2px', borderRadius: '2px', color: '#854d0e' }}>{part}</span>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}
-    </>
-  );
-};
-
-const renderStatusBadge = (needToBuy: number, excessBuy: number, totalDemand: number) => {
-  if (needToBuy > 0) {
-    return (
-      <span style={{
-        backgroundColor: '#FEE2E2',
-        color: '#DC2626',
-        border: '1px solid #fecaca',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '12px',
-        fontWeight: 600,
-        display: 'inline-block'
-      }}>
-        待採購 {needToBuy}
-      </span>
-    );
-  }
-  if (excessBuy > 0) {
-    return (
-      <span style={{
-        backgroundColor: '#fff7ed',
-        color: '#c2410c',
-        border: '1px solid #ffedd5',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '12px',
-        fontWeight: 600,
-        display: 'inline-block'
-      }}>
-        多買 {excessBuy}
-      </span>
-    );
-  }
-  if (totalDemand === 0) {
-    return (
-      <span style={{
-        backgroundColor: '#EFF6FF',
-        color: '#2563EB',
-        border: '1px solid #dbeafe',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '12px',
-        fontWeight: 600,
-        display: 'inline-block'
-      }}>
-        無需求
-      </span>
-    );
-  }
-  return (
-    <span style={{
-      backgroundColor: '#f0fdf4',
-      color: '#166534',
-      border: '1px solid #dcfce7',
-      padding: '2px 8px',
-      borderRadius: '4px',
-      fontSize: '12px',
-      fontWeight: 600,
-      display: 'inline-block'
-    }}>
-      完成
-    </span>
-  );
-};
-
-export default function PurchaseManagement() {
-
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-
-  const [group, setGroup] = useState<ProductGroup | null>(null);
-  const [variants, setVariants] = useState<ProductVariant[]>([]);
-  const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
-  const [categoryMap, setCategoryMap] = useState<Map<string, ProductCategory>>(new Map());
-  
-  // Data for calculation
-  const [salesOrders, setSalesOrders] = useState<any[]>([]);
-  const [salesOrderItems, setSalesOrderItems] = useState<any[]>([]);
-  
-  const [searchTerm, setSearchTerm] = useState('');
-  const [manualExpandedGroups, setManualExpandedGroups] = useState<Set<string>>(new Set());
-
-
-  const toggleManualGroup = (title: string) => {
-    const newSet = new Set(manualExpandedGroups);
-    if (newSet.has(title)) newSet.delete(title);
-    else newSet.add(title);
-    setManualExpandedGroups(newSet);
-  };
-
-  const [filterMode, setFilterMode] = useState<'all' | 'abnormal'>('all');
-
-  const [sortMode, setSortMode] = useState<'catalog' | 'shortage'>('catalog');
-
-  const [privateOrders, setPrivateOrders] = useState<PrivateOrder[]>([]);
-  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
-  const [purchaseBatches, setPurchaseBatches] = useState<PurchaseBatch[]>([]);
-  const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
-  
-  // UI States
-  const [activeTab, setActiveTab] = useState<'worksheet' | 'purchase_batches' | 'private_orders'>('worksheet');
-
-  const [showPrivateOrderModal, setShowPrivateOrderModal] = useState(false);
-  const [editingPoId, setEditingPoId] = useState<string | null>(null);
-  const [poForm, setPoForm] = useState({ customer_name: '', contact: '', note: '' });
-  const [poLines, setPoLines] = useState<{ variant_id: string, quantity: number, amount: number, note: string }[]>([]);
-
-  // Modal: Purchase Batch
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
-  const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
-  const [batchLines, setBatchLines] = useState<{ variant_id: string, quantity: number, cost: number, note: string }[]>([]);
-
-  useEffect(() => {
-    loadData();
-  }, [id]);
-
-  const loadData = async () => {
-    if (!id) return;
-    const allGroups = await db.getProductGroups();
-    const g = allGroups.find(x => x.id === id);
-    if (!g) {
-      navigate('/purchase-records');
-      return;
-    }
-    setGroup(g);
-
-    const allVars = await db.getProductVariants();
-    const allCats = await db.getProductCategories();
-    const groupCatIds = new Set(allCats.filter(c => c.product_group_id === id).map(c => c.id));
-    const groupVars = allVars.filter(v => v.product_group_id === id || (v.product_category_id && groupCatIds.has(v.product_category_id)));
-    
-    setVariants(groupVars);
-    
-    const catMap = new Map(allCats.map(c => [c.id, c]));
-    setCategoryMap(catMap);
-
-    const inventory = await db.getInventory();
-    const invMap = new Map(inventory.map(i => [i.myacg_item_code, i]));
-    setInventoryMap(invMap);
-
-    // Fetch new architecture data
-    const allPrivateOrders = await db.getPrivateOrders();
-    const allPrivateOrderItems = await db.getPrivateOrderItems();
-    const groupPrivateOrders = allPrivateOrders.filter(po => po.product_group_id === id);
-    const groupPoIds = new Set(groupPrivateOrders.map(po => po.id));
-    const groupPrivateOrderItems = allPrivateOrderItems.filter(poi => groupPoIds.has(poi.private_order_id));
-    
-    setPrivateOrders(groupPrivateOrders);
-    setPrivateOrderItems(groupPrivateOrderItems);
-
-    const allBatches = await db.getPurchaseBatches();
-    const allBatchItems = await db.getPurchaseBatchItems();
-    const groupBatches = allBatches.filter(b => b.product_group_id === id);
-    const groupBatchIds = new Set(groupBatches.map(b => b.id));
-    const groupBatchItems = allBatchItems.filter(bi => groupBatchIds.has(bi.purchase_batch_id));
-
-    
-    setPurchaseBatches(groupBatches);
-    setPurchaseBatchItems(groupBatchItems);
-
-    const allSO = await db.getSalesOrders();
-    const allSOI = await db.getSalesOrderItems();
-    const groupVariantCodes = new Set(groupVars.map(v => v.myacg_item_code));
-    const groupSOI = allSOI.filter(i => groupVariantCodes.has(i.myacg_item_code));
-    const groupSOIds = new Set(groupSOI.map(i => i.order_id));
-    const groupSO = allSO.filter(o => groupSOIds.has(o.id));
-
-    setSalesOrders(groupSO);
-    setSalesOrderItems(groupSOI);
-  };
-
-
-  const handleUpdatePlatformDemand = async (vId: string, platform: 'myacg' | 'waca', totalValue: number) => {
-    if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
-    const allVars = await db.getProductVariants();
-    const target = allVars.find(v => v.id === vId);
-    if (target) {
-      if (platform === 'myacg') {
-        const auto = target.myacg_auto_quantity || 0;
-        target.myacg_manual_adjustment = totalValue - auto;
-      } else {
-        const auto = target.waca_auto_quantity || 0;
-        target.waca_manual_adjustment = totalValue - auto;
-      }
-      await db.saveProductVariants(allVars);
-      setVariants(variants.map(v => v.id === vId ? target : v));
-    }
-  };
-
-  // --- Modal Logic: Private Order ---
-  const openPrivateOrderModal = () => {
-    setEditingPoId(null);
-    setPoForm({ customer_name: '', contact: '', note: '' });
-    setPoLines(variants.map(v => ({ variant_id: v.id, quantity: 0, amount: 0, note: '' })));
-    setShowPrivateOrderModal(true);
-  };
-
-  const handleEditOrder = (order: PrivateOrder) => {
-    setEditingPoId(order.id);
-    setPoForm({ customer_name: order.customer_name, contact: order.contact || '', note: order.note || '' });
-    setPoLines(variants.map(v => {
-      const existing = privateOrderItems.find(i => i.product_variant_id === v.id && i.private_order_id === order.id);
-      return {
-        variant_id: v.id,
-        quantity: existing ? existing.quantity : 0,
-        amount: existing ? existing.amount : 0,
-        note: existing?.note || ''
-      };
-    }));
-    setShowPrivateOrderModal(true);
-  };
-
-  const updatePoLine = (index: number, field: string, value: any) => {
-    const newLines = [...poLines];
-    newLines[index] = { ...newLines[index], [field]: value };
-    setPoLines(newLines);
-  };
-
-  const handleAddPrivateOrderSubmit = async () => {
-    const validLines = poLines.filter(l => l.quantity > 0);
-    if (!group || !poForm.customer_name.trim() || validLines.length === 0) return;
-    
-    const allPOs = await db.getPrivateOrders();
-    const allPOItems = await db.getPrivateOrderItems();
-
-    if (editingPoId) {
-      const idx = allPOs.findIndex(o => o.id === editingPoId);
-      if (idx !== -1) {
-        allPOs[idx] = { ...allPOs[idx], customer_name: poForm.customer_name, contact: poForm.contact, note: poForm.note };
-      }
-      const newPOItems = allPOItems.filter(i => i.private_order_id !== editingPoId);
-      const updatedItems: PrivateOrderItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        private_order_id: editingPoId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        amount: line.amount,
-        note: line.note
-      }));
-      await db.savePrivateOrders(allPOs);
-      await db.savePrivateOrderItems([...newPOItems, ...updatedItems]);
-    } else {
-      const newPoId = crypto.randomUUID();
-      const newPo: PrivateOrder = {
-        id: newPoId,
-        product_group_id: group.id,
-        customer_name: poForm.customer_name,
-        contact: poForm.contact,
-        note: poForm.note,
-        created_at: new Date().toISOString().slice(0, 10)
-      };
-
-      const newItems: PrivateOrderItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        private_order_id: newPoId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        amount: line.amount,
-        note: line.note
-      }));
-      
-      await db.savePrivateOrders([...allPOs, newPo]);
-      await db.savePrivateOrderItems([...allPOItems, ...newItems]);
-    }
-    
-    setShowPrivateOrderModal(false);
-    await loadData();
-  };
-
-  // --- Modal Logic: Purchase Batch ---
-  const openBatchModal = () => {
-    setEditingBatchId(null);
-    setBatchForm({ name: '', date: new Date().toISOString().slice(0, 10), note: '' });
-    setBatchLines(variants.map(v => ({ variant_id: v.id, quantity: 0, cost: 0, note: '' })));
-    setShowBatchModal(true);
-  };
-
-  const handleEditBatch = (batch: PurchaseBatch) => {
-    setEditingBatchId(batch.id);
-    setBatchForm({ name: batch.name, date: batch.date, note: batch.note || '' });
-    setBatchLines(variants.map(v => {
-      const existing = purchaseBatchItems.find(i => i.product_variant_id === v.id && i.purchase_batch_id === batch.id);
-      return {
-        variant_id: v.id,
-        quantity: existing ? existing.quantity : 0,
-        cost: existing ? existing.cost : 0,
-        note: existing?.note || ''
-      };
-    }));
-    setShowBatchModal(true);
-  };
-
-  const updateBatchLine = (index: number, field: string, value: any) => {
-    const newLines = [...batchLines];
-    newLines[index] = { ...newLines[index], [field]: value };
-    setBatchLines(newLines);
-  };
-
-  const handleAddBatchSubmit = async () => {
-    const validLines = batchLines.filter(l => l.quantity > 0);
-    if (!group || !batchForm.name.trim() || validLines.length === 0) return;
-    
-    const allBatches = await db.getPurchaseBatches();
-    const allBatchItems = await db.getPurchaseBatchItems();
-
-    if (editingBatchId) {
-      const idx = allBatches.findIndex(b => b.id === editingBatchId);
-      if (idx !== -1) {
-        allBatches[idx] = { ...allBatches[idx], name: batchForm.name, date: batchForm.date, note: batchForm.note };
-      }
-      const newItems = allBatchItems.filter(i => i.purchase_batch_id !== editingBatchId);
-      const updatedItems: PurchaseBatchItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        purchase_batch_id: editingBatchId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        cost: line.cost,
-        note: line.note
-      }));
-      await db.savePurchaseBatches(allBatches);
-      await db.savePurchaseBatchItems([...newItems, ...updatedItems]);
-    } else {
-      const newBatchId = crypto.randomUUID();
-      const newBatch: PurchaseBatch = {
-        id: newBatchId,
-        product_group_id: group.id,
-        name: batchForm.name,
-        date: batchForm.date,
-        note: batchForm.note,
-        created_at: new Date().toISOString()
-      };
-
-      const newItems: PurchaseBatchItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        purchase_batch_id: newBatchId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        cost: line.cost,
-        note: line.note
-      }));
-
-      await db.savePurchaseBatches([...allBatches, newBatch]);
-      await db.savePurchaseBatchItems([...allBatchItems, ...newItems]);
-    }
-    
-    setShowBatchModal(false);
-    await loadData();
-  };
-
-
-
-
-
-  const formatVariantOption = (v: ProductVariant) => {
-    let catTitle = '';
-    if (v.product_category_id) {
-      const cat = categoryMap.get(v.product_category_id);
-      if (cat) catTitle = cat.title;
-    }
-    
-    if (!catTitle || catTitle === '單品') {
-      return v.variant_name;
-    } else {
-      return `${catTitle} - ${v.variant_name}`;
-    }
-  };
-
-  if (!group) return <div className="p-xl text-center text-muted">載入中...</div>;
-
-  // Grouping Variants by Category or Single Item
   // KPI Calculations
   let totalShortage = 0;
   let totalExcess = 0;
@@ -746,12 +346,9 @@ export default function PurchaseManagement() {
               });
 
               // Decide Border Color
-              let borderColor = "#CBD5E1";
-              if (pNeed > 0) {
-                borderColor = "#F87171";
-              } else if (pDemand > 0) {
-                borderColor = "#22C55E";
-              }
+              let borderColor = "#cbd5e1";
+              if (pNeed > 0) borderColor = "#ef4444";
+              else if (pExcess > 0) borderColor = "#f97316";
 
               // SINGLE ITEM RENDERING
               if (groupItems.length === 1) {
@@ -761,74 +358,59 @@ export default function PurchaseManagement() {
                 
                 return (
                   <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
-                      <colgroup>
-                        <col style={{ width: '30%' }} />
-                        <col style={{ width: '11%' }} />
-                        <col style={{ width: '13%' }} />
-                        <col style={{ width: '11%' }} />
-                        <col style={{ width: '11%' }} />
-                        <col style={{ width: '12%' }} />
-                        <col style={{ width: '12%' }} />
-                      </colgroup>
-                      <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
-                        <tr>
-                          <th style={{ padding: '8px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>單價</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td style={{ padding: '10px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title.startsWith('__single__') ? (v.variant_name || group.title) : title}>
-                              <HighlightText text={title.startsWith('__single__') ? (v.variant_name || group.title) : title} highlight={searchTerm} />
-                            </div>
-                            <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
-                              SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
-                            </div>
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                            ¥ {price}
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                            {renderStatusBadge(pNeed, pExcess, pDemand)}
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                            <input 
-                              type="number" 
-                              style={{ width: '64px', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '14px', fontWeight: 600, color: '#1E293B', margin: '0 auto', display: 'block' }} 
-                              value={pMyacg || ''}
-                              placeholder="0"
-                              onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
-                            />
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                            <input 
-                              type="number" 
-                              style={{ width: '64px', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '14px', fontWeight: 600, color: '#1E293B', margin: '0 auto', display: 'block' }} 
-                              value={pWaca || ''}
-                              placeholder="0"
-                              onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
-                            />
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: pManual > 0 ? '#1E293B' : '#94a3b8', backgroundColor: pManual > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>
-                              {pManual > 0 ? pManual : '-'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                            <span style={{ fontSize: '14px', fontWeight: 600, color: pPurchased > 0 ? '#1E293B' : '#94a3b8' }}>
-                              {pPurchased > 0 ? pPurchased : '-'}
-                            </span>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
+                    <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
+                          <HighlightText text={title.startsWith('__single__') ? (v.variant_name || group.title) : title} highlight={searchTerm} />
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                          SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} /> | 單價: ¥{price}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '24px', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>還缺</span>
+                          <span style={{ fontWeight: 700, color: pNeed > 0 ? '#ef4444' : '#cbd5e1', fontSize: '16px' }}>{pNeed > 0 ? pNeed : '-'}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>多買</span>
+                          <span style={{ fontWeight: 700, color: pExcess > 0 ? '#f97316' : '#cbd5e1', fontSize: '16px' }}>{pExcess > 0 ? pExcess : '-'}</span>
+                        </div>
+                        <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '60px' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>買動漫</span>
+                          <input 
+                            type="number" 
+                            style={{ width: '100%', height: '24px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
+                            value={pMyacg || ''}
+                            placeholder="0"
+                            onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '60px' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>WACA</span>
+                          <input 
+                            type="number" 
+                            style={{ width: '100%', height: '24px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
+                            value={pWaca || ''}
+                            placeholder="0"
+                            onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>私下</span>
+                          <span style={{ fontWeight: 600, color: pManual > 0 ? '#db2777' : '#94a3b8', backgroundColor: pManual > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>{pManual}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>已採購</span>
+                          <span style={{ fontWeight: 600, color: pPurchased > 0 ? '#2563eb' : '#94a3b8' }}>{pPurchased}</span>
+                        </div>
+                      </div>
+
+                    </div>
                   </div>
                 );
               }
@@ -840,7 +422,7 @@ export default function PurchaseManagement() {
                   {/* Category Header Row */}
                   <div 
                     style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
-                    onClick={() => toggleManualGroup(title)}
+                    onClick={() => toggleGroup(title)}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
@@ -849,42 +431,14 @@ export default function PurchaseManagement() {
                       <span style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 500 }}>
                         共 {groupItems.length} 款
                       </span>
-                      {pNeed > 0 && (
-                        <span style={{
-                          backgroundColor: '#FEE2E2',
-                          color: '#DC2626',
-                          border: '1px solid #fecaca',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          marginLeft: '8px',
-                          display: 'inline-block'
-                        }}>
-                          待採購 {pNeed}
-                        </span>
-                      )}
-                      {pNeed === 0 && pExcess > 0 && (
-                        <span style={{
-                          backgroundColor: '#fff7ed',
-                          color: '#c2410c',
-                          border: '1px solid #ffedd5',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          marginLeft: '8px',
-                          display: 'inline-block'
-                        }}>
-                          多買 {pExcess}
-                        </span>
-                      )}
+                      {pNeed > 0 && <span style={{ color: '#ef4444', fontWeight: 600, fontSize: '14px', marginLeft: '8px' }}>總缺貨 {pNeed} 件</span>}
+                      {pNeed === 0 && pExcess > 0 && <span style={{ color: '#f97316', fontWeight: 600, fontSize: '14px', marginLeft: '8px' }}>多買 {pExcess} 件</span>}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#64748b' }}>
                       <span>總需求 {pDemand}</span>
                       <span>已採購 {pPurchased}</span>
-                      <span>待採購 {pNeed}</span>
+                      <span>還缺 {pNeed}</span>
                       <span>多買 {pExcess}</span>
                       <span>私下 {pManual}</span>
                       <div style={{ color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
@@ -896,25 +450,17 @@ export default function PurchaseManagement() {
                   {/* Expanded SKU Table */}
                   {isExpanded && (
                     <div style={{ borderTop: '1px solid #f1f5f9' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
-                        <colgroup>
-                          <col style={{ width: '30%' }} />
-                          <col style={{ width: '11%' }} />
-                          <col style={{ width: '13%' }} />
-                          <col style={{ width: '11%' }} />
-                          <col style={{ width: '11%' }} />
-                          <col style={{ width: '12%' }} />
-                          <col style={{ width: '12%' }} />
-                        </colgroup>
-                        <thead style={{ backgroundColor: '#fafafa', color: '#64748B' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead style={{ backgroundColor: '#fafafa', color: '#64748b' }}>
                           <tr>
-                            <th style={{ padding: '10px 20px', textAlign: 'left', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>商品名稱/SKU</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>單價</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>狀態</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>買動漫</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>WACA</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>私下登記</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px', fontWeight: 600, letterSpacing: '0.02em' }}>已採購</th>
+                            <th style={{ padding: '10px 20px', textAlign: 'left', fontWeight: 500, width: '250px' }}>商品名稱</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500 }}>單價</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>還缺</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>多買</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500, width: '80px' }}>買動漫</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500, width: '80px' }}>WACA</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>私下登記</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>已採購</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -937,25 +483,28 @@ export default function PurchaseManagement() {
                             const excessBuy = Math.max(totalPurchased - totalDemand, 0);
 
                             return (
-                              <tr key={v.id} style={{ borderBottom: i === groupItems.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
-                                <td style={{ padding: '12px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.variant_name}>
+                              <tr key={v.id} style={{ borderBottom: i === groupItems.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '12px 20px', textAlign: 'left' }}>
+                                  <div style={{ fontWeight: 500, color: '#334155' }}>
                                     <HighlightText text={v.variant_name} highlight={searchTerm} />
                                   </div>
-                                  <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
+                                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
                                     SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
                                   </div>
                                 </td>
-                                <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>¥ {price}</td>
+                                <td style={{ padding: '12px', textAlign: 'right', color: '#475569' }}>¥ {price}</td>
                                 
-                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  {renderStatusBadge(needToBuy, excessBuy, totalDemand)}
+                                <td style={{ padding: '12px', textAlign: 'center', fontWeight: needToBuy > 0 ? 600 : 400, color: needToBuy > 0 ? '#ef4444' : '#cbd5e1' }}>
+                                  {needToBuy > 0 ? needToBuy : '-'}
+                                </td>
+                                <td style={{ padding: '12px', textAlign: 'center', fontWeight: excessBuy > 0 ? 600 : 400, color: excessBuy > 0 ? '#f97316' : '#cbd5e1' }}>
+                                  {excessBuy > 0 ? excessBuy : '-'}
                                 </td>
 
                                 <td style={{ padding: '12px', textAlign: 'center' }}>
                                   <input 
                                     type="number" 
-                                    style={{ width: '64px', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '14px', fontWeight: 600, color: '#1E293B', margin: '0 auto', display: 'block' }} 
+                                    style={{ width: '100%', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
                                     value={myacgDemand || ''}
                                     placeholder="0"
                                     onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
@@ -964,7 +513,7 @@ export default function PurchaseManagement() {
                                 <td style={{ padding: '12px', textAlign: 'center' }}>
                                   <input 
                                     type="number" 
-                                    style={{ width: '64px', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '14px', fontWeight: 600, color: '#1E293B', margin: '0 auto', display: 'block' }} 
+                                    style={{ width: '100%', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
                                     value={wacaDemand || ''}
                                     placeholder="0"
                                     onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
@@ -972,13 +521,13 @@ export default function PurchaseManagement() {
                                 </td>
                                 
                                 <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  <span style={{ fontSize: '14px', fontWeight: 600, color: privateDemand > 0 ? '#1E293B' : '#94a3b8', backgroundColor: privateDemand > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>
+                                  <span style={{ fontWeight: 600, color: privateDemand > 0 ? '#db2777' : '#94a3b8', backgroundColor: privateDemand > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>
                                     {privateDemand > 0 ? privateDemand : '-'}
                                   </span>
                                 </td>
 
                                 <td style={{ padding: '12px', textAlign: 'center' }}>
-                                  <span style={{ fontSize: '14px', fontWeight: 600, color: totalPurchased > 0 ? '#1E293B' : '#94a3b8' }}>
+                                  <span style={{ fontWeight: 600, color: totalPurchased > 0 ? '#2563eb' : '#94a3b8' }}>
                                     {totalPurchased > 0 ? totalPurchased : '-'}
                                   </span>
                                 </td>

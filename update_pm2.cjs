@@ -1,0 +1,771 @@
+const fs = require('fs');
+
+const orig = fs.readFileSync('src/pages/PurchaseManagement.tsx', 'utf8');
+const lines = orig.split('\n');
+
+// Find loadData start
+const loadDataStartIdx = lines.findIndex(l => l.includes('  const loadData = async () => {'));
+const returnIdx = lines.findIndex((l, i) => i > 400 && l.includes('  return ('));
+
+const beforeLoadData = lines.slice(0, loadDataStartIdx).join('\n');
+const importsToAdd = `import { AlertTriangle, Package, CheckSquare, RefreshCw, ShoppingCart, DollarSign, Filter, ListOrdered } from 'lucide-react';
+`;
+
+// State additions
+const stateAdditions = `
+  const [salesOrders, setSalesOrders] = useState<any[]>([]);
+  const [salesOrderItems, setSalesOrderItems] = useState<any[]>([]);
+  const [filterMode, setFilterMode] = useState<'all' | 'abnormal'>('all');
+  const [sortMode, setSortMode] = useState<'catalog' | 'shortage'>('catalog');
+`;
+
+const loadDataContent = `  const loadData = async () => {
+    if (!id) return;
+    const allGroups = await db.getProductGroups();
+    const g = allGroups.find(x => x.id === id);
+    if (!g) {
+      navigate('/purchase-records');
+      return;
+    }
+    setGroup(g);
+
+    const allVars = await db.getProductVariants();
+    const allCats = await db.getProductCategories();
+    const groupCatIds = new Set(allCats.filter(c => c.product_group_id === id).map(c => c.id));
+    const groupVars = allVars.filter(v => v.product_group_id === id || (v.product_category_id && groupCatIds.has(v.product_category_id)));
+    
+    setVariants(groupVars);
+    
+    const catMap = new Map(allCats.map(c => [c.id, c]));
+    setCategoryMap(catMap);
+
+    const inventory = await db.getInventory();
+    const invMap = new Map(inventory.map(i => [i.myacg_item_code, i]));
+    setInventoryMap(invMap);
+
+    const allPrivateOrders = await db.getPrivateOrders();
+    const allPrivateOrderItems = await db.getPrivateOrderItems();
+    const groupPrivateOrders = allPrivateOrders.filter(po => po.product_group_id === id);
+    const groupPoIds = new Set(groupPrivateOrders.map(po => po.id));
+    const groupPrivateOrderItems = allPrivateOrderItems.filter(poi => groupPoIds.has(poi.private_order_id));
+    
+    setPrivateOrders(groupPrivateOrders);
+    setPrivateOrderItems(groupPrivateOrderItems);
+
+    const allBatches = await db.getPurchaseBatches();
+    const allBatchItems = await db.getPurchaseBatchItems();
+    const groupBatches = allBatches.filter(b => b.product_group_id === id);
+    const groupBatchIds = new Set(groupBatches.map(b => b.id));
+    const groupBatchItems = allBatchItems.filter(bi => groupBatchIds.has(bi.purchase_batch_id));
+
+    setPurchaseBatches(groupBatches);
+    setPurchaseBatchItems(groupBatchItems);
+
+    const allSO = await db.getSalesOrders();
+    const allSOI = await db.getSalesOrderItems();
+    const groupVariantCodes = new Set(groupVars.map(v => v.myacg_item_code));
+    const groupSOI = allSOI.filter(i => groupVariantCodes.has(i.myacg_item_code));
+    const groupSOIds = new Set(groupSOI.map(i => i.order_id));
+    const groupSO = allSO.filter(o => groupSOIds.has(o.id));
+
+    setSalesOrders(groupSO);
+    setSalesOrderItems(groupSOI);
+  };
+`;
+
+// Extract functions between loadData and return
+const funcStart = lines.findIndex((l, i) => i > loadDataStartIdx && l.includes('  const handleUpdatePlatformDemand'));
+const funcsContent = lines.slice(funcStart, returnIdx).join('\n');
+
+// Calculate new KPI values
+const kpiContent = `
+  // KPI Calculations
+  let totalShortage = 0;
+  let totalExcess = 0;
+  let totalPurchased = 0;
+  let totalDemand = 0;
+
+  variants.forEach(v => {
+    const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+    const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+    
+    const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
+    const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
+
+    const vTotalDemand = myacgDemand + wacaDemand + privateDemand;
+    totalDemand += vTotalDemand;
+
+    const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
+    const vPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+    totalPurchased += vPurchased;
+    
+    const needToBuy = Math.max(vTotalDemand - vPurchased, 0);
+    const excessBuy = Math.max(vPurchased - vTotalDemand, 0);
+
+    totalShortage += needToBuy;
+    totalExcess += excessBuy;
+  });
+
+  const validSO = salesOrders.filter(o => {
+    const soItems = salesOrderItems.filter(i => i.order_id === o.id);
+    return soItems.some(i => i.order_status !== '已取消' && i.order_status !== 'CANCELED');
+  });
+  const totalOrdersCount = validSO.length;
+
+  let totalOrdersAmount = 0;
+  salesOrderItems.forEach(i => {
+    if (i.order_status !== '已取消' && i.order_status !== 'CANCELED') {
+      if (typeof i.amount === 'number') {
+        totalOrdersAmount += i.amount;
+      } else {
+        totalOrdersAmount += (i.quantity * (i.price || 0));
+      }
+    }
+  });
+
+  // Grouping Variants by Category or Single Item
+  const groupedVariants: Record<string, ProductVariant[]> = {};
+  variants.forEach(v => {
+    let groupKey = '';
+    if (v.product_category_id) {
+      const cat = categoryMap.get(v.product_category_id);
+      groupKey = cat ? cat.title : \`__single__\${v.id}\`;
+    } else {
+      groupKey = \`__single__\${v.id}\`;
+    }
+    
+    if (!groupedVariants[groupKey]) groupedVariants[groupKey] = [];
+    groupedVariants[groupKey].push(v);
+  });
+
+  Object.values(groupedVariants).forEach(groupItems => {
+    groupItems.sort((a, b) => {
+      const aSort = a.sort_order ?? 9999;
+      const bSort = b.sort_order ?? 9999;
+      if (aSort !== bSort) return aSort - bSort;
+      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '');
+    });
+  });
+
+  let sortedGroupEntries = Object.entries(groupedVariants).sort(([titleA, itemsA], [titleB, itemsB]) => {
+    let sortA = 9999;
+    let sortB = 9999;
+
+    const catA = itemsA[0]?.product_category_id ? categoryMap.get(itemsA[0].product_category_id) : null;
+    const catB = itemsB[0]?.product_category_id ? categoryMap.get(itemsB[0].product_category_id) : null;
+
+    if (catA) sortA = catA.sort_order ?? 9999;
+    else if (itemsA[0]) sortA = itemsA[0].sort_order ?? 9999;
+
+    if (catB) sortB = catB.sort_order ?? 9999;
+    else if (itemsB[0]) sortB = itemsB[0].sort_order ?? 9999;
+
+    if (sortA !== sortB) return sortA - sortB;
+
+    return titleA.localeCompare(titleB);
+  });
+
+  if (sortMode === 'shortage') {
+    sortedGroupEntries = sortedGroupEntries.sort(([, itemsA], [, itemsB]) => {
+      const getShortage = (items: ProductVariant[]) => items.reduce((sum, v) => {
+        const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+        const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+        const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
+        const totalPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
+        return sum + Math.max((myacgDemand + wacaDemand + privateDemand) - totalPurchased, 0);
+      }, 0);
+      return getShortage(itemsB) - getShortage(itemsA);
+    });
+  }
+`;
+
+const jsxContent = `
+  return (
+    <div style={{ minHeight: '100vh', backgroundColor: '#f4f5f7', display: 'flex', flexDirection: 'column' }}>
+      
+      {/* Top Breadcrumb & Title Area */}
+      <div style={{ backgroundColor: '#fff', padding: '16px 24px', borderBottom: '1px solid #e5e7eb' }}>
+        <div className="flex items-center gap-sm text-muted text-sm" style={{ marginBottom: '12px' }}>
+          <button className="btn btn-ghost" style={{ padding: 0 }} onClick={() => navigate('/purchase-records')}>
+            <ArrowLeft size={16} />
+          </button>
+          <span>團務與商品管理</span>
+          <span>/</span>
+          <span className="text-primary font-medium">{group.title}</span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {group.normalized_title || group.title}
+            {group.listing_type && (
+              <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
+                {group.listing_type}
+              </span>
+            )}
+          </h1>
+        </div>
+      </div>
+
+      <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
+        
+        {/* Top Summary Cards */}
+        {activeTab === 'worksheet' && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '16px', marginBottom: '24px' }}>
+            
+            {/* Total Shortage */}
+            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總缺貨數</div>
+                <AlertTriangle size={20} color="#ef4444" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>{totalShortage}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>需採購補齊</div>
+            </div>
+
+            {/* Total Excess */}
+            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總多買數</div>
+                <RefreshCw size={20} color="#f97316" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#f97316' }}>{totalExcess}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>數量過多</div>
+            </div>
+
+            {/* Total Orders */}
+            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>訂單總數</div>
+                <ShoppingCart size={20} color="#3b82f6" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{totalOrdersCount}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>單</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>有效單號數</div>
+            </div>
+
+            {/* Total Amount */}
+            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>訂單總金額</div>
+                <DollarSign size={20} color="#10b981" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{totalOrdersAmount.toLocaleString()}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>NTD</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>訂單商品總額</div>
+            </div>
+
+            {/* Total Demand */}
+            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求數</div>
+                <Package size={20} color="#64748b" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{totalDemand}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有平台需求加總</div>
+            </div>
+
+            {/* Total Purchased */}
+            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購總數</div>
+                <CheckSquare size={20} color="#2563eb" />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>{totalPurchased}</span>
+                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>包含所有批次</div>
+            </div>
+
+          </div>
+        )}
+
+        {/* Tab Header */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', backgroundColor: '#e2e8f0', padding: '4px', borderRadius: '8px', marginRight: 'auto' }}>
+            <div 
+              style={{ padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', borderRadius: '6px', color: activeTab === 'worksheet' ? '#1e293b' : '#64748b', backgroundColor: activeTab === 'worksheet' ? '#fff' : 'transparent', boxShadow: activeTab === 'worksheet' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+              onClick={() => setActiveTab('worksheet')}
+            >代購工作規格表</div>
+            <div 
+              style={{ padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', borderRadius: '6px', color: activeTab === 'purchase_batches' ? '#1e293b' : '#64748b', backgroundColor: activeTab === 'purchase_batches' ? '#fff' : 'transparent', boxShadow: activeTab === 'purchase_batches' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+              onClick={() => setActiveTab('purchase_batches')}
+            >採購批次紀錄</div>
+            <div 
+              style={{ padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', borderRadius: '6px', color: activeTab === 'private_orders' ? '#1e293b' : '#64748b', backgroundColor: activeTab === 'private_orders' ? '#fff' : 'transparent', boxShadow: activeTab === 'private_orders' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+              onClick={() => setActiveTab('private_orders')}
+            >私下登記紀錄</div>
+          </div>
+        </div>
+
+        {/* Toolbar */}
+        {activeTab === 'worksheet' && (
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', padding: '16px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+            <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+              <div 
+                style={{ padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                onClick={() => setFilterMode('abnormal')}
+              >只顯示異常 (缺貨/多買)</div>
+              <div 
+                style={{ padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                onClick={() => setFilterMode('all')}
+              >顯示全部商品</div>
+            </div>
+
+            <div style={{ margin: '0 16px', width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>
+
+            <select 
+              className="input" 
+              style={{ width: '200px', height: '36px', fontSize: '13px', padding: '0 12px' }}
+              value={sortMode}
+              onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
+            >
+              <option value="catalog">依商品主檔順序排序</option>
+              <option value="shortage">依缺貨多寡排序</option>
+            </select>
+            
+            <div style={{ flex: 1 }}></div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: '240px' }}>
+                <Search size={16} style={{ color: '#64748b', marginRight: '8px' }} />
+                <input 
+                  type="text" 
+                  placeholder="搜尋商品..." 
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '13px', color: '#334155' }}
+                />
+              </div>
+              <button className="btn btn-outline" style={{ fontSize: '13px', padding: '6px 12px', backgroundColor: '#fdf2f8', color: '#db2777', borderColor: '#fbcfe8' }} onClick={openPrivateOrderModal}>
+                <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 私下登記
+              </button>
+              <button className="btn btn-primary" style={{ fontSize: '13px', padding: '6px 12px' }} onClick={openBatchModal}>
+                <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Card List Area */}
+        {activeTab === 'worksheet' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, paddingBottom: '40px' }}>
+            {sortedGroupEntries.filter(([title, groupItems]) => {
+              // 1. Search Filter
+              if (searchTerm) {
+                const lowerSearch = searchTerm.toLowerCase();
+                const groupMatch = title.toLowerCase().includes(lowerSearch);
+                const hasMatch = groupItems.some(v => 
+                  (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
+                  (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
+                );
+                if (!groupMatch && !hasMatch) return false;
+              }
+
+              // 2. Abnormal Filter
+              if (filterMode === 'abnormal') {
+                let hasAbnormal = false;
+                for (const v of groupItems) {
+                  const m = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+                  const w = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+                  const p = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
+                  const d = m + w + p;
+                  const pb = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
+                  if (Math.max(d - pb, 0) > 0 || Math.max(pb - d, 0) > 0) {
+                    hasAbnormal = true;
+                    break;
+                  }
+                }
+                if (!hasAbnormal) return false;
+              }
+              
+              return true;
+
+            }).map(([title, groupItems]) => {
+              const lowerSearch = searchTerm.toLowerCase();
+              const isSearchMatched = searchTerm.trim() !== '' && (
+                title.toLowerCase().includes(lowerSearch) || 
+                groupItems.some(v => 
+                  (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
+                  (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
+                )
+              );
+              const isExpanded = isSearchMatched ? true : manualExpandedGroups.has(title);
+              
+              // Compute Group Aggregates
+              let pMyacg = 0, pWaca = 0, pManual = 0, pNeed = 0, pExcess = 0, pPurchased = 0, pDemand = 0;
+              groupItems.forEach(v => {
+                const mDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+                const wDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+                const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
+                const priDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
+
+                pMyacg += mDemand;
+                pWaca += wDemand;
+                pManual += priDemand;
+                
+                const tDemand = mDemand + wDemand + priDemand;
+                pDemand += tDemand;
+                
+                const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
+                const tPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+                pPurchased += tPurchased;
+                
+                pNeed += Math.max(tDemand - tPurchased, 0);
+                pExcess += Math.max(tPurchased - tDemand, 0);
+              });
+
+              // Decide Border Color
+              let borderClass = "border-l-gray-300";
+              if (pNeed > 0) borderClass = "border-l-red-500";
+              else if (pExcess > 0) borderClass = "border-l-orange-500";
+
+              // SINGLE ITEM RENDERING
+              if (groupItems.length === 1) {
+                const v = groupItems[0];
+                const inv = inventoryMap.get(v.myacg_item_code);
+                const price = inv ? inv.final_price : 0;
+                
+                return (
+                  <div key={v.id} className={\`card shadow-sm rounded-lg border-l-4 \${borderClass} overflow-hidden bg-white\`} style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
+                    <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
+                          <HighlightText text={title.startsWith('__single__') ? (v.variant_name || group.title) : title} highlight={searchTerm} />
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                          SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} /> | 單價: ¥{price}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '24px', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>還缺</span>
+                          <span style={{ fontWeight: 700, color: pNeed > 0 ? '#ef4444' : '#cbd5e1', fontSize: '16px' }}>{pNeed > 0 ? pNeed : '-'}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>多買</span>
+                          <span style={{ fontWeight: 700, color: pExcess > 0 ? '#f97316' : '#cbd5e1', fontSize: '16px' }}>{pExcess > 0 ? pExcess : '-'}</span>
+                        </div>
+                        <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '60px' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>買動漫</span>
+                          <input 
+                            type="number" 
+                            style={{ width: '100%', height: '24px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
+                            value={pMyacg || ''}
+                            placeholder="0"
+                            onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '60px' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>WACA</span>
+                          <input 
+                            type="number" 
+                            style={{ width: '100%', height: '24px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
+                            value={pWaca || ''}
+                            placeholder="0"
+                            onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>私下</span>
+                          <span style={{ fontWeight: 600, color: pManual > 0 ? '#db2777' : '#94a3b8', backgroundColor: pManual > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>{pManual}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <span style={{ color: '#64748b', fontSize: '11px', marginBottom: '4px' }}>已採購</span>
+                          <span style={{ fontWeight: 600, color: pPurchased > 0 ? '#2563eb' : '#94a3b8' }}>{pPurchased}</span>
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                );
+              }
+
+              // CATEGORY CARD RENDERING
+              return (
+                <div key={title} className={\`card shadow-sm rounded-lg border-l-4 \${borderClass} bg-white\`} style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
+                  
+                  {/* Category Header Row */}
+                  <div 
+                    style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                    onClick={() => toggleGroup(title)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
+                        <HighlightText text={title} highlight={searchTerm} />
+                      </div>
+                      <span style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 500 }}>
+                        共 {groupItems.length} 款
+                      </span>
+                      {pNeed > 0 && <span style={{ color: '#ef4444', fontWeight: 600, fontSize: '14px', marginLeft: '8px' }}>總缺貨 {pNeed} 件</span>}
+                      {pNeed === 0 && pExcess > 0 && <span style={{ color: '#f97316', fontWeight: 600, fontSize: '14px', marginLeft: '8px' }}>多買 {pExcess} 件</span>}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#64748b' }}>
+                      <span>總需求 {pDemand}</span>
+                      <span>已採購 {pPurchased}</span>
+                      <span>還缺 {pNeed}</span>
+                      <span>多買 {pExcess}</span>
+                      <span>私下 {pManual}</span>
+                      <div style={{ color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
+                        {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded SKU Table */}
+                  {isExpanded && (
+                    <div style={{ borderTop: '1px solid #f1f5f9' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead style={{ backgroundColor: '#fafafa', color: '#64748b' }}>
+                          <tr>
+                            <th style={{ padding: '10px 20px', textAlign: 'left', fontWeight: 500, width: '250px' }}>商品名稱</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 500 }}>單價</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>還缺</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>多買</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500, width: '80px' }}>買動漫</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500, width: '80px' }}>WACA</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>私下登記</th>
+                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 500 }}>已採購</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupItems.map((v, i) => {
+                            const inv = inventoryMap.get(v.myacg_item_code);
+                            const price = inv ? inv.final_price : 0;
+                            
+                            const myacgDemand = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
+                            const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+                            
+                            const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
+                            const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
+        
+                            const totalDemand = myacgDemand + wacaDemand + privateDemand;
+    
+                            const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
+                            const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+                            
+                            const needToBuy = Math.max(totalDemand - totalPurchased, 0);
+                            const excessBuy = Math.max(totalPurchased - totalDemand, 0);
+
+                            return (
+                              <tr key={v.id} style={{ borderBottom: i === groupItems.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '12px 20px', textAlign: 'left' }}>
+                                  <div style={{ fontWeight: 500, color: '#334155' }}>
+                                    <HighlightText text={v.variant_name} highlight={searchTerm} />
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                                    SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
+                                  </div>
+                                </td>
+                                <td style={{ padding: '12px', textAlign: 'right', color: '#475569' }}>¥ {price}</td>
+                                
+                                <td style={{ padding: '12px', textAlign: 'center', fontWeight: needToBuy > 0 ? 600 : 400, color: needToBuy > 0 ? '#ef4444' : '#cbd5e1' }}>
+                                  {needToBuy > 0 ? needToBuy : '-'}
+                                </td>
+                                <td style={{ padding: '12px', textAlign: 'center', fontWeight: excessBuy > 0 ? 600 : 400, color: excessBuy > 0 ? '#f97316' : '#cbd5e1' }}>
+                                  {excessBuy > 0 ? excessBuy : '-'}
+                                </td>
+
+                                <td style={{ padding: '12px', textAlign: 'center' }}>
+                                  <input 
+                                    type="number" 
+                                    style={{ width: '100%', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
+                                    value={myacgDemand || ''}
+                                    placeholder="0"
+                                    onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
+                                  />
+                                </td>
+                                <td style={{ padding: '12px', textAlign: 'center' }}>
+                                  <input 
+                                    type="number" 
+                                    style={{ width: '100%', height: '28px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px' }} 
+                                    value={wacaDemand || ''}
+                                    placeholder="0"
+                                    onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
+                                  />
+                                </td>
+                                
+                                <td style={{ padding: '12px', textAlign: 'center' }}>
+                                  <span style={{ fontWeight: 600, color: privateDemand > 0 ? '#db2777' : '#94a3b8', backgroundColor: privateDemand > 0 ? '#fce7f3' : 'transparent', padding: '2px 8px', borderRadius: '12px' }}>
+                                    {privateDemand > 0 ? privateDemand : '-'}
+                                  </span>
+                                </td>
+
+                                <td style={{ padding: '12px', textAlign: 'center' }}>
+                                  <span style={{ fontWeight: 600, color: totalPurchased > 0 ? '#2563eb' : '#94a3b8' }}>
+                                    {totalPurchased > 0 ? totalPurchased : '-'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Render Purchase Batch Tab */}
+        {activeTab === 'purchase_batches' && (
+          <PurchaseBatchTab 
+            batches={purchaseBatches} 
+            batchItems={purchaseBatchItems} 
+            variants={variants} 
+            onRefresh={loadData} 
+            onEditBatch={handleEditBatch}
+          />
+        )}
+
+        {/* Render Private Order Tab */}
+        {activeTab === 'private_orders' && (
+          <PrivateOrderTab 
+            orders={privateOrders} 
+            orderItems={privateOrderItems} 
+            variants={variants} 
+            onRefresh={loadData} 
+            onEditOrder={handleEditOrder}
+          />
+        )}
+      </div>
+
+      {/* Modals... (Keep Private Order and Batch Modals Unchanged) */}
+      {showPrivateOrderModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{editingPoId ? '編輯私下登記' : '新增私下登記'}</h2>
+              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowPrivateOrderModal(false)}><X size={20} /></button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>買家名稱 *</label>
+                <input className="input" type="text" value={poForm.customer_name} onChange={e => setPoForm({...poForm, customer_name: e.target.value})} style={{ width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>聯絡方式</label>
+                <input className="input" type="text" value={poForm.contact} onChange={e => setPoForm({...poForm, contact: e.target.value})} style={{ width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>訂單備註</label>
+                <input className="input" type="text" value={poForm.note} onChange={e => setPoForm({...poForm, note: e.target.value})} style={{ width: '100%' }} />
+              </div>
+            </div>
+
+            <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '14px', color: '#1e293b' }}>商品需求明細</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
+                  <th style={{ padding: '8px', textAlign: 'left', fontWeight: 500 }}>商品規格</th>
+                  <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>數量</th>
+                  <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '100px' }}>實收金額</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variants.map((v, idx) => (
+                  <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '8px' }}>{formatVariantOption(v)}</td>
+                    <td style={{ padding: '8px', textAlign: 'center' }}>
+                      <input className="input" type="number" min="0" value={poLines[idx]?.quantity || ''} onChange={e => updatePoLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center' }} />
+                    </td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>
+                      <input className="input" type="number" min="0" value={poLines[idx]?.amount || ''} onChange={e => updatePoLine(idx, 'amount', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right' }} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="btn btn-outline" onClick={() => setShowPrivateOrderModal(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleAddPrivateOrderSubmit} disabled={!poForm.customer_name.trim()}>儲存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBatchModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{editingBatchId ? '編輯採購批次' : '新增採購批次'}</h2>
+              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowBatchModal(false)}><X size={20} /></button>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>批次名稱 *</label>
+                <input className="input" type="text" value={batchForm.name} onChange={e => setBatchForm({...batchForm, name: e.target.value})} placeholder="例如：2023-11-20 安利美特採購" style={{ width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>採購日期</label>
+                <input className="input" type="date" value={batchForm.date} onChange={e => setBatchForm({...batchForm, date: e.target.value})} style={{ width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>備註</label>
+                <input className="input" type="text" value={batchForm.note} onChange={e => setBatchForm({...batchForm, note: e.target.value})} style={{ width: '100%' }} />
+              </div>
+            </div>
+
+            <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '14px', color: '#1e293b' }}>採購明細</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
+                  <th style={{ padding: '8px', textAlign: 'left', fontWeight: 500 }}>商品規格</th>
+                  <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>數量</th>
+                  <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '100px' }}>實支單價(日幣)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variants.map((v, idx) => (
+                  <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '8px' }}>{formatVariantOption(v)}</td>
+                    <td style={{ padding: '8px', textAlign: 'center' }}>
+                      <input className="input" type="number" min="0" value={batchLines[idx]?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center' }} />
+                    </td>
+                    <td style={{ padding: '8px', textAlign: 'right' }}>
+                      <input className="input" type="number" min="0" value={batchLines[idx]?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right' }} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="btn btn-outline" onClick={() => setShowBatchModal(false)}>取消</button>
+              <button className="btn btn-primary" onClick={handleAddBatchSubmit} disabled={!batchForm.name.trim()}>儲存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+`;
+
+const finalFileContent = beforeLoadData + importsToAdd + stateAdditions + loadDataContent + funcsContent + kpiContent + jsxContent;
+fs.writeFileSync('src/pages/PurchaseManagement.tsx', finalFileContent, 'utf8');
+console.log('Successfully wrote new PurchaseManagement.tsx');
