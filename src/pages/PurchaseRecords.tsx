@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Edit2, Save, X, Search, Trash2 } from 'lucide-react';
+import { Receipt, Search } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,8 +15,6 @@ export default function PurchaseRecords() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<Partial<ProductGroup>>({});
   const [editMode, setEditMode] = useState<boolean>(false);
   const navigate = useNavigate();
 
@@ -177,9 +175,6 @@ export default function PurchaseRecords() {
     return { demand: totalDemand, purchased: totalPurchased, gap };
   };
 
-  const getGroupGap = (groupId: string) => {
-    return getGroupDemandAndPurchased(groupId).gap;
-  };
 
   const getClosingDateStyle = (closingDate: string | undefined | null) => {
     if (!closingDate) return { text: '-', color: '#64748b', fontWeight: 400 };
@@ -311,63 +306,6 @@ export default function PurchaseRecords() {
     setSalesOrderItems(fetchedOrderItems);
   };
 
-  const handleEdit = (group: ProductGroup) => {
-    setEditingId(group.id);
-    setEditForm(group);
-  };
-
-  const handleSave = async (id: string) => {
-    const updatedGroups = groups.map(g => g.id === id ? { ...g, ...editForm } as ProductGroup : g);
-    await db.saveProductGroups(updatedGroups);
-    setGroups(updatedGroups);
-    setEditingId(null);
-  };
-
-  const handleDeleteGroup = async (groupId: string) => {
-    if (!window.confirm('確定要從訂購紀錄表移除此商品嗎？')) {
-      return;
-    }
-    try {
-      // 1. Delete Product Group
-      const updatedGroups = groups.filter(g => g.id !== groupId);
-      await db.saveProductGroups(updatedGroups);
-
-      // 2. Delete Categories
-      const updatedCategories = categories.filter(c => c.product_group_id !== groupId);
-      await db.saveProductCategories(updatedCategories);
-
-      // 3. Delete Variants
-      const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
-      await db.saveProductVariants(updatedVariants);
-
-      // 4. Delete Purchase Batches & Purchase Batch Items
-      const fetchedBatches = await db.getPurchaseBatches();
-      const targetBatchIds = new Set(fetchedBatches.filter(b => b.product_group_id === groupId).map(b => b.id));
-      const updatedBatches = fetchedBatches.filter(b => b.product_group_id !== groupId);
-      await db.savePurchaseBatches(updatedBatches);
-
-      const fetchedBatchItems = await db.getPurchaseBatchItems();
-      const updatedBatchItems = fetchedBatchItems.filter(item => !targetBatchIds.has(item.purchase_batch_id));
-      await db.savePurchaseBatchItems(updatedBatchItems);
-
-      // 5. Delete Private Orders & Private Order Items
-      const fetchedPrivateOrders = await db.getPrivateOrders();
-      const targetPrivateOrderIds = new Set(fetchedPrivateOrders.filter(o => o.product_group_id === groupId).map(o => o.id));
-      const updatedPrivateOrders = fetchedPrivateOrders.filter(o => o.product_group_id !== groupId);
-      await db.savePrivateOrders(updatedPrivateOrders);
-
-      const fetchedPrivateOrderItems = await db.getPrivateOrderItems();
-      const updatedPrivateOrderItems = fetchedPrivateOrderItems.filter(item => !targetPrivateOrderIds.has(item.private_order_id));
-      await db.savePrivateOrderItems(updatedPrivateOrderItems);
-
-      // 6. Reload Data
-      await loadData();
-    } catch (err) {
-      console.error(err);
-      alert('刪除失敗');
-    }
-  };
-
   const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
       return;
@@ -391,7 +329,6 @@ export default function PurchaseRecords() {
       return;
     }
     if (editMode) return;
-    if (editingId === id) return;
     navigate(`/purchase-records/${id}`);
   };
 
@@ -579,22 +516,19 @@ export default function PurchaseRecords() {
                 <thead>
                   <tr>
                     <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '25%' }}>商品名稱</th>
+                    <th style={{ width: '23%' }}>商品名稱</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>私下登記</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
                     <th style={{ width: '8%', textAlign: 'center' }}>缺口</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>購買結單日</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>官方結單日</th>
+                    <th style={{ width: '12%', textAlign: 'center' }}>購買結單日</th>
+                    <th style={{ width: '12%', textAlign: 'center' }}>官方結單日</th>
                     <th style={{ width: '7%', textAlign: 'center' }}>發售月份</th>
-                    <th style={{ width: '5%', textAlign: 'center' }}>官網</th>
-                    <th style={{ width: '5%', textAlign: 'center' }}>編輯</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAndSortedGroups.map(g => {
-                    const isEditing = editingId === g.id;
                     const details = getGroupPlatformDetails(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
@@ -603,26 +537,22 @@ export default function PurchaseRecords() {
                       <tr 
                         key={g.id} 
                         onClick={(e) => handleRowClick(g.id, e)}
-                        style={{ cursor: isEditing ? 'default' : 'pointer' }}
+                        style={{ cursor: 'pointer' }}
                       >
                         <td style={{ textAlign: 'center', fontWeight: 600 }}>
                           {status.text}
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                          {isEditing ? (
-                            <input className="input" style={{ width: '100%' }} value={editForm.title || ''} onChange={e => setEditForm({...editForm, title: e.target.value})} />
-                          ) : (
-                            <div className="flex-col gap-xs">
-                              <div>{g.normalized_title || g.title}</div>
-                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                {g.listing_type && (
-                                  <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
-                                    {g.listing_type}
-                                  </span>
-                                )}
-                              </div>
+                          <div className="flex-col gap-xs">
+                            <div>{g.normalized_title || g.title}</div>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {g.listing_type && (
+                                <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                  {g.listing_type}
+                                </span>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {details.myacg}
@@ -640,15 +570,7 @@ export default function PurchaseRecords() {
                           缺 {details.gap}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <input 
-                              className="input" 
-                              type="date" 
-                              style={{ width: '100%' }} 
-                              value={editForm.purchase_date || ''} 
-                              onChange={e => setEditForm({...editForm, purchase_date: e.target.value})} 
-                            />
-                          ) : editMode ? (
+                          {editMode ? (
                             <input 
                               className="input" 
                               type="date" 
@@ -663,10 +585,8 @@ export default function PurchaseRecords() {
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'center', color: (isEditing || editMode) ? 'inherit' : closingDateStyle.color, fontWeight: (isEditing || editMode) ? 'inherit' : closingDateStyle.fontWeight }}>
-                          {isEditing ? (
-                            <input className="input" type="date" style={{ width: '100%' }} value={editForm.closing_date || ''} onChange={e => setEditForm({...editForm, closing_date: e.target.value})} />
-                          ) : editMode ? (
+                        <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
+                          {editMode ? (
                             <input 
                               className="input" 
                               type="date" 
@@ -678,9 +598,103 @@ export default function PurchaseRecords() {
                           ) : closingDateStyle.text}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <input className="input" style={{ width: '100%' }} value={editForm.release_month || ''} onChange={e => setEditForm({...editForm, release_month: e.target.value})} placeholder="例如：2026-11" />
-                          ) : editMode ? (
+                          {editMode ? (
+                            <input 
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.release_month || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                              placeholder="例如：2026-11"
+                            />
+                          ) : g.release_month || '-'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
+                    <th style={{ width: '28%' }}>商品名稱</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>需求</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>缺口</th>
+                    <th style={{ width: '12%', textAlign: 'center' }}>購買結單日</th>
+                    <th style={{ width: '12%', textAlign: 'center' }}>官方結單日</th>
+                    <th style={{ width: '10%', textAlign: 'center' }}>發售月份</th>
+                    <th style={{ width: '6%', textAlign: 'center' }}>官網</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAndSortedGroups.map(g => {
+                    const details = getGroupDemandAndPurchased(g.id);
+                    const status = getGroupStatus(g);
+                    const closingDateStyle = getClosingDateStyle(g.closing_date);
+
+                    return (
+                      <tr 
+                        key={g.id} 
+                        onClick={(e) => handleRowClick(g.id, e)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                          {status.text}
+                        </td>
+                        <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                          <div className="flex-col gap-xs">
+                            <div>{g.normalized_title || g.title}</div>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {g.listing_type && (
+                                <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                  {g.listing_type}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
+                          {details.demand}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
+                          {details.purchased}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: details.gap > 0 ? '#ef4444' : '#166534' }}>
+                          缺 {details.gap}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {editMode ? (
+                            <input 
+                              className="input" 
+                              type="date" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.purchase_date || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                            />
+                          ) : (
+                            <span style={{ color: '#475569', fontWeight: 500 }}>
+                              {g.purchase_date || '-'}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
+                          {editMode ? (
+                            <input 
+                              className="input" 
+                              type="date" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.closing_date || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                            />
+                          ) : closingDateStyle.text}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {editMode ? (
                             <input 
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
@@ -692,182 +706,17 @@ export default function PurchaseRecords() {
                           ) : g.release_month || '-'}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <input className="input" style={{ width: '100%' }} value={editForm.product_url || ''} onChange={e => setEditForm({...editForm, product_url: e.target.value})} placeholder="連結" />
-                          ) : editMode ? (
-                            <input 
-                              className="input" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.product_url || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)} 
+                          {g.product_url ? (
+                            <a 
+                              href={g.product_url} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
                               onClick={e => e.stopPropagation()}
-                              placeholder="連結"
-                            />
-                          ) : (
-                            g.product_url ? (
-                              <a 
-                                href={g.product_url} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                                onClick={e => e.stopPropagation()}
-                              >
-                                🔗 官網
-                              </a>
-                            ) : '-'
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <div className="flex items-center justify-center gap-xs">
-                              <button className="btn btn-ghost text-success" style={{ padding: '4px' }} onClick={() => handleSave(g.id)}><Save size={16} /></button>
-                              <button className="btn btn-ghost text-danger" style={{ padding: '4px' }} onClick={() => setEditingId(null)}><X size={16} /></button>
-                            </div>
-                          ) : editMode ? (
-                            <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 500 }}>行內編輯</span>
-                          ) : (
-                            <div className="flex items-center justify-center gap-xs">
-                              <button 
-                                className="btn btn-ghost" 
-                                style={{ padding: '4px' }} 
-                                onClick={(e) => { e.stopPropagation(); handleEdit(g); }}
-                                title="編輯"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                              <button 
-                                className="btn btn-ghost text-danger" 
-                                style={{ padding: '4px' }} 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteGroup(g.id); }}
-                                title="刪除"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            ) : (
-              <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '12%', textAlign: 'center' }}>購買結單日</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '34%' }}>商品名稱</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>缺口</th>
-                    <th style={{ width: '12%', textAlign: 'center' }}>結單日</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>發售月份</th>
-                    <th style={{ width: '6%', textAlign: 'center' }}>官網</th>
-                    <th style={{ width: '6%', textAlign: 'center' }}>編輯</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAndSortedGroups.map(g => {
-                    const isEditing = editingId === g.id;
-                    const gap = getGroupGap(g.id);
-                    const status = getGroupStatus(g);
-                    const closingDateStyle = getClosingDateStyle(g.closing_date);
-
-                    return (
-                      <tr 
-                        key={g.id} 
-                        onClick={(e) => handleRowClick(g.id, e)}
-                        style={{ cursor: isEditing ? 'default' : 'pointer' }}
-                      >
-                        <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <input 
-                              className="input" 
-                              type="date" 
-                              style={{ width: '100%' }} 
-                              value={editForm.purchase_date || ''} 
-                              onChange={e => setEditForm({...editForm, purchase_date: e.target.value})} 
-                            />
-                          ) : (
-                            <span style={{ color: '#475569', fontWeight: 500 }}>
-                              {g.purchase_date || '-'}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center', fontWeight: 600 }}>
-                          {status.text}
-                        </td>
-                        <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                          {isEditing ? (
-                            <input className="input" style={{ width: '100%' }} value={editForm.title || ''} onChange={e => setEditForm({...editForm, title: e.target.value})} />
-                          ) : (
-                            <div className="flex-col gap-xs">
-                              <div>{g.normalized_title || g.title}</div>
-                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                                {g.listing_type && (
-                                  <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
-                                    {g.listing_type}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: gap > 0 ? '#ef4444' : '#166534' }}>
-                          缺 {gap}
-                        </td>
-                        <td style={{ textAlign: 'center', color: isEditing ? 'inherit' : closingDateStyle.color, fontWeight: isEditing ? 'inherit' : closingDateStyle.fontWeight }}>
-                          {isEditing ? (
-                            <input className="input" type="date" style={{ width: '100%' }} value={editForm.closing_date || ''} onChange={e => setEditForm({...editForm, closing_date: e.target.value})} />
-                          ) : closingDateStyle.text}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <input className="input" style={{ width: '100%' }} value={editForm.release_month || ''} onChange={e => setEditForm({...editForm, release_month: e.target.value})} placeholder="例如：2026-11" />
-                          ) : g.release_month || '-'}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <input className="input" style={{ width: '100%' }} value={editForm.product_url || ''} onChange={e => setEditForm({...editForm, product_url: e.target.value})} placeholder="連結" />
-                          ) : (
-                            g.product_url ? (
-                              <a 
-                                href={g.product_url} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                                onClick={e => e.stopPropagation()}
-                              >
-                                🔗 官網
-                              </a>
-                            ) : '-'
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {isEditing ? (
-                            <div className="flex items-center justify-center gap-xs">
-                              <button className="btn btn-ghost text-success" style={{ padding: '4px' }} onClick={() => handleSave(g.id)}><Save size={16} /></button>
-                              <button className="btn btn-ghost text-danger" style={{ padding: '4px' }} onClick={() => setEditingId(null)}><X size={16} /></button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-center gap-xs">
-                              <button 
-                                className="btn btn-ghost" 
-                                style={{ padding: '4px' }} 
-                                onClick={(e) => { e.stopPropagation(); handleEdit(g); }}
-                                title="編輯"
-                              >
-                                <Edit2 size={16} />
-                              </button>
-                              <button 
-                                className="btn btn-ghost text-danger" 
-                                style={{ padding: '4px' }} 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteGroup(g.id); }}
-                                title="刪除"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          )}
+                            >
+                              🔗 官網
+                            </a>
+                          ) : '-'}
                         </td>
                       </tr>
                     );
