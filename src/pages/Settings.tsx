@@ -15,6 +15,27 @@ export default function Settings() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [connectionStatus, setConnectionStatus] = useState<'未測試' | '連線成功' | '連線失敗'>('未測試');
+  const [connectionDetail, setConnectionDetail] = useState<string>('');
+  const [isTesting, setIsTesting] = useState<boolean>(false);
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setConnectionStatus('未測試');
+    setConnectionDetail('');
+    try {
+      const { supabaseProvider } = await import('../providers/cloud/supabaseProvider');
+      const message = await supabaseProvider.testConnection();
+      setConnectionStatus('連線成功');
+      setConnectionDetail(`伺服器回傳訊息：${message}`);
+    } catch (err: any) {
+      setConnectionStatus('連線失敗');
+      setConnectionDetail(`錯誤詳情：${err.message || err}`);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   useEffect(() => {
     loadCounts();
   }, []);
@@ -285,6 +306,70 @@ export default function Settings() {
             </label>
           </div>
         </div>
+
+        {/* Supabase 連線測試 */}
+        {(() => {
+          let statusBg = '#f7fafc';
+          let statusColor = '#4a5568';
+          let statusBorder = '#e2e8f0';
+
+          if (connectionStatus === '連線成功') {
+            statusBg = '#e6fffa';
+            statusColor = '#319795';
+            statusBorder = '#b2f5ea';
+          } else if (connectionStatus === '連線失敗') {
+            statusBg = '#fff5f5';
+            statusColor = '#e53e3e';
+            statusBorder = '#fed7d7';
+          }
+
+          return (
+            <div className="card flex-col" style={{ gridColumn: 'span 3', marginTop: '16px' }}>
+              <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Database size={18} className="text-primary" /> 
+                Supabase 連線測試 (POC)
+              </h3>
+              <p className="text-muted text-sm" style={{ marginBottom: '16px' }}>
+                驗證雲端模式所需的 API 連線狀態。此功能會向 Supabase 查詢健康檢查測試資料表 (erp_healthcheck)。
+              </p>
+
+              <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div>
+                  <strong>目前模式：</strong>本地模式
+                </div>
+                <div>
+                  <strong>Supabase 狀態：</strong>
+                  <span className="badge" style={{ 
+                    padding: '2px 8px', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    backgroundColor: statusBg,
+                    color: statusColor,
+                    border: `1px solid ${statusBorder}`
+                  }}>
+                    {connectionStatus}
+                  </span>
+                </div>
+                {connectionDetail && (
+                  <div style={{ fontSize: '13px', padding: '8px 12px', borderRadius: '4px', backgroundColor: 'var(--color-bg-base)', border: '1px solid var(--color-border)', wordBreak: 'break-all' }}>
+                    {connectionDetail}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={handleTestConnection}
+                  disabled={isTesting}
+                >
+                  {isTesting ? '正在測試...' : '測試連線'}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
