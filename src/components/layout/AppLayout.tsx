@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode } from '../../providers/providerMode';
+import { useAuth } from '../../auth/AuthProvider';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 
 interface SidebarItemProps {
@@ -38,6 +39,7 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { mode, setMode, isMobile } = useViewport();
+  const { user, loading, signOut } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
@@ -127,32 +129,68 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             })()}
           </div>
 
-          {/* Viewport Switcher (Dev Tool) */}
-          <div className="flex items-center gap-xs" style={{ border: '1px solid var(--color-border)', padding: '2px', borderRadius: 'var(--radius-sm)' }}>
-            <button 
-              onClick={() => setMode('auto')} 
-              className={`btn ${mode === 'auto' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ padding: '4px 8px', borderRadius: '2px' }}
-              title="自動偵測 (Auto)"
-            >
-              <Layout size={14} /> <span className="text-xs hide-on-mobile">Auto</span>
-            </button>
-            <button 
-              onClick={() => setMode('desktop')} 
-              className={`btn ${mode === 'desktop' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ padding: '4px 8px', borderRadius: '2px' }}
-              title="強制桌機版預覽 (Desktop Preview)"
-            >
-              <Monitor size={14} /> <span className="text-xs hide-on-mobile">Desktop</span>
-            </button>
-            <button 
-              onClick={() => setMode('mobile')} 
-              className={`btn ${mode === 'mobile' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ padding: '4px 8px', borderRadius: '2px' }}
-              title="強制手機版預覽 (Mobile Preview)"
-            >
-              <Smartphone size={14} /> <span className="text-xs hide-on-mobile">Mobile</span>
-            </button>
+          {/* Right Side Header Items: Auth Status + Viewport Switcher */}
+          <div className="flex items-center gap-md">
+            {/* Supabase Auth Status */}
+            {(() => {
+              if (loading) {
+                return <span className="text-xs text-muted">載入中...</span>;
+              }
+
+              if (!user) {
+                return (
+                  <div className="flex items-center gap-xs">
+                    <span className="text-xs text-muted" style={{ marginRight: '4px' }}>未登入</span>
+                    <Link to="/login" className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid var(--color-border)' }}>
+                      前往登入
+                    </Link>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="flex items-center gap-sm">
+                  <span className="text-xs font-medium" style={{ color: 'var(--color-text)' }} title={user.email}>
+                    {user.email}
+                  </span>
+                  <button 
+                    onClick={signOut} 
+                    className="btn btn-ghost text-danger" 
+                    style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5' }}
+                  >
+                    登出
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* Viewport Switcher (Dev Tool) */}
+            <div className="flex items-center gap-xs" style={{ border: '1px solid var(--color-border)', padding: '2px', borderRadius: 'var(--radius-sm)' }}>
+              <button 
+                onClick={() => setMode('auto')} 
+                className={`btn ${mode === 'auto' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ padding: '4px 8px', borderRadius: '2px' }}
+                title="自動偵測 (Auto)"
+              >
+                <Layout size={14} /> <span className="text-xs hide-on-mobile">Auto</span>
+              </button>
+              <button 
+                onClick={() => setMode('desktop')} 
+                className={`btn ${mode === 'desktop' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ padding: '4px 8px', borderRadius: '2px' }}
+                title="強制桌機版預覽 (Desktop Preview)"
+              >
+                <Monitor size={14} /> <span className="text-xs hide-on-mobile">Desktop</span>
+              </button>
+              <button 
+                onClick={() => setMode('mobile')} 
+                className={`btn ${mode === 'mobile' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ padding: '4px 8px', borderRadius: '2px' }}
+                title="強制手機版預覽 (Mobile Preview)"
+              >
+                <Smartphone size={14} /> <span className="text-xs hide-on-mobile">Mobile</span>
+              </button>
+            </div>
           </div>
         </header>
 
