@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { db, getBaseSku, calculateFinalMyacgDemand, findMatchingInventoryItem } from '../lib/db';
+import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Edit2, Save, X, Search, Trash2 } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
@@ -17,6 +17,7 @@ export default function PurchaseRecords() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<ProductGroup>>({});
+  const [editMode, setEditMode] = useState<boolean>(false);
   const navigate = useNavigate();
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
@@ -24,8 +25,8 @@ export default function PurchaseRecords() {
   const [filterStatus, setFilterStatus] = useState(() => localStorage.getItem('erp_filter_status') || 'all');
   const [filterType, setFilterType] = useState(() => localStorage.getItem('erp_filter_type') || 'all');
   const [sortMode, setSortMode] = useState(() => localStorage.getItem('erp_sort_mode') || 'closing_urgent');
-  const [activeTab, setActiveTab] = useState<'all' | 'proxy' | 'multi'>(() => {
-    return (localStorage.getItem('erp_active_tab') as 'all' | 'proxy' | 'multi') || 'all';
+  const [activeTab, setActiveTab] = useState<'all' | 'hololive' | 'vspo' | 'proxy' | 'other'>(() => {
+    return (localStorage.getItem('erp_active_tab') as 'all' | 'hololive' | 'vspo' | 'proxy' | 'other') || 'all';
   });
 
   useEffect(() => {
@@ -96,7 +97,58 @@ export default function PurchaseRecords() {
     });
     if (matchInv) return true;
 
-    return false;
+  };
+
+  const normalizeForMatch = (text: string | undefined | null): string => {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .replace(/[\s!\uff01\?\uff1f\-_\(\)\uff08\uff09\.\*,]/g, '');
+  };
+
+  const isProxyProduct = (g: ProductGroup) => {
+    return !!checkIsProxyProduct(g);
+  };
+
+  const isHololiveProduct = (g: ProductGroup) => {
+    if (isProxyProduct(g)) return false;
+    const titleNorm = normalizeForMatch(g.title);
+    const normTitleNorm = normalizeForMatch(g.normalized_title);
+    return titleNorm.includes('hololive') || normTitleNorm.includes('hololive');
+  };
+
+  const isVspoProduct = (g: ProductGroup) => {
+    if (isProxyProduct(g)) return false;
+    const titleNorm = normalizeForMatch(g.title);
+    const normTitleNorm = normalizeForMatch(g.normalized_title);
+    return titleNorm.includes('vspo') || titleNorm.includes('ぶいすぽ') || 
+           normTitleNorm.includes('vspo') || normTitleNorm.includes('ぶいすぽ');
+  };
+
+  const isOtherProduct = (g: ProductGroup) => {
+    return !isProxyProduct(g) && !isHololiveProduct(g) && !isVspoProduct(g);
+  };
+
+  const getGroupPlatformDetails = (groupId: string) => {
+    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
+    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
+    
+    let myacg = 0;
+    let waca = 0;
+    let privateOrder = 0;
+    let purchased = 0;
+    
+    groupVars.forEach(v => {
+      myacg += calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment || 0);
+      waca += (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+      privateOrder += privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      purchased += batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+    });
+    
+    const demand = myacg + waca + privateOrder;
+    const gap = Math.max(demand - purchased, 0);
+    
+    return { myacg, waca, privateOrder, purchased, gap };
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
@@ -115,47 +167,7 @@ export default function PurchaseRecords() {
       const demand = myacgDemand + wacaDemand + privateDemand;
       const purchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
       
-      if (v.myacg_item_code.toUpperCase().includes('G07073119')) {
-        const invItem = findMatchingInventoryItem(v.myacg_item_code, inventory);
-        const inventorySold = invItem ? invItem.myacg_sold_quantity : undefined;
-        const inventoryDemand = invItem ? invItem.myacg_demand_quantity : undefined;
-
-        const cleanCode = v.myacg_item_code.trim().toUpperCase();
-        const baseVariant = getBaseSku(cleanCode);
-        let orderDemand = 0;
-        for (const item of salesOrderItems) {
-          if (item.order_status && item.order_status.includes('已取消')) continue;
-          const itemCode = item.myacg_item_code.trim().toUpperCase();
-          const baseItem = getBaseSku(itemCode);
-          if (
-            itemCode === cleanCode ||
-            (baseItem === baseVariant && (itemCode === baseItem || cleanCode === baseVariant)) ||
-            (baseItem === baseVariant)
-          ) {
-            orderDemand += item.quantity;
-          }
-        }
-
-        const finalMyacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-        const uiMyacgValue = myacgDemand;
-        
-        const source = (inventorySold != null && inventorySold > 0) 
-          ? 'inventory' 
-          : ((inventoryDemand != null && inventoryDemand > 0) ? 'inventory' : (orderDemand > 0 ? 'order' : 'zero'));
-
-        console.table({
-          sku: v.myacg_item_code,
-          inventorySold: inventorySold ?? 'undefined',
-          inventoryDemand: inventoryDemand ?? 'undefined',
-          orderDemand,
-          finalMyacgDemand,
-          uiMyacgValue,
-          totalDemand: demand,
-          purchased,
-          shortage: Math.max(demand - purchased, 0),
-          source
-        });
-      }
+      
       
       totalDemand += demand;
       totalPurchased += purchased;
@@ -188,49 +200,31 @@ export default function PurchaseRecords() {
     return { text: closingDate, color: '#334155', fontWeight: 500 };
   };
 
-  const { filteredAndSortedGroups, debugInfo } = useMemo(() => {
+  const filteredAndSortedGroups = useMemo(() => {
     let result = [...groups];
 
-    // Debug print for categorization
-    groups.forEach(g => {
-      const groupVars = variants.filter(v => v.product_group_id === g.id);
-      const invListingTypes = groupVars.map(v => {
-        const invItem = inventory.find(i => i.myacg_item_code === v.myacg_item_code);
-        return invItem?.listing_type || '無';
-      });
-      const isProxy = checkIsProxyProduct(g);
-      console.log(`[Debug Proxy Categorization] Title: "${g.title}", Group ListingType: "${g.listing_type || '無'}", Inv ListingType: "${invListingTypes.join(', ')}", Category: ${isProxy ? '代理版' : '多規格'}`);
-    });
-
     // Filter by activeTab
-    if (activeTab === 'proxy') {
-      result = result.filter(g => checkIsProxyProduct(g));
-    } else if (activeTab === 'multi') {
-      result = result.filter(g => !checkIsProxyProduct(g));
+    if (activeTab === 'hololive') {
+      result = result.filter(g => isHololiveProduct(g));
+    } else if (activeTab === 'vspo') {
+      result = result.filter(g => isVspoProduct(g));
+    } else if (activeTab === 'proxy') {
+      result = result.filter(g => isProxyProduct(g));
+    } else if (activeTab === 'other') {
+      result = result.filter(g => isOtherProduct(g));
     }
-    
-    const debug = {
-      total: result.length,
-      afterSource: result.length,
-      afterStatus: result.length,
-      afterType: result.length,
-      afterSearch: result.length,
-      final: result.length
-    };
 
     const today = new Date().toISOString().split('T')[0];
 
     // 1. Filter Source
     if (filterSource !== 'all') {
       result = result.filter(g => {
-        if (checkIsProxyProduct(g)) return filterSource === '代理商品';
-        const lowerTitle = (g.title || '').toLowerCase();
-        if (lowerTitle.includes('hololive')) return filterSource === 'Hololive';
-        if (lowerTitle.includes('vspo') || g.title.includes('ぶいすぽ')) return filterSource === 'VSPO';
+        if (filterSource === '代理商品') return isProxyProduct(g);
+        if (filterSource === 'Hololive') return isHololiveProduct(g);
+        if (filterSource === 'VSPO') return isVspoProduct(g);
         return false;
       });
     }
-    debug.afterSource = result.length;
 
     // 2. Filter Status
     if (filterStatus !== 'all') {
@@ -240,7 +234,6 @@ export default function PurchaseRecords() {
         result = result.filter(g => g.closing_date && g.closing_date < today);
       }
     }
-    debug.afterStatus = result.length;
 
     // 3. Filter Type
     if (filterType !== 'all') {
@@ -249,7 +242,6 @@ export default function PurchaseRecords() {
         return (g.listing_type || '一般預購') === filterType;
       });
     }
-    debug.afterType = result.length;
 
     // 4. Search
     if (searchTerm.trim()) {
@@ -267,8 +259,6 @@ export default function PurchaseRecords() {
         );
       });
     }
-    debug.afterSearch = result.length;
-    debug.final = result.length;
 
     // 5. Sort
     result.sort((a, b) => {
@@ -294,7 +284,7 @@ export default function PurchaseRecords() {
       }
     });
 
-    return { filteredAndSortedGroups: result, debugInfo: debug };
+    return result;
   }, [groups, searchTerm, filterSource, filterStatus, filterType, sortMode, variants, categories, batchItems, privateOrderItems, activeTab, inventory]);
 
 
@@ -386,6 +376,7 @@ export default function PurchaseRecords() {
         (e.target as HTMLElement).closest('button')) {
       return;
     }
+    if (editMode) return;
     if (editingId === id) return;
     navigate(`/purchase-records/${id}`);
   };
@@ -402,7 +393,7 @@ export default function PurchaseRecords() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <button 
           onClick={() => setActiveTab('all')}
           style={{
@@ -421,6 +412,40 @@ export default function PurchaseRecords() {
           全部商品 ({groups.length})
         </button>
         <button 
+          onClick={() => setActiveTab('hololive')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            background: 'none',
+            borderBottom: activeTab === 'hololive' ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === 'hololive' ? '#2563eb' : '#64748b',
+            transition: 'all 0.2s',
+            marginBottom: '-1px'
+          }}
+        >
+          Hololive商品 ({groups.filter(isHololiveProduct).length})
+        </button>
+        <button 
+          onClick={() => setActiveTab('vspo')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            background: 'none',
+            borderBottom: activeTab === 'vspo' ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === 'vspo' ? '#2563eb' : '#64748b',
+            transition: 'all 0.2s',
+            marginBottom: '-1px'
+          }}
+        >
+          VSPO商品 ({groups.filter(isVspoProduct).length})
+        </button>
+        <button 
           onClick={() => setActiveTab('proxy')}
           style={{
             padding: '8px 16px',
@@ -435,10 +460,10 @@ export default function PurchaseRecords() {
             marginBottom: '-1px'
           }}
         >
-          代理版商品 ({groups.filter(checkIsProxyProduct).length})
+          代理版商品 ({groups.filter(isProxyProduct).length})
         </button>
         <button 
-          onClick={() => setActiveTab('multi')}
+          onClick={() => setActiveTab('other')}
           style={{
             padding: '8px 16px',
             fontSize: '14px',
@@ -446,13 +471,13 @@ export default function PurchaseRecords() {
             cursor: 'pointer',
             border: 'none',
             background: 'none',
-            borderBottom: activeTab === 'multi' ? '2px solid #2563eb' : '2px solid transparent',
-            color: activeTab === 'multi' ? '#2563eb' : '#64748b',
+            borderBottom: activeTab === 'other' ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === 'other' ? '#2563eb' : '#64748b',
             transition: 'all 0.2s',
             marginBottom: '-1px'
           }}
         >
-          多規格商品 ({groups.filter(g => !checkIsProxyProduct(g)).length})
+          其他商品 ({groups.filter(isOtherProduct).length})
         </button>
       </div>
 
@@ -519,18 +544,7 @@ export default function PurchaseRecords() {
           共 <span style={{ color: '#2563eb', fontWeight: 700, fontSize: '15px' }}>{filteredAndSortedGroups.length}</span> 筆商品符合條件
         </div>
         
-        {/* Debug Info */}
-        <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', fontSize: '12px', color: '#475569' }}>
-          <div style={{ fontWeight: 600, marginBottom: '4px', color: '#334155' }}>Filter Debug Info:</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-            <div>原始商品總數：{debugInfo.total} 筆</div>
-            <div>來源篩選後：{debugInfo.afterSource} 筆</div>
-            <div>狀態篩選後：{debugInfo.afterStatus} 筆</div>
-            <div>類型篩選後：{debugInfo.afterType} 筆</div>
-            <div>搜尋篩選後：{debugInfo.afterSearch} 筆</div>
-            <div style={{ fontWeight: 600, color: '#2563eb' }}>最終結果：{debugInfo.final} 筆</div>
-          </div>
-        </div>
+
 
       </div>
 
@@ -550,14 +564,16 @@ export default function PurchaseRecords() {
               <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    <th style={{ width: '10%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '30%' }}>商品名稱</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>需求</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>已採購</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>缺口</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
+                    <th style={{ width: '25%' }}>商品名稱</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>私下登記</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
+                    <th style={{ width: '8%', textAlign: 'center' }}>缺口</th>
                     <th style={{ width: '10%', textAlign: 'center' }}>購買結單日</th>
                     <th style={{ width: '10%', textAlign: 'center' }}>官方結單日</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>發售月份</th>
+                    <th style={{ width: '7%', textAlign: 'center' }}>發售月份</th>
                     <th style={{ width: '5%', textAlign: 'center' }}>官網</th>
                     <th style={{ width: '5%', textAlign: 'center' }}>編輯</th>
                   </tr>
@@ -565,7 +581,7 @@ export default function PurchaseRecords() {
                 <tbody>
                   {filteredAndSortedGroups.map(g => {
                     const isEditing = editingId === g.id;
-                    const { demand, purchased, gap } = getGroupDemandAndPurchased(g.id);
+                    const details = getGroupPlatformDetails(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
 
@@ -590,30 +606,24 @@ export default function PurchaseRecords() {
                                     {g.listing_type}
                                   </span>
                                 )}
-                                <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 400 }}>
-                                  [Debug] Group: {g.listing_type || '無'} | Inv: {
-                                    (() => {
-                                      const groupVars = variants.filter(v => v.product_group_id === g.id);
-                                      const types = Array.from(new Set(groupVars.map(v => {
-                                        const invItem = inventory.find(i => i.myacg_item_code === v.myacg_item_code);
-                                        return invItem?.listing_type || '無';
-                                      })));
-                                      return types.join('/') || '無';
-                                    })()
-                                  } | 分類: {checkIsProxyProduct(g) ? '🟢 代理版' : '🔵 多規格'}
-                                </span>
                               </div>
                             </div>
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {demand}
+                          {details.myacg}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {purchased}
+                          {details.waca}
                         </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: gap > 0 ? '#ef4444' : '#166534' }}>
-                          缺 {gap}
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                          {details.privateOrder}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
+                          {details.purchased}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: details.gap > 0 ? '#ef4444' : '#166534' }}>
+                          缺 {details.gap}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {isEditing ? (
@@ -746,18 +756,6 @@ export default function PurchaseRecords() {
                                     {g.listing_type}
                                   </span>
                                 )}
-                                <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 400 }}>
-                                  [Debug] Group: {g.listing_type || '無'} | Inv: {
-                                    (() => {
-                                      const groupVars = variants.filter(v => v.product_group_id === g.id);
-                                      const types = Array.from(new Set(groupVars.map(v => {
-                                        const invItem = inventory.find(i => i.myacg_item_code === v.myacg_item_code);
-                                        return invItem?.listing_type || '無';
-                                      })));
-                                      return types.join('/') || '無';
-                                    })()
-                                  } | 分類: {checkIsProxyProduct(g) ? '🟢 代理版' : '🔵 多規格'}
-                                </span>
                               </div>
                             </div>
                           )}
@@ -828,6 +826,35 @@ export default function PurchaseRecords() {
           </div>
         )}
       </div>
+      
+      {/* Floating Action Button (FAB) */}
+      <button
+        onClick={() => setEditMode(!editMode)}
+        style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          zIndex: 9999,
+          height: '46px',
+          padding: '0 24px',
+          fontWeight: 700,
+          fontSize: '14px',
+          borderRadius: '9999px',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          backgroundColor: editMode ? '#ea580c' : '#2563eb',
+          color: '#ffffff',
+          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1)',
+          transition: 'all 0.2s ease',
+          outline: 'none'
+        }}
+      >
+        {editMode ? '✏️ 編輯模式' : '🔒 鎖定模式'}
+      </button>
     </div>
   );
 }

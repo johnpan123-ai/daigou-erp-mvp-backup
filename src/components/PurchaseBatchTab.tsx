@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory } from '../lib/db';
+import type { PurchaseBatch, PurchaseBatchItem, ProductVariant } from '../lib/db';
 import { db } from '../lib/db';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
 
@@ -7,12 +7,12 @@ interface PurchaseBatchTabProps {
   batches: PurchaseBatch[];
   batchItems: PurchaseBatchItem[];
   variants: ProductVariant[];
-  categoryMap: Map<string, ProductCategory>;
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
+  getDisplayProductName: (v: ProductVariant) => string;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, onRefresh, onEditBatch }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, onRefresh, onEditBatch, getDisplayProductName }: PurchaseBatchTabProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const toggleExpand = (id: string) => {
@@ -36,19 +36,7 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
 
   const variantMap = new Map(variants.map(v => [v.id, v]));
 
-  const formatVariantOption = (v: ProductVariant) => {
-    let catTitle = '';
-    if (v.product_category_id) {
-      const cat = categoryMap.get(v.product_category_id);
-      if (cat) catTitle = cat.title;
-    }
-    
-    if (!catTitle || catTitle === '單品') {
-      return v.variant_name;
-    } else {
-      return `${catTitle} - ${v.variant_name}`;
-    }
-  };
+
 
   if (batches.length === 0) {
     return <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>目前沒有採購批次紀錄。</div>;
@@ -95,15 +83,23 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
               {/* Items List */}
               {isExpanded && (
                 <div style={{ padding: '16px', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
+                    <colgroup>
+                      <col style={{ width: '40%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '16%' }} />
+                      <col style={{ width: '10%' }} />
+                    </colgroup>
                     <thead>
                       <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
                         <th style={{ padding: '8px', textAlign: 'left' }}>商品名稱</th>
-                        <th style={{ padding: '8px', textAlign: 'right', width: '80px' }}>數量</th>
-                        <th style={{ padding: '8px', textAlign: 'right', width: '100px' }}>成本</th>
-                        <th style={{ padding: '8px', textAlign: 'right', width: '120px' }}>小計</th>
-                        <th style={{ padding: '8px', textAlign: 'left', width: '150px' }}>備註</th>
-                        <th style={{ padding: '8px', textAlign: 'center', width: '80px' }}>操作</th>
+                        <th style={{ padding: '8px', textAlign: 'center' }}>數量</th>
+                        <th style={{ padding: '8px', textAlign: 'right' }}>成本</th>
+                        <th style={{ padding: '8px', textAlign: 'right' }}>小計</th>
+                        <th style={{ padding: '8px', textAlign: 'left' }}>備註</th>
+                        <th style={{ padding: '8px', textAlign: 'center' }}>操作</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -115,11 +111,11 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                         const variant = variantMap.get(item.product_variant_id);
                         return (
                           <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '8px', color: '#0f172a' }}>{variant ? formatVariantOption(variant) : '未知商品'}</td>
-                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>{item.quantity}</td>
+                            <td style={{ padding: '8px', color: '#0f172a', wordBreak: 'break-word' }}>{variant ? getDisplayProductName(variant) : '未知商品'}</td>
+                            <td style={{ padding: '8px', textAlign: 'center', fontWeight: 500 }}>{item.quantity}</td>
                             <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>¥ {item.cost.toLocaleString()}</td>
                             <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>¥ {(item.quantity * item.cost).toLocaleString()}</td>
-                            <td style={{ padding: '8px', color: '#64748b' }}>{item.note}</td>
+                            <td style={{ padding: '8px', color: '#64748b', wordBreak: 'break-word' }}>{item.note}</td>
                             <td style={{ padding: '8px', textAlign: 'center' }}>
                               {/* inline item edit removed, use whole document edit from batch header */}
                             </td>

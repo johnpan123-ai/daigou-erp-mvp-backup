@@ -172,9 +172,21 @@ export default function PurchaseManagement() {
   const cleanDailiTitle = (title: string): string => {
     if (!title) return '';
     let res = title;
-    res = res.replace(/【小河馬日本代購】/g, '');
-    res = res.replace(/【小河馬代購】/g, '');
-    const keywords = ['預購', '現貨', '日本代購', '現地代購', '再版', '預約', '日版', '代理版', '代理'];
+    const keywords = [
+      '【小河馬日本代購】',
+      '【小河馬代購】',
+      '小河馬日本代購',
+      '小河馬代購',
+      '預購',
+      '現貨',
+      '日本代購',
+      '現地代購',
+      '代理版',
+      '代理',
+      '日版',
+      '再版',
+      '預約'
+    ];
     keywords.forEach(kw => {
       res = res.replaceAll(kw, '');
     });
@@ -183,17 +195,47 @@ export default function PurchaseManagement() {
     return res;
   };
 
-  const getDailiVariantModalName = (v: ProductVariant) => {
-    const name = v.variant_name || '';
-    const trimmed = name.trim();
-    if (trimmed !== '' && trimmed !== '單品' && trimmed !== '一箱') {
-      return trimmed;
+  const getDisplayProductName = (v: ProductVariant): string => {
+    const variantName = (v.variant_name || '').trim();
+    const productTitle = group?.title || '';
+    const isDaili = group?.listing_type === '代理版';
+    
+    if (isDaili) {
+      // 1. variant_name (unless blank, null, undefined, 單品, 一箱)
+      if (variantName && variantName !== '單品' && variantName !== '一箱') {
+        return variantName;
+      }
+      // 2. cleanDailiTitle(product_title)
+      const cleaned = cleanDailiTitle(productTitle);
+      if (cleaned) {
+        return cleaned;
+      }
+      // 3. product_title
+      if (productTitle) {
+        return productTitle;
+      }
+      // 4. group.title
+      if (group?.title) {
+        return group.title;
+      }
+      // 5. SKU
+      return v.myacg_item_code || '未命名規格';
+    } else {
+      // Standard Product (Category - Variant)
+      if (v.product_category_id) {
+        const cat = categoryMap.get(v.product_category_id);
+        if (cat && cat.title && cat.title !== '單品') {
+          return `${cat.title} - ${variantName || '單品'}`;
+        }
+      }
+      if (variantName) {
+        return variantName;
+      }
+      if (productTitle) {
+        return productTitle;
+      }
+      return v.myacg_item_code || '未命名規格';
     }
-    const cleanedGroup = cleanDailiTitle(group?.normalized_title || group?.title || '');
-    if (cleanedGroup) {
-      return cleanedGroup;
-    }
-    return v.myacg_item_code || '未命名規格';
   };
   
   // Data for calculation
@@ -529,13 +571,7 @@ export default function PurchaseManagement() {
 
 
 
-  const formatVariantOption = (v: ProductVariant) => {
-    const parsed = parseVariantFallback(v, categoryMap);
-    if (parsed && parsed.categoryTitle) {
-      return `${parsed.categoryTitle} - ${parsed.variantDisplayName}`;
-    }
-    return v.variant_name;
-  };
+
 
   const getVariantShortageForModal = (v: ProductVariant) => {
     const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
@@ -804,12 +840,12 @@ export default function PurchaseManagement() {
           </button>
           <span>團務與商品管理</span>
           <span>/</span>
-          <span className="text-primary font-medium">{group.title}</span>
+          <span className="text-primary font-medium">{isDaili ? cleanDailiTitle(group.title) : group.title}</span>
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {group.normalized_title || group.title}
+            {isDaili ? cleanDailiTitle(group.normalized_title || group.title) : (group.normalized_title || group.title)}
             {group.listing_type && (
               <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
                 {group.listing_type}
@@ -1099,8 +1135,8 @@ export default function PurchaseManagement() {
               if (searchTerm) {
                 const lowerSearch = searchTerm.toLowerCase();
                 const catTitle = groupKey.startsWith('category:') 
-                  ? groupKey.slice('category:'.length) 
-                  : (groupItems[0]?.raw_variant_name || groupItems[0]?.variant_name || '');
+                  ? (isDaili ? cleanDailiTitle(groupKey.slice('category:'.length)) : groupKey.slice('category:'.length))
+                  : getDisplayProductName(groupItems[0]);
                 const groupMatch = catTitle.toLowerCase().includes(lowerSearch);
                 const hasMatch = groupItems.some(v => 
                   (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
@@ -1113,8 +1149,8 @@ export default function PurchaseManagement() {
 
             }).map(([groupKey, groupItems]) => {
               const catTitle = groupKey.startsWith('category:') 
-                ? groupKey.slice('category:'.length) 
-                : (groupItems[0]?.raw_variant_name || groupItems[0]?.variant_name || group.title);
+                ? (isDaili ? cleanDailiTitle(groupKey.slice('category:'.length)) : groupKey.slice('category:'.length))
+                : getDisplayProductName(groupItems[0]);
               
               const lowerSearch = searchTerm.toLowerCase();
               const isSearchMatched = searchTerm.trim() !== '' && (
@@ -1515,8 +1551,8 @@ export default function PurchaseManagement() {
                               return (
                                 <tr key={v.id} style={{ borderBottom: i === filteredList.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
                                   <td style={{ padding: '12px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.variant_name}>
-                                      <HighlightText text={parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name} highlight={searchTerm} />
+                                    <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
+                                      <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name)} highlight={searchTerm} />
                                     </div>
                                     <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
                                       SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
@@ -1686,8 +1722,8 @@ export default function PurchaseManagement() {
           // 1. Process all groups and variants to extract actual shortages (needToBuy > 0)
           const shortageGroups = sortedGroupEntries.map(([groupKey, groupItems]) => {
             const catTitle = groupKey.startsWith('category:') 
-              ? groupKey.slice('category:'.length) 
-              : (groupItems[0]?.raw_variant_name || groupItems[0]?.variant_name || '');
+              ? (isDaili ? cleanDailiTitle(groupKey.slice('category:'.length)) : groupKey.slice('category:'.length))
+              : getDisplayProductName(groupItems[0]);
             
             // Apply Search Filter first
             if (searchTerm) {
@@ -1848,7 +1884,7 @@ export default function PurchaseManagement() {
                         <div key={item.variant.id} style={{ fontSize: '14px', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ color: '#94a3b8' }}>•</span>
                           <span>
-                            <HighlightText text={parsedVariantsMap.get(item.variant.id)?.variantDisplayName || item.variant.variant_name} highlight={searchTerm} />
+                            <HighlightText text={isDaili ? getDisplayProductName(item.variant) : (parsedVariantsMap.get(item.variant.id)?.variantDisplayName || item.variant.variant_name)} highlight={searchTerm} />
                           </span>
                           <span style={{ fontWeight: 700, color: '#0F172A', marginLeft: '4px' }}>×{item.needToBuy}</span>
                         </div>
@@ -1867,9 +1903,9 @@ export default function PurchaseManagement() {
             batches={purchaseBatches} 
             batchItems={purchaseBatchItems} 
             variants={variants} 
-            categoryMap={categoryMap}
             onRefresh={loadData} 
             onEditBatch={handleEditBatch}
+            getDisplayProductName={getDisplayProductName}
           />
         )}
 
@@ -1879,9 +1915,9 @@ export default function PurchaseManagement() {
             orders={privateOrders} 
             orderItems={privateOrderItems} 
             variants={variants} 
-            categoryMap={categoryMap}
             onRefresh={loadData} 
             onEditOrder={handleEditOrder}
+            getDisplayProductName={getDisplayProductName}
           />
         )}
       </div>
@@ -1923,7 +1959,16 @@ export default function PurchaseManagement() {
                 <tbody>
                   {variants.map((v, idx) => (
                     <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px' }}>{formatVariantOption(v)}</td>
+                      <td style={{ padding: '8px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ fontWeight: 600, color: '#1e293b' }}>
+                            {getDisplayProductName(v)}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                            SKU: {v.myacg_item_code}
+                          </div>
+                        </div>
+                      </td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>
                         <input className="input" type="number" min="0" value={poLines[idx]?.quantity || ''} onChange={e => updatePoLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
                       </td>
@@ -2005,7 +2050,7 @@ export default function PurchaseManagement() {
                           <td style={{ padding: '8px' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                               <div style={{ fontWeight: 600, color: '#1e293b' }}>
-                                {isDaili ? getDailiVariantModalName(v) : formatVariantOption(v)}
+                                {getDisplayProductName(v)}
                               </div>
                               <div style={{ fontSize: '11px', color: '#94a3b8' }}>
                                 SKU: {v.myacg_item_code}

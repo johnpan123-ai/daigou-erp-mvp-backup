@@ -953,7 +953,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     for (const v of variants) {
       // Find matching inventory item using fuzzy matching helpers
       const invItem = findMatchingInventoryItem(v.myacg_item_code, inventory);
-      const myacgOrderDemand = getOrderDemandForVariant(v.myacg_item_code, myacgOrderDemandMap);
+
       
       const effectiveMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
 
@@ -966,15 +966,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         console.warn(`找不到 InventoryItem 對應 SKU: ${v.myacg_item_code}`);
       }
 
-      console.log(
-        `[Debug db.ts getProductVariants]\n` +
-        `SKU: ${v.myacg_item_code}\n` +
-        `商品名稱: ${v.product_title}${v.variant_name ? ' - ' + v.variant_name : ''}\n` +
-        `Inventory 已售數量: ${invItem ? (invItem.myacg_sold_quantity || 0) : '未找到'}\n` +
-        `Inventory 需求數量: ${invItem ? (invItem.myacg_demand_quantity || 0) : '未找到'}\n` +
-        `訂單匯入數量: ${myacgOrderDemand}\n` +
-        `最後採用數量: ${effectiveMyacg}`
-      );
+
 
       const newWacaAuto = getOrderDemandForVariant(v.myacg_item_code, wacaOrderDemandMap);
 
