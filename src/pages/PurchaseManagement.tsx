@@ -160,6 +160,7 @@ export default function PurchaseManagement() {
 
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [onlyShowShortage, setOnlyShowShortage] = useState(false);
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
   const [batchLines, setBatchLines] = useState<{ variant_id: string, quantity: number, cost: number, note: string }[]>([]);
@@ -167,6 +168,7 @@ export default function PurchaseManagement() {
   useEffect(() => {
     loadData();
   }, [id]);
+
 
   const loadData = async () => {
     if (!id) return;
@@ -368,6 +370,7 @@ export default function PurchaseManagement() {
   // --- Modal Logic: Purchase Batch ---
   const openBatchModal = () => {
     setEditingBatchId(null);
+    setOnlyShowShortage(false);
     setBatchForm({ name: '', date: new Date().toISOString().slice(0, 10), note: '' });
     setBatchLines(variants.map(v => ({ variant_id: v.id, quantity: 0, cost: 0, note: '' })));
     setShowBatchModal(true);
@@ -375,6 +378,7 @@ export default function PurchaseManagement() {
 
   const handleEditBatch = (batch: PurchaseBatch) => {
     setEditingBatchId(batch.id);
+    setOnlyShowShortage(false);
     setBatchForm({ name: batch.name, date: batch.date, note: batch.note || '' });
     setBatchLines(variants.map(v => {
       const existing = purchaseBatchItems.find(i => i.product_variant_id === v.id && i.purchase_batch_id === batch.id);
@@ -450,17 +454,24 @@ export default function PurchaseManagement() {
 
 
   const formatVariantOption = (v: ProductVariant) => {
-    let catTitle = '';
-    if (v.product_category_id) {
-      const cat = categoryMap.get(v.product_category_id);
-      if (cat) catTitle = cat.title;
+    const parsed = parseVariantFallback(v, categoryMap);
+    if (parsed && parsed.categoryTitle) {
+      return `${parsed.categoryTitle} - ${parsed.variantDisplayName}`;
     }
-    
-    if (!catTitle || catTitle === '單品') {
-      return v.variant_name;
-    } else {
-      return `${catTitle} - ${v.variant_name}`;
-    }
+    return v.variant_name;
+  };
+
+  const getVariantShortageForModal = (v: ProductVariant) => {
+    const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+    const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+    const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+    const totalDemand = myacgDemand + wacaDemand + privateDemand;
+
+    const purchased = purchaseBatchItems
+      .filter(pbi => pbi.product_variant_id === v.id && pbi.purchase_batch_id !== editingBatchId)
+      .reduce((sum, item) => sum + item.quantity, 0);
+
+    return totalDemand - purchased;
   };
 
   if (!group) return <div className="p-xl text-center text-muted">載入中...</div>;
@@ -516,13 +527,96 @@ export default function PurchaseManagement() {
     }
   });
 
-  // Grouping Variants by Category or Single Item
-  const groupedVariants: Record<string, ProductVariant[]> = {};
-  variants.forEach(v => {
-    let groupKey = '';
+
+
+  const compareNatural = (a: string, b: string) => {
+    return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' });
+  };
+
+  interface ParsedVariant {
+    categoryTitle: string | null;
+    variantDisplayName: string;
+  }
+
+  const parseVariantFallback = (v: ProductVariant, categoryMap: Map<string, ProductCategory>): ParsedVariant => {
+    // Rule 1: product_category_id exists
     if (v.product_category_id) {
       const cat = categoryMap.get(v.product_category_id);
-      groupKey = cat ? cat.title : `__single__${v.id}`;
+      if (cat) {
+        return {
+          categoryTitle: cat.title,
+          variantDisplayName: v.variant_name
+        };
+      }
+    }
+
+    // Rule 2: parse from variant_name or raw_variant_name
+    const name = (v.variant_name || v.raw_variant_name || '').trim();
+    
+    // Check pattern "分類名稱 - 分類名稱 角色名" or "分類名稱 - 角色名"
+    if (name.includes(' - ')) {
+      const parts = name.split(' - ');
+      const prefix = parts[0].trim();
+      let rest = parts.slice(1).join(' - ').trim();
+      if (rest.startsWith(prefix)) {
+        let sub = rest.slice(prefix.length).trim();
+        // Remove any leading dash/separator
+        if (sub.startsWith('-') || sub.startsWith('_') || sub.startsWith('—')) {
+          sub = sub.slice(1).trim();
+        }
+        return {
+          categoryTitle: prefix,
+          variantDisplayName: sub || rest
+        };
+      }
+      return {
+        categoryTitle: prefix,
+        variantDisplayName: rest
+      };
+    }
+
+    // Check pattern with whitespace: "分類名稱 角色名"
+    const whitespaceRegex = /\s+/;
+    if (whitespaceRegex.test(name)) {
+      const parts = name.split(whitespaceRegex);
+      const prefix = parts[0].trim();
+      const rest = parts.slice(1).join(' ').trim();
+      if (prefix && rest) {
+        return {
+          categoryTitle: prefix,
+          variantDisplayName: rest
+        };
+      }
+    }
+
+    // Fallback: no category parsed
+    return {
+      categoryTitle: null,
+      variantDisplayName: name
+    };
+  };
+
+  // Pre-parse variants locally for UI fallback grouping
+  const parsedVariantsMap = new Map<string, ParsedVariant>();
+  variants.forEach(v => {
+    parsedVariantsMap.set(v.id, parseVariantFallback(v, categoryMap));
+  });
+
+  const categoryCountMap = new Map<string, number>();
+  variants.forEach(v => {
+    const parsed = parsedVariantsMap.get(v.id);
+    if (parsed && parsed.categoryTitle) {
+      categoryCountMap.set(parsed.categoryTitle, (categoryCountMap.get(parsed.categoryTitle) || 0) + 1);
+    }
+  });
+
+  const groupedVariants: Record<string, ProductVariant[]> = {};
+  variants.forEach(v => {
+    const parsed = parsedVariantsMap.get(v.id);
+    let groupKey = '';
+    // ProductCategory/parsed category exists and has variants count > 1 globally
+    if (parsed && parsed.categoryTitle && (categoryCountMap.get(parsed.categoryTitle) || 0) > 1) {
+      groupKey = `category:${parsed.categoryTitle}`;
     } else {
       groupKey = `__single__${v.id}`;
     }
@@ -536,26 +630,37 @@ export default function PurchaseManagement() {
       const aSort = a.sort_order ?? 9999;
       const bSort = b.sort_order ?? 9999;
       if (aSort !== bSort) return aSort - bSort;
-      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '');
+      return compareNatural(a.myacg_item_code, b.myacg_item_code);
     });
   });
 
-  let sortedGroupEntries = Object.entries(groupedVariants).sort(([titleA, itemsA], [titleB, itemsB]) => {
+  let sortedGroupEntries = Object.entries(groupedVariants).sort(([keyA, itemsA], [keyB, itemsB]) => {
     let sortA = 9999;
     let sortB = 9999;
 
-    const catA = itemsA[0]?.product_category_id ? categoryMap.get(itemsA[0].product_category_id) : null;
-    const catB = itemsB[0]?.product_category_id ? categoryMap.get(itemsB[0].product_category_id) : null;
+    const isCatA = keyA.startsWith('category:');
+    const isCatB = keyB.startsWith('category:');
 
-    if (catA) sortA = catA.sort_order ?? 9999;
-    else if (itemsA[0]) sortA = itemsA[0].sort_order ?? 9999;
+    const titleA = isCatA ? keyA.slice('category:'.length) : (itemsA[0]?.raw_variant_name || itemsA[0]?.variant_name || '');
+    const titleB = isCatB ? keyB.slice('category:'.length) : (itemsB[0]?.raw_variant_name || itemsB[0]?.variant_name || '');
 
-    if (catB) sortB = catB.sort_order ?? 9999;
-    else if (itemsB[0]) sortB = itemsB[0].sort_order ?? 9999;
+    if (isCatA) {
+      const catObj = Array.from(categoryMap.values()).find(c => c.title === titleA);
+      if (catObj) sortA = catObj.sort_order ?? 9999;
+    } else if (itemsA[0]) {
+      sortA = itemsA[0].sort_order ?? 9999;
+    }
+
+    if (isCatB) {
+      const catObj = Array.from(categoryMap.values()).find(c => c.title === titleB);
+      if (catObj) sortB = catObj.sort_order ?? 9999;
+    } else if (itemsB[0]) {
+      sortB = itemsB[0].sort_order ?? 9999;
+    }
 
     if (sortA !== sortB) return sortA - sortB;
 
-    return titleA.localeCompare(titleB);
+    return titleA.localeCompare(titleB, undefined, { numeric: true, sensitivity: 'base' });
   });
 
   if (sortMode === 'shortage') {
@@ -818,11 +923,14 @@ export default function PurchaseManagement() {
         {/* Card List Area (Standard Mode) */}
         {activeTab === 'worksheet' && filterMode === 'all' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, paddingBottom: '40px' }}>
-            {sortedGroupEntries.filter(([title, groupItems]) => {
+            {sortedGroupEntries.filter(([groupKey, groupItems]) => {
               // 1. Search Filter
               if (searchTerm) {
                 const lowerSearch = searchTerm.toLowerCase();
-                const groupMatch = title.toLowerCase().includes(lowerSearch);
+                const catTitle = groupKey.startsWith('category:') 
+                  ? groupKey.slice('category:'.length) 
+                  : (groupItems[0]?.raw_variant_name || groupItems[0]?.variant_name || '');
+                const groupMatch = catTitle.toLowerCase().includes(lowerSearch);
                 const hasMatch = groupItems.some(v => 
                   (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
                   (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
@@ -832,16 +940,20 @@ export default function PurchaseManagement() {
 
               return true;
 
-            }).map(([title, groupItems]) => {
+            }).map(([groupKey, groupItems]) => {
+              const catTitle = groupKey.startsWith('category:') 
+                ? groupKey.slice('category:'.length) 
+                : (groupItems[0]?.raw_variant_name || groupItems[0]?.variant_name || group.title);
+              
               const lowerSearch = searchTerm.toLowerCase();
               const isSearchMatched = searchTerm.trim() !== '' && (
-                title.toLowerCase().includes(lowerSearch) || 
+                catTitle.toLowerCase().includes(lowerSearch) || 
                 groupItems.some(v => 
                   (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
                   (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
                 )
               );
-              const isExpanded = isSearchMatched ? true : manualExpandedGroups.has(title);
+              const isExpanded = isSearchMatched ? true : manualExpandedGroups.has(groupKey);
               
               // Compute Group Aggregates
               let pMyacg = 0, pWaca = 0, pManual = 0, pNeed = 0, pExcess = 0, pPurchased = 0, pDemand = 0;
@@ -875,7 +987,7 @@ export default function PurchaseManagement() {
               }
 
               // SINGLE ITEM RENDERING
-              if (groupItems.length === 1) {
+              if (groupKey.startsWith('__single__')) {
                 const v = groupItems[0];
                 const inv = inventoryMap.get(v.myacg_item_code);
                 const price = inv ? inv.final_price : 0;
@@ -906,8 +1018,8 @@ export default function PurchaseManagement() {
                       <tbody>
                         <tr>
                           <td style={{ padding: '10px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={title.startsWith('__single__') ? (v.variant_name || group.title) : title}>
-                              <HighlightText text={title.startsWith('__single__') ? (v.variant_name || group.title) : title} highlight={searchTerm} />
+                            <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={catTitle}>
+                              <HighlightText text={catTitle} highlight={searchTerm} />
                             </div>
                             <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
                               SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
@@ -984,16 +1096,16 @@ export default function PurchaseManagement() {
 
               // CATEGORY CARD RENDERING
               return (
-                <div key={title} className="card shadow-sm rounded-lg bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
+                <div key={groupKey} className="card shadow-sm rounded-lg bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
                   
                   {/* Category Header Row */}
                   <div 
                     style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
-                    onClick={() => toggleManualGroup(title)}
+                    onClick={() => toggleManualGroup(groupKey)}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
-                        <HighlightText text={title} highlight={searchTerm} />
+                        <HighlightText text={catTitle} highlight={searchTerm} />
                       </div>
                       <span style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 500 }}>
                         共 {groupItems.length} 款
@@ -1067,52 +1179,44 @@ export default function PurchaseManagement() {
                           </tr>
                         </thead>
                         <tbody>
-                          {groupItems.map((v, i) => {
-                            const inv = Array.from(inventoryMap.values()).find(item => 
-                              item.myacg_item_code === v.myacg_item_code ||
-                              (getBaseSku(item.myacg_item_code) === getBaseSku(v.myacg_item_code) &&
-                               (item.myacg_item_code === getBaseSku(item.myacg_item_code) || v.myacg_item_code === getBaseSku(v.myacg_item_code)))
-                            );
-                            const price = inv ? inv.final_price : 0;
+                          {(() => {
+                            const filteredList = groupItems.filter(v => {
+                              if (!searchTerm.trim()) return true;
+                              const lowerSearch = searchTerm.toLowerCase();
+                              return (
+                                (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
+                                (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
+                              );
+                            });
                             
-                            const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
-                            const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-                            
-                            const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
-                            const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
-        
-                            const totalDemand = myacgDemand + wacaDemand + privateDemand;
-    
-                            const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
-                            const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
-                            
-                            const needToBuy = Math.max(totalDemand - totalPurchased, 0);
-                            const excessBuy = Math.max(totalPurchased - totalDemand, 0);
+                            return filteredList.map((v, i) => {
+                              const inv = Array.from(inventoryMap.values()).find(item => 
+                                item.myacg_item_code === v.myacg_item_code ||
+                                (getBaseSku(item.myacg_item_code) === getBaseSku(v.myacg_item_code) &&
+                                 (item.myacg_item_code === getBaseSku(item.myacg_item_code) || v.myacg_item_code === getBaseSku(v.myacg_item_code)))
+                              );
+                              const price = inv ? inv.final_price : 0;
+                              
+                              const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+                              const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
+                              
+                              const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
+                              const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
+          
+                              const totalDemand = myacgDemand + wacaDemand + privateDemand;
+      
+                              const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
+                              const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+                              
+                              const needToBuy = Math.max(totalDemand - totalPurchased, 0);
+                              const excessBuy = Math.max(totalPurchased - totalDemand, 0);
 
-                            if (v.myacg_item_code.includes('G07073119')) {
-                              const orderedQty = salesOrderItems.filter(soi => 
-                                soi.myacg_item_code === v.myacg_item_code ||
-                                (getBaseSku(soi.myacg_item_code) === getBaseSku(v.myacg_item_code) &&
-                                 (soi.myacg_item_code === getBaseSku(soi.myacg_item_code) || v.myacg_item_code === getBaseSku(v.myacg_item_code)))
-                              ).reduce((sum, item) => sum + item.quantity, 0);
-
-                              console.log(`SKU: ${v.myacg_item_code}\n完整 variant:`, {
-                                myacg_item_code: v.myacg_item_code,
-                                myacg_auto_quantity: calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems),
-                                myacg_quantity: myacgDemand,
-                                myacg_sold_quantity: inv ? inv.myacg_sold_quantity : undefined,
-                                ordered_quantity: orderedQty,
-                                purchase_quantity: totalPurchased,
-                                finalDemand: totalDemand
-                              });
-                            }
-
-                            return (
-                              <tr key={v.id} style={{ borderBottom: i === groupItems.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
-                                <td style={{ padding: '12px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.variant_name}>
-                                    <HighlightText text={v.variant_name} highlight={searchTerm} />
-                                  </div>
+                              return (
+                                <tr key={v.id} style={{ borderBottom: i === filteredList.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
+                                  <td style={{ padding: '12px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.variant_name}>
+                                      <HighlightText text={parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name} highlight={searchTerm} />
+                                    </div>
                                   <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
                                     SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
                                   </div>
@@ -1182,8 +1286,9 @@ export default function PurchaseManagement() {
                                   </span>
                                 </td>
                               </tr>
-                            );
-                          })}
+                              );
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
@@ -1197,11 +1302,15 @@ export default function PurchaseManagement() {
         {/* Shortage Purchasing List (only when activeTab === 'worksheet' and filterMode === 'abnormal') */}
         {activeTab === 'worksheet' && filterMode === 'abnormal' && (() => {
           // 1. Process all groups and variants to extract actual shortages (needToBuy > 0)
-          const shortageGroups = sortedGroupEntries.map(([title, groupItems]) => {
+          const shortageGroups = sortedGroupEntries.map(([groupKey, groupItems]) => {
+            const catTitle = groupKey.startsWith('category:') 
+              ? groupKey.slice('category:'.length) 
+              : (groupItems[0]?.raw_variant_name || groupItems[0]?.variant_name || '');
+            
             // Apply Search Filter first
             if (searchTerm) {
               const lowerSearch = searchTerm.toLowerCase();
-              const groupMatch = title.toLowerCase().includes(lowerSearch);
+              const groupMatch = catTitle.toLowerCase().includes(lowerSearch);
               const hasMatch = groupItems.some(v => 
                 (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
                 (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
@@ -1228,10 +1337,10 @@ export default function PurchaseManagement() {
             if (totalGroupShortage === 0) return null;
 
             return {
-              title,
+              groupKey,
+              catTitle,
               items: itemsWithShortage,
-              totalShortage: totalGroupShortage,
-              originalItemsCount: groupItems.length
+              totalShortage: totalGroupShortage
             };
           }).filter((g): g is NonNullable<typeof g> => g !== null);
 
@@ -1284,15 +1393,12 @@ export default function PurchaseManagement() {
 
               {/* Shopping List Items */}
               {shortageGroups.map(g => {
-                const isSingleItem = g.originalItemsCount === 1 || g.title.startsWith('__single__');
+                const isSingleItem = g.groupKey.startsWith('__single__');
                 
                 if (isSingleItem) {
-                  const singleItem = g.items[0];
-                  const itemTitle = g.title.startsWith('__single__') ? (singleItem.variant.variant_name || group.title) : g.title;
-                  
                   return (
                     <div 
-                      key={g.title} 
+                      key={g.groupKey} 
                       className="card shadow-sm rounded-lg overflow-hidden bg-white" 
                       style={{ 
                         borderTop: '1px solid #e5e7eb', 
@@ -1307,7 +1413,7 @@ export default function PurchaseManagement() {
                       }}
                     >
                       <span style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A' }}>
-                        <HighlightText text={itemTitle} highlight={searchTerm} />
+                        <HighlightText text={g.catTitle} highlight={searchTerm} />
                       </span>
                       <span style={{
                         backgroundColor: '#FEE2E2',
@@ -1327,7 +1433,7 @@ export default function PurchaseManagement() {
                 // Multi-spec Product (category group)
                 return (
                   <div 
-                    key={g.title} 
+                    key={g.groupKey} 
                     className="card shadow-sm rounded-lg overflow-hidden bg-white" 
                     style={{ 
                       borderTop: '1px solid #e5e7eb', 
@@ -1340,7 +1446,7 @@ export default function PurchaseManagement() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                       <span style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span style={{ color: '#64748b' }}>▼</span> 
-                        <HighlightText text={g.title} highlight={searchTerm} />
+                        <HighlightText text={g.catTitle} highlight={searchTerm} />
                       </span>
                       <span style={{
                         backgroundColor: '#FEE2E2',
@@ -1360,7 +1466,7 @@ export default function PurchaseManagement() {
                         <div key={item.variant.id} style={{ fontSize: '14px', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ color: '#94a3b8' }}>•</span>
                           <span>
-                            <HighlightText text={item.variant.variant_name} highlight={searchTerm} />
+                            <HighlightText text={parsedVariantsMap.get(item.variant.id)?.variantDisplayName || item.variant.variant_name} highlight={searchTerm} />
                           </span>
                           <span style={{ fontWeight: 700, color: '#0F172A', marginLeft: '4px' }}>×{item.needToBuy}</span>
                         </div>
@@ -1480,7 +1586,18 @@ export default function PurchaseManagement() {
                 </div>
               </div>
 
-              <div style={{ fontWeight: 600, marginBottom: '8px', fontSize: '14px', color: '#1e293b' }}>採購明細</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>採購明細</div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={onlyShowShortage} 
+                    onChange={e => setOnlyShowShortage(e.target.checked)} 
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span>只顯示有缺口商品</span>
+                </label>
+              </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
                 <thead>
                   <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
@@ -1490,17 +1607,73 @@ export default function PurchaseManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {variants.map((v, idx) => (
-                    <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px' }}>{formatVariantOption(v)}</td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>
-                        <input className="input" type="number" min="0" value={batchLines[idx]?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
-                      </td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <input className="input" type="number" min="0" value={batchLines[idx]?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
-                      </td>
-                    </tr>
-                  ))}
+                  {(() => {
+                    const rows: React.ReactNode[] = [];
+                    let hasAnyVisible = false;
+                    
+                    variants.forEach((v, idx) => {
+                      const shortage = getVariantShortageForModal(v);
+                      const isHidden = onlyShowShortage && shortage <= 0;
+                      if (isHidden) return;
+                      
+                      hasAnyVisible = true;
+                      rows.push(
+                        <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '8px' }}>
+                              <span>{formatVariantOption(v)}</span>
+                              {shortage > 0 && (
+                                <span style={{
+                                  backgroundColor: '#FEE2E2',
+                                  color: '#DC2626',
+                                  border: '1px solid #fecaca',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  缺 {shortage}
+                                </span>
+                              )}
+                              {shortage < 0 && (
+                                <span style={{
+                                  backgroundColor: '#EFF6FF',
+                                  color: '#2563EB',
+                                  border: '1px solid #bfdbfe',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  多買 {Math.abs(shortage)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'center' }}>
+                            <input className="input" type="number" min="0" value={batchLines[idx]?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                          </td>
+                          <td style={{ padding: '8px', textAlign: 'right' }}>
+                            <input className="input" type="number" min="0" value={batchLines[idx]?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                          </td>
+                        </tr>
+                      );
+                    });
+                    
+                    if (!hasAnyVisible) {
+                      return (
+                        <tr>
+                          <td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
+                            目前無任何缺口商品
+                          </td>
+                        </tr>
+                      );
+                    }
+                    
+                    return rows;
+                  })()}
                 </tbody>
               </table>
 
