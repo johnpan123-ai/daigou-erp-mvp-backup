@@ -1,17 +1,13 @@
 -- =========================================================================
--- 小河馬採購工作台 - 訂購紀錄核心雲端同步 SQL 審查修正版 (Phase 3-C-MVP)
+-- 小河馬採購工作台 - 訂購紀錄核心雲端同步 SQL 審查修正版 (Phase 3-C-MVP-Idempotency-Fix)
 -- 檔案名稱: 002_core_erp_tables_mvp.sql
 -- 
 -- 【說明】
--- 1. 本檔案為經安全與效能審查（Review）修正後之 MVP 核心 DDL 部署版本。
+-- 1. 本檔案為經安全與重複執行性（Idempotency）修正後之 MVP 核心 DDL 部署版本。
 -- 2. 修正重點：
---    - 建立 SECURITY DEFINER 輔助函數以避免 RLS 查詢 `profiles` 時發生遞迴與效能低落。
---    - 修改 SELECT 政策：預設僅能檢視 `deleted_at IS NULL` 的資料（Owner 例外可看全部）。
---    - 拆分 modify_policy 為 INSERT、UPDATE、DELETE 政策，權限邊界更清晰。
---    - DELETE 限制：一般 Staff 僅能透過 UPDATE 將 `deleted_at` 設為非空（軟刪除），
---      物理刪除（DELETE）僅限角色為 `owner` 的使用者。
---    - 建立 `sync_audit_columns` trigger，在 UPDATE 時自動累加 `version`、
---      更新 `updated_at` 並記錄 `updated_by = auth.uid()`。
+--    - 在所有 CREATE TRIGGER 前新增 DROP TRIGGER IF EXISTS 守護。
+--    - 在所有 CREATE POLICY 前新增 DROP POLICY IF EXISTS 守護。
+--    - 確保此指令檔在 Supabase 重複貼上執行時，不會因物件已存在而中斷出錯。
 -- 3. **請手動複製到 Supabase SQL Editor 執行，請勿直接修改程式**。
 -- =========================================================================
 
@@ -185,14 +181,28 @@ CREATE TABLE IF NOT EXISTS public.private_order_items (
 );
 
 -- ==========================================
--- 2. 觸發器綁定：自動累加 Version、更新時間與操作人
+-- 2. 觸發器防重疊建立與綁定
 -- ==========================================
+
+DROP TRIGGER IF EXISTS trigger_update_product_groups_audit ON public.product_groups;
 CREATE TRIGGER trigger_update_product_groups_audit BEFORE UPDATE ON public.product_groups FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
+
+DROP TRIGGER IF EXISTS trigger_update_product_categories_audit ON public.product_categories;
 CREATE TRIGGER trigger_update_product_categories_audit BEFORE UPDATE ON public.product_categories FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
+
+DROP TRIGGER IF EXISTS trigger_update_product_variants_audit ON public.product_variants;
 CREATE TRIGGER trigger_update_product_variants_audit BEFORE UPDATE ON public.product_variants FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
+
+DROP TRIGGER IF EXISTS trigger_update_purchase_batches_audit ON public.purchase_batches;
 CREATE TRIGGER trigger_update_purchase_batches_audit BEFORE UPDATE ON public.purchase_batches FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
+
+DROP TRIGGER IF EXISTS trigger_update_purchase_batch_items_audit ON public.purchase_batch_items;
 CREATE TRIGGER trigger_update_purchase_batch_items_audit BEFORE UPDATE ON public.purchase_batch_items FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
+
+DROP TRIGGER IF EXISTS trigger_update_private_orders_audit ON public.private_orders;
 CREATE TRIGGER trigger_update_private_orders_audit BEFORE UPDATE ON public.private_orders FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
+
+DROP TRIGGER IF EXISTS trigger_update_private_order_items_audit ON public.private_order_items;
 CREATE TRIGGER trigger_update_private_order_items_audit BEFORE UPDATE ON public.private_order_items FOR EACH ROW EXECUTE FUNCTION public.sync_audit_columns();
 
 -- ==========================================
@@ -204,7 +214,7 @@ CREATE INDEX IF NOT EXISTS idx_product_categories_group_id ON public.product_cat
 CREATE INDEX IF NOT EXISTS idx_product_variants_group_id ON public.product_variants(product_group_id);
 CREATE INDEX IF NOT EXISTS idx_product_variants_category_id ON public.product_variants(product_category_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_batches_group_id ON public.purchase_batches(product_group_id);
-CREATE INDEX If NOT EXISTS idx_purchase_batch_items_batch_id ON public.purchase_batch_items(purchase_batch_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_batch_items_batch_id ON public.purchase_batch_items(purchase_batch_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_batch_items_variant_id ON public.purchase_batch_items(product_variant_id);
 CREATE INDEX IF NOT EXISTS idx_private_orders_group_id ON public.private_orders(product_group_id);
 CREATE INDEX IF NOT EXISTS idx_private_order_items_order_id ON public.private_order_items(private_order_id);
@@ -239,45 +249,97 @@ ALTER TABLE public.private_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.private_order_items ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------
--- 4a. SELECT 政策：一般使用者僅能查詢「未軟刪除 (deleted_at IS NULL)」的資料，Owner 則不受此限。
+-- 4a. SELECT 政策：安全清理舊政策後重新建立
 -- ------------------------------------------
+DROP POLICY IF EXISTS select_policy ON public.product_groups;
 CREATE POLICY select_policy ON public.product_groups FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS select_policy ON public.product_categories;
 CREATE POLICY select_policy ON public.product_categories FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS select_policy ON public.product_variants;
 CREATE POLICY select_policy ON public.product_variants FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS select_policy ON public.purchase_batches;
 CREATE POLICY select_policy ON public.purchase_batches FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS select_policy ON public.purchase_batch_items;
 CREATE POLICY select_policy ON public.purchase_batch_items FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS select_policy ON public.private_orders;
 CREATE POLICY select_policy ON public.private_orders FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS select_policy ON public.private_order_items;
 CREATE POLICY select_policy ON public.private_order_items FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
 
 -- ------------------------------------------
--- 4b. INSERT 政策：僅限 Owner 與 Staff 寫入
+-- 4b. INSERT 政策：安全清理舊政策後重新建立
 -- ------------------------------------------
+DROP POLICY IF EXISTS insert_policy ON public.product_groups;
 CREATE POLICY insert_policy ON public.product_groups FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS insert_policy ON public.product_categories;
 CREATE POLICY insert_policy ON public.product_categories FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS insert_policy ON public.product_variants;
 CREATE POLICY insert_policy ON public.product_variants FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS insert_policy ON public.purchase_batches;
 CREATE POLICY insert_policy ON public.purchase_batches FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS insert_policy ON public.purchase_batch_items;
 CREATE POLICY insert_policy ON public.purchase_batch_items FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS insert_policy ON public.private_orders;
 CREATE POLICY insert_policy ON public.private_orders FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS insert_policy ON public.private_order_items;
 CREATE POLICY insert_policy ON public.private_order_items FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
 
 -- ------------------------------------------
--- 4c. UPDATE 政策：僅限 Owner 與 Staff 更新（包含將 deleted_at 設為現在時間以執行軟刪除）
+-- 4c. UPDATE 政策：安全清理舊政策後重新建立
 -- ------------------------------------------
+DROP POLICY IF EXISTS update_policy ON public.product_groups;
 CREATE POLICY update_policy ON public.product_groups FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS update_policy ON public.product_categories;
 CREATE POLICY update_policy ON public.product_categories FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS update_policy ON public.product_variants;
 CREATE POLICY update_policy ON public.product_variants FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS update_policy ON public.purchase_batches;
 CREATE POLICY update_policy ON public.purchase_batches FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS update_policy ON public.purchase_batch_items;
 CREATE POLICY update_policy ON public.purchase_batch_items FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS update_policy ON public.private_orders;
 CREATE POLICY update_policy ON public.private_orders FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
+
+DROP POLICY IF EXISTS update_policy ON public.private_order_items;
 CREATE POLICY update_policy ON public.private_order_items FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
 
 -- ------------------------------------------
--- 4d. DELETE 政策：實體物理刪除 (Hard Delete) 嚴格限制僅限 Owner 可執行
+-- 4d. DELETE 政策：安全清理舊政策後重新建立 (僅限 Owner 可物理刪除)
 -- ------------------------------------------
+DROP POLICY IF EXISTS delete_policy ON public.product_groups;
 CREATE POLICY delete_policy ON public.product_groups FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS delete_policy ON public.product_categories;
 CREATE POLICY delete_policy ON public.product_categories FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS delete_policy ON public.product_variants;
 CREATE POLICY delete_policy ON public.product_variants FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS delete_policy ON public.purchase_batches;
 CREATE POLICY delete_policy ON public.purchase_batches FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS delete_policy ON public.purchase_batch_items;
 CREATE POLICY delete_policy ON public.purchase_batch_items FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS delete_policy ON public.private_orders;
 CREATE POLICY delete_policy ON public.private_orders FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
+
+DROP POLICY IF EXISTS delete_policy ON public.private_order_items;
 CREATE POLICY delete_policy ON public.private_order_items FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
