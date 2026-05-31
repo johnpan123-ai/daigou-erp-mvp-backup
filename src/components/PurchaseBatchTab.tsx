@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PurchaseBatch, PurchaseBatchItem, ProductVariant } from '../lib/db';
+import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory } from '../lib/db';
 import { db } from '../lib/db';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
 
@@ -7,11 +7,12 @@ interface PurchaseBatchTabProps {
   batches: PurchaseBatch[];
   batchItems: PurchaseBatchItem[];
   variants: ProductVariant[];
+  categoryMap: Map<string, ProductCategory>;
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, onRefresh, onEditBatch }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, onRefresh, onEditBatch }: PurchaseBatchTabProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const toggleExpand = (id: string) => {
@@ -34,6 +35,20 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
   };
 
   const variantMap = new Map(variants.map(v => [v.id, v]));
+
+  const formatVariantOption = (v: ProductVariant) => {
+    let catTitle = '';
+    if (v.product_category_id) {
+      const cat = categoryMap.get(v.product_category_id);
+      if (cat) catTitle = cat.title;
+    }
+    
+    if (!catTitle || catTitle === '單品') {
+      return v.variant_name;
+    } else {
+      return `${catTitle} - ${v.variant_name}`;
+    }
+  };
 
   if (batches.length === 0) {
     return <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>目前沒有採購批次紀錄。</div>;
@@ -92,11 +107,15 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map(item => {
+                      {items.sort((a, b) => {
+                        const idxA = variants.findIndex(v => v.id === a.product_variant_id);
+                        const idxB = variants.findIndex(v => v.id === b.product_variant_id);
+                        return idxA - idxB;
+                      }).map(item => {
                         const variant = variantMap.get(item.product_variant_id);
                         return (
                           <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '8px', color: '#0f172a' }}>{variant?.variant_name || '未知商品'}</td>
+                            <td style={{ padding: '8px', color: '#0f172a' }}>{variant ? formatVariantOption(variant) : '未知商品'}</td>
                             <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>{item.quantity}</td>
                             <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>¥ {item.cost.toLocaleString()}</td>
                             <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>¥ {(item.quantity * item.cost).toLocaleString()}</td>

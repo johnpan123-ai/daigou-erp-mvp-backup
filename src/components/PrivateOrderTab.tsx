@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PrivateOrder, PrivateOrderItem, ProductVariant } from '../lib/db';
+import type { PrivateOrder, PrivateOrderItem, ProductVariant, ProductCategory } from '../lib/db';
 import { db } from '../lib/db';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
 
@@ -7,11 +7,12 @@ interface PrivateOrderTabProps {
   orders: PrivateOrder[];
   orderItems: PrivateOrderItem[];
   variants: ProductVariant[];
+  categoryMap: Map<string, ProductCategory>;
   onRefresh: () => void;
   onEditOrder: (order: PrivateOrder) => void;
 }
 
-export default function PrivateOrderTab({ orders, orderItems, variants, onRefresh, onEditOrder }: PrivateOrderTabProps) {
+export default function PrivateOrderTab({ orders, orderItems, variants, categoryMap, onRefresh, onEditOrder }: PrivateOrderTabProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const toggleExpand = (id: string) => {
@@ -34,6 +35,20 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
   };
 
   const variantMap = new Map(variants.map(v => [v.id, v]));
+
+  const formatVariantOption = (v: ProductVariant) => {
+    let catTitle = '';
+    if (v.product_category_id) {
+      const cat = categoryMap.get(v.product_category_id);
+      if (cat) catTitle = cat.title;
+    }
+    
+    if (!catTitle || catTitle === '單品') {
+      return v.variant_name;
+    } else {
+      return `${catTitle} - ${v.variant_name}`;
+    }
+  };
 
   if (orders.length === 0) {
     return <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>目前沒有私下登記紀錄。</div>;
@@ -93,11 +108,15 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map(item => {
+                      {items.sort((a, b) => {
+                        const idxA = variants.findIndex(v => v.id === a.product_variant_id);
+                        const idxB = variants.findIndex(v => v.id === b.product_variant_id);
+                        return idxA - idxB;
+                      }).map(item => {
                         const variant = variantMap.get(item.product_variant_id);
                         return (
                           <tr key={item.id} style={{ borderBottom: '1px solid #fdf2f8' }}>
-                            <td style={{ padding: '8px', color: '#0f172a' }}>{variant?.variant_name || '未知商品'}</td>
+                            <td style={{ padding: '8px', color: '#0f172a' }}>{variant ? formatVariantOption(variant) : '未知商品'}</td>
                             <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>{item.quantity}</td>
                             <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>NT$ {item.amount.toLocaleString()}</td>
                             <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>NT$ {(item.quantity * item.amount).toLocaleString()}</td>
