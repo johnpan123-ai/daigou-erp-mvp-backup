@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ViewportProvider } from './contexts/ViewportContext';
 import { AppLayout } from './components/layout/AppLayout';
+import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import OrdersImport from './pages/OrdersImport';
 import PurchaseRecords from './pages/PurchaseRecords';
@@ -14,8 +15,10 @@ function App() {
       <BrowserRouter>
         <AppLayout>
           <Routes>
-            <Route path="/" element={<Inventory />} />
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/inventory" element={<Inventory />} />
+
             <Route path="/orders-import" element={<OrdersImport />} />
             <Route path="/purchase-records" element={<PurchaseRecords />} />
             <Route path="/purchase-records/:id" element={<PurchaseManagement />} />

@@ -3,7 +3,7 @@ import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 export default function PurchaseRecords() {
 
@@ -17,6 +17,8 @@ export default function PurchaseRecords() {
 
   const [editMode, setEditMode] = useState<boolean>(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
   const [filterSource, setFilterSource] = useState(() => localStorage.getItem('erp_filter_source') || 'all');
@@ -38,6 +40,19 @@ export default function PurchaseRecords() {
   useEffect(() => {
     localStorage.setItem('erp_active_tab', activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    const tabParam = searchParams.get('tab');
+    if (tabParam) {
+      if (tabParam === 'all') setActiveTab('all');
+      else if (tabParam === 'hololive') setActiveTab('hololive');
+      else if (tabParam === 'vspo') setActiveTab('vspo');
+      else if (tabParam === 'agency') setActiveTab('proxy');
+      else if (tabParam === 'other') setActiveTab('other');
+    }
+  }, [location.search, setActiveTab]);
+
 
   const getGroupStatus = (g: ProductGroup) => {
     const today = new Date().toISOString().split('T')[0];

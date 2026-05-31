@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X, Monitor, Smartphone, Layout } from 'lucide-react';
+import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 
@@ -13,7 +13,12 @@ interface SidebarItemProps {
 
 function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
   const location = useLocation();
-  const isActive = location.pathname.startsWith(to) || (to === '/inventory' && location.pathname === '/');
+  const isActive = 
+    (to === '/dashboard' || to === '/')
+      ? (location.pathname === '/' || location.pathname === '/dashboard')
+      : (to === '/inventory')
+        ? location.pathname === '/inventory'
+        : location.pathname.startsWith(to);
 
   return (
     <Link 
@@ -28,6 +33,7 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
     </Link>
   );
 }
+
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { mode, setMode, isMobile } = useViewport();
@@ -52,22 +58,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         <nav className="flex-col sidebar-nav-container">
           <div className="sidebar-section-title">
-            主檔與訂單
+            主選單
           </div>
+          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label="Dashboard" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="商品清單匯入" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
-          
-          <div className="sidebar-section-title">
-            採購作業
-          </div>
           <SidebarItem to="/purchase-records" icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/purchasing" icon={<BarChart3 size={20} />} label="採購差異總覽" onClick={() => setIsMobileMenuOpen(false)} />
-          
-          <div style={{ flexGrow: 1 }} />
-          
-          <div className="sidebar-section-title">
-            系統
-          </div>
           <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
         </nav>
       </aside>
