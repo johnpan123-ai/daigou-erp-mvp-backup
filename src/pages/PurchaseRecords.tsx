@@ -368,6 +368,20 @@ export default function PurchaseRecords() {
     }
   };
 
+  const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
+    if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
+      return;
+    }
+    const updatedGroups = groups.map(g => {
+      if (g.id === groupId) {
+        return { ...g, [field]: value } as ProductGroup;
+      }
+      return g;
+    });
+    setGroups(updatedGroups);
+    await db.saveProductGroups(updatedGroups);
+  };
+
   const handleRowClick = (id: string, e: React.MouseEvent) => {
     // Don't navigate if clicking inputs/buttons
     if ((e.target as HTMLElement).tagName === 'INPUT' || 
@@ -634,25 +648,61 @@ export default function PurchaseRecords() {
                               value={editForm.purchase_date || ''} 
                               onChange={e => setEditForm({...editForm, purchase_date: e.target.value})} 
                             />
+                          ) : editMode ? (
+                            <input 
+                              className="input" 
+                              type="date" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.purchase_date || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                            />
                           ) : (
                             <span style={{ color: '#475569', fontWeight: 500 }}>
                               {g.purchase_date || '-'}
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'center', color: isEditing ? 'inherit' : closingDateStyle.color, fontWeight: isEditing ? 'inherit' : closingDateStyle.fontWeight }}>
+                        <td style={{ textAlign: 'center', color: (isEditing || editMode) ? 'inherit' : closingDateStyle.color, fontWeight: (isEditing || editMode) ? 'inherit' : closingDateStyle.fontWeight }}>
                           {isEditing ? (
                             <input className="input" type="date" style={{ width: '100%' }} value={editForm.closing_date || ''} onChange={e => setEditForm({...editForm, closing_date: e.target.value})} />
+                          ) : editMode ? (
+                            <input 
+                              className="input" 
+                              type="date" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.closing_date || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                            />
                           ) : closingDateStyle.text}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {isEditing ? (
                             <input className="input" style={{ width: '100%' }} value={editForm.release_month || ''} onChange={e => setEditForm({...editForm, release_month: e.target.value})} placeholder="例如：2026-11" />
+                          ) : editMode ? (
+                            <input 
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.release_month || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                              placeholder="例如：2026-11"
+                            />
                           ) : g.release_month || '-'}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {isEditing ? (
                             <input className="input" style={{ width: '100%' }} value={editForm.product_url || ''} onChange={e => setEditForm({...editForm, product_url: e.target.value})} placeholder="連結" />
+                          ) : editMode ? (
+                            <input 
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.product_url || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)} 
+                              onClick={e => e.stopPropagation()}
+                              placeholder="連結"
+                            />
                           ) : (
                             g.product_url ? (
                               <a 
@@ -673,6 +723,8 @@ export default function PurchaseRecords() {
                               <button className="btn btn-ghost text-success" style={{ padding: '4px' }} onClick={() => handleSave(g.id)}><Save size={16} /></button>
                               <button className="btn btn-ghost text-danger" style={{ padding: '4px' }} onClick={() => setEditingId(null)}><X size={16} /></button>
                             </div>
+                          ) : editMode ? (
+                            <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 500 }}>行內編輯</span>
                           ) : (
                             <div className="flex items-center justify-center gap-xs">
                               <button 
