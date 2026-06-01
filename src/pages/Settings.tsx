@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { dataProvider } from '../providers/dataProvider';
-import { getProviderMode } from '../providers/providerMode';
+import { getProviderMode, setProviderMode } from '../providers/providerMode';
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
@@ -260,36 +260,53 @@ export default function Settings() {
           </div>
 
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-            <label style={{ 
-              border: '2px solid var(--color-primary)', 
-              borderRadius: '8px', 
-              padding: '16px', 
-              flex: '1', 
-              minWidth: '200px', 
-              cursor: 'pointer',
-              position: 'relative',
-              backgroundColor: 'rgba(134, 59, 255, 0.05)'
-            }}>
-              <input type="radio" checked readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
-              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px' }}>本地模式（可用）</div>
-              <div className="text-xs text-muted">使用瀏覽器 LocalStorage/IndexedDB 儲存資料，完全在本地執行。</div>
-            </label>
-
             <label 
-              onClick={() => alert('此模式尚未啟用，之後會在雲端化階段開放。')}
+              onClick={() => {
+                if (currentMode !== 'local') {
+                  setProviderMode('local');
+                  window.location.reload();
+                }
+              }}
               style={{ 
-                border: '1px solid var(--color-border)', 
+                border: currentMode === 'local' ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', 
                 borderRadius: '8px', 
                 padding: '16px', 
                 flex: '1', 
                 minWidth: '200px', 
                 cursor: 'pointer',
-                opacity: '0.6',
-                position: 'relative'
+                position: 'relative',
+                backgroundColor: currentMode === 'local' ? 'rgba(134, 59, 255, 0.05)' : 'transparent'
               }}
             >
-              <input type="radio" checked={false} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
-              <div className="font-semibold text-muted" style={{ fontSize: '15px', marginBottom: '4px' }}>雲端模式（尚未啟用）</div>
+              <input type="radio" checked={currentMode === 'local'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px' }}>本地模式（可用）</div>
+              <div className="text-xs text-muted">使用瀏覽器 LocalStorage/IndexedDB 儲存資料，完全在本地執行。</div>
+            </label>
+
+            <label 
+              onClick={() => {
+                if (currentMode !== 'cloud') {
+                  if (!user) {
+                    alert('請先登入後再使用雲端模式');
+                    return;
+                  }
+                  setProviderMode('cloud');
+                  window.location.reload();
+                }
+              }}
+              style={{ 
+                border: currentMode === 'cloud' ? '2px solid var(--color-primary)' : '1px solid var(--color-border)', 
+                borderRadius: '8px', 
+                padding: '16px', 
+                flex: '1', 
+                minWidth: '200px', 
+                cursor: 'pointer',
+                position: 'relative',
+                backgroundColor: currentMode === 'cloud' ? 'rgba(134, 59, 255, 0.05)' : 'transparent'
+              }}
+            >
+              <input type="radio" checked={currentMode === 'cloud'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className={`font-semibold ${currentMode === 'cloud' ? '' : 'text-muted'}`} style={{ fontSize: '15px', marginBottom: '4px' }}>雲端模式</div>
               <div className="text-xs text-muted">與 Supabase 雲端資料庫同步，支援多使用者即時協同編輯。</div>
             </label>
 
@@ -301,7 +318,7 @@ export default function Settings() {
                 padding: '16px', 
                 flex: '1', 
                 minWidth: '200px', 
-                cursor: 'pointer',
+                cursor: 'not-allowed',
                 opacity: '0.6',
                 position: 'relative'
               }}
@@ -341,7 +358,7 @@ export default function Settings() {
 
               <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div>
-                  <strong>目前模式：</strong>本地模式
+                  <strong>目前模式：</strong>{currentMode === 'local' ? '本地模式' : currentMode === 'cloud' ? '雲端模式' : '備援模式'}
                 </div>
                 <div>
                   <strong>Supabase 狀態：</strong>

@@ -97,10 +97,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               let badgeBorder = '#b2f5ea';
 
               if (mode === 'cloud') {
-                modeLabel = '雲端模式尚未啟用';
-                badgeColor = '#d69e2e';
-                badgeBg = '#fefcbf';
-                badgeBorder = '#fef08a';
+                modeLabel = '雲端模式';
+                badgeColor = '#6366f1';
+                badgeBg = '#e0e7ff';
+                badgeBorder = '#c7d2fe';
               } else if (mode === 'fallback') {
                 modeLabel = '備援模式';
                 badgeColor = '#3182ce';

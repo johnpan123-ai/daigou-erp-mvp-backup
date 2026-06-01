@@ -15,5 +15,5 @@ export function setProviderMode(mode: ProviderMode): void {
 }
 
 export function isCloudEnabled(): boolean {
-  return false;
+  return true;
 }

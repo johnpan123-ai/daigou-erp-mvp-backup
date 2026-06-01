@@ -112,9 +112,52 @@ export class SupabaseProvider implements IDataProvider {
     return db.getProductVariants();
   }
 
-  // === 3 張 Synced 表寫入 (本階段唯讀：僅寫入本地快取，不 Push 至 Supabase) ===
   async saveProductGroups(groups: ProductGroup[]): Promise<void> {
-    return db.saveProductGroups(groups);
+    // 1. 寫入本地 IndexedDB 快取
+    await db.saveProductGroups(groups);
+
+    // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
+    if (groups.length === 0) {
+      return;
+    }
+
+    try {
+      // 篩選出合法 UUID 的資料
+      const validGroups = groups.filter(g => 
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(g.id)
+      );
+
+      if (validGroups.length === 0) {
+        console.log('[Sync Push] product_groups skipped: no valid rows');
+        return;
+      }
+
+      console.log(`[Sync Push] product_groups preparing: ${validGroups.length} rows`);
+
+      const upsertData = validGroups.map(g => ({
+        id: g.id,
+        local_id: g.id,
+        title: g.title,
+        listing_type: g.listing_type || null,
+        purchase_date: g.purchase_date || null,
+        closing_date: g.closing_date || null,
+        release_month: g.release_month || null,
+        product_url: g.product_url || null,
+        priority: g.priority || 'Medium'
+      }));
+
+      const { error } = await supabase
+        .from('product_groups')
+        .upsert(upsertData);
+
+      if (error) {
+        console.error(`[Sync Push] product_groups upsert failed: ${error.message || JSON.stringify(error)}`);
+      } else {
+        console.log(`[Sync Push] product_groups upsert success: ${upsertData.length} rows`);
+      }
+    } catch (err: any) {
+      console.error(`[Sync Push] product_groups upsert failed: ${err.message || err}`);
+    }
   }
 
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
