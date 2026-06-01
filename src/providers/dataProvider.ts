@@ -1,5 +1,6 @@
 import type { IDataProvider } from './types';
 import { LocalProvider } from './localProvider';
+import { supabaseProvider } from './cloud/supabaseProvider';
 import { getProviderMode } from './providerMode';
 import type { 
   InventoryItem, 
@@ -18,14 +19,14 @@ import type {
 
 class DynamicDataProvider implements IDataProvider {
   private localProvider = new LocalProvider();
+  private supabaseProvider = supabaseProvider;
 
   private getActiveProvider(): IDataProvider {
     const mode = getProviderMode();
-    // If mode is 'cloud' or 'fallback', since those are not enabled yet, we fallback to localProvider
     if (mode === 'cloud') {
-      return this.localProvider;
+      return this.supabaseProvider;
     } else if (mode === 'fallback') {
-      return this.localProvider;
+      return this.supabaseProvider;
     }
     return this.localProvider;
   }
