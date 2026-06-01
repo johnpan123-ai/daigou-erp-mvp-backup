@@ -43,6 +43,7 @@ export class SupabaseProvider implements IDataProvider {
 
   /**
    * Phase 3-E-1: 從 Supabase 抓取 3 張核心商品資料表並快取至本地的唯讀同步程序
+   * 已修正：增加等待 Supabase Auth 驗證狀態初始化，避免未載入 Session 即以匿名 (anon) 身份拉取空資料。
    */
   async pullCoreProductData(): Promise<void> {
     if (this.isPulled) return;
@@ -50,7 +51,17 @@ export class SupabaseProvider implements IDataProvider {
 
     this.pullPromise = (async () => {
       try {
-        console.log('[Sync] 正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...');
+        console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
+        
+        // 等待並獲取當前登入的 session，確保 JWT token 已載入 client
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session) {
+          console.warn('[Sync] Supabase 尚未偵測到有效登入 Session，略過雲端 Pull 以避免覆蓋本機資料。');
+          return;
+        }
+
+        console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
         
         // 1. 同時從 Supabase 抓取未刪除的資料
         const [groupsRes, categoriesRes, variantsRes] = await Promise.all([
@@ -63,7 +74,11 @@ export class SupabaseProvider implements IDataProvider {
         if (categoriesRes.error) throw categoriesRes.error;
         if (variantsRes.error) throw variantsRes.error;
 
+        console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${groupsRes.data?.length || 0} 筆, product_categories = ${categoriesRes.data?.length || 0} 筆, product_variants = ${variantsRes.data?.length || 0} 筆`);
+
         // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
+        console.log(`[Sync] 正在寫入本地快取：groups: ${groupsRes.data?.length || 0} 筆, categories: ${categoriesRes.data?.length || 0} 筆, variants: ${variantsRes.data?.length || 0} 筆`);
+        
         await db.saveProductGroups(groupsRes.data || []);
         await db.saveProductCategories(categoriesRes.data || []);
         await db.saveProductVariants(variantsRes.data || []);
