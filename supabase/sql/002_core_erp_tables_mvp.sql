@@ -1,5 +1,5 @@
 -- =========================================================================
--- 小河馬採購工作台 - 訂購紀錄核心雲端同步 SQL 審查修正版 (Phase 3-C-MVP-Idempotency-Fix)
+-- 小河馬採購工作台 - 訂購紀錄核心雲端同步 SQL 審查修正版 (Phase 3-B-MVP-Idempotency-Fix)
 -- 檔案名稱: 002_core_erp_tables_mvp.sql
 -- 
 -- 【說明】
@@ -8,6 +8,8 @@
 --    - 在所有 CREATE TRIGGER 前新增 DROP TRIGGER IF EXISTS 守護。
 --    - 在所有 CREATE POLICY 前新增 DROP POLICY IF EXISTS 守護。
 --    - 確保此指令檔在 Supabase 重複貼上執行時，不會因物件已存在而中斷出錯。
+--    - 已加入 sync_status 欄位以支援本地端-雲端之狀態標記。
+--    - 調整外鍵 Constraint 約束，防止 Cascade Delete 造成業務數據誤刪，將關鍵節點改為 ON DELETE RESTRICT。
 -- 3. **請手動複製到 Supabase SQL Editor 執行，請勿直接修改程式**。
 -- =========================================================================
 
@@ -54,9 +56,9 @@ CREATE TABLE IF NOT EXISTS public.product_groups (
     normalized_title   text,
     listing_type       text,
     priority           text NOT NULL DEFAULT 'Medium' CONSTRAINT priority_check CHECK (priority IN ('High', 'Medium', 'Low')),
-    purchase_date      date,
-    closing_date       date,
-    release_month      text,
+    purchase_date      text, -- 購買結單日 (格式 YYYY-MM-DD)
+    closing_date       text, -- 官方結單日 (格式 YYYY-MM-DD)
+    release_month      text, -- 發售月份
     has_official_site  boolean NOT NULL DEFAULT false,
     product_url        text,
     
@@ -66,13 +68,15 @@ CREATE TABLE IF NOT EXISTS public.product_groups (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- B. 商品分類 (Product Category)
 CREATE TABLE IF NOT EXISTS public.product_categories (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_group_id uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE CASCADE,
+    product_group_id uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE CASCADE, 
+    -- 說明：Category 代表商品群組底下的分頁頁籤。若群組 (ProductGroup) 被刪除，則底下分類一併 CASCADE 刪除是安全的。
     title            text NOT NULL,
     sort_order       integer NOT NULL DEFAULT 0,
     
@@ -82,24 +86,35 @@ CREATE TABLE IF NOT EXISTS public.product_categories (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- C. 商品規格明細 (Product Variant)
 CREATE TABLE IF NOT EXISTS public.product_variants (
-    id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_group_id          uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE CASCADE,
-    product_category_id       uuid REFERENCES public.product_categories(id) ON DELETE SET NULL,
-    myacg_item_code           text NOT NULL, -- MVP 階段改為純文字儲存，不建立與 inventory 表的外鍵約束
-    product_title             text NOT NULL,
-    variant_name              text NOT NULL,
-    raw_variant_name          text,
-    myacg_auto_quantity       integer NOT NULL DEFAULT 0,
-    effective_myacg_quantity   integer NOT NULL DEFAULT 0,
-    waca_auto_quantity        integer NOT NULL DEFAULT 0,
-    note                      text NOT NULL DEFAULT '',
-    sort_order                integer NOT NULL DEFAULT 0,
-    catalog_missing           boolean NOT NULL DEFAULT false,
+    id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_group_id            uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE RESTRICT,
+    -- 說明：防止商品群組 (ProductGroup) 被誤刪。若群組下已有規格，必須先處理規格，故使用 ON DELETE RESTRICT 約束。
+    product_category_id         uuid REFERENCES public.product_categories(id) ON DELETE SET NULL,
+    -- 說明：分類 (Category) 刪除時，不應刪除規格商品，僅將其分類歸屬設為空 (SET NULL)。
+    myacg_item_code             text NOT NULL, -- MVP 階段改為純文字儲存，不建立與 inventory 表的外鍵約束
+    product_title               text NOT NULL,
+    variant_name                text NOT NULL,
+    raw_variant_name            text,
+    
+    -- 平台需求與手動調整量
+    myacg_auto_quantity         integer NOT NULL DEFAULT 0,
+    effective_myacg_quantity     integer NOT NULL DEFAULT 0,
+    myacg_manual_adjustment     integer NOT NULL DEFAULT 0,
+    waca_auto_quantity          integer NOT NULL DEFAULT 0,
+    waca_manual_adjustment      integer NOT NULL DEFAULT 0,
+    private_manual_adjustment   integer NOT NULL DEFAULT 0,
+    purchased_manual_adjustment integer NOT NULL DEFAULT 0,
+    
+    note                        text NOT NULL DEFAULT '',
+    sort_order                  integer NOT NULL DEFAULT 0,
+    catalog_missing             boolean NOT NULL DEFAULT false,
+    source                      text,
     
     -- MVP 核心同步與審查欄位
     local_id                 text,
@@ -107,16 +122,19 @@ CREATE TABLE IF NOT EXISTS public.product_variants (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- D. 採購批次單頭 (Purchase Batch)
 CREATE TABLE IF NOT EXISTS public.purchase_batches (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_group_id uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE CASCADE,
+    product_group_id uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE RESTRICT,
+    -- 說明：防止誤刪已被採購批次關聯的商品群組。
     name             text NOT NULL,
-    date             date,
+    date             text, -- 採購日期
     note             text,
+    currency         text NOT NULL DEFAULT 'JPY', -- 幣別
     
     -- MVP 核心同步與審查欄位
     local_id                 text,
@@ -124,14 +142,17 @@ CREATE TABLE IF NOT EXISTS public.purchase_batches (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- E. 採購批次明細 (Purchase Batch Item)
 CREATE TABLE IF NOT EXISTS public.purchase_batch_items (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     purchase_batch_id  uuid NOT NULL REFERENCES public.purchase_batches(id) ON DELETE CASCADE,
+    -- 說明：批次明細為批次單頭之附屬文件，單頭刪除時一併 CASCADE 刪除明細是合理的。
     product_variant_id uuid NOT NULL REFERENCES public.product_variants(id) ON DELETE RESTRICT,
+    -- 說明：禁止刪除已產生採購明細的商品規格 (ON DELETE RESTRICT)，保護歷史交易與成本記錄。
     quantity           integer NOT NULL DEFAULT 0,
     cost               numeric(12, 2) NOT NULL DEFAULT 0,
     note               text,
@@ -142,16 +163,19 @@ CREATE TABLE IF NOT EXISTS public.purchase_batch_items (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- F. 私下登記單頭 (Private Order)
 CREATE TABLE IF NOT EXISTS public.private_orders (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_group_id uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE CASCADE,
+    product_group_id uuid NOT NULL REFERENCES public.product_groups(id) ON DELETE RESTRICT,
+    -- 說明：防止誤刪已被客戶訂單關聯的商品群組。
     customer_name    text NOT NULL,
     contact          text,
     note             text,
+    status           text DEFAULT 'pending', -- 訂單狀態
     
     -- MVP 核心同步與審查欄位
     local_id                 text,
@@ -159,16 +183,19 @@ CREATE TABLE IF NOT EXISTS public.private_orders (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- G. 私下登記明細 (Private Order Item)
 CREATE TABLE IF NOT EXISTS public.private_order_items (
     id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     private_order_id   uuid NOT NULL REFERENCES public.private_orders(id) ON DELETE CASCADE,
+    -- 說明：私下登記明細隨單頭刪除而 CASCADE 刪除。
     product_variant_id uuid NOT NULL REFERENCES public.product_variants(id) ON DELETE RESTRICT,
+    -- 說明：禁止刪除已有訂單訂購的商品規格 (ON DELETE RESTRICT)。
     quantity           integer NOT NULL DEFAULT 0,
-    amount             numeric(12, 2) NOT NULL DEFAULT 0,
+    amount             numeric(12, 2) NOT NULL DEFAULT 0, -- 金額
     note               text,
     
     -- MVP 核心同步與審查欄位
@@ -177,7 +204,8 @@ CREATE TABLE IF NOT EXISTS public.private_order_items (
     updated_at               timestamptz NOT NULL DEFAULT now(),
     updated_by               uuid REFERENCES auth.users(id) ON DELETE SET NULL DEFAULT auth.uid(),
     deleted_at               timestamptz,
-    version                  integer NOT NULL DEFAULT 1
+    version                  integer NOT NULL DEFAULT 1,
+    sync_status              text NOT NULL DEFAULT 'synced'
 );
 
 -- ==========================================
@@ -249,7 +277,7 @@ ALTER TABLE public.private_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.private_order_items ENABLE ROW LEVEL SECURITY;
 
 -- ------------------------------------------
--- 4a. SELECT 政策：安全清理舊政策後重新建立
+-- 4a. SELECT 政策：安全清理舊政策後重新建立 (防軟刪除)
 -- ------------------------------------------
 DROP POLICY IF EXISTS select_policy ON public.product_groups;
 CREATE POLICY select_policy ON public.product_groups FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
@@ -273,7 +301,7 @@ DROP POLICY IF EXISTS select_policy ON public.private_order_items;
 CREATE POLICY select_policy ON public.private_order_items FOR SELECT TO authenticated USING (deleted_at IS NULL OR public.get_my_role() = 'owner');
 
 -- ------------------------------------------
--- 4b. INSERT 政策：安全清理舊政策後重新建立
+-- 4b. INSERT 政策：僅限 owner / staff 可新增
 -- ------------------------------------------
 DROP POLICY IF EXISTS insert_policy ON public.product_groups;
 CREATE POLICY insert_policy ON public.product_groups FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
@@ -297,7 +325,7 @@ DROP POLICY IF EXISTS insert_policy ON public.private_order_items;
 CREATE POLICY insert_policy ON public.private_order_items FOR INSERT TO authenticated WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
 
 -- ------------------------------------------
--- 4c. UPDATE 政策：安全清理舊政策後重新建立
+-- 4c. UPDATE 政策：僅限 owner / staff 可更新
 -- ------------------------------------------
 DROP POLICY IF EXISTS update_policy ON public.product_groups;
 CREATE POLICY update_policy ON public.product_groups FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
@@ -321,7 +349,7 @@ DROP POLICY IF EXISTS update_policy ON public.private_order_items;
 CREATE POLICY update_policy ON public.private_order_items FOR UPDATE TO authenticated USING (public.get_my_role() IN ('owner', 'staff')) WITH CHECK (public.get_my_role() IN ('owner', 'staff'));
 
 -- ------------------------------------------
--- 4d. DELETE 政策：安全清理舊政策後重新建立 (僅限 Owner 可物理刪除)
+-- 4d. DELETE 政策：僅限 Owner 可物理刪除
 -- ------------------------------------------
 DROP POLICY IF EXISTS delete_policy ON public.product_groups;
 CREATE POLICY delete_policy ON public.product_groups FOR DELETE TO authenticated USING (public.get_my_role() = 'owner');
