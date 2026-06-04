@@ -1,3 +1,87 @@
+// Polyfill crypto.randomUUID for insecure contexts (HTTP)
+(function polyfillCrypto() {
+  try {
+    const fallbackUUID = function randomUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    };
+
+    const targetGlobals = [];
+    if (typeof globalThis !== 'undefined') targetGlobals.push(globalThis);
+    if (typeof window !== 'undefined') targetGlobals.push(window);
+    if (typeof self !== 'undefined') targetGlobals.push(self);
+
+    for (const g of targetGlobals) {
+      let currentCrypto = (g as any).crypto;
+      if (!currentCrypto) {
+        try {
+          Object.defineProperty(g, 'crypto', {
+            value: {},
+            writable: true,
+            configurable: true,
+            enumerable: true
+          });
+          currentCrypto = (g as any).crypto;
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      if (currentCrypto && !currentCrypto.randomUUID) {
+        try {
+          Object.defineProperty(currentCrypto, 'randomUUID', {
+            value: fallbackUUID,
+            writable: true,
+            configurable: true,
+            enumerable: false
+          });
+        } catch (err) {
+          // If crypto is read-only or non-extensible
+          const originalCrypto = currentCrypto;
+          const newCrypto = Object.create(originalCrypto || {});
+
+          Object.defineProperty(newCrypto, 'randomUUID', {
+            value: fallbackUUID,
+            writable: true,
+            configurable: true,
+            enumerable: false
+          });
+
+          if (originalCrypto && typeof originalCrypto.getRandomValues === 'function') {
+            Object.defineProperty(newCrypto, 'getRandomValues', {
+              value: originalCrypto.getRandomValues.bind(originalCrypto),
+              writable: true,
+              configurable: true,
+              enumerable: false
+            });
+          }
+
+          try {
+            Object.defineProperty(g, 'crypto', {
+              value: newCrypto,
+              configurable: true,
+              writable: true,
+              enumerable: true
+            });
+          } catch (e2) {
+            // Last resort: assign directly
+            try {
+              (g as any).crypto = newCrypto;
+            } catch (e3) {
+              console.error('Failed to override crypto object:', e3);
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to polyfill crypto.randomUUID:', e);
+  }
+})();
+
 import { supabase } from './supabaseClient';
 import { db } from '../../lib/db';
 import type { IDataProvider } from '../types';
@@ -15,6 +99,56 @@ import type {
   ImportBatch,
   ImportStats
 } from '../../lib/db';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUuid = (val: any): boolean => typeof val === 'string' && UUID_REGEX.test(val);
+const generateFallbackUuid = (): string => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+function getDeterministicUuid(str: string): string {
+  if (isValidUuid(str)) {
+    return str;
+  }
+  // Convert standard string (e.g. MYACG_12345) to a deterministic UUID using cyrb128
+  const cyrb128 = (s: string) => {
+    let h1 = 1779033703, h2 = 302473350, h3 = 336245363, h4 = 50249321;
+    for (let i = 0, k; i < s.length; i++) {
+      k = s.charCodeAt(i);
+      h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+      h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+      h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+      h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+    }
+    h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+    h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+    h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+    h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+    return [(h1^h2^h3^h4)>>>0, (h2^h1)>>>0, (h3^h1)>>>0, (h4^h1)>>>0];
+  };
+
+  const hashes = cyrb128(str);
+  const toHex8 = (num: number) => num.toString(16).padStart(8, '0');
+
+  const h1 = toHex8(hashes[0]);
+  const h2 = toHex8(hashes[1]);
+  const h3 = toHex8(hashes[2]);
+  const h4 = toHex8(hashes[3]);
+
+  const part1 = h1;
+  const part2 = h2.substring(0, 4);
+  const part3 = '5' + h2.substring(5, 8); // version 5
+  const variantChar = ['8', '9', 'a', 'b'][parseInt(h3.charAt(0), 16) % 4];
+  const part4 = variantChar + h3.substring(1, 4);
+  const part5 = h3.substring(4, 8) + h4;
+
+  return `${part1}-${part2}-${part3}-${part4}-${part5}`;
+}
+
 
 export class SupabaseProvider implements IDataProvider {
   private isPulled = false;
@@ -64,29 +198,60 @@ export class SupabaseProvider implements IDataProvider {
         console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
         
         // 1. 同時從 Supabase 抓取未刪除的資料
-        const [groupsRes, categoriesRes, variantsRes] = await Promise.all([
+        const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes] = await Promise.all([
           supabase.from('product_groups').select('*').is('deleted_at', null),
           supabase.from('product_categories').select('*').is('deleted_at', null),
-          supabase.from('product_variants').select('*').is('deleted_at', null)
+          supabase.from('product_variants').select('*').is('deleted_at', null),
+          supabase.from('purchase_batches').select('*').is('deleted_at', null),
+          supabase.from('purchase_batch_items').select('*').is('deleted_at', null)
         ]);
 
         if (groupsRes.error) throw groupsRes.error;
         if (categoriesRes.error) throw categoriesRes.error;
         if (variantsRes.error) throw variantsRes.error;
+        if (batchesRes.error) throw batchesRes.error;
+        if (batchItemsRes.error) throw batchItemsRes.error;
 
-        console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${groupsRes.data?.length || 0} 筆, product_categories = ${categoriesRes.data?.length || 0} 筆, product_variants = ${variantsRes.data?.length || 0} 筆`);
+        const gLen = groupsRes.data?.length || 0;
+        const cLen = categoriesRes.data?.length || 0;
+        const vLen = variantsRes.data?.length || 0;
+        const bLen = batchesRes.data?.length || 0;
+        const biLen = batchItemsRes.data?.length || 0;
+
+        console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆`);
+
+        // Check if all of them are empty
+        if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
+          console.log('[Sync Pull] core skipped: empty cloud result');
+          this.isPulled = true;
+          return;
+        }
 
         // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
-        console.log(`[Sync] 正在寫入本地快取：groups: ${groupsRes.data?.length || 0} 筆, categories: ${categoriesRes.data?.length || 0} 筆, variants: ${variantsRes.data?.length || 0} 筆`);
+        console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆`);
         
         await db.saveProductGroups(groupsRes.data || []);
         await db.saveProductCategories(categoriesRes.data || []);
         await db.saveProductVariants(variantsRes.data || []);
+        await db.savePurchaseBatches(batchesRes.data || []);
+        await db.savePurchaseBatchItems(batchItemsRes.data || []);
+
+        // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
+        await this.pullSalesOrders();
+        await this.pullSalesOrderItems();
+
+        // 4. 呼叫既有的重新計算流程（即 db.getProductVariants），依雲端訂單重新計算
+        console.log('[Sync] 觸發本地變體 auto quantity 重新計算...');
+        const recalculatedVariants = await db.getProductVariants();
+
+        // 5. 將重新計算後的變體資料庫存同步回雲端，維持兩端一致
+        await this.saveProductVariants(recalculatedVariants);
 
         this.isPulled = true;
-        console.log('[Sync] 商品核心主檔只讀同步完成，已成功快取至本地端。');
+        console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
       } catch (err) {
         console.error('[Sync] 商品核心主檔同步失敗，將自動降級讀取本地現有快取:', err);
+        console.log('[Sync Pull] core failed: keep local cache');
         // 為了不讓 UI 因為連線問題崩潰，我們不向上拋出錯誤，而是印出錯誤並使用本地現有快取
       } finally {
         this.pullPromise = null;
@@ -113,19 +278,47 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveProductGroups(groups: ProductGroup[]): Promise<void> {
+    const sanitizedGroups = [];
+    for (const g of groups) {
+      if (!isValidUuid(g.id)) {
+        const newId = generateFallbackUuid();
+        console.warn(`[UUID Stabilization] Detected invalid Group ID "${g.id}". Regenerated to "${newId}".`);
+        
+        // Update any child categories in IndexedDB
+        const cats = await db.getProductCategories();
+        const childCats = cats.filter(c => c.product_group_id === g.id);
+        if (childCats.length > 0) {
+          childCats.forEach(c => c.product_group_id = newId);
+          await db.saveProductCategories(cats);
+          await this.saveProductCategories(childCats);
+        }
+
+        // Update any child variants in IndexedDB
+        const vars = await db.getProductVariants();
+        const childVars = vars.filter(v => v.product_group_id === g.id);
+        if (childVars.length > 0) {
+          childVars.forEach(v => v.product_group_id = newId);
+          await db.saveProductVariants(vars);
+          await this.saveProductVariants(childVars);
+        }
+
+        sanitizedGroups.push({ ...g, id: newId });
+      } else {
+        sanitizedGroups.push(g);
+      }
+    }
+
     // 1. 寫入本地 IndexedDB 快取
-    await db.saveProductGroups(groups);
+    await db.saveProductGroups(sanitizedGroups);
 
     // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
-    if (groups.length === 0) {
+    if (sanitizedGroups.length === 0) {
       return;
     }
 
     try {
       // 篩選出合法 UUID 的資料
-      const validGroups = groups.filter(g => 
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(g.id)
-      );
+      const validGroups = sanitizedGroups.filter(g => isValidUuid(g.id));
 
       if (validGroups.length === 0) {
         console.log('[Sync Push] product_groups skipped: no valid rows');
@@ -143,7 +336,9 @@ export class SupabaseProvider implements IDataProvider {
         closing_date: g.closing_date || null,
         release_month: g.release_month || null,
         product_url: g.product_url || null,
-        priority: g.priority || 'Medium'
+        priority: g.priority || 'Medium',
+        normalized_title: g.normalized_title || null,
+        has_official_site: g.has_official_site || false
       }));
 
       const { error } = await supabase
@@ -161,12 +356,212 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
-    return db.saveProductCategories(categories);
+    const sanitizedCategories = [];
+    const groups = await db.getProductGroups();
+    const vars = await db.getProductVariants();
+    let categoriesChanged = false;
+    let variantsChanged = false;
+
+    for (const c of categories) {
+      const updatedCat = { ...c };
+
+      // Ensure Category ID is valid UUID
+      if (!isValidUuid(c.id)) {
+        const newCatId = generateFallbackUuid();
+        console.warn(`[UUID Stabilization] Detected invalid Category ID "${c.id}". Regenerated to "${newCatId}".`);
+        updatedCat.id = newCatId;
+        categoriesChanged = true;
+
+        // Cascade to product_variants in IndexedDB
+        const childVars = vars.filter(v => v.product_category_id === c.id);
+        if (childVars.length > 0) {
+          childVars.forEach(v => {
+            v.product_category_id = newCatId;
+          });
+          variantsChanged = true;
+        }
+      }
+
+      // Ensure product_group_id is valid UUID
+      if (!isValidUuid(updatedCat.product_group_id)) {
+        // Try to find the group by title if the invalid ID is actually a title
+        const matchingGroup = groups.find(g => g.id === updatedCat.product_group_id || g.title === updatedCat.product_group_id);
+        if (matchingGroup && isValidUuid(matchingGroup.id)) {
+          updatedCat.product_group_id = matchingGroup.id;
+          categoriesChanged = true;
+        } else {
+          const newGroupId = generateFallbackUuid();
+          console.warn(`[UUID Stabilization] Category "${updatedCat.title}" has invalid Group ID "${updatedCat.product_group_id}". Generated fallback Group ID "${newGroupId}".`);
+          updatedCat.product_group_id = newGroupId;
+          categoriesChanged = true;
+        }
+      }
+
+      sanitizedCategories.push(updatedCat);
+    }
+
+    if (categoriesChanged) {
+      await db.saveProductCategories(sanitizedCategories);
+    } else {
+      await db.saveProductCategories(categories);
+    }
+
+    if (variantsChanged) {
+      await db.saveProductVariants(vars);
+      await this.saveProductVariants(vars);
+    }
+
+    // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
+    const finalCategories = categoriesChanged ? sanitizedCategories : categories;
+    if (finalCategories.length === 0) {
+      return;
+    }
+
+    try {
+      // 篩選出具備合法 UUID 之 id 與 product_group_id 的分類資料
+      const validCategories = finalCategories.filter(c => 
+        isValidUuid(c.id) && isValidUuid(c.product_group_id)
+      );
+
+      if (validCategories.length === 0) {
+        console.log('[Sync Push] product_categories skipped: no valid rows');
+        return;
+      }
+
+      console.log(`[Sync Push] product_categories preparing: ${validCategories.length} rows`);
+
+      const upsertData = validCategories.map(c => ({
+        id: c.id,
+        local_id: c.id,
+        product_group_id: c.product_group_id,
+        title: c.title,
+        sort_order: c.sort_order || 0
+      }));
+
+      const { error } = await supabase
+        .from('product_categories')
+        .upsert(upsertData);
+
+      if (error) {
+        console.error(`[Sync Push] product_categories upsert failed: ${error.message || JSON.stringify(error)}`);
+      } else {
+        console.log(`[Sync Push] product_categories upsert success: ${upsertData.length} rows`);
+      }
+    } catch (err: any) {
+      console.error(`[Sync Push] product_categories upsert failed: ${err.message || err}`);
+    }
   }
 
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
-    return db.saveProductVariants(variants);
+    const sanitizedVariants = [];
+    const groups = await db.getProductGroups();
+    const categories = await db.getProductCategories();
+    let variantsChanged = false;
+
+    for (const v of variants) {
+      const updatedVar = { ...v };
+
+      // Ensure Variant ID is valid UUID
+      if (!isValidUuid(v.id)) {
+        const newVarId = generateFallbackUuid();
+        console.warn(`[UUID Stabilization] Detected invalid Variant ID "${v.id}". Regenerated to "${newVarId}".`);
+        updatedVar.id = newVarId;
+        variantsChanged = true;
+      }
+
+      // Ensure product_group_id is valid UUID
+      if (!isValidUuid(updatedVar.product_group_id)) {
+        const matchingGroup = groups.find(g => g.id === updatedVar.product_group_id || g.title === updatedVar.product_group_id);
+        if (matchingGroup && isValidUuid(matchingGroup.id)) {
+          updatedVar.product_group_id = matchingGroup.id;
+          variantsChanged = true;
+        } else {
+          const newGroupId = generateFallbackUuid();
+          console.warn(`[UUID Stabilization] Variant "${updatedVar.variant_name}" has invalid Group ID "${updatedVar.product_group_id}". Generated fallback Group ID "${newGroupId}".`);
+          updatedVar.product_group_id = newGroupId;
+          variantsChanged = true;
+        }
+      }
+
+      // Ensure product_category_id is either valid UUID or null
+      if (updatedVar.product_category_id !== undefined && updatedVar.product_category_id !== null) {
+        if (!isValidUuid(updatedVar.product_category_id)) {
+          const matchingCat = categories.find(c => c.id === updatedVar.product_category_id || c.title === updatedVar.product_category_id);
+          if (matchingCat && isValidUuid(matchingCat.id)) {
+            updatedVar.product_category_id = matchingCat.id;
+            variantsChanged = true;
+          } else {
+            console.warn(`[UUID Stabilization] Variant "${updatedVar.variant_name}" has invalid Category ID "${updatedVar.product_category_id}". Setting to undefined.`);
+            updatedVar.product_category_id = undefined;
+            variantsChanged = true;
+          }
+        }
+      }
+
+      sanitizedVariants.push(updatedVar);
+    }
+
+    if (variantsChanged) {
+      await db.saveProductVariants(sanitizedVariants);
+    } else {
+      await db.saveProductVariants(variants);
+    }
+
+    // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
+    const finalVariants = variantsChanged ? sanitizedVariants : variants;
+    if (finalVariants.length === 0) {
+      return;
+    }
+
+    try {
+      // 篩選出具備合法 UUID 之 id 與 product_group_id 的規格資料
+      const validVariants = finalVariants.filter(v => 
+        isValidUuid(v.id) && isValidUuid(v.product_group_id)
+      );
+
+      if (validVariants.length === 0) {
+        console.log('[Sync Push] product_variants skipped: no valid rows');
+        return;
+      }
+
+      console.log(`[Sync Push] product_variants preparing: ${validVariants.length} rows`);
+
+      const upsertData = validVariants.map(v => ({
+        id: v.id,
+        local_id: v.id,
+        product_group_id: v.product_group_id,
+        product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
+        myacg_item_code: v.myacg_item_code,
+        variant_name: v.variant_name,
+        raw_variant_name: v.raw_variant_name || null,
+        product_title: v.product_title,
+        myacg_manual_adjustment: v.myacg_manual_adjustment || 0,
+        waca_manual_adjustment: v.waca_manual_adjustment || 0,
+        private_manual_adjustment: v.private_manual_adjustment || 0,
+        purchased_manual_adjustment: v.purchased_manual_adjustment || 0,
+        myacg_auto_quantity: v.myacg_auto_quantity || 0,
+        effective_myacg_quantity: v.effective_myacg_quantity || 0,
+        waca_auto_quantity: v.waca_auto_quantity || 0,
+        note: v.note || '',
+        sort_order: v.sort_order || 0,
+        catalog_missing: v.catalog_missing || false,
+        source: v.source || null
+      }));
+
+      const { error } = await supabase
+        .from('product_variants')
+        .upsert(upsertData);
+
+      if (error) {
+        console.error(`[Sync Push] product_variants upsert failed: ${error.message || JSON.stringify(error)}`);
+      } else {
+        console.log(`[Sync Push] product_variants upsert success: ${upsertData.length} rows`);
+      }
+    } catch (err: any) {
+      console.error(`[Sync Push] product_variants upsert failed: ${err.message || err}`);
+    }
   }
+
 
   // === 4 張非 Synced 核心表與本地輔助表 (完全委託本地 db) ===
   async getInventory(): Promise<InventoryItem[]> {
@@ -181,8 +576,39 @@ export class SupabaseProvider implements IDataProvider {
     return db.getSalesOrders();
   }
 
-  async saveSalesOrders(items: SalesOrder[]): Promise<void> {
-    return db.saveSalesOrders(items);
+  async saveSalesOrders(orders: SalesOrder[]): Promise<void> {
+    // 1. 本地照舊保存
+    await db.saveSalesOrders(orders);
+
+    // 2. Cloud Mode 時 upsert sales_orders
+    if (orders.length === 0) {
+      return;
+    }
+
+    try {
+      console.log(`[Sync Push] sales_orders preparing: ${orders.length} rows`);
+
+      const upsertData = orders.map(o => ({
+        id: getDeterministicUuid(o.id.trim().toUpperCase()),
+        local_id: o.id,
+        platform: o.platform,
+        order_number: o.order_number,
+        buyer_name: o.buyer_name,
+        created_at: o.created_at || new Date().toISOString()
+      }));
+
+      const { error } = await supabase
+        .from('sales_orders')
+        .upsert(upsertData, { onConflict: 'order_number' });
+
+      if (error) {
+        console.error(`[Sync Push] sales_orders upsert failed: ${error.message || JSON.stringify(error)}`);
+      } else {
+        console.log(`[Sync Push] sales_orders upsert success: ${upsertData.length} rows`);
+      }
+    } catch (err: any) {
+      console.error(`[Sync Push] sales_orders upsert failed: ${err.message || err}`);
+    }
   }
 
   async getSalesOrderItems(): Promise<SalesOrderItem[]> {
@@ -190,7 +616,123 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
-    return db.saveSalesOrderItems(items);
+    // 1. 本地照舊保存
+    await db.saveSalesOrderItems(items);
+
+    // 2. Cloud Mode 時 upsert sales_order_items
+    if (items.length === 0) {
+      return;
+    }
+
+    try {
+      console.log(`[Sync Push] sales_order_items preparing: ${items.length} rows`);
+
+      const upsertData = items.map(item => {
+        const orderIdPart = item.order_id.trim().toUpperCase();
+        const codePart = item.myacg_item_code.trim().toUpperCase();
+        const variantPart = (item.variant_name || '').trim().toUpperCase();
+        const pricePart = Number(item.price || 0).toString();
+        const uniqueKey = `${orderIdPart}_${codePart}_${variantPart}_${pricePart}`;
+        const deterministicId = getDeterministicUuid(uniqueKey);
+
+        return {
+          id: deterministicId,
+          order_id: getDeterministicUuid(orderIdPart),
+          product_variant_id: isValidUuid(item.product_variant_id) ? item.product_variant_id : null,
+          myacg_item_code: item.myacg_item_code,
+          product_name: item.product_name || null,
+          variant_name: item.variant_name || null,
+          quantity: item.quantity || 0,
+          price: item.price !== undefined ? Number(item.price) : 0,
+          amount: item.amount !== undefined ? Number(item.amount) : 0,
+          order_status: item.order_status || null,
+          local_id: item.id
+        };
+      });
+
+      const { error } = await supabase
+        .from('sales_order_items')
+        .upsert(upsertData);
+
+      if (error) {
+        console.error(`[Sync Push] sales_order_items upsert failed: ${error.message || JSON.stringify(error)}`);
+      } else {
+        console.log(`[Sync Push] sales_order_items upsert success: ${upsertData.length} rows`);
+      }
+    } catch (err: any) {
+      console.error(`[Sync Push] sales_order_items upsert failed: ${err.message || err}`);
+    }
+  }
+
+  async pullSalesOrders(): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('sales_orders')
+        .select('*')
+        .is('deleted_at', null);
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = data || [];
+      const mappedOrders: SalesOrder[] = rows.map(r => ({
+        id: r.local_id || r.id,
+        platform: r.platform,
+        order_number: r.order_number,
+        buyer_name: r.buyer_name,
+        created_at: r.created_at
+      }));
+
+      // Write directly to local DB
+      await db.saveSalesOrders(mappedOrders);
+      console.log(`[Sync Pull] sales_orders applied: ${mappedOrders.length} rows`);
+    } catch (err: any) {
+      console.error(`[Sync Pull] sales_orders failed: ${err.message || err}`);
+    }
+  }
+
+  async pullSalesOrderItems(): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('sales_order_items')
+        .select('*')
+        .is('deleted_at', null);
+
+      if (error) {
+        throw error;
+      }
+
+      const orders = await db.getSalesOrders();
+      const orderUuidToLocalIdMap = new Map<string, string>();
+      for (const order of orders) {
+        const uuid = getDeterministicUuid(order.id.trim().toUpperCase());
+        orderUuidToLocalIdMap.set(uuid, order.id);
+      }
+
+      const rows = data || [];
+      const mappedItems: SalesOrderItem[] = rows.map(r => {
+        const localOrderId: string = orderUuidToLocalIdMap.get(r.order_id) || r.order_id;
+        return {
+          id: r.local_id || r.id,
+          order_id: localOrderId,
+          product_variant_id: r.product_variant_id || undefined,
+          myacg_item_code: r.myacg_item_code,
+          product_name: r.product_name || undefined,
+          variant_name: r.variant_name || undefined,
+          quantity: r.quantity,
+          price: r.price !== null ? Number(r.price) : undefined,
+          amount: r.amount !== null ? Number(r.amount) : undefined,
+          order_status: r.order_status || undefined
+        };
+      });
+
+      // Write directly to local DB
+      await db.saveSalesOrderItems(mappedItems);
+      console.log(`[Sync Pull] sales_order_items applied: ${mappedItems.length} rows`);
+    } catch (err: any) {
+      console.error(`[Sync Pull] sales_order_items failed: ${err.message || err}`);
+    }
   }
 
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
@@ -198,7 +740,56 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePurchaseBatches(batches: PurchaseBatch[]): Promise<void> {
-    return db.savePurchaseBatches(batches);
+    // 1. Identify deleted ones by comparing with current local storage records
+    const currentLocal = await db.getPurchaseBatches();
+    const incomingIds = new Set(batches.map(b => b.id));
+    const removedBatches = currentLocal.filter(b => !incomingIds.has(b.id));
+
+    // 2. Save locally
+    await db.savePurchaseBatches(batches);
+
+    // 3. Supabase Cloud Sync
+    try {
+      // (A) Handle soft deletion of removed batches in Supabase
+      if (removedBatches.length > 0) {
+        const removedIds = removedBatches.map(b => b.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          console.log(`[Sync Push] purchase_batches marking deleted_at: ${removedIds.length} rows`);
+          const { error: delError } = await supabase
+            .from('purchase_batches')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds);
+          if (delError) {
+            console.error('[Sync Push] purchase_batches delete update failed:', delError);
+          }
+        }
+      }
+
+      // (B) Upsert incoming active batches to Supabase
+      const activeBatches = batches.filter(b => isValidUuid(b.id) && isValidUuid(b.product_group_id));
+      if (activeBatches.length > 0) {
+        console.log(`[Sync Push] purchase_batches upserting: ${activeBatches.length} rows`);
+        const upsertData = activeBatches.map(b => ({
+          id: b.id,
+          local_id: b.id,
+          product_group_id: b.product_group_id,
+          name: b.name,
+          date: b.date || null,
+          note: b.note || null,
+          currency: 'JPY'
+        }));
+
+        const { error: upsertError } = await supabase
+          .from('purchase_batches')
+          .upsert(upsertData);
+        if (upsertError) {
+          console.error('[Sync Push] purchase_batches upsert failed:', upsertError);
+        }
+      }
+    } catch (err) {
+      console.error('[Sync Push] purchase_batches sync failed:', err);
+    }
   }
 
   async getPurchaseBatchItems(): Promise<PurchaseBatchItem[]> {
@@ -206,7 +797,56 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
-    return db.savePurchaseBatchItems(items);
+    // 1. Identify deleted ones by comparing with current local storage records
+    const currentLocal = await db.getPurchaseBatchItems();
+    const incomingIds = new Set(items.map(i => i.id));
+    const removedItems = currentLocal.filter(i => !incomingIds.has(i.id));
+
+    // 2. Save locally (which also triggers auto recalculated quantities updates)
+    await db.savePurchaseBatchItems(items);
+
+    // 3. Supabase Cloud Sync
+    try {
+      // (A) Handle soft deletion of removed items in Supabase
+      if (removedItems.length > 0) {
+        const removedIds = removedItems.map(i => i.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          console.log(`[Sync Push] purchase_batch_items marking deleted_at: ${removedIds.length} rows`);
+          const { error: delError } = await supabase
+            .from('purchase_batch_items')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds);
+          if (delError) {
+            console.error('[Sync Push] purchase_batch_items delete update failed:', delError);
+          }
+        }
+      }
+
+      // (B) Upsert incoming active items to Supabase
+      const activeItems = items.filter(i => isValidUuid(i.id) && isValidUuid(i.purchase_batch_id) && isValidUuid(i.product_variant_id));
+      if (activeItems.length > 0) {
+        console.log(`[Sync Push] purchase_batch_items upserting: ${activeItems.length} rows`);
+        const upsertData = activeItems.map(i => ({
+          id: i.id,
+          local_id: i.id,
+          purchase_batch_id: i.purchase_batch_id,
+          product_variant_id: i.product_variant_id,
+          quantity: i.quantity || 0,
+          cost: i.cost || 0,
+          note: i.note || null
+        }));
+
+        const { error: upsertError } = await supabase
+          .from('purchase_batch_items')
+          .upsert(upsertData);
+        if (upsertError) {
+          console.error('[Sync Push] purchase_batch_items upsert failed:', upsertError);
+        }
+      }
+    } catch (err) {
+      console.error('[Sync Push] purchase_batch_items sync failed:', err);
+    }
   }
 
   async getPrivateOrders(): Promise<PrivateOrder[]> {
@@ -251,19 +891,120 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
-    return db.createPurchaseRecordFromInventory(itemCodes);
+    await db.createPurchaseRecordFromInventory(itemCodes);
+    const groups = await db.getProductGroups();
+    const categories = await db.getProductCategories();
+    const variants = await db.getProductVariants();
+    await this.saveProductGroups(groups);
+    await this.saveProductCategories(categories);
+    await this.saveProductVariants(variants);
   }
 
   async reparseProductVariants(): Promise<void> {
-    return db.reparseProductVariants();
+    await db.reparseProductVariants();
+    const categories = await db.getProductCategories();
+    const variants = await db.getProductVariants();
+    await this.saveProductCategories(categories);
+    await this.saveProductVariants(variants);
   }
 
   async reparseProductTitles(): Promise<void> {
-    return db.reparseProductTitles();
+    await db.reparseProductTitles();
+    const groups = await db.getProductGroups();
+    await this.saveProductGroups(groups);
   }
 
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
-    return db.syncProductGroupsWithInventory();
+    const result = await db.syncProductGroupsWithInventory();
+    const categories = await db.getProductCategories();
+    const variants = await db.getProductVariants();
+    await this.saveProductCategories(categories);
+    await this.saveProductVariants(variants);
+    return result;
+  }
+
+  async deleteProductGroup(groupId: string): Promise<void> {
+    const groups = await db.getProductGroups();
+    const updatedGroups = groups.filter(g => g.id !== groupId);
+    await db.saveProductGroups(updatedGroups);
+
+    const categories = await db.getProductCategories();
+    const updatedCategories = categories.filter(c => c.product_group_id !== groupId);
+    await db.saveProductCategories(updatedCategories);
+
+    const variants = await db.getProductVariants();
+    const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
+    await db.saveProductVariants(updatedVariants);
+
+    const nowStr = new Date().toISOString();
+    const { error: groupError } = await supabase
+      .from('product_groups')
+      .update({ deleted_at: nowStr })
+      .eq('id', groupId);
+
+    if (groupError) {
+      console.error('[Supabase] Failed to soft delete group:', groupError);
+      throw groupError;
+    }
+
+    const { error: catError } = await supabase
+      .from('product_categories')
+      .update({ deleted_at: nowStr })
+      .eq('product_group_id', groupId);
+    if (catError) {
+      console.error('[Supabase] Failed to soft delete categories:', catError);
+    }
+
+    const { error: varError } = await supabase
+      .from('product_variants')
+      .update({ deleted_at: nowStr })
+      .eq('product_group_id', groupId);
+    if (varError) {
+      console.error('[Supabase] Failed to soft delete variants:', varError);
+    }
+  }
+
+  async deleteProductGroups(groupIds: string[]): Promise<void> {
+    if (!groupIds || groupIds.length === 0) return;
+
+    const groups = await db.getProductGroups();
+    const updatedGroups = groups.filter(g => !groupIds.includes(g.id));
+    await db.saveProductGroups(updatedGroups);
+
+    const categories = await db.getProductCategories();
+    const updatedCategories = categories.filter(c => !c.product_group_id || !groupIds.includes(c.product_group_id));
+    await db.saveProductCategories(updatedCategories);
+
+    const variants = await db.getProductVariants();
+    const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
+    await db.saveProductVariants(updatedVariants);
+
+    const nowStr = new Date().toISOString();
+    const { error: groupError } = await supabase
+      .from('product_groups')
+      .update({ deleted_at: nowStr })
+      .in('id', groupIds);
+
+    if (groupError) {
+      console.error('[Supabase] Failed to soft delete groups:', groupError);
+      throw groupError;
+    }
+
+    const { error: catError } = await supabase
+      .from('product_categories')
+      .update({ deleted_at: nowStr })
+      .in('product_group_id', groupIds);
+    if (catError) {
+      console.error('[Supabase] Failed to soft delete categories:', catError);
+    }
+
+    const { error: varError } = await supabase
+      .from('product_variants')
+      .update({ deleted_at: nowStr })
+      .in('product_group_id', groupIds);
+    if (varError) {
+      console.error('[Supabase] Failed to soft delete variants:', varError);
+    }
   }
 }
 

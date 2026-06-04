@@ -75,6 +75,11 @@ export default function Settings() {
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (currentMode === 'cloud') {
+      alert('雲端模式下不支援匯入備份還原！');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -95,6 +100,10 @@ export default function Settings() {
   };
 
   const handleClearPurchaseRecords = async () => {
+    if (currentMode === 'cloud') {
+      alert('雲端模式下不支援清空訂購紀錄！');
+      return;
+    }
     if (confirm('確定要清空所有「訂購紀錄」(ProductGroup / Category / Variant) 嗎？\n您的「商品主檔」(Inventory) 將會保留。')) {
       await dataProvider.clearPurchaseRecords();
       alert('訂購紀錄已清空。');
@@ -103,6 +112,10 @@ export default function Settings() {
   };
 
   const handleClear = async () => {
+    if (currentMode === 'cloud') {
+      alert('雲端模式下不支援清空全部資料！');
+      return;
+    }
     if (confirm('警告：確定要清空所有資料嗎？此操作無法復原！\n強烈建議先點擊「匯出 JSON 備份」。')) {
       if (confirm('請再次確認，真的要清空所有資料庫？')) {
         await dataProvider.clearData();
@@ -179,7 +192,7 @@ export default function Settings() {
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
                 <div className="text-xs text-muted">從先前的備份檔案還原資料 (會覆蓋現有資料)。</div>
               </div>
-              <button className="btn btn-primary" onClick={handleImportClick}>
+              <button className="btn btn-primary" onClick={handleImportClick} disabled={currentMode === 'cloud'}>
                 <Upload size={16} /> 匯入還原
               </button>
               <input 
@@ -196,7 +209,7 @@ export default function Settings() {
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新解析商品規格</div>
                 <div className="text-xs text-muted">修正因為舊版匯入導致的規格未正確切分問題。</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} onClick={async () => {
+              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={async () => {
                 if (confirm('確定要重新解析商品規格？不會刪除任何訂單與採購資料。')) {
                   await dataProvider.reparseProductVariants();
                   alert('解析完成');
@@ -212,7 +225,7 @@ export default function Settings() {
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新整理商品標題</div>
                 <div className="text-xs text-muted">清理商品名稱中多餘的促銷/代購文字，僅保留商品主體。不影響原始名稱。</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} onClick={async () => {
+              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={async () => {
                 if (confirm('確定要重新整理所有商品標題嗎？')) {
                   await dataProvider.reparseProductTitles();
                   alert('清理完成');
@@ -228,7 +241,7 @@ export default function Settings() {
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>清空訂購紀錄資料</div>
                 <div className="text-xs text-muted">只清除訂購紀錄 (Group/Category/Variant)，不影響商品主檔。</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} onClick={handleClearPurchaseRecords}>
+              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={handleClearPurchaseRecords}>
                 <Trash2 size={16} /> 清空紀錄
               </button>
             </div>
@@ -238,7 +251,7 @@ export default function Settings() {
                 <div className="font-medium text-danger" style={{ marginBottom: '4px' }}>危險操作：清空全部資料</div>
                 <div className="text-xs text-danger" style={{ opacity: 0.8 }}>將清空所有測試與正式資料，操作無法復原。</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white' }} onClick={handleClear}>
+              <button className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={handleClear}>
                 <Trash2 size={16} /> 清空 Reset
               </button>
             </div>
@@ -287,6 +300,7 @@ export default function Settings() {
               onClick={() => {
                 if (currentMode !== 'cloud') {
                   if (!user) {
+                    console.log('[Provider Mode] blocked: login required');
                     alert('請先登入後再使用雲端模式');
                     return;
                   }

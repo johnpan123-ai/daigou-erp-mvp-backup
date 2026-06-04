@@ -50,4 +50,6 @@ export interface IDataProvider {
   reparseProductVariants(): Promise<void>;
   reparseProductTitles(): Promise<void>;
   syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }>;
+  deleteProductGroup(groupId: string): Promise<void>;
+  deleteProductGroups(groupIds: string[]): Promise<void>;
 }

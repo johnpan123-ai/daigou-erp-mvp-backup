@@ -1,10 +1,24 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateFinalMyacgDemand } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
+
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Search, Trash2 } from 'lucide-react';
+import { Receipt, Search, Trash2, Calendar } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
+
+const DEFAULT_COL_WIDTHS = {
+  title: 350,
+  myacg: 80,
+  waca: 80,
+  privateOrder: 90,
+  purchased: 80,
+  gap: 80,
+  purchaseDate: 120,
+  closingDate: 120,
+  releaseMonth: 100,
+  productUrl: 120
+};
 
 export default function PurchaseRecords() {
 
@@ -17,8 +31,57 @@ export default function PurchaseRecords() {
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
 
   const [editMode, setEditMode] = useState<boolean>(false);
+
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem('erp_purchase_records_col_widths');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return DEFAULT_COL_WIDTHS;
+  });
+
+  const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = colWidths[colKey] || DEFAULT_COL_WIDTHS[colKey as keyof typeof DEFAULT_COL_WIDTHS];
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const newWidth = Math.max(50, startWidth + dx);
+      setColWidths(prev => ({
+        ...prev,
+        [colKey]: newWidth
+      }));
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      
+      setColWidths(current => {
+        localStorage.setItem('erp_purchase_records_col_widths', JSON.stringify(current));
+        return current;
+      });
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Batch edit states and datepicker refs
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [batchClosingDate, setBatchClosingDate] = useState('');
+  const [batchReleaseMonth, setBatchReleaseMonth] = useState('');
+
+  const datePickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const purchaseDatePickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
@@ -52,12 +115,16 @@ export default function PurchaseRecords() {
       else if (tabParam === 'agency') setActiveTab('proxy');
       else if (tabParam === 'other') setActiveTab('other');
     }
+    const searchParam = searchParams.get('search');
+    if (searchParam) {
+      setSearchTerm(searchParam);
+    }
   }, [location.search, setActiveTab]);
 
 
   const getGroupStatus = (g: ProductGroup) => {
     const today = new Date().toISOString().split('T')[0];
-    if (!g.closing_date || g.closing_date >= today) {
+    if (!g.closing_date || g.closing_date.replace(/\//g, '-') >= today) {
       return { text: '🟢 開單中', active: true };
     }
     return { text: '⚫ 已結單', active: false };
@@ -151,18 +218,23 @@ export default function PurchaseRecords() {
     let waca = 0;
     let privateOrder = 0;
     let purchased = 0;
+    let myacgManual = 0;
+    let wacaManual = 0;
     
     groupVars.forEach(v => {
-      myacg += calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment || 0);
+      const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      myacg += (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
       waca += (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
       privateOrder += privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
       purchased += batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      myacgManual += (v.myacg_manual_adjustment || 0);
+      wacaManual += (v.waca_manual_adjustment || 0);
     });
     
     const demand = myacg + waca + privateOrder;
     const gap = Math.max(demand - purchased, 0);
     
-    return { myacg, waca, privateOrder, purchased, gap };
+    return { myacg, waca, privateOrder, purchased, gap, myacgManual, wacaManual };
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
@@ -174,7 +246,8 @@ export default function PurchaseRecords() {
     let gap = 0;
     
     groupVars.forEach(v => {
-      const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment || 0);
+      const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      const myacgDemand = (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
       const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
       const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
       
@@ -196,12 +269,13 @@ export default function PurchaseRecords() {
     if (!closingDate) return { text: '-', color: '#64748b', fontWeight: 400 };
     
     const todayStr = new Date().toISOString().split('T')[0];
-    if (closingDate < todayStr) {
+    const cleanDate = closingDate.replace(/\//g, '-');
+    if (cleanDate < todayStr) {
       return { text: closingDate, color: '#ef4444', fontWeight: 700 };
     }
     
     const todayTime = new Date(todayStr).getTime();
-    const closingTime = new Date(closingDate).getTime();
+    const closingTime = new Date(cleanDate).getTime();
     const diffDays = Math.ceil((closingTime - todayTime) / (1000 * 60 * 60 * 24));
     
     if (diffDays >= 0 && diffDays <= 3) {
@@ -240,9 +314,9 @@ export default function PurchaseRecords() {
     // 2. Filter Status
     if (filterStatus !== 'all') {
       if (filterStatus === '開單中') {
-        result = result.filter(g => !g.closing_date || g.closing_date >= today);
+        result = result.filter(g => !g.closing_date || g.closing_date.replace(/\//g, '-') >= today);
       } else if (filterStatus === '已結單') {
-        result = result.filter(g => g.closing_date && g.closing_date < today);
+        result = result.filter(g => g.closing_date && g.closing_date.replace(/\//g, '-') < today);
       }
     }
 
@@ -274,19 +348,19 @@ export default function PurchaseRecords() {
     // 5. Sort
     result.sort((a, b) => {
       if (sortMode === 'closing_urgent') {
-        const activeA = !a.closing_date || a.closing_date >= today;
-        const activeB = !b.closing_date || b.closing_date >= today;
+        const activeA = !a.closing_date || a.closing_date.replace(/\//g, '-') >= today;
+        const activeB = !b.closing_date || b.closing_date.replace(/\//g, '-') >= today;
         
         if (activeA !== activeB) {
           return activeA ? -1 : 1;
         }
         
-        const dateA = a.closing_date || '9999-12-31';
-        const dateB = b.closing_date || '9999-12-31';
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
         return dateA.localeCompare(dateB);
       } else if (sortMode === 'closing_asc') {
-        const dateA = a.closing_date || '9999-12-31';
-        const dateB = b.closing_date || '9999-12-31';
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
         return dateA.localeCompare(dateB);
       } else {
         const timeA = new Date(a.created_at || a.purchase_date || 0).getTime();
@@ -326,9 +400,13 @@ export default function PurchaseRecords() {
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
       return;
     }
+    let processedValue = value;
+    if ((field === 'closing_date' || field === 'purchase_date') && typeof value === 'string') {
+      processedValue = value.replace(/-/g, '/');
+    }
     const updatedGroups = groups.map(g => {
       if (g.id === groupId) {
-        return { ...g, [field]: value } as ProductGroup;
+        return { ...g, [field]: processedValue } as ProductGroup;
       }
       return g;
     });
@@ -336,8 +414,106 @@ export default function PurchaseRecords() {
     await dataProvider.saveProductGroups(updatedGroups);
   };
 
+  const handleBatchApply = async () => {
+    if (selectedGroupIds.size === 0) {
+      alert('請先選取商品項目！');
+      return;
+    }
+    if (!batchClosingDate.trim() && !batchReleaseMonth.trim()) {
+      alert('請填寫欲批次套用的官方結單日或發售月份！');
+      return;
+    }
+
+    const confirmMsg = `您即將批次更新 ${selectedGroupIds.size} 筆商品群組的日期資訊，是否確認？`;
+    if (!window.confirm(confirmMsg)) return;
+
+    const updatedGroups = groups.map(g => {
+      if (selectedGroupIds.has(g.id)) {
+        const nextGroup = { ...g };
+        if (batchClosingDate.trim()) {
+          nextGroup.closing_date = batchClosingDate.trim().replace(/-/g, '/');
+        }
+        if (batchReleaseMonth.trim()) {
+          nextGroup.release_month = batchReleaseMonth.trim();
+        }
+        return nextGroup;
+      }
+      return g;
+    });
+
+    setGroups(updatedGroups);
+    await dataProvider.saveProductGroups(updatedGroups);
+    
+    setSelectedGroupIds(new Set());
+    setBatchClosingDate('');
+    setBatchReleaseMonth('');
+    alert('批次更新完成！');
+  };
+
+  const handlePaste = async (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    startRowIndex: number,
+    field: 'closing_date' | 'release_month' | 'purchase_date' | 'product_url'
+  ) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text');
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+
+    const listToUpdate = filteredAndSortedGroups.slice(startRowIndex, startRowIndex + lines.length);
+    if (listToUpdate.length === 0) return;
+
+    const groupMap = new Map(groups.map(g => [g.id, g]));
+    listToUpdate.forEach((item, offset) => {
+      const dbGroup = groupMap.get(item.id);
+      if (dbGroup) {
+        let val = lines[offset];
+        if (field === 'closing_date' || field === 'purchase_date') {
+          val = val.replace(/-/g, '/');
+        }
+        dbGroup[field] = val;
+      }
+    });
+
+    const nextGroups = Array.from(groupMap.values());
+    setGroups(nextGroups);
+    await dataProvider.saveProductGroups(nextGroups);
+  };
+
+  const handleKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    rowIndex: number,
+    field: string
+  ) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const nextInput = document.querySelector(
+        `input[data-row="${rowIndex + 1}"][data-field="${field}"]`
+      ) as HTMLInputElement;
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.select();
+      }
+    }
+  };
+
+  const formatReleaseMonth = (val: string | undefined | null) => {
+    if (!val) return '-';
+    const match = val.match(/^(\d{4})-(\d{2})$/);
+    if (match) {
+      return `${match[1]}年${match[2]}月`;
+    }
+    return val;
+  };
+
   const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca', totalValue: number) => {
     if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
+    
+    const g = groups.find(x => x.id === groupId);
+    if (!g || !isProxyProduct(g)) {
+      console.warn(`[Edit Blocked] Only proxy products are allowed to modify platform quantities at the group level.`);
+      return;
+    }
     
     const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
     const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
@@ -350,11 +526,9 @@ export default function PurchaseRecords() {
     
     if (dbTarget) {
       if (platform === 'myacg') {
-        const auto = calculateFinalMyacgDemand(dbTarget.myacg_item_code, inventory, salesOrderItems);
-        dbTarget.myacg_manual_adjustment = totalValue - auto;
+        dbTarget.myacg_manual_adjustment = totalValue;
       } else {
-        const auto = dbTarget.waca_auto_quantity || 0;
-        dbTarget.waca_manual_adjustment = totalValue - auto;
+        dbTarget.waca_manual_adjustment = totalValue;
       }
       
       await dataProvider.saveProductVariants(allVars);
@@ -363,13 +537,36 @@ export default function PurchaseRecords() {
   };
 
   const handleDeleteGroup = async (groupId: string, groupTitle: string) => {
-    const confirmDelete = window.confirm(`您確定要刪除商品群組「${groupTitle}」嗎？\n此動作將會從訂購紀錄中移除此群組。`);
+    const confirmDelete = window.confirm(`確定要刪除「${groupTitle}」嗎？`);
     if (!confirmDelete) return;
 
-    const updatedGroups = groups.filter(g => g.id !== groupId);
-    setGroups(updatedGroups);
-    await dataProvider.saveProductGroups(updatedGroups);
+    try {
+      await dataProvider.deleteProductGroup(groupId);
+      alert(`已成功刪除商品群組「${groupTitle}」。`);
+      await loadData();
+    } catch (e) {
+      alert('刪除失敗');
+      console.error(e);
+    }
   };
+
+  const handleBatchDelete = async () => {
+    if (selectedGroupIds.size === 0) return;
+    const confirmDelete = window.confirm(`確定刪除已選取的 ${selectedGroupIds.size} 筆商品？`);
+    if (!confirmDelete) return;
+
+    try {
+      const idsToDelete = Array.from(selectedGroupIds);
+      await dataProvider.deleteProductGroups(idsToDelete);
+      alert(`已成功刪除 ${idsToDelete.length} 筆商品群組。`);
+      setSelectedGroupIds(new Set());
+      await loadData();
+    } catch (e) {
+      alert('批次刪除失敗，請重試。');
+      console.error(e);
+    }
+  };
+
 
   const handleRowClick = (id: string, e: React.MouseEvent) => {
     // Don't navigate if clicking inputs/buttons
@@ -387,6 +584,51 @@ export default function PurchaseRecords() {
 
   return (
     <div className="flex-col gap-lg">
+      <style>{`
+        .erp-table th {
+          padding: 0 !important;
+        }
+
+        .th-inner {
+          position: relative;
+          padding: 8px 12px;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          width: 100%;
+          height: 100%;
+          min-height: 38px;
+        }
+
+        .th-inner.justify-center {
+          justify-content: center;
+        }
+
+        .th-inner.justify-end {
+          justify-content: flex-end;
+        }
+
+        .resizer-handle {
+          position: absolute;
+          right: 0;
+          top: 4px;
+          bottom: 4px;
+          width: 4px;
+          border-right: 2px solid #000000;
+          cursor: col-resize;
+          user-select: none;
+          z-index: 10;
+          opacity: 0.6;
+          transition: opacity 0.15s;
+        }
+
+        .resizer-handle:hover,
+        .resizer-handle:active {
+          opacity: 1;
+          border-right: 2px solid #2563eb;
+        }
+      `}</style>
+
 
       <div className="flex justify-between items-center" style={{ marginBottom: 'var(--spacing-md)' }}>
         <div>
@@ -538,7 +780,34 @@ export default function PurchaseRecords() {
               <option value="created_desc">建立時間 (新到舊)</option>
               <option value="closing_asc">結單日 (近到遠)</option>
             </select>
+            <button
+              onClick={() => {
+                setColWidths(DEFAULT_COL_WIDTHS);
+                localStorage.removeItem('erp_purchase_records_col_widths');
+                alert('欄位寬度已重設為預設值！');
+              }}
+              style={{
+                height: '36px',
+                padding: '0 12px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#475569',
+                backgroundColor: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                display: 'inline-flex',
+                alignItems: 'center',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}
+            >
+              重置欄位寬度
+            </button>
           </div>
+
 
         </div>
 
@@ -550,7 +819,149 @@ export default function PurchaseRecords() {
 
       </div>
 
+      {editMode && (
+        <div style={{
+          backgroundColor: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: '12px',
+          padding: '16px',
+          marginBottom: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#1e40af' }}>批量編輯 ({selectedGroupIds.size} 筆已選取)</span>
+            <span style={{ fontSize: '12px', color: '#1e40af' }}>勾選左側核取方塊後，填寫下方欄位並點擊套用</span>
+          </div>
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>官方結單日：</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="YYYY/MM/DD"
+                  value={batchClosingDate}
+                  onChange={e => setBatchClosingDate(e.target.value)}
+                  style={{ width: '150px', height: '36px', fontSize: '13px', paddingRight: '24px' }}
+                />
+                <Calendar
+                  size={14}
+                  style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                  onClick={() => {
+                    const el = document.getElementById('batch-datepicker-input') as HTMLInputElement | null;
+                    if (el) el.showPicker();
+                  }}
+                />
+                <input
+                  id="batch-datepicker-input"
+                  type="date"
+                  style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                  value={batchClosingDate ? batchClosingDate.replace(/\//g, '-') : ''}
+                  onChange={e => {
+                    setBatchClosingDate(e.target.value.replace(/-/g, '/'));
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>發售月份：</span>
+              <input
+                type="text"
+                className="input"
+                placeholder="YYYY-MM (如 2026-07)"
+                value={batchReleaseMonth}
+                onChange={e => setBatchReleaseMonth(e.target.value)}
+                style={{ width: '180px', height: '36px', fontSize: '13px' }}
+              />
+            </div>
+
+            <button
+              onClick={handleBatchApply}
+              disabled={selectedGroupIds.size === 0}
+              style={{
+                padding: '0 16px',
+                height: '36px',
+                backgroundColor: selectedGroupIds.size > 0 ? '#2563eb' : '#9ca3af',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: selectedGroupIds.size > 0 ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s'
+              }}
+            >
+              套用至勾選商品
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedGroupIds.size > 0 && (
+        <div style={{
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fee2e2',
+          borderRadius: '12px',
+          padding: '16px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 700, color: '#991b1b' }}>
+              已選取 {selectedGroupIds.size} 筆商品
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleBatchDelete}
+              style={{
+                padding: '0 16px',
+                height: '36px',
+                backgroundColor: '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <Trash2 size={14} />
+              <span>批次刪除</span>
+            </button>
+            <button
+              onClick={() => setSelectedGroupIds(new Set())}
+              style={{
+                padding: '0 16px',
+                height: '36px',
+                backgroundColor: '#ffffff',
+                color: '#4b5563',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              取消選取
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-col gap-md">
+
         {filteredAndSortedGroups.length === 0 ? (
           <EmptyState
             icon={Receipt}
@@ -566,21 +977,87 @@ export default function PurchaseRecords() {
               <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    {editMode && <th style={{ width: '6%', textAlign: 'center' }}>刪除</th>}
-                    <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: editMode ? '17%' : '23%' }}>商品名稱</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>私下登記</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>缺口</th>
-                    <th style={{ width: '12%', textAlign: 'center' }}>購買結單日</th>
-                    <th style={{ width: '12%', textAlign: 'center' }}>官方結單日</th>
-                    <th style={{ width: '7%', textAlign: 'center' }}>發售月份</th>
+                    <th style={{ width: '40px', textAlign: 'center' }}>
+                      <input 
+                        type="checkbox"
+                        checked={filteredAndSortedGroups.length > 0 && filteredAndSortedGroups.every(g => selectedGroupIds.has(g.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            if (filteredAndSortedGroups.length > 50) {
+                              const confirmSelect = window.confirm(`您即將選取 ${filteredAndSortedGroups.length} 筆商品進行批次編輯，是否確定？`);
+                              if (!confirmSelect) return;
+                            }
+                            setSelectedGroupIds(new Set(filteredAndSortedGroups.map(g => g.id)));
+                          } else {
+                            setSelectedGroupIds(new Set());
+                          }
+                        }}
+                      />
+                    </th>
+                    {editMode && <th style={{ width: '60px', textAlign: 'center' }}>刪除</th>}
+                    <th style={{ width: '90px' }}>
+                      <div className="th-inner justify-center">
+                        <span>狀態</span>
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.title}px` }}>
+                      <div className="th-inner">
+                        <span>商品名稱</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('title', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.myacg}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>買動漫</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('myacg', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.waca}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>WACA</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('waca', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.privateOrder}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>私下登記</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('privateOrder', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.purchased}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>已採購</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchased', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.gap}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>缺口</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('gap', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.purchaseDate}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>購買結單日</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchaseDate', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.closingDate}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>官方結單日</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('closingDate', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.releaseMonth}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>發售月份</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('releaseMonth', e)} />
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAndSortedGroups.map(g => {
+                  {filteredAndSortedGroups.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
@@ -591,6 +1068,21 @@ export default function PurchaseRecords() {
                         onClick={(e) => handleRowClick(g.id, e)}
                         style={{ cursor: 'pointer' }}
                       >
+                        <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <input 
+                            type="checkbox"
+                            checked={selectedGroupIds.has(g.id)}
+                            onChange={(e) => {
+                              const next = new Set(selectedGroupIds);
+                              if (e.target.checked) {
+                                next.add(g.id);
+                              } else {
+                                next.delete(g.id);
+                              }
+                              setSelectedGroupIds(next);
+                            }}
+                          />
+                        </td>
                         {editMode && (
                           <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                             <button 
@@ -609,8 +1101,12 @@ export default function PurchaseRecords() {
                                 borderRadius: '4px',
                                 transition: 'all 0.2s'
                               }}
-                              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fef2f2'}
-                              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.backgroundColor = '#fef2f2';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
                             >
                               <Trash2 size={14} />
                               <span>刪除</span>
@@ -633,7 +1129,7 @@ export default function PurchaseRecords() {
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {editMode ? (
+                          {editMode && isProxyProduct(g) ? (
                             <input 
                               type="number"
                               className="input" 
@@ -648,18 +1144,18 @@ export default function PurchaseRecords() {
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {editMode ? (
+                          {editMode && isProxyProduct(g) ? (
                             <input 
                               type="number"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
-                              value={details.waca} 
+                              value={details.wacaManual} 
                               onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value) || 0)} 
                               onClick={e => e.stopPropagation()}
                               min={0}
                             />
                           ) : (
-                            details.waca
+                            details.wacaManual
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
@@ -673,14 +1169,37 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {editMode ? (
-                            <input 
-                              className="input" 
-                              type="date" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.purchase_date || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
-                              onClick={e => e.stopPropagation()}
-                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                              <input 
+                                className="input" 
+                                type="text" 
+                                placeholder="YYYY/MM/DD"
+                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                value={g.purchase_date || ''} 
+                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => handleKeyDown(e, idx, 'purchase_date')}
+                                onPaste={e => handlePaste(e, idx, 'purchase_date')}
+                                data-row={idx}
+                                data-field="purchase_date"
+                              />
+                              <Calendar 
+                                size={14} 
+                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  purchaseDatePickerRefs.current[g.id]?.showPicker();
+                                }}
+                              />
+                              <input 
+                                type="date"
+                                ref={el => { purchaseDatePickerRefs.current[g.id] = el; }}
+                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                value={g.purchase_date ? g.purchase_date.replace(/\//g, '-') : ''}
+                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)}
+                                onClick={e => e.stopPropagation()}
+                              />
+                            </div>
                           ) : (
                             <span style={{ color: '#475569', fontWeight: 500 }}>
                               {g.purchase_date || '-'}
@@ -689,14 +1208,37 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                           {editMode ? (
-                            <input 
-                              className="input" 
-                              type="date" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.closing_date || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
-                              onClick={e => e.stopPropagation()}
-                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                              <input 
+                                className="input" 
+                                type="text" 
+                                placeholder="YYYY/MM/DD"
+                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                value={g.closing_date || ''} 
+                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => handleKeyDown(e, idx, 'closing_date')}
+                                onPaste={e => handlePaste(e, idx, 'closing_date')}
+                                data-row={idx}
+                                data-field="closing_date"
+                              />
+                              <Calendar 
+                                size={14} 
+                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  datePickerRefs.current[g.id]?.showPicker();
+                                }}
+                              />
+                              <input 
+                                type="date"
+                                ref={el => { datePickerRefs.current[g.id] = el; }}
+                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
+                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
+                                onClick={e => e.stopPropagation()}
+                              />
+                            </div>
                           ) : closingDateStyle.text}
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -707,9 +1249,13 @@ export default function PurchaseRecords() {
                               value={g.release_month || ''} 
                               onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
                               onClick={e => e.stopPropagation()}
+                              onKeyDown={e => handleKeyDown(e, idx, 'release_month')}
+                              onPaste={e => handlePaste(e, idx, 'release_month')}
+                              data-row={idx}
+                              data-field="release_month"
                               placeholder="例如：2026-11"
                             />
-                          ) : g.release_month || '-'}
+                          ) : formatReleaseMonth(g.release_month)}
                         </td>
                       </tr>
                     );
@@ -720,21 +1266,87 @@ export default function PurchaseRecords() {
               <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
-                    {editMode && <th style={{ width: '6%', textAlign: 'center' }}>刪除</th>}
-                    <th style={{ width: '8%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: editMode ? '19%' : '25%' }}>商品名稱</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>買動漫</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>WACA</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>已採購</th>
-                    <th style={{ width: '8%', textAlign: 'center' }}>缺口</th>
-                    <th style={{ width: '12%', textAlign: 'center' }}>購買結單日</th>
-                    <th style={{ width: '12%', textAlign: 'center' }}>官方結單日</th>
-                    <th style={{ width: '7%', textAlign: 'center' }}>發售月份</th>
-                    <th style={{ width: '4%', textAlign: 'center' }}>官網</th>
+                    <th style={{ width: '40px', textAlign: 'center' }}>
+                      <input 
+                        type="checkbox"
+                        checked={filteredAndSortedGroups.length > 0 && filteredAndSortedGroups.every(g => selectedGroupIds.has(g.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            if (filteredAndSortedGroups.length > 50) {
+                              const confirmSelect = window.confirm(`您即將選取 ${filteredAndSortedGroups.length} 筆商品進行批次編輯，是否確定？`);
+                              if (!confirmSelect) return;
+                            }
+                            setSelectedGroupIds(new Set(filteredAndSortedGroups.map(g => g.id)));
+                          } else {
+                            setSelectedGroupIds(new Set());
+                          }
+                        }}
+                      />
+                    </th>
+                    {editMode && <th style={{ width: '60px', textAlign: 'center' }}>刪除</th>}
+                    <th style={{ width: '90px' }}>
+                      <div className="th-inner justify-center">
+                        <span>狀態</span>
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.title}px` }}>
+                      <div className="th-inner">
+                        <span>商品名稱</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('title', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.myacg}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>買動漫</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('myacg', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.waca}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>WACA</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('waca', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.purchased}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>已採購</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchased', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.gap}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>缺口</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('gap', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.purchaseDate}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>購買結單日</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchaseDate', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.closingDate}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>官方結單日</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('closingDate', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.releaseMonth}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>發售月份</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('releaseMonth', e)} />
+                      </div>
+                    </th>
+                    <th style={{ width: `${colWidths.productUrl}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>官網</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('productUrl', e)} />
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAndSortedGroups.map(g => {
+                  {filteredAndSortedGroups.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
                     const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                     const status = getGroupStatus(g);
@@ -746,6 +1358,21 @@ export default function PurchaseRecords() {
                         onClick={(e) => handleRowClick(g.id, e)}
                         style={{ cursor: 'pointer' }}
                       >
+                        <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <input 
+                            type="checkbox"
+                            checked={selectedGroupIds.has(g.id)}
+                            onChange={(e) => {
+                              const next = new Set(selectedGroupIds);
+                              if (e.target.checked) {
+                                next.add(g.id);
+                              } else {
+                                next.delete(g.id);
+                              }
+                              setSelectedGroupIds(next);
+                            }}
+                          />
+                        </td>
                         {editMode && (
                           <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                             <button 
@@ -764,8 +1391,12 @@ export default function PurchaseRecords() {
                                 borderRadius: '4px',
                                 transition: 'all 0.2s'
                               }}
-                              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fef2f2'}
-                              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.backgroundColor = '#fef2f2';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
                             >
                               <Trash2 size={14} />
                               <span>刪除</span>
@@ -788,7 +1419,7 @@ export default function PurchaseRecords() {
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {editMode ? (
+                          {editMode && isProxyProduct(g) ? (
                             <input 
                               type="number"
                               className="input" 
@@ -803,18 +1434,18 @@ export default function PurchaseRecords() {
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {editMode ? (
+                          {editMode && isProxyProduct(g) ? (
                             <input 
                               type="number"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
-                              value={details.waca} 
+                              value={details.wacaManual} 
                               onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value) || 0)} 
                               onClick={e => e.stopPropagation()}
                               min={0}
                             />
                           ) : (
-                            details.waca
+                            details.wacaManual
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
@@ -825,14 +1456,37 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {editMode ? (
-                            <input 
-                              className="input" 
-                              type="date" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.purchase_date || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
-                              onClick={e => e.stopPropagation()}
-                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                              <input 
+                                className="input" 
+                                type="text" 
+                                placeholder="YYYY/MM/DD"
+                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                value={g.purchase_date || ''} 
+                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => handleKeyDown(e, idx, 'purchase_date')}
+                                onPaste={e => handlePaste(e, idx, 'purchase_date')}
+                                data-row={idx}
+                                data-field="purchase_date"
+                              />
+                              <Calendar 
+                                size={14} 
+                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  purchaseDatePickerRefs.current[g.id]?.showPicker();
+                                }}
+                              />
+                              <input 
+                                type="date"
+                                ref={el => { purchaseDatePickerRefs.current[g.id] = el; }}
+                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                value={g.purchase_date ? g.purchase_date.replace(/\//g, '-') : ''}
+                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)}
+                                onClick={e => e.stopPropagation()}
+                              />
+                            </div>
                           ) : (
                             <span style={{ color: '#475569', fontWeight: 500 }}>
                               {g.purchase_date || '-'}
@@ -841,14 +1495,37 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                           {editMode ? (
-                            <input 
-                              className="input" 
-                              type="date" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.closing_date || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
-                              onClick={e => e.stopPropagation()}
-                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                              <input 
+                                className="input" 
+                                type="text" 
+                                placeholder="YYYY/MM/DD"
+                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                value={g.closing_date || ''} 
+                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                                onClick={e => e.stopPropagation()}
+                                onKeyDown={e => handleKeyDown(e, idx, 'closing_date')}
+                                onPaste={e => handlePaste(e, idx, 'closing_date')}
+                                data-row={idx}
+                                data-field="closing_date"
+                              />
+                              <Calendar 
+                                size={14} 
+                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  datePickerRefs.current[g.id]?.showPicker();
+                                }}
+                              />
+                              <input 
+                                type="date"
+                                ref={el => { datePickerRefs.current[g.id] = el; }}
+                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
+                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
+                                onClick={e => e.stopPropagation()}
+                              />
+                            </div>
                           ) : closingDateStyle.text}
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -859,18 +1536,33 @@ export default function PurchaseRecords() {
                               value={g.release_month || ''} 
                               onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
                               onClick={e => e.stopPropagation()}
+                              onKeyDown={e => handleKeyDown(e, idx, 'release_month')}
+                              onPaste={e => handlePaste(e, idx, 'release_month')}
+                              data-row={idx}
+                              data-field="release_month"
                               placeholder="例如：2026-11"
                             />
-                          ) : g.release_month || '-'}
+                          ) : formatReleaseMonth(g.release_month)}
                         </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {g.product_url ? (
+                        <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          {editMode ? (
+                            <input 
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                              value={g.product_url || ''} 
+                              onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)} 
+                              onKeyDown={e => handleKeyDown(e, idx, 'product_url')}
+                              onPaste={e => handlePaste(e, idx, 'product_url')}
+                              data-row={idx}
+                              data-field="product_url"
+                              placeholder="官網網址"
+                            />
+                          ) : g.product_url ? (
                             <a 
                               href={g.product_url} 
                               target="_blank" 
                               rel="noreferrer" 
                               style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                              onClick={e => e.stopPropagation()}
                             >
                               🔗 官網
                             </a>

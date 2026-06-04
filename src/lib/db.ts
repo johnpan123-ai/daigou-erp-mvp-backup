@@ -226,6 +226,95 @@ export function resolveMyacgSpecs(rawNames: string[]): Record<string, { category
   return result;
 }
 
+export function mergeVariantNames(name1: string, name2: string): string {
+  if (!name1) return name2 || '';
+  if (!name2) return name1 || '';
+  if (name1.trim() === name2.trim()) return name1;
+
+  const expand = (name: string): string[] => {
+    const parts = name.split('/').map(s => s.trim()).filter(Boolean);
+    if (parts.length <= 1) return parts;
+    
+    const firstPart = parts[0];
+    const firstWords = firstPart.split(/\s+/);
+    if (firstWords.length <= 1) return parts;
+    
+    const prefixWords = firstWords.slice(0, -1);
+    const prefix = prefixWords.join(' ');
+    
+    return parts.map((part, idx) => {
+      if (idx === 0) return part;
+      const partWords = part.split(/\s+/);
+      if (prefixWords.length > 0 && partWords[0] === prefixWords[0]) {
+        return part;
+      }
+      return `${prefix} ${part}`.trim();
+    });
+  };
+
+  const expanded1 = expand(name1);
+  const expanded2 = expand(name2);
+  
+  const uniqueParts: string[] = [];
+  for (const part of [...expanded1, ...expanded2]) {
+    let shouldAdd = true;
+    for (let i = 0; i < uniqueParts.length; i++) {
+      const existing = uniqueParts[i];
+      if (existing === part) {
+        shouldAdd = false;
+        break;
+      }
+      if (existing.includes(part)) {
+        shouldAdd = false;
+        break;
+      }
+      if (part.includes(existing)) {
+        uniqueParts[i] = part;
+        shouldAdd = false;
+        break;
+      }
+    }
+    if (shouldAdd) {
+      uniqueParts.push(part);
+    }
+  }
+  // Remove any exact duplicates that might have sneaked in
+  const finalUniqueParts = Array.from(new Set(uniqueParts));
+  if (finalUniqueParts.length === 1) return finalUniqueParts[0];
+
+  const findCommonPrefix = (arr: string[]): string => {
+    if (arr.length === 0) return '';
+    const wordLists = arr.map(s => s.split(/\s+/));
+    let commonWords: string[] = [];
+    const minLen = Math.min(...wordLists.map(list => list.length));
+    
+    for (let i = 0; i < minLen; i++) {
+      const word = wordLists[0][i];
+      const allMatch = wordLists.every(list => list[i] === word);
+      if (allMatch) {
+        commonWords.push(word);
+      } else {
+        break;
+      }
+    }
+    return commonWords.join(' ');
+  };
+
+  const prefix = findCommonPrefix(finalUniqueParts);
+  if (prefix) {
+    const suffixes = finalUniqueParts.map(part => {
+      return part.slice(prefix.length).trim();
+    }).filter(Boolean);
+    
+    if (suffixes.length > 0) {
+      return `${prefix} ${suffixes.join(' / ')}`;
+    }
+    return prefix;
+  }
+
+  return finalUniqueParts.join(' / ');
+}
+
 export interface ImportStats {
   total: number;
   newCount: number;
@@ -304,51 +393,13 @@ export const getBaseSku = (code: string): string => {
 export const findMatchingInventoryItem = (variantCode: string, inventory: InventoryItem[]): InventoryItem | undefined => {
   if (!variantCode) return undefined;
   const cleanCode = variantCode.trim().toUpperCase();
-  
-  // 1. Try exact case-insensitive match
-  let matched = inventory.find(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
-  if (matched) return matched;
-  
-  // 2. Try base SKU case-insensitive match
-  const baseVariant = getBaseSku(cleanCode);
-  matched = inventory.find(i => {
-    const iCode = i.myacg_item_code.trim().toUpperCase();
-    const baseI = getBaseSku(iCode);
-    return baseI === baseVariant && 
-      (iCode === baseI || cleanCode === baseVariant);
-  });
-  if (matched) return matched;
-
-  // 3. Fallback: match any inventory item sharing the same base SKU
-  return inventory.find(i => {
-    const iCode = i.myacg_item_code.trim().toUpperCase();
-    return getBaseSku(iCode) === baseVariant;
-  });
+  return inventory.find(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
 };
 
 export const findMatchingVariant = (itemCode: string, variants: ProductVariant[]): ProductVariant | undefined => {
   if (!itemCode) return undefined;
   const cleanCode = itemCode.trim().toUpperCase();
-  
-  // 1. Try exact case-insensitive match
-  let matched = variants.find(v => v.myacg_item_code.trim().toUpperCase() === cleanCode);
-  if (matched) return matched;
-  
-  // 2. Try base SKU case-insensitive match
-  const baseItem = getBaseSku(cleanCode);
-  matched = variants.find(v => {
-    const vCode = v.myacg_item_code.trim().toUpperCase();
-    const baseV = getBaseSku(vCode);
-    return baseV === baseItem && 
-      (vCode === baseV || cleanCode === baseItem);
-  });
-  if (matched) return matched;
-
-  // 3. Fallback: match any variant sharing the same base SKU
-  return variants.find(v => {
-    const vCode = v.myacg_item_code.trim().toUpperCase();
-    return getBaseSku(vCode) === baseItem;
-  });
+  return variants.find(v => v.myacg_item_code.trim().toUpperCase() === cleanCode);
 };
 
 export const calculateFinalMyacgDemand = (
@@ -356,33 +407,11 @@ export const calculateFinalMyacgDemand = (
   inventory: InventoryItem[], 
   salesOrderItems: SalesOrderItem[]
 ): number => {
-  const invItem = findMatchingInventoryItem(variantCode, inventory);
-  const inventoryDemand = invItem ? (invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity) : undefined;
-  
-  // Calculate orderDemand
+  void salesOrderItems;
+  if (!variantCode) return -1;
   const cleanCode = variantCode.trim().toUpperCase();
-  const baseVariant = getBaseSku(cleanCode);
-  let orderDemand = 0;
-  
-  for (const item of salesOrderItems) {
-    if (item.order_status && item.order_status.includes('已取消')) continue;
-    const itemCode = item.myacg_item_code.trim().toUpperCase();
-    const baseItem = getBaseSku(itemCode);
-    if (
-      itemCode === cleanCode ||
-      (baseItem === baseVariant && (itemCode === baseItem || cleanCode === baseVariant)) ||
-      (baseItem === baseVariant)
-    ) {
-      orderDemand += item.quantity;
-    }
-  }
-
-  const finalMyacgDemand =
-    inventoryDemand != null && inventoryDemand > 0
-      ? inventoryDemand
-      : orderDemand;
-
-  return finalMyacgDemand;
+  const invItem = inventory.find(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
+  return invItem ? (invItem.myacg_sold_quantity ?? 0) : -1;
 };
 
 export class LocalStorageAdapter implements DatabaseAdapter {
@@ -403,7 +432,31 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     let unchangedCount = 0;
     const groupSet = new Set<string>();
 
+    // Pre-aggregate the incoming items by myacg_item_code to handle duplicates inside the same file
+    const aggregatedItemsMap = new Map<string, InventoryItem>();
     for (const item of items) {
+      const code = item.myacg_item_code;
+      const existingAgg = aggregatedItemsMap.get(code);
+      if (!existingAgg) {
+        aggregatedItemsMap.set(code, { ...item });
+      } else {
+        // Merge raw variant names and product titles
+        // existingAgg.raw_variant_name = mergeVariantNames(existingAgg.raw_variant_name, item.raw_variant_name);
+        // existingAgg.product_title = mergeVariantNames(existingAgg.product_title, item.product_title);
+        existingAgg.raw_variant_name = item.raw_variant_name || existingAgg.raw_variant_name;
+        existingAgg.product_title = item.product_title || existingAgg.product_title;
+
+        // Sum quantities
+        existingAgg.myacg_sold_quantity = (existingAgg.myacg_sold_quantity ?? 0) + (item.myacg_sold_quantity ?? 0);
+        existingAgg.myacg_available_quantity = (existingAgg.myacg_available_quantity ?? 0) + (item.myacg_available_quantity ?? 0);
+        if (item.myacg_demand_quantity !== undefined) {
+          existingAgg.myacg_demand_quantity = (existingAgg.myacg_demand_quantity ?? 0) + (item.myacg_demand_quantity ?? 0);
+        }
+      }
+    }
+    const incomingItems = Array.from(aggregatedItemsMap.values());
+
+    for (const item of incomingItems) {
       item.normalized_product_title = normalizeProductTitle(item.product_title);
       item.listing_type = determineListingType(item.product_title);
       groupSet.add(item.normalized_product_title);
@@ -413,6 +466,14 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         newCount++;
         currentMap.set(item.myacg_item_code, item);
       } else {
+        // Merge raw variant names and product titles from existing database item to prevent loss
+        // item.raw_variant_name = mergeVariantNames(existing.raw_variant_name, item.raw_variant_name);
+        // item.product_title = mergeVariantNames(existing.product_title, item.product_title);
+        item.raw_variant_name = item.raw_variant_name || existing.raw_variant_name;
+        item.product_title = item.product_title || existing.product_title;
+        item.normalized_product_title = normalizeProductTitle(item.product_title);
+        item.listing_type = determineListingType(item.product_title);
+
         const isChanged = 
           existing.product_title !== item.product_title ||
           existing.raw_variant_name !== item.raw_variant_name ||
@@ -539,18 +600,28 @@ export class LocalStorageAdapter implements DatabaseAdapter {
           };
           variants.push(variant);
           variantsUpdated = true;
-        } else if (variant.variant_name !== spec.variant_label || variant.product_category_id !== categoryId) {
-          variant.variant_name = spec.variant_label;
-          variant.raw_variant_name = item.raw_variant_name;
-          variant.product_category_id = categoryId;
-          variantsUpdated = true;
+        } else {
+          if (
+            variant.variant_name !== spec.variant_label ||
+            variant.product_category_id !== categoryId ||
+            variant.product_title !== item.product_title ||
+            variant.raw_variant_name !== item.raw_variant_name
+          ) {
+            variant.variant_name = spec.variant_label;
+            variant.raw_variant_name = item.raw_variant_name;
+            variant.product_title = item.product_title;
+            variant.product_category_id = categoryId;
+            variantsUpdated = true;
+          }
         }
       }
       
       // Update existing variants that were already in the group
       for (const existingVar of existingVars) {
-        if (existingVar.raw_variant_name) {
-          const spec = resolvedSpecs[existingVar.raw_variant_name];
+        const invItem = findMatchingInventoryItem(existingVar.myacg_item_code, targetItems);
+        const rawName = invItem ? invItem.raw_variant_name : existingVar.raw_variant_name;
+        if (rawName) {
+          const spec = resolvedSpecs[rawName];
           if (spec) {
             let categoryId: string | undefined = undefined;
             if (spec.category_label) {
@@ -568,9 +639,24 @@ export class LocalStorageAdapter implements DatabaseAdapter {
               categoryId = category.id;
             }
 
-            if (existingVar.variant_name !== spec.variant_label || existingVar.product_category_id !== categoryId) {
+            let updated = false;
+            if (existingVar.variant_name !== spec.variant_label) {
               existingVar.variant_name = spec.variant_label;
+              updated = true;
+            }
+            if (existingVar.product_category_id !== categoryId) {
               existingVar.product_category_id = categoryId;
+              updated = true;
+            }
+            if (invItem && existingVar.product_title !== invItem.product_title) {
+              existingVar.product_title = invItem.product_title;
+              updated = true;
+            }
+            if (invItem && existingVar.raw_variant_name !== invItem.raw_variant_name) {
+              existingVar.raw_variant_name = invItem.raw_variant_name;
+              updated = true;
+            }
+            if (updated) {
               variantsUpdated = true;
             }
           }
@@ -609,11 +695,15 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     for (const group of groups) {
       const groupVariants = variants.filter(v => v.product_group_id === group.id);
       
-      // We will ensure raw_variant_name is populated first
+      // We will ensure raw_variant_name and product_title are in sync with inventory
       groupVariants.forEach(v => {
-        if (!v.raw_variant_name) {
-          const invItem = inventoryMap.get(v.myacg_item_code);
-          if (invItem) v.raw_variant_name = invItem.raw_variant_name;
+        const invItem = inventoryMap.get(v.myacg_item_code);
+        if (invItem) {
+          if (v.raw_variant_name !== invItem.raw_variant_name || v.product_title !== invItem.product_title) {
+            v.raw_variant_name = invItem.raw_variant_name;
+            v.product_title = invItem.product_title;
+            variantsUpdated = true;
+          }
         }
       });
 
@@ -705,9 +795,24 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       for (const v of existingVariants) {
         const invItem = findMatchingInventoryItem(v.myacg_item_code, matchingItems);
         if (invItem) {
-          if (v.catalog_missing !== false || v.sort_order !== (invItem.import_sort_index ?? 9999)) {
+          let updated = false;
+          if (v.catalog_missing !== false) {
             v.catalog_missing = false;
+            updated = true;
+          }
+          if (v.sort_order !== (invItem.import_sort_index ?? 9999)) {
             v.sort_order = invItem.import_sort_index ?? 9999;
+            updated = true;
+          }
+          if (v.product_title !== invItem.product_title) {
+            v.product_title = invItem.product_title;
+            updated = true;
+          }
+          if (v.raw_variant_name !== invItem.raw_variant_name) {
+            v.raw_variant_name = invItem.raw_variant_name;
+            updated = true;
+          }
+          if (updated) {
             groupChanged = true;
           }
         } else {
@@ -768,6 +873,16 @@ export class LocalStorageAdapter implements DatabaseAdapter {
             
             const existingVar = findMatchingVariant(item.myacg_item_code, variants);
             if (existingVar) {
+                let updated = false;
+                if (existingVar.product_title !== item.product_title) {
+                    existingVar.product_title = item.product_title;
+                    updated = true;
+                }
+                if (existingVar.raw_variant_name !== item.raw_variant_name) {
+                    existingVar.raw_variant_name = item.raw_variant_name;
+                    updated = true;
+                }
+                
                 const spec = resolved[item.raw_variant_name || ''];
                 if (spec && spec.category_label) {
                     let cat = categories.find(c => c.product_group_id === group.id && c.title === spec.category_label);
@@ -780,11 +895,26 @@ export class LocalStorageAdapter implements DatabaseAdapter {
                         };
                         categories.push(cat);
                     }
-                    existingVar.product_category_id = cat.id;
-                    existingVar.variant_name = spec.variant_label;
+                    if (existingVar.product_category_id !== cat.id) {
+                        existingVar.product_category_id = cat.id;
+                        updated = true;
+                    }
+                    if (existingVar.variant_name !== spec.variant_label) {
+                        existingVar.variant_name = spec.variant_label;
+                        updated = true;
+                    }
                 } else if (spec) {
-                    existingVar.product_category_id = undefined;
-                    existingVar.variant_name = spec.variant_label;
+                    if (existingVar.product_category_id !== undefined) {
+                        existingVar.product_category_id = undefined;
+                        updated = true;
+                    }
+                    if (existingVar.variant_name !== spec.variant_label) {
+                        existingVar.variant_name = spec.variant_label;
+                        updated = true;
+                    }
+                }
+                if (updated) {
+                    groupChanged = true;
                 }
             }
         }

@@ -300,46 +300,9 @@ export default function PurchaseManagement() {
     const groupCatIds = new Set(allCats.filter(c => c.product_group_id === id).map(c => c.id));
     const groupVars = allVars.filter(v => v.product_group_id === id || (v.product_category_id && groupCatIds.has(v.product_category_id)));
     
-    // Sort groupVars to match display order in worksheet
-    const getVariantSortValue = (v: ProductVariant) => {
-      let catSort = 9999;
-      if (v.product_category_id) {
-        const cat = catMap.get(v.product_category_id);
-        if (cat) catSort = cat.sort_order ?? 9999;
-      } else {
-        catSort = v.sort_order ?? 9999;
-      }
-      return catSort;
-    };
-
+    // Sort groupVars to match display order in worksheet (purely natural SKU order)
     groupVars.sort((a, b) => {
-      const catSortA = getVariantSortValue(a);
-      const catSortB = getVariantSortValue(b);
-      if (catSortA !== catSortB) return catSortA - catSortB;
-
-      let catTitleA = '';
-      if (a.product_category_id) {
-        const cat = catMap.get(a.product_category_id);
-        if (cat) catTitleA = cat.title;
-      } else {
-        catTitleA = `__single__${a.id}`;
-      }
-
-      let catTitleB = '';
-      if (b.product_category_id) {
-        const cat = catMap.get(b.product_category_id);
-        if (cat) catTitleB = cat.title;
-      } else {
-        catTitleB = `__single__${b.id}`;
-      }
-
-      if (catTitleA !== catTitleB) return catTitleA.localeCompare(catTitleB);
-
-      const vSortA = a.sort_order ?? 9999;
-      const vSortB = b.sort_order ?? 9999;
-      if (vSortA !== vSortB) return vSortA - vSortB;
-
-      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '');
+      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
     });
 
     setVariants(groupVars);
@@ -388,7 +351,8 @@ export default function PurchaseManagement() {
     const target = allVars.find(v => v.id === vId);
     if (target) {
       if (platform === 'myacg') {
-        const auto = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+        const myacgQty = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+        const auto = myacgQty >= 0 ? myacgQty : 0;
         target.myacg_manual_adjustment = totalValue - auto;
       } else {
         const auto = target.waca_auto_quantity || 0;
@@ -575,7 +539,8 @@ export default function PurchaseManagement() {
 
 
   const getVariantShortageForModal = (v: ProductVariant) => {
-    const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+    const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+    const myacgDemand = myacgQty >= 0 ? myacgQty : 0;
     const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
     const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
     const totalDemand = myacgDemand + wacaDemand + privateDemand;
@@ -624,7 +589,8 @@ export default function PurchaseManagement() {
   };
 
   variants.forEach(v => {
-    const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+    const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+    const myacgDemand = myacgQty >= 0 ? myacgQty : 0;
     const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
     
     const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
@@ -780,12 +746,7 @@ export default function PurchaseManagement() {
   });
 
   Object.values(groupedVariants).forEach(groupItems => {
-    groupItems.sort((a, b) => {
-      const aSort = a.sort_order ?? 9999;
-      const bSort = b.sort_order ?? 9999;
-      if (aSort !== bSort) return aSort - bSort;
-      return compareNatural(a.myacg_item_code, b.myacg_item_code);
-    });
+    groupItems.sort((a, b) => compareNatural(a.myacg_item_code, b.myacg_item_code));
   });
 
   const getGroupSortOrder = (_key: string, items: ProductVariant[]) => {
@@ -822,33 +783,17 @@ export default function PurchaseManagement() {
   });
   console.table(debugInfo);
 
-  let sortedGroupEntries = Object.entries(groupedVariants).sort(([keyA, itemsA], [keyB, itemsB]) => {
-    const sortA = getGroupSortOrder(keyA, itemsA);
-    const sortB = getGroupSortOrder(keyB, itemsB);
-
-    if (sortA !== sortB) return sortA - sortB;
-
+  let sortedGroupEntries = Object.entries(groupedVariants).sort(([, itemsA], [, itemsB]) => {
     const skuA = getGroupMinSku(itemsA);
     const skuB = getGroupMinSku(itemsB);
-
-    const skuCompare = compareNatural(skuA, skuB);
-    if (skuCompare !== 0) return skuCompare;
-
-    const isCatA = keyA.startsWith('category:');
-    const isCatB = keyB.startsWith('category:');
-    const titleA = isCatA ? keyA.slice('category:'.length) : (itemsA[0]?.raw_variant_name || itemsA[0]?.variant_name || '');
-    const titleB = isCatB ? keyB.slice('category:'.length) : (itemsB[0]?.raw_variant_name || itemsB[0]?.variant_name || '');
-
-    return titleA.localeCompare(titleB, undefined, {
-      numeric: true,
-      sensitivity: 'base'
-    });
+    return compareNatural(skuA, skuB);
   });
 
   if (sortMode === 'shortage') {
     sortedGroupEntries = sortedGroupEntries.sort(([, itemsA], [, itemsB]) => {
       const getShortage = (items: ProductVariant[]) => items.reduce((sum, v) => {
-        const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+        const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+        const myacgDemand = myacgQty >= 0 ? myacgQty : 0;
         const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
         const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
         const totalPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
@@ -1194,7 +1139,8 @@ export default function PurchaseManagement() {
               // Compute Group Aggregates
               let pMyacg = 0, pWaca = 0, pManual = 0, pNeed = 0, pExcess = 0, pPurchased = 0, pDemand = 0;
               groupItems.forEach(v => {
-                const mDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+                const mQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+                const mDemand = mQty >= 0 ? mQty : 0;
                 const wDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
                 const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
                 const priDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -1563,7 +1509,8 @@ export default function PurchaseManagement() {
                             });
                             
                             return filteredList.map((v, i) => {
-                              const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+                              const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+                              const myacgDemand = (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
                               const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
                               
                               const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
@@ -1581,7 +1528,7 @@ export default function PurchaseManagement() {
                                 <tr key={v.id} style={{ borderBottom: i === filteredList.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
                                   <td style={{ padding: '12px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
-                                      <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name)} highlight={searchTerm} />
+                                      <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name || v.product_title || '單品')} highlight={searchTerm} />
                                     </div>
                                     <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
                                       SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
@@ -1766,7 +1713,8 @@ export default function PurchaseManagement() {
             }
 
             const itemsWithShortage = groupItems.map(v => {
-              const myacgDemand = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems) + (v.myacg_manual_adjustment || 0);
+              const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
+              const myacgDemand = (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
               const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
               const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
               const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -1913,7 +1861,7 @@ export default function PurchaseManagement() {
                         <div key={item.variant.id} style={{ fontSize: '14px', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ color: '#94a3b8' }}>•</span>
                           <span>
-                            <HighlightText text={isDaili ? getDisplayProductName(item.variant) : (parsedVariantsMap.get(item.variant.id)?.variantDisplayName || item.variant.variant_name)} highlight={searchTerm} />
+                            <HighlightText text={isDaili ? getDisplayProductName(item.variant) : (parsedVariantsMap.get(item.variant.id)?.variantDisplayName || item.variant.variant_name || item.variant.product_title || '單品')} highlight={searchTerm} />
                           </span>
                           <span style={{ fontWeight: 700, color: '#0F172A', marginLeft: '4px' }}>×{item.needToBuy}</span>
                         </div>

@@ -31,19 +31,70 @@ const HighlightText = ({ text, highlight }: { text: string; highlight: string })
   );
 };
 
+const DEFAULT_COL_WIDTHS = {
+  title: 450,
+  category: 180,
+  status: 200,
+  listedAt: 120,
+  sales: 100
+};
+
 export default function Inventory() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all'); // 'all', 'proxy', 'japan', 'instock', 'added', 'not_added'
+  const [categoryFilter, setCategoryFilter] = useState('all'); // 'all', 'hololive', 'vspo', 'other'
+  const [proxyFilter, setProxyFilter] = useState('all'); // 'all', 'proxy', 'japan', 'instock'
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'added', 'not_added'
   const [refreshTime, setRefreshTime] = useState<string>('');
   
   // selectedSkus contains myacg_item_code
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem('erp_inventory_col_widths');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return DEFAULT_COL_WIDTHS;
+  });
+
+  const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = colWidths[colKey] || DEFAULT_COL_WIDTHS[colKey as keyof typeof DEFAULT_COL_WIDTHS];
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const newWidth = Math.max(80, startWidth + dx);
+      setColWidths(prev => ({
+        ...prev,
+        [colKey]: newWidth
+      }));
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      
+      setColWidths(current => {
+        localStorage.setItem('erp_inventory_col_widths', JSON.stringify(current));
+        return current;
+      });
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadItems();
@@ -95,11 +146,36 @@ export default function Inventory() {
 
   const handleCreatePurchaseRecords = async () => {
     if (selectedSkus.size === 0) return;
+    const confirmImport = window.confirm(`你即將匯入 ${selectedSkus.size} 個商品至訂購紀錄表，是否確認？`);
+    if (!confirmImport) return;
     try {
       await dataProvider.createPurchaseRecordFromInventory(Array.from(selectedSkus));
       alert(`已將 ${selectedSkus.size} 筆 SKU 建立/匯入訂購紀錄。`);
       setSelectedSkus(new Set());
       await loadItems(); // Refresh the "Added" status
+    } catch (e) {
+      alert('建立失敗');
+      console.error(e);
+    }
+  };
+
+  const handleImportSingleGroup = async (g: InventoryGroup) => {
+    const skusToImport = g.skus.map(s => s.myacg_item_code);
+    if (skusToImport.length === 0) return;
+
+    const confirmImport = window.confirm(`你即將匯入該群組共 ${skusToImport.length} 個商品至訂購紀錄表，是否確認？`);
+    if (!confirmImport) return;
+
+    try {
+      await dataProvider.createPurchaseRecordFromInventory(skusToImport);
+      alert(`已將 ${skusToImport.length} 筆 SKU 建立/匯入訂購紀錄。`);
+      
+      // 同時把這些 sku 從 selectedSkus 中移除（若有的話）
+      const nextSelected = new Set(selectedSkus);
+      skusToImport.forEach(sku => nextSelected.delete(sku));
+      setSelectedSkus(nextSelected);
+
+      await loadItems(); // 重新整理狀態
     } catch (e) {
       alert('建立失敗');
       console.error(e);
@@ -149,15 +225,37 @@ export default function Inventory() {
     // Apply Filters
     let filteredGroups = sortedGroups;
 
-    if (filterType === 'proxy') {
+    // 1. Category Filter
+    if (categoryFilter === 'hololive') {
+      filteredGroups = filteredGroups.filter(g => {
+        const titleNorm = g.title.toLowerCase().replace(/[\s!\uff01\?\uff1f\-_\(\)\uff08\uff09\.\*,]/g, '');
+        return titleNorm.includes('hololive');
+      });
+    } else if (categoryFilter === 'vspo') {
+      filteredGroups = filteredGroups.filter(g => {
+        const titleNorm = g.title.toLowerCase().replace(/[\s!\uff01\?\uff1f\-_\(\)\uff08\uff09\.\*,]/g, '');
+        return titleNorm.includes('vspo') || titleNorm.includes('ぶいすぽ');
+      });
+    } else if (categoryFilter === 'other') {
+      filteredGroups = filteredGroups.filter(g => {
+        const titleNorm = g.title.toLowerCase().replace(/[\s!\uff01\?\uff1f\-_\(\)\uff08\uff09\.\*,]/g, '');
+        return !titleNorm.includes('hololive') && !titleNorm.includes('vspo') && !titleNorm.includes('ぶいすぽ');
+      });
+    }
+
+    // 2. Proxy/Type Filter (listing_type)
+    if (proxyFilter === 'proxy') {
       filteredGroups = filteredGroups.filter(g => g.skus[0]?.listing_type === '代理版');
-    } else if (filterType === 'japan') {
+    } else if (proxyFilter === 'japan') {
       filteredGroups = filteredGroups.filter(g => g.skus[0]?.listing_type === '日本代購');
-    } else if (filterType === 'instock') {
+    } else if (proxyFilter === 'instock') {
       filteredGroups = filteredGroups.filter(g => g.skus[0]?.listing_type === '現貨');
-    } else if (filterType === 'added') {
+    }
+
+    // 3. Purchase Status Filter (added/not_added)
+    if (statusFilter === 'added') {
       filteredGroups = filteredGroups.filter(g => g.inPurchaseRecord);
-    } else if (filterType === 'not_added') {
+    } else if (statusFilter === 'not_added') {
       filteredGroups = filteredGroups.filter(g => !g.inPurchaseRecord);
     }
 
@@ -178,7 +276,7 @@ export default function Inventory() {
       return groupMatches || matchingSkus.length > 0;
     });
 
-  }, [items, searchTerm, filterType, existingGroupTitles]);
+  }, [items, searchTerm, categoryFilter, proxyFilter, statusFilter, existingGroupTitles]);
 
   // Effect to auto-expand groups when search term changes
   useEffect(() => {
@@ -218,7 +316,7 @@ export default function Inventory() {
   // Reset pagination if search or filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterType]);
+  }, [searchTerm, categoryFilter, proxyFilter, statusFilter]);
 
   const toggleGroupExpand = (title: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -671,16 +769,55 @@ export default function Inventory() {
           border-collapse: collapse;
           text-align: left;
           font-size: 13px;
+          table-layout: fixed;
         }
 
         .inventory-table th {
-          padding: 16px;
+          padding: 0;
           font-weight: 600;
           color: #475569;
           font-size: 12px;
           background-color: #f8fafc;
           border-bottom: 1px solid #e2e8f0;
           white-space: nowrap;
+        }
+
+        .th-inner {
+          position: relative;
+          padding: 8px 12px;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          width: 100%;
+          height: 100%;
+        }
+
+        .th-inner.justify-center {
+          justify-content: center;
+        }
+
+        .th-inner.justify-end {
+          justify-content: flex-end;
+        }
+
+        .resizer-handle {
+          position: absolute;
+          right: 0;
+          top: 4px;
+          bottom: 4px;
+          width: 4px;
+          border-right: 2px solid #000000;
+          cursor: col-resize;
+          user-select: none;
+          z-index: 10;
+          opacity: 0.6;
+          transition: opacity 0.15s;
+        }
+
+        .resizer-handle:hover,
+        .resizer-handle:active {
+          opacity: 1;
+          border-right: 2px solid #2563eb;
         }
 
         .inventory-table tr {
@@ -697,9 +834,11 @@ export default function Inventory() {
         }
 
         .inventory-table td {
-          padding: 14px 16px;
+          padding: 6px 12px;
           vertical-align: middle;
           box-sizing: border-box;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         /* Soft Badge Tags */
@@ -752,8 +891,8 @@ export default function Inventory() {
         .badge-status-added {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
-          padding: 4px 12px;
+          gap: 4px;
+          padding: 2px 8px;
           font-size: 11px;
           font-weight: 600;
           border-radius: 9999px;
@@ -765,8 +904,8 @@ export default function Inventory() {
         .badge-status-not-added {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
-          padding: 4px 12px;
+          gap: 4px;
+          padding: 2px 8px;
           font-size: 11px;
           font-weight: 600;
           border-radius: 9999px;
@@ -992,56 +1131,36 @@ export default function Inventory() {
             />
           </div>
 
-          {/* Classification Dropdown (Placeholder to match style) */}
-          <select className="filter-select" defaultValue="all" disabled style={{ opacity: 0.8, cursor: 'not-allowed' }}>
+          {/* Classification Dropdown */}
+          <select 
+            className={`filter-select ${categoryFilter !== 'all' ? 'active' : ''}`}
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+          >
             <option value="all">全部分類</option>
+            <option value="hololive">Hololive</option>
+            <option value="vspo">VSPO</option>
+            <option value="other">其他分類</option>
           </select>
 
-          {/* Proxy Dropdown */}
+          {/* Proxy/Type Dropdown */}
           <select 
-            className={`filter-select ${filterType === 'proxy' ? 'active' : ''}`}
-            value={filterType === 'proxy' ? 'proxy' : 'all'}
-            onChange={(e) => {
-              if (e.target.value === 'proxy') setFilterType('proxy');
-              else setFilterType('all');
-            }}
+            className={`filter-select ${proxyFilter !== 'all' ? 'active' : ''}`}
+            value={proxyFilter}
+            onChange={(e) => setProxyFilter(e.target.value)}
           >
-            <option value="all">全部代理</option>
+            <option value="all">全部代理/類型</option>
             <option value="proxy">代理版</option>
-          </select>
-
-          {/* Source Dropdown */}
-          <select 
-            className={`filter-select ${filterType === 'japan' ? 'active' : ''}`}
-            value={filterType === 'japan' ? 'japan' : 'all'}
-            onChange={(e) => {
-              if (e.target.value === 'japan') setFilterType('japan');
-              else setFilterType('all');
-            }}
-          >
-            <option value="all">全部來源</option>
             <option value="japan">日本代購</option>
-          </select>
-
-          {/* Status Dropdown */}
-          <select 
-            className={`filter-select ${filterType === 'instock' ? 'active' : ''}`}
-            value={filterType === 'instock' ? 'instock' : 'all'}
-            onChange={(e) => {
-              if (e.target.value === 'instock') setFilterType('instock');
-              else setFilterType('all');
-            }}
-          >
-            <option value="all">全部狀態</option>
             <option value="instock">現貨</option>
           </select>
 
           {/* Quick status Tags */}
           <button 
-            className={`quick-tag ${filterType === 'added' ? 'active' : ''}`}
+            className={`quick-tag ${statusFilter === 'added' ? 'active' : ''}`}
             onClick={() => {
-              if (filterType === 'added') setFilterType('all');
-              else setFilterType('added');
+              if (statusFilter === 'added') setStatusFilter('all');
+              else setStatusFilter('added');
             }}
           >
             <span className="dot-indicator dot-green"></span>
@@ -1049,10 +1168,10 @@ export default function Inventory() {
           </button>
 
           <button 
-            className={`quick-tag ${filterType === 'not_added' ? 'active' : ''}`}
+            className={`quick-tag ${statusFilter === 'not_added' ? 'active' : ''}`}
             onClick={() => {
-              if (filterType === 'not_added') setFilterType('all');
-              else setFilterType('not_added');
+              if (statusFilter === 'not_added') setStatusFilter('all');
+              else setStatusFilter('not_added');
             }}
           >
             <span className="dot-indicator dot-red"></span>
@@ -1060,7 +1179,23 @@ export default function Inventory() {
           </button>
         </div>
 
-        <div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button 
+            className="btn-more-filters"
+            onClick={() => {
+              setColWidths({
+                title: 450,
+                category: 180,
+                status: 200,
+                listedAt: 120,
+                sales: 100
+              });
+              localStorage.removeItem('erp_inventory_col_widths');
+              alert('欄位寬度已重設為預設值！');
+            }}
+          >
+            <span>重設欄寬</span>
+          </button>
           <button className="btn-more-filters">
             <SlidersHorizontal size={14} />
             <span>更多篩選</span>
@@ -1074,10 +1209,10 @@ export default function Inventory() {
         {groups.length === 0 ? (
           <EmptyState
             icon={PackageX}
-            title={searchTerm || filterType !== 'all' ? "找不到符合條件的商品" : "尚未匯入商品主檔"}
-            description={searchTerm || filterType !== 'all' ? "請嘗試更換搜尋關鍵字或篩選條件。" : "請點擊匯入買動漫匯出檔案，建立系統內 SKU 與庫存數據。"}
-            actionLabel={searchTerm || filterType !== 'all' ? undefined : "匯入 XLS"}
-            onAction={searchTerm || filterType !== 'all' ? undefined : handleImportClick}
+            title={searchTerm || categoryFilter !== 'all' || proxyFilter !== 'all' || statusFilter !== 'all' ? "找不到符合條件的商品" : "尚未匯入商品主檔"}
+            description={searchTerm || categoryFilter !== 'all' || proxyFilter !== 'all' || statusFilter !== 'all' ? "請嘗試更換搜尋關鍵字或篩選條件。" : "請點擊匯入買動漫匯出檔案，建立系統內 SKU 與庫存數據。"}
+            actionLabel={searchTerm || categoryFilter !== 'all' || proxyFilter !== 'all' || statusFilter !== 'all' ? undefined : "匯入 XLS"}
+            onAction={searchTerm || categoryFilter !== 'all' || proxyFilter !== 'all' || statusFilter !== 'all' ? undefined : handleImportClick}
           />
         ) : (
           <>
@@ -1085,22 +1220,53 @@ export default function Inventory() {
               <thead>
                 <tr>
                   <th style={{ width: '48px', textAlign: 'center' }}>
-                    <input type="checkbox" 
-                      checked={selectedSkus.size === items.length && items.length > 0} 
-                      onChange={() => {
-                        if (selectedSkus.size === items.length) {
-                          setSelectedSkus(new Set());
-                        } else {
-                          setSelectedSkus(new Set(items.map(i => i.myacg_item_code)));
-                        }
-                      }} 
-                    />
+                    {/* 移除全選 Checkbox */}
                   </th>
-                  <th>商品名稱 / SKU</th>
-                  <th style={{ width: '180px' }}>分類 / 代理</th>
-                  <th style={{ width: '120px', textAlign: 'center' }}>狀態</th>
-                  <th style={{ width: '120px', textAlign: 'center' }}>上架時間</th>
-                  <th style={{ width: '100px', textAlign: 'right' }}>總銷量</th>
+                  <th style={{ width: `${colWidths.title}px` }}>
+                    <div className="th-inner">
+                      <span>商品名稱 / SKU</span>
+                      <div 
+                        className="resizer-handle"
+                        onMouseDown={(e) => handleMouseDown('title', e)}
+                      />
+                    </div>
+                  </th>
+                  <th style={{ width: `${colWidths.category}px` }}>
+                    <div className="th-inner">
+                      <span>分類 / 代理</span>
+                      <div 
+                        className="resizer-handle"
+                        onMouseDown={(e) => handleMouseDown('category', e)}
+                      />
+                    </div>
+                  </th>
+                  <th style={{ width: `${colWidths.status}px` }}>
+                    <div className="th-inner justify-center">
+                      <span>狀態</span>
+                      <div 
+                        className="resizer-handle"
+                        onMouseDown={(e) => handleMouseDown('status', e)}
+                      />
+                    </div>
+                  </th>
+                  <th style={{ width: `${colWidths.listedAt}px` }}>
+                    <div className="th-inner justify-center">
+                      <span>上架時間</span>
+                      <div 
+                        className="resizer-handle"
+                        onMouseDown={(e) => handleMouseDown('listedAt', e)}
+                      />
+                    </div>
+                  </th>
+                  <th style={{ width: `${colWidths.sales}px` }}>
+                    <div className="th-inner justify-end">
+                      <span>總銷量</span>
+                      <div 
+                        className="resizer-handle"
+                        onMouseDown={(e) => handleMouseDown('sales', e)}
+                      />
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1157,31 +1323,42 @@ export default function Inventory() {
                           />
                         </td>
                         <td>
-                          <div className="flex-col gap-xs">
-                            <div style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a', lineHeight: '1.4' }}>
+                          <div className="flex-col" style={{ gap: '2px' }}>
+                            <div style={{ 
+                              fontWeight: 600, 
+                              fontSize: '13px', 
+                              color: '#0f172a', 
+                              lineHeight: '1.3',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              wordBreak: 'break-word'
+                            }}>
                               <HighlightText text={g.title} highlight={searchTerm} />
                               {!isSingle && (
-                                <span style={{ marginLeft: '6px', fontSize: '11px', padding: '2px 6px', borderRadius: '12px', backgroundColor: '#f1f5f9', color: '#64748b', fontWeight: 500 }}>
+                                <span style={{ marginLeft: '6px', fontSize: '11px', padding: '1px 5px', borderRadius: '12px', backgroundColor: '#f1f5f9', color: '#64748b', fontWeight: 500 }}>
                                   {g.skus.length} 款
                                 </span>
                               )}
                               {!isSingle && (
-                                isExpanded ? <ChevronDown size={14} style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle', color: '#94a3b8' }} /> : <ChevronRight size={14} style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle', color: '#94a3b8' }} />
+                                isExpanded ? <ChevronDown size={12} style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle', color: '#94a3b8' }} /> : <ChevronRight size={12} style={{ display: 'inline-block', marginLeft: '4px', verticalAlign: 'middle', color: '#94a3b8' }} />
                               )}
                             </div>
                             
                             {isSingle && (
-                              <div style={{ color: '#64748b', fontSize: '12px', display: 'flex', gap: '12px', marginTop: '2px' }}>
+                              <div style={{ color: '#64748b', fontSize: '11px', display: 'flex', gap: '10px', marginTop: '1px', flexWrap: 'wrap' }}>
                                 <span>SKU: <HighlightText text={g.skus[0].myacg_item_code} highlight={searchTerm} /></span>
                                 {g.skus[0].raw_variant_name && (
                                   <span>規格: <HighlightText text={g.skus[0].raw_variant_name} highlight={searchTerm} /></span>
                                 )}
-                                <span>價格: NT${g.minPrice}</span>
+                                <span style={{ fontWeight: 600, color: '#475569' }}>NT${g.minPrice}</span>
                               </div>
                             )}
                             {!isSingle && (
-                              <div style={{ color: '#94a3b8', fontSize: '11px', marginTop: '2px' }}>
-                                價格區間: NT${g.minPrice === g.maxPrice ? g.minPrice : `${g.minPrice}~${g.maxPrice}`}
+                              <div style={{ color: '#64748b', fontSize: '11px', display: 'flex', gap: '10px', marginTop: '1px' }}>
+                                <span>價格區間: <span style={{ fontWeight: 600 }}>NT${g.minPrice === g.maxPrice ? g.minPrice : `${g.minPrice}~${g.maxPrice}`}</span></span>
                               </div>
                             )}
                           </div>
@@ -1190,24 +1367,77 @@ export default function Inventory() {
                           {renderGroupTags()}
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <div className="flex justify-center">
+                          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: '8px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
                             {g.inPurchaseRecord ? (
-                              <span className="badge-status-added">
-                                <span className="dot-indicator dot-green"></span>
-                                <span>已加入</span>
-                              </span>
+                              <>
+                                <span className="badge-status-added">
+                                  <span className="dot-indicator dot-green"></span>
+                                  <span>已加入</span>
+                                </span>
+                                <button 
+                                  style={{ 
+                                    fontSize: '11px', 
+                                    color: '#475569', 
+                                    backgroundColor: '#ffffff', 
+                                    border: '1px solid #cbd5e1', 
+                                    borderRadius: '6px', 
+                                    padding: '3px 8px', 
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap',
+                                    transition: 'all 0.15s'
+                                  }}
+                                  onClick={() => handleImportSingleGroup(g)}
+                                  onMouseEnter={e => {
+                                    e.currentTarget.style.backgroundColor = '#f8fafc';
+                                    e.currentTarget.style.borderColor = '#94a3b8';
+                                  }}
+                                  onMouseLeave={e => {
+                                    e.currentTarget.style.backgroundColor = '#ffffff';
+                                    e.currentTarget.style.borderColor = '#cbd5e1';
+                                  }}
+                                >
+                                  再次匯入
+                                </button>
+                              </>
                             ) : (
-                              <span className="badge-status-not-added">
-                                <span className="dot-indicator dot-red"></span>
-                                <span>未加入</span>
-                              </span>
+                              <>
+                                <span className="badge-status-not-added">
+                                  <span className="dot-indicator dot-red"></span>
+                                  <span>未加入</span>
+                                </span>
+                                <button 
+                                  style={{ 
+                                    fontSize: '11px', 
+                                    color: '#ffffff', 
+                                    backgroundColor: '#2563eb', 
+                                    border: 'none', 
+                                    borderRadius: '6px', 
+                                    padding: '3px 8px', 
+                                    fontWeight: 600, 
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap',
+                                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                                    transition: 'all 0.15s'
+                                  }}
+                                  onClick={() => handleImportSingleGroup(g)}
+                                  onMouseEnter={e => {
+                                    e.currentTarget.style.backgroundColor = '#1d4ed8';
+                                  }}
+                                  onMouseLeave={e => {
+                                    e.currentTarget.style.backgroundColor = '#2563eb';
+                                  }}
+                                >
+                                  匯入訂購紀錄
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
-                        <td style={{ textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                        <td style={{ textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
                           {g.latest_listed_at ? g.latest_listed_at.split(' ')[0] : '-'}
                         </td>
-                        <td style={{ textAlign: 'right', color: '#475569', fontSize: '14px', fontWeight: 500 }}>
+                        <td style={{ textAlign: 'right', color: '#475569', fontSize: '13px', fontWeight: 500 }}>
                           {g.totalSold}
                         </td>
                       </tr>

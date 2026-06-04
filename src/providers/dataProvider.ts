@@ -121,6 +121,12 @@ class DynamicDataProvider implements IDataProvider {
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
     return this.getActiveProvider().syncProductGroupsWithInventory();
   }
+  async deleteProductGroup(groupId: string): Promise<void> {
+    return this.getActiveProvider().deleteProductGroup(groupId);
+  }
+  async deleteProductGroups(groupIds: string[]): Promise<void> {
+    return this.getActiveProvider().deleteProductGroups(groupIds);
+  }
 }
 
 export const dataProvider: IDataProvider = new DynamicDataProvider();

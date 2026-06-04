@@ -106,4 +106,30 @@ export class LocalProvider implements IDataProvider {
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
     return db.syncProductGroupsWithInventory();
   }
+  async deleteProductGroup(groupId: string): Promise<void> {
+    const groups = await db.getProductGroups();
+    const updatedGroups = groups.filter(g => g.id !== groupId);
+    await db.saveProductGroups(updatedGroups);
+
+    const categories = await db.getProductCategories();
+    const updatedCategories = categories.filter(c => c.product_group_id !== groupId);
+    await db.saveProductCategories(updatedCategories);
+
+    const variants = await db.getProductVariants();
+    const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
+    await db.saveProductVariants(updatedVariants);
+  }
+  async deleteProductGroups(groupIds: string[]): Promise<void> {
+    const groups = await db.getProductGroups();
+    const updatedGroups = groups.filter(g => !groupIds.includes(g.id));
+    await db.saveProductGroups(updatedGroups);
+
+    const categories = await db.getProductCategories();
+    const updatedCategories = categories.filter(c => !c.product_group_id || !groupIds.includes(c.product_group_id));
+    await db.saveProductCategories(updatedCategories);
+
+    const variants = await db.getProductVariants();
+    const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
+    await db.saveProductVariants(updatedVariants);
+  }
 }

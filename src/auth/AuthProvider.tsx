@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../providers/cloud/supabaseClient';
-import { getProviderMode } from '../providers/providerMode';
+import { getProviderMode, setProviderMode } from '../providers/providerMode';
 import type { User } from '@supabase/supabase-js';
 
 export interface UserProfile {
@@ -61,6 +61,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       setLoading(false);
+
+      const currentMode = getProviderMode();
+      if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
+        console.log('[Provider Mode] blocked: login required');
+        setProviderMode('local');
+        window.location.reload();
+        return;
+      }
+
       if (currentUser) {
         fetchProfile(currentUser.id);
       } else {
@@ -74,6 +83,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       setLoading(false);
+
+      const currentMode = getProviderMode();
+      if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
+        console.log('[Provider Mode] blocked: login required');
+        setProviderMode('local');
+        window.location.reload();
+        return;
+      }
+
       if (currentUser) {
         fetchProfile(currentUser.id);
       } else {
@@ -90,6 +108,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
+    setProviderMode('local');
+    window.location.reload();
   };
 
   return (

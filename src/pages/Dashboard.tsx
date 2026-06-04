@@ -315,6 +315,27 @@ export default function Dashboard() {
     };
   }, [groups, variants, inventory]);
 
+  // Release Month stats aggregation
+  const releaseMonthStats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const groupsList = groups || [];
+    const currentMonth = today.substring(0, 7); // "YYYY-MM"
+
+    groupsList.forEach(g => {
+      if (!g || !g.release_month) return;
+      const match = g.release_month.match(/^(\d{4})-(\d{2})$/);
+      if (!match) return;
+
+      if (g.release_month >= currentMonth) {
+        counts[g.release_month] = (counts[g.release_month] || 0) + 1;
+      }
+    });
+
+    return Object.entries(counts)
+      .map(([month, count]) => ({ month, count }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+  }, [groups, today]);
+
   // Urgent Groups (closing in <= 7 days, or overdue with gap)
   const urgentGroups = useMemo(() => {
     const groupsList = groups || [];
@@ -1012,7 +1033,71 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 第三區：即將結單 / 需要處理 */}
+      {/* 第三區：即將發售商品 */}
+      {releaseMonthStats.length > 0 && (
+        <div className="category-section" style={{ marginTop: '8px' }}>
+          <div className="category-section-header">
+            <h3>即將發售商品</h3>
+            <p>本月及未來月份即將發售之商品群組統計，點擊可查詢該月份商品</p>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: '20px'
+          }}>
+            {releaseMonthStats.map(({ month, count }) => {
+              const match = month.match(/^(\d{4})-(\d{2})$/);
+              const displayName = match ? `${match[1]}年${match[2]}月` : month;
+              return (
+                <div 
+                  key={month}
+                  onClick={() => navigate(`/purchase-records?tab=all&search=${month}`)}
+                  style={{
+                    background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '16px',
+                    padding: '20px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'translateY(-4px)';
+                    e.currentTarget.style.borderColor = '#2563eb';
+                    e.currentTarget.style.boxShadow = '0 12px 20px -8px rgba(37, 99, 235, 0.15), 0 4px 12px -2px rgba(0, 0, 0, 0.04)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.borderColor = '#e2e8f0';
+                    e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)';
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '4px',
+                    height: '100%',
+                    backgroundColor: '#2563eb'
+                  }} />
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#475569' }}>{displayName}</span>
+                  <span style={{ fontSize: '24px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                    {count}
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>個商品群組</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 第四區：即將結單 / 需要處理 */}
       <div className="urgent-section">
         <div className="urgent-section-header">
           <div>

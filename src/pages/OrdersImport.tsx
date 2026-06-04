@@ -27,6 +27,7 @@ interface ImportReport {
   
   // Explicit details for ImportBatch log
   duplicateItemsList: ParsedMyAcgOrder[];
+  cancelledOrderNos?: string[];
 }
 
 export default function OrdersImport() {
@@ -256,6 +257,10 @@ export default function OrdersImport() {
         newOrderItemsCount++;
       }
 
+      const csvCancelledOrderNos = Array.from(new Set(
+        rawItems.filter(i => i.order_status.includes('已取消')).map(i => i.order_no)
+      ));
+
       setReport({
         fileName: file.name,
         totalOrdersRead,
@@ -273,7 +278,8 @@ export default function OrdersImport() {
         pendingGroups,
         pendingOrders: Array.from(pendingOrdersMap.values()),
         pendingOrderItems,
-        duplicateItemsList
+        duplicateItemsList,
+        cancelledOrderNos: csvCancelledOrderNos
       });
 
     } catch (error) {
@@ -296,7 +302,17 @@ export default function OrdersImport() {
       const currentOrders = await dataProvider.getSalesOrders();
       await dataProvider.saveSalesOrders([...currentOrders, ...report.pendingOrders]);
       const currentOrderItems = await dataProvider.getSalesOrderItems();
-      await dataProvider.saveSalesOrderItems([...currentOrderItems, ...report.pendingOrderItems]);
+      
+      const csvCancelledOrderNos = new Set(report.cancelledOrderNos || []);
+      const updatedOrderItems = currentOrderItems.map(item => {
+        const order = currentOrders.find(o => o.id === item.order_id);
+        if (order && csvCancelledOrderNos.has(order.order_number)) {
+          return { ...item, order_status: '已取消' };
+        }
+        return item;
+      });
+
+      await dataProvider.saveSalesOrderItems([...updatedOrderItems, ...report.pendingOrderItems]);
 
       // Save ImportBatch
       const newBatch: ImportBatch = {
