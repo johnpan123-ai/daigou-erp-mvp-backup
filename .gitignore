@@ -38,3 +38,4 @@ inspect_*
 run_supabase_analysis*
 list_supabase_tables*
 search_*
+*.cjs
