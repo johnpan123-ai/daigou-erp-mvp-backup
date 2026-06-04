@@ -95,7 +95,6 @@ export default function Inventory() {
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [canWrite, setCanWrite] = useState<boolean>(true);
 
   useEffect(() => {
     loadItems();
@@ -107,9 +106,6 @@ export default function Inventory() {
     const groups = await dataProvider.getProductGroups();
     setProductGroups(groups);
     
-    const userCanWrite = await dataProvider.canWriteCloud();
-    setCanWrite(userCanWrite);
-
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
@@ -120,18 +116,10 @@ export default function Inventory() {
   }, [productGroups]);
 
   const handleImportClick = () => {
-    if (!canWrite) {
-      alert('無權限：唯讀角色（Viewer/Helper）無法匯入資料');
-      return;
-    }
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canWrite) {
-      alert('無權限：唯讀角色（Viewer/Helper）無法匯入資料');
-      return;
-    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -157,10 +145,6 @@ export default function Inventory() {
   };
 
   const handleCreatePurchaseRecords = async () => {
-    if (!canWrite) {
-      alert('無權限：唯讀角色（Viewer/Helper）無法建立訂購紀錄');
-      return;
-    }
     if (selectedSkus.size === 0) return;
     const confirmImport = window.confirm(`你即將匯入 ${selectedSkus.size} 個商品至訂購紀錄表，是否確認？`);
     if (!confirmImport) return;
@@ -1026,19 +1010,15 @@ export default function Inventory() {
             <p>管理全部商品庫存，以 SKU 為基礎。</p>
           </div>
           <div className="inventory-header-buttons">
-            {canWrite && (
-              <>
-                <button className="btn-add-product" onClick={() => alert('手動新增商品功能開發中，目前請使用 [匯入主檔 XLS] 進行商品新增。')}>
-                  <Plus size={14} />
-                  <span>新增商品</span>
-                </button>
-                <button className="btn-import-xls" onClick={handleImportClick} disabled={isImporting}>
-                  <Upload size={14} />
-                  <span>{isImporting ? '匯入中...' : '匯入主檔 XLS'}</span>
-                </button>
-              </>
-            )}
-            {selectedSkus.size > 0 && canWrite && (
+            <button className="btn-add-product" onClick={() => alert('手動新增商品功能開發中，目前請使用 [匯入主檔 XLS] 進行商品新增。')}>
+              <Plus size={14} />
+              <span>新增商品</span>
+            </button>
+            <button className="btn-import-xls" onClick={handleImportClick} disabled={isImporting}>
+              <Upload size={14} />
+              <span>{isImporting ? '匯入中...' : '匯入主檔 XLS'}</span>
+            </button>
+            {selectedSkus.size > 0 && (
               <button className="btn btn-primary" onClick={handleCreatePurchaseRecords} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                 <span>建立訂購紀錄 ({selectedSkus.size} 筆)</span>
               </button>

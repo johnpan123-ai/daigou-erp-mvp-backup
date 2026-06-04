@@ -272,7 +272,6 @@ export class SupabaseProvider implements IDataProvider {
         console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
         console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
         console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
-        console.log(`[Variant Price Sync] cloud pulled sample:`, variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
 
         // Check if all of them are empty
         if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
@@ -543,7 +542,6 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
-    console.log(`[Variant Price Sync] before save: length ${variants.length}`, variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
     const sanitizedVariants = [];
     const groups = await db.getProductGroups();
     const categories = await db.getProductCategories();
@@ -641,18 +639,11 @@ export class SupabaseProvider implements IDataProvider {
         myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
         effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
         waca_auto_quantity: v.waca_auto_quantity ?? 0,
-        price_jpy: v.price_jpy ?? 0,
-        price_twd: v.price_twd ?? 0,
-        product_url: v.product_url || null,
         note: v.note || '',
         sort_order: v.sort_order || 0,
         catalog_missing: v.catalog_missing || false,
         source: v.source || null
       }));
-
-      if (upsertData.length > 0) {
-        console.log(`[Variant Price Sync] upsert payload sample:`, JSON.stringify(upsertData[0]));
-      }
 
       const { error } = await supabase
         .from('product_variants')
@@ -1055,9 +1046,6 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
-    if (!(await this.canWriteCloud())) {
-      throw new Error("無權限，viewer 不可從庫存建立採購紀錄");
-    }
     await db.createPurchaseRecordFromInventory(itemCodes);
     const groups = await db.getProductGroups();
     const categories = await db.getProductCategories();
@@ -1068,9 +1056,6 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async reparseProductVariants(): Promise<void> {
-    if (!(await this.canWriteCloud())) {
-      throw new Error("無權限，viewer 不可重編譯規格");
-    }
     await db.reparseProductVariants();
     const categories = await db.getProductCategories();
     const variants = await db.getProductVariants();
@@ -1079,18 +1064,12 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async reparseProductTitles(): Promise<void> {
-    if (!(await this.canWriteCloud())) {
-      throw new Error("無權限，viewer 不可重編譯商品名稱");
-    }
     await db.reparseProductTitles();
     const groups = await db.getProductGroups();
     await this.saveProductGroups(groups);
   }
 
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
-    if (!(await this.canWriteCloud())) {
-      throw new Error("無權限，viewer 不可同步商品群組");
-    }
     const result = await db.syncProductGroupsWithInventory();
     const categories = await db.getProductCategories();
     const variants = await db.getProductVariants();

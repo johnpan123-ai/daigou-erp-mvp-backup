@@ -31,7 +31,6 @@ export default function PurchaseRecords() {
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
 
   const [editMode, setEditMode] = useState<boolean>(false);
-  const [canWrite, setCanWrite] = useState<boolean>(true);
   let sampleLogged = false;
 
   console.log(`[UI Render] UI groups count: ${groups.length}`);
@@ -453,13 +452,6 @@ export default function PurchaseRecords() {
     console.log(`[UI Load] UI groups count: ${fetchedGroups.length}`);
     console.log(`[UI Load] UI variants count: ${fetchedVars.length}`);
     console.log('[UI Load] variants sample:', fetchedVars.length > 0 ? JSON.stringify(fetchedVars[0]) : 'empty');
-    
-    const userCanWrite = await dataProvider.canWriteCloud();
-    setCanWrite(userCanWrite);
-    if (!userCanWrite) {
-      setEditMode(false);
-    }
-
     setGroups(fetchedGroups);
     setVariants(fetchedVars);
     setCategories(fetchedCats);
@@ -470,10 +462,6 @@ export default function PurchaseRecords() {
   };
 
   const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
-    if (!canWrite) {
-      alert('無權限：唯讀角色（Viewer/Helper）無法修改商品主檔');
-      return;
-    }
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
       return;
     }
@@ -614,10 +602,6 @@ export default function PurchaseRecords() {
   };
 
   const handleDeleteGroup = async (groupId: string, groupTitle: string) => {
-    if (!canWrite) {
-      alert('無權限：唯讀角色（Viewer/Helper）無法刪除商品主檔');
-      return;
-    }
     const confirmDelete = window.confirm(`確定要刪除「${groupTitle}」嗎？`);
     if (!confirmDelete) return;
 
@@ -632,10 +616,6 @@ export default function PurchaseRecords() {
   };
 
   const handleBatchDelete = async () => {
-    if (!canWrite) {
-      alert('無權限：唯讀角色（Viewer/Helper）無法批次刪除商品主檔');
-      return;
-    }
     if (selectedGroupIds.size === 0) return;
     const confirmDelete = window.confirm(`確定刪除已選取的 ${selectedGroupIds.size} 筆商品？`);
     if (!confirmDelete) return;
@@ -1675,13 +1655,7 @@ export default function PurchaseRecords() {
       
       {/* Floating Action Button (FAB) */}
       <button
-        onClick={() => {
-          if (!canWrite) {
-            alert('無權限：唯讀角色（Viewer/Helper）無法進入編輯模式');
-            return;
-          }
-          setEditMode(!editMode);
-        }}
+        onClick={() => setEditMode(!editMode)}
         style={{
           position: 'fixed',
           bottom: '24px',
