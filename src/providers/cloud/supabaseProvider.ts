@@ -179,7 +179,11 @@ export class SupabaseProvider implements IDataProvider {
    * Phase 3-E-1: 從 Supabase 抓取 3 張核心商品資料表並快取至本地的唯讀同步程序
    * 已修正：增加等待 Supabase Auth 驗證狀態初始化，避免未載入 Session 即以匿名 (anon) 身份拉取空資料。
    */
-  async pullCoreProductData(): Promise<void> {
+  async pullCoreProductData(force = false): Promise<void> {
+    if (force) {
+      this.isPulled = false;
+      this.pullPromise = null;
+    }
     if (this.isPulled) return;
     if (this.pullPromise) return this.pullPromise;
 
@@ -219,6 +223,7 @@ export class SupabaseProvider implements IDataProvider {
         const biLen = batchItemsRes.data?.length || 0;
 
         console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆`);
+        console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
 
         // Check if all of them are empty
         if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
@@ -239,6 +244,7 @@ export class SupabaseProvider implements IDataProvider {
         // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
         await this.pullSalesOrders();
         await this.pullSalesOrderItems();
+        await this.pullDashboardCategoryImages();
 
         // 4. 呼叫既有的重新計算流程（即 db.getProductVariants），依雲端訂單重新計算
         console.log('[Sync] 觸發本地變體 auto quantity 重新計算...');
@@ -325,7 +331,7 @@ export class SupabaseProvider implements IDataProvider {
         return;
       }
 
-      console.log(`[Sync Push] product_groups preparing: ${validGroups.length} rows`);
+      console.log(`[Cloud Push] product_groups count: ${validGroups.length}`);
 
       const upsertData = validGroups.map(g => ({
         id: g.id,
@@ -346,12 +352,18 @@ export class SupabaseProvider implements IDataProvider {
         .upsert(upsertData);
 
       if (error) {
-        console.error(`[Sync Push] product_groups upsert failed: ${error.message || JSON.stringify(error)}`);
+        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
+        await this.pullCoreProductData(true);
+        alert(`雲端同步商品群組失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料，請重試！`);
+        throw error;
       } else {
         console.log(`[Sync Push] product_groups upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
-      console.error(`[Sync Push] product_groups upsert failed: ${err.message || err}`);
+      console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步商品群組發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -428,7 +440,7 @@ export class SupabaseProvider implements IDataProvider {
         return;
       }
 
-      console.log(`[Sync Push] product_categories preparing: ${validCategories.length} rows`);
+      console.log(`[Cloud Push] product_categories count: ${validCategories.length}`);
 
       const upsertData = validCategories.map(c => ({
         id: c.id,
@@ -443,12 +455,18 @@ export class SupabaseProvider implements IDataProvider {
         .upsert(upsertData);
 
       if (error) {
-        console.error(`[Sync Push] product_categories upsert failed: ${error.message || JSON.stringify(error)}`);
+        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
+        await this.pullCoreProductData(true);
+        alert(`雲端同步商品分類失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
+        throw error;
       } else {
         console.log(`[Sync Push] product_categories upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
-      console.error(`[Sync Push] product_categories upsert failed: ${err.message || err}`);
+      console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步商品分類發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -524,7 +542,7 @@ export class SupabaseProvider implements IDataProvider {
         return;
       }
 
-      console.log(`[Sync Push] product_variants preparing: ${validVariants.length} rows`);
+      console.log(`[Cloud Push] product_variants count: ${validVariants.length}`);
 
       const upsertData = validVariants.map(v => ({
         id: v.id,
@@ -553,12 +571,18 @@ export class SupabaseProvider implements IDataProvider {
         .upsert(upsertData);
 
       if (error) {
-        console.error(`[Sync Push] product_variants upsert failed: ${error.message || JSON.stringify(error)}`);
+        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
+        await this.pullCoreProductData(true);
+        alert(`雲端同步商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
+        throw error;
       } else {
         console.log(`[Sync Push] product_variants upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
-      console.error(`[Sync Push] product_variants upsert failed: ${err.message || err}`);
+      console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -602,12 +626,18 @@ export class SupabaseProvider implements IDataProvider {
         .upsert(upsertData, { onConflict: 'order_number' });
 
       if (error) {
-        console.error(`[Sync Push] sales_orders upsert failed: ${error.message || JSON.stringify(error)}`);
+        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
+        await this.pullSalesOrders();
+        alert(`雲端同步銷售訂單失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
+        throw error;
       } else {
         console.log(`[Sync Push] sales_orders upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
-      console.error(`[Sync Push] sales_orders upsert failed: ${err.message || err}`);
+      console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullSalesOrders();
+      alert(`雲端同步銷售訂單發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -655,12 +685,18 @@ export class SupabaseProvider implements IDataProvider {
         .upsert(upsertData);
 
       if (error) {
-        console.error(`[Sync Push] sales_order_items upsert failed: ${error.message || JSON.stringify(error)}`);
+        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
+        await this.pullSalesOrderItems();
+        alert(`雲端同步訂單明細失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
+        throw error;
       } else {
         console.log(`[Sync Push] sales_order_items upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
-      console.error(`[Sync Push] sales_order_items upsert failed: ${err.message || err}`);
+      console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullSalesOrderItems();
+      alert(`雲端同步訂單明細發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -784,11 +820,17 @@ export class SupabaseProvider implements IDataProvider {
           .from('purchase_batches')
           .upsert(upsertData);
         if (upsertError) {
-          console.error('[Sync Push] purchase_batches upsert failed:', upsertError);
+          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
+          await this.pullCoreProductData(true);
+          alert(`雲端同步採購批次失敗：${upsertError.message}。已回復本地快取資料！`);
+          throw upsertError;
         }
       }
-    } catch (err) {
-      console.error('[Sync Push] purchase_batches sync failed:', err);
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步採購批次發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -841,11 +883,17 @@ export class SupabaseProvider implements IDataProvider {
           .from('purchase_batch_items')
           .upsert(upsertData);
         if (upsertError) {
-          console.error('[Sync Push] purchase_batch_items upsert failed:', upsertError);
+          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
+          await this.pullCoreProductData(true);
+          alert(`雲端同步採購批次明細失敗：${upsertError.message}。已回復本地快取資料！`);
+          throw upsertError;
         }
       }
-    } catch (err) {
-      console.error('[Sync Push] purchase_batch_items sync failed:', err);
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步採購批次明細發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
     }
   }
 
@@ -1004,6 +1052,69 @@ export class SupabaseProvider implements IDataProvider {
       .in('product_group_id', groupIds);
     if (varError) {
       console.error('[Supabase] Failed to soft delete variants:', varError);
+    }
+  }
+
+  async pullDashboardCategoryImages(): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('dashboard_category_images')
+        .select('category_key, image_url, storage_path')
+        .is('deleted_at', null);
+
+      if (error) throw error;
+
+      if (data) {
+        data.forEach(item => {
+          if (item.category_key) {
+            if (item.image_url) {
+              localStorage.setItem(`dashboard_cloud_img_${item.category_key}`, item.image_url);
+            } else {
+              localStorage.removeItem(`dashboard_cloud_img_${item.category_key}`);
+            }
+            if (item.storage_path) {
+              localStorage.setItem(`dashboard_cloud_path_${item.category_key}`, item.storage_path);
+            } else {
+              localStorage.removeItem(`dashboard_cloud_path_${item.category_key}`);
+            }
+          }
+        });
+        console.log(`[Sync] 成功同步 ${data.length} 筆首頁大類圖片資料`);
+      }
+    } catch (err: any) {
+      console.error('[Sync] 同步首頁大類圖片失敗:', err.message || err);
+    }
+  }
+
+  async saveDashboardCategoryImage(categoryKey: string, imageUrl: string | null, storagePath: string | null): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('dashboard_category_images')
+        .upsert({
+          category_key: categoryKey,
+          image_url: imageUrl,
+          storage_path: storagePath,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'category_key'
+        });
+
+      if (error) throw error;
+
+      if (imageUrl) {
+        localStorage.setItem(`dashboard_cloud_img_${categoryKey}`, imageUrl);
+      } else {
+        localStorage.removeItem(`dashboard_cloud_img_${categoryKey}`);
+      }
+      if (storagePath) {
+        localStorage.setItem(`dashboard_cloud_path_${categoryKey}`, storagePath);
+      } else {
+        localStorage.removeItem(`dashboard_cloud_path_${categoryKey}`);
+      }
+      console.log(`[Sync Push] 首頁大類圖片已儲存並推送雲端: ${categoryKey}`);
+    } catch (err: any) {
+      console.error(`[Sync Push] 推送首頁大類圖片失敗 (${categoryKey}):`, err.message || err);
+      throw err;
     }
   }
 }

@@ -4,6 +4,9 @@ import { calculateFinalMyacgDemand } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { ClipboardList, AlertTriangle, Clock, CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react';
+import { supabase } from '../providers/cloud/supabaseClient';
+import { supabaseProvider } from '../providers/cloud/supabaseProvider';
+import { getProviderMode } from '../providers/providerMode';
 
 export default function Dashboard() {
   const [groups, setGroups] = useState<ProductGroup[]>([]);
@@ -36,6 +39,27 @@ export default function Dashboard() {
     other: '/images/other.png'
   };
 
+  const refreshCategoryImages = () => {
+    const mode = getProviderMode();
+    if (mode === 'cloud') {
+      setCategoryImages({
+        all: localStorage.getItem('dashboard_cloud_img_all') || '',
+        hololive: localStorage.getItem('dashboard_cloud_img_hololive') || '',
+        vspo: localStorage.getItem('dashboard_cloud_img_vspo') || '',
+        agency: localStorage.getItem('dashboard_cloud_img_agency') || '',
+        other: localStorage.getItem('dashboard_cloud_img_other') || ''
+      });
+    } else {
+      setCategoryImages({
+        all: localStorage.getItem('dashboard_category_img_all') || '',
+        hololive: localStorage.getItem('dashboard_category_img_hololive') || '',
+        vspo: localStorage.getItem('dashboard_category_img_vspo') || '',
+        agency: localStorage.getItem('dashboard_category_img_agency') || '',
+        other: localStorage.getItem('dashboard_category_img_other') || ''
+      });
+    }
+  };
+
   const triggerImageUpload = (categoryKey: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setActiveCategoryForUpload(categoryKey);
@@ -45,33 +69,76 @@ export default function Dashboard() {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeCategoryForUpload) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        localStorage.setItem(`dashboard_category_img_${activeCategoryForUpload}`, dataUrl);
-        setCategoryImages(prev => ({
-          ...prev,
-          [activeCategoryForUpload]: dataUrl
-        }));
+    const mode = getProviderMode();
+
+    if (mode === 'cloud') {
+      try {
+        setIsLoading(true);
+        // 1. 刪除舊圖片 (若有)
+        const oldPath = localStorage.getItem(`dashboard_cloud_path_${activeCategoryForUpload}`);
+        if (oldPath) {
+          try {
+            const { error: removeError } = await supabase.storage
+              .from('category-images')
+              .remove([oldPath]);
+            if (removeError) {
+              console.warn('[Storage] 刪除舊分類圖片失敗:', removeError.message);
+            }
+          } catch (err: any) {
+            console.warn('[Storage] 刪除舊分類圖片發生錯誤:', err.message || err);
+          }
+        }
+
+        // 2. 上傳新圖片
+        const fileExt = file.name.split('.').pop();
+        const newPath = `${activeCategoryForUpload}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+          .from('category-images')
+          .upload(newPath, file, { cacheControl: '3600', upsert: true });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        // 3. 取得 Public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('category-images')
+          .getPublicUrl(newPath);
+
+        // 4. 更新雲端資料庫與本地 localStorage 快取
+        await supabaseProvider.saveDashboardCategoryImage(activeCategoryForUpload, publicUrl, newPath);
+        refreshCategoryImages();
+        alert('雲端圖片上傳成功！');
+      } catch (err: any) {
+        console.error('上傳圖片至雲端失敗:', err);
+        alert(`上傳圖片失敗: ${err.message || err}`);
+      } finally {
+        setIsLoading(false);
       }
-    };
-    reader.readAsDataURL(file);
+    } else {
+      // Local Mode: 舊有 localStorage 儲存 Data URL 方式
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        if (dataUrl) {
+          localStorage.setItem(`dashboard_category_img_${activeCategoryForUpload}`, dataUrl);
+          setCategoryImages(prev => ({
+            ...prev,
+            [activeCategoryForUpload]: dataUrl
+          }));
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   useEffect(() => {
     loadData();
-    setCategoryImages({
-      all: localStorage.getItem('dashboard_category_img_all') || '',
-      hololive: localStorage.getItem('dashboard_category_img_hololive') || '',
-      vspo: localStorage.getItem('dashboard_category_img_vspo') || '',
-      agency: localStorage.getItem('dashboard_category_img_agency') || '',
-      other: localStorage.getItem('dashboard_category_img_other') || ''
-    });
+    refreshCategoryImages();
   }, []);
 
   const loadData = async () => {
@@ -100,6 +167,7 @@ export default function Dashboard() {
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
+    refreshCategoryImages();
     setIsLoading(false);
   };
 
