@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode } from '../../providers/providerMode';
@@ -44,6 +44,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { role, displayName, isProfileLoading } = useRole();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!loading && !user && location.pathname !== '/login') {
+      navigate('/login', { replace: true });
+    }
+  }, [loading, user, location.pathname, navigate]);
 
   const providerMode = getProviderMode();
   const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';

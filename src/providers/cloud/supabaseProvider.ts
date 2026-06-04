@@ -272,6 +272,7 @@ export class SupabaseProvider implements IDataProvider {
         console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
         console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
         console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
+        console.log('[Default Cost Sync] cloud pulled sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
 
         // Check if all of them are empty
         if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
@@ -542,6 +543,10 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
+    if (!variants || variants.length === 0) {
+      console.warn("[Sync Push] SKIP saveProductVariants because variants array is empty");
+      return;
+    }
     const sanitizedVariants = [];
     const groups = await db.getProductGroups();
     const categories = await db.getProductCategories();
@@ -642,8 +647,12 @@ export class SupabaseProvider implements IDataProvider {
         note: v.note || '',
         sort_order: v.sort_order || 0,
         catalog_missing: v.catalog_missing || false,
-        source: v.source || null
+        source: v.source || null,
+        default_jpy_cost: v.default_jpy_cost ?? null,
+        default_twd_cost: v.default_twd_cost ?? null
       }));
+
+      console.log('[Default Cost Sync] save payload sample:', upsertData.length > 0 ? JSON.stringify(upsertData[0]) : 'empty');
 
       const { error } = await supabase
         .from('product_variants')

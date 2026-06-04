@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../providers/cloud/supabaseClient';
 import { Box, Lock, Mail } from 'lucide-react';
 
@@ -9,6 +10,13 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && user) {
+      navigate('/', { replace: true });
+    }
+  }, [user, loading, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -16,7 +24,7 @@ export default function Login() {
     setError(null);
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -24,7 +32,9 @@ export default function Login() {
       if (signInError) throw signInError;
       
       // Redirect on success
-      navigate('/dashboard');
+      if (data?.session || data?.user) {
+        navigate('/', { replace: true });
+      }
     } catch (err: any) {
       setError(err.message || '登入失敗，請檢查您的帳號與密碼。');
     } finally {

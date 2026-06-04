@@ -121,6 +121,10 @@ export interface ProductVariant {
   // Order Import specific flags
   catalog_missing?: boolean;
   source?: "inventory_import" | "myacg_order_import";
+
+  // Cost Sync fields
+  default_jpy_cost?: number | null;
+  default_twd_cost?: number | null;
 }
 
 export interface ImportBatch {

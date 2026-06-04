@@ -139,6 +139,19 @@ export default function PurchaseManagement() {
   const [editMode, setEditMode] = useState<boolean>(() => {
     return localStorage.getItem('purchase_management_edit_mode') === 'true';
   });
+  const [canWrite, setCanWrite] = useState<boolean>(false);
+
+  const getVariantDefaultJpyCost = (v: ProductVariant): number | undefined | null => {
+    return (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) 
+      ? v.default_jpy_cost 
+      : variantDefaultJpyCosts[v.id];
+  };
+
+  const getVariantDefaultTwdCost = (v: ProductVariant): number | undefined | null => {
+    return (v.default_twd_cost !== undefined && v.default_twd_cost !== null) 
+      ? v.default_twd_cost 
+      : variantDefaultTwdCosts[v.id];
+  };
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [exchangeRate, setExchangeRate] = useState<number>(() => {
     const val = localStorage.getItem('erp_exchange_rate');
@@ -175,8 +188,13 @@ export default function PurchaseManagement() {
     }
   });
 
-  const handleUpdateDefaultJpyCost = (variantId: string, valStr: string) => {
+  const handleUpdateDefaultJpyCost = async (variantId: string, valStr: string) => {
+    if (!canWrite) return;
     const val = valStr === '' ? null : parseInt(valStr);
+    
+    // Log price update
+    console.log(`[Default Cost Sync] update variant: id=${variantId}, jpy=${val}, twd=N/A`);
+
     const updated = { ...variantDefaultJpyCosts };
     if (val === null || isNaN(val) || val <= 0) {
       delete updated[variantId];
@@ -185,6 +203,20 @@ export default function PurchaseManagement() {
     }
     setVariantDefaultJpyCosts(updated);
     localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
+
+    const allVars = await dataProvider.getProductVariants();
+    const target = allVars.find(v => v.id === variantId);
+    if (target) {
+      const updatedVars = allVars.map(v => 
+        v.id === variantId 
+          ? { ...v, default_jpy_cost: val } 
+          : v
+      );
+      if (updatedVars.length > 0) {
+        await dataProvider.saveProductVariants(updatedVars);
+      }
+      setVariants(variants.map(v => v.id === variantId ? { ...v, default_jpy_cost: val } : v));
+    }
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
@@ -196,8 +228,13 @@ export default function PurchaseManagement() {
     }
   });
 
-  const handleUpdateDefaultTwdCost = (variantId: string, valStr: string) => {
+  const handleUpdateDefaultTwdCost = async (variantId: string, valStr: string) => {
+    if (!canWrite) return;
     const val = valStr === '' ? null : parseInt(valStr);
+
+    // Log price update
+    console.log(`[Default Cost Sync] update variant: id=${variantId}, jpy=N/A, twd=${val}`);
+
     const updated = { ...variantDefaultTwdCosts };
     if (val === null || isNaN(val) || val <= 0) {
       delete updated[variantId];
@@ -206,6 +243,20 @@ export default function PurchaseManagement() {
     }
     setVariantDefaultTwdCosts(updated);
     localStorage.setItem('variant_default_twd_costs', JSON.stringify(updated));
+
+    const allVars = await dataProvider.getProductVariants();
+    const target = allVars.find(v => v.id === variantId);
+    if (target) {
+      const updatedVars = allVars.map(v => 
+        v.id === variantId 
+          ? { ...v, default_twd_cost: val } 
+          : v
+      );
+      if (updatedVars.length > 0) {
+        await dataProvider.saveProductVariants(updatedVars);
+      }
+      setVariants(variants.map(v => v.id === variantId ? { ...v, default_twd_cost: val } : v));
+    }
   };
 
   const cleanDailiTitle = (title: string): string => {
@@ -343,7 +394,76 @@ export default function PurchaseManagement() {
       return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
     });
 
-    setVariants(groupVars);
+    const writePermission = await dataProvider.canWriteCloud();
+    setCanWrite(writePermission);
+
+    // Sync legacy costs to variants and update cost state maps
+    const jpyCosts = { ...variantDefaultJpyCosts };
+    const twdCosts = { ...variantDefaultTwdCosts };
+    let needsSync = false;
+
+    const updatedGroupVars = groupVars.map(v => {
+      let updatedJpy = v.default_jpy_cost;
+      let updatedTwd = v.default_twd_cost;
+      let variantChanged = false;
+
+      // Hydrate local state if variant has database cost
+      if (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) {
+        jpyCosts[v.id] = v.default_jpy_cost;
+      } else {
+        // Fallback to local storage cost if database column is null/empty
+        const localJpy = jpyCosts[v.id];
+        if (localJpy !== undefined && localJpy !== null) {
+          updatedJpy = localJpy;
+          variantChanged = true;
+        }
+      }
+
+      if (v.default_twd_cost !== undefined && v.default_twd_cost !== null) {
+        twdCosts[v.id] = v.default_twd_cost;
+      } else {
+        const localTwd = twdCosts[v.id];
+        if (localTwd !== undefined && localTwd !== null) {
+          updatedTwd = localTwd;
+          variantChanged = true;
+        }
+      }
+
+      if (variantChanged) {
+        needsSync = true;
+        return {
+          ...v,
+          default_jpy_cost: updatedJpy,
+          default_twd_cost: updatedTwd
+        };
+      }
+      return v;
+    });
+
+    setVariantDefaultJpyCosts(jpyCosts);
+    setVariantDefaultTwdCosts(twdCosts);
+    localStorage.setItem('variant_default_jpy_costs', JSON.stringify(jpyCosts));
+    localStorage.setItem('variant_default_twd_costs', JSON.stringify(twdCosts));
+
+    if (needsSync && writePermission) {
+      console.log('[Default Cost Sync] Migrating legacy local storage costs to cloud...');
+      if (allVars && allVars.length > 0) {
+        const updatedAllVars = allVars.map(av => {
+          const match = updatedGroupVars.find(gv => gv.id === av.id);
+          if (match && (match.default_jpy_cost !== av.default_jpy_cost || match.default_twd_cost !== av.default_twd_cost)) {
+            return {
+              ...av,
+              default_jpy_cost: match.default_jpy_cost,
+              default_twd_cost: match.default_twd_cost
+            };
+          }
+          return av;
+        });
+        await dataProvider.saveProductVariants(updatedAllVars);
+      }
+    }
+
+    setVariants(updatedGroupVars);
 
     const inventory = await dataProvider.getInventory();
     const invMap = new Map(inventory.map(i => [i.myacg_item_code, i]));
@@ -496,7 +616,7 @@ export default function PurchaseManagement() {
     
     const isDaili = group?.listing_type === '代理版';
     setBatchLines(variants.map(v => {
-      const defCost = isDaili ? variantDefaultTwdCosts[v.id] : variantDefaultJpyCosts[v.id];
+      const defCost = isDaili ? getVariantDefaultTwdCost(v) : getVariantDefaultJpyCost(v);
       const latCost = getLatestBatchCost(v.id);
       const initialCost = (defCost !== undefined && defCost !== null) ? defCost : (latCost || 0);
       return { variant_id: v.id, quantity: 0, cost: initialCost, note: '' };
@@ -641,7 +761,7 @@ export default function PurchaseManagement() {
     totalExcess += excessBuy;
 
     // JPY Standard
-    const defaultCost = variantDefaultJpyCosts[v.id];
+    const defaultCost = getVariantDefaultJpyCost(v);
     const latestCost = getLatestBatchCost(v.id);
     const activeCost = (defaultCost !== undefined && defaultCost !== null) ? defaultCost : (latestCost || 0);
     jpyNeedToBuy += needToBuy * activeCost;
@@ -652,7 +772,7 @@ export default function PurchaseManagement() {
     const finalPrice = invItem?.final_price ?? 0;
     dailiTotalOrderAmount += vTotalDemand * finalPrice;
 
-    const defaultTwdCost = variantDefaultTwdCosts[v.id];
+    const defaultTwdCost = getVariantDefaultTwdCost(v);
     const latestTwdCost = getLatestBatchCost(v.id);
     const activeTwdCost = (defaultTwdCost !== undefined && defaultTwdCost !== null) ? defaultTwdCost : (latestTwdCost || 0);
     dailiNeedToBuyCost += needToBuy * activeTwdCost;
@@ -829,6 +949,9 @@ export default function PurchaseManagement() {
       return getShortage(itemsB) - getShortage(itemsA);
     });
   }
+
+  const costSample = variants.find(v => (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) || (v.default_twd_cost !== undefined && v.default_twd_cost !== null)) || variants[0];
+  console.log('[Default Cost Sync] UI render sample:', costSample ? { id: costSample.id, default_jpy_cost: costSample.default_jpy_cost, default_twd_cost: costSample.default_twd_cost } : 'empty');
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f4f5f7', display: 'flex', flexDirection: 'column' }}>
@@ -1260,7 +1383,7 @@ export default function PurchaseManagement() {
                                 NT$ {(inventoryMap.get(v.myacg_item_code)?.final_price ?? 0).toLocaleString()}
                               </td>
                               <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                {editMode ? (
+                                {editMode && canWrite ? (
                                   <input
                                     type="number"
                                     min="0"
@@ -1279,12 +1402,12 @@ export default function PurchaseManagement() {
                                       margin: '0 0 0 auto',
                                       display: 'block'
                                     }}
-                                    value={variantDefaultTwdCosts[v.id] !== undefined ? variantDefaultTwdCosts[v.id] : ''}
+                                    value={getVariantDefaultTwdCost(v) ?? ''}
                                     onChange={e => handleUpdateDefaultTwdCost(v.id, e.target.value)}
                                   />
                                 ) : (
                                   (() => {
-                                    const defCost = variantDefaultTwdCosts[v.id];
+                                    const defCost = getVariantDefaultTwdCost(v);
                                     if (defCost !== undefined && defCost !== null) {
                                       return `NT$ ${defCost}`;
                                     }
@@ -1299,7 +1422,7 @@ export default function PurchaseManagement() {
                             </>
                           ) : (
                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                              {editMode ? (
+                              {editMode && canWrite ? (
                                 <input
                                   type="number"
                                   min="0"
@@ -1318,12 +1441,12 @@ export default function PurchaseManagement() {
                                     margin: '0 0 0 auto',
                                     display: 'block'
                                   }}
-                                  value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
+                                  value={getVariantDefaultJpyCost(v) ?? ''}
                                   onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
                                 />
                               ) : (
                                 (() => {
-                                  const defCost = variantDefaultJpyCosts[v.id];
+                                  const defCost = getVariantDefaultJpyCost(v);
                                   if (defCost !== undefined && defCost !== null) {
                                     return `¥ ${defCost}`;
                                   }
@@ -1548,7 +1671,7 @@ export default function PurchaseManagement() {
                                         NT$ {(inventoryMap.get(v.myacg_item_code)?.final_price ?? 0).toLocaleString()}
                                       </td>
                                       <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                        {editMode ? (
+                                        {editMode && canWrite ? (
                                           <input
                                             type="number"
                                             min="0"
@@ -1567,12 +1690,12 @@ export default function PurchaseManagement() {
                                               margin: '0 0 0 auto',
                                               display: 'block'
                                             }}
-                                            value={variantDefaultTwdCosts[v.id] !== undefined ? variantDefaultTwdCosts[v.id] : ''}
+                                            value={getVariantDefaultTwdCost(v) ?? ''}
                                             onChange={e => handleUpdateDefaultTwdCost(v.id, e.target.value)}
                                           />
                                         ) : (
                                           (() => {
-                                            const defCost = variantDefaultTwdCosts[v.id];
+                                            const defCost = getVariantDefaultTwdCost(v);
                                             if (defCost !== undefined && defCost !== null) {
                                               return `NT$ ${defCost}`;
                                             }
@@ -1587,7 +1710,7 @@ export default function PurchaseManagement() {
                                     </>
                                   ) : (
                                     <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                      {editMode ? (
+                                      {editMode && canWrite ? (
                                         <input
                                           type="number"
                                           min="0"
@@ -1606,12 +1729,12 @@ export default function PurchaseManagement() {
                                             margin: '0 0 0 auto',
                                             display: 'block'
                                           }}
-                                          value={variantDefaultJpyCosts[v.id] !== undefined ? variantDefaultJpyCosts[v.id] : ''}
+                                          value={getVariantDefaultJpyCost(v) ?? ''}
                                           onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
                                         />
                                       ) : (
                                         (() => {
-                                          const defCost = variantDefaultJpyCosts[v.id];
+                                          const defCost = getVariantDefaultJpyCost(v);
                                           if (defCost !== undefined && defCost !== null) {
                                             return `¥ ${defCost}`;
                                           }
