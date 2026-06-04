@@ -132,4 +132,8 @@ export class LocalProvider implements IDataProvider {
     const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
     await db.saveProductVariants(updatedVariants);
   }
+  async canWriteCloud(): Promise<boolean> {
+    return true;
+  }
 }
+

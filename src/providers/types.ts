@@ -52,4 +52,6 @@ export interface IDataProvider {
   syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }>;
   deleteProductGroup(groupId: string): Promise<void>;
   deleteProductGroups(groupIds: string[]): Promise<void>;
+  canWriteCloud(): Promise<boolean>;
 }
+

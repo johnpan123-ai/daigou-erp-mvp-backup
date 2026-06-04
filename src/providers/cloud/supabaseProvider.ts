@@ -149,10 +149,56 @@ function getDeterministicUuid(str: string): string {
   return `${part1}-${part2}-${part3}-${part4}-${part5}`;
 }
 
+function isSchemaMissingError(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || '').toLowerCase();
+  const code = err.code || '';
+  return code === '42P01' || msg.includes('could not find the table') || msg.includes('relation') || msg.includes('does not exist');
+}
+
 
 export class SupabaseProvider implements IDataProvider {
   private isPulled = false;
   private pullPromise: Promise<void> | null = null;
+  private cachedRole: 'owner' | 'staff' | 'viewer' | 'helper' | null = null;
+  private cachedRoleUserId: string | null = null;
+
+  async getRole(): Promise<'owner' | 'staff' | 'viewer' | 'helper' | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      this.cachedRole = null;
+      this.cachedRoleUserId = null;
+      return null;
+    }
+    
+    const userId = session.user.id;
+    if (this.cachedRoleUserId === userId && this.cachedRole !== null) {
+      return this.cachedRole;
+    }
+    
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('user_id', userId)
+        .single();
+      
+      if (error || !data) {
+        return null;
+      }
+      
+      this.cachedRole = data.role as any;
+      this.cachedRoleUserId = userId;
+      return this.cachedRole;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async canWriteCloud(): Promise<boolean> {
+    const role = await this.getRole();
+    return role === 'owner' || role === 'staff';
+  }
 
   async testConnection(): Promise<string> {
     try {
@@ -255,8 +301,13 @@ export class SupabaseProvider implements IDataProvider {
 
         this.isPulled = true;
         console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
-      } catch (err) {
-        console.error('[Sync] 商品核心主檔同步失敗，將自動降級讀取本地現有快取:', err);
+      } catch (err: any) {
+        console.error('[Sync] 商品核心主檔同步失敗:', err);
+        if (isSchemaMissingError(err)) {
+          alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
+          this.isPulled = false;
+          throw err;
+        }
         console.log('[Sync Pull] core failed: keep local cache');
         // 為了不讓 UI 因為連線問題崩潰，我們不向上拋出錯誤，而是印出錯誤並使用本地現有快取
       } finally {
@@ -316,6 +367,11 @@ export class SupabaseProvider implements IDataProvider {
 
     // 1. 寫入本地 IndexedDB 快取
     await db.saveProductGroups(sanitizedGroups);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip product_groups cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
 
     // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
     if (sanitizedGroups.length === 0) {
@@ -423,6 +479,11 @@ export class SupabaseProvider implements IDataProvider {
       await this.saveProductVariants(vars);
     }
 
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip product_categories cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
     // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
     const finalCategories = categoriesChanged ? sanitizedCategories : categories;
     if (finalCategories.length === 0) {
@@ -525,6 +586,11 @@ export class SupabaseProvider implements IDataProvider {
       await db.saveProductVariants(variants);
     }
 
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip product_variants cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
     // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
     const finalVariants = variantsChanged ? sanitizedVariants : variants;
     if (finalVariants.length === 0) {
@@ -604,6 +670,11 @@ export class SupabaseProvider implements IDataProvider {
     // 1. 本地照舊保存
     await db.saveSalesOrders(orders);
 
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip sales_orders cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
     // 2. Cloud Mode 時 upsert sales_orders
     if (orders.length === 0) {
       return;
@@ -648,6 +719,11 @@ export class SupabaseProvider implements IDataProvider {
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
     // 1. 本地照舊保存
     await db.saveSalesOrderItems(items);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip sales_order_items cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
 
     // 2. Cloud Mode 時 upsert sales_order_items
     if (items.length === 0) {
@@ -724,7 +800,11 @@ export class SupabaseProvider implements IDataProvider {
       await db.saveSalesOrders(mappedOrders);
       console.log(`[Sync Pull] sales_orders applied: ${mappedOrders.length} rows`);
     } catch (err: any) {
-      console.error(`[Sync Pull] sales_orders failed: ${err.message || err}`);
+      console.error(`[Sync Pull ERROR] sales_orders failed (Schema 缺失?): ${err.message || err}`);
+      if (err.message && (err.message.includes('42P01') || err.message.toLowerCase().includes('relation') || err.message.toLowerCase().includes('could not find the table'))) {
+        alert('核心資料表 sales_orders 缺失，請聯絡系統管理員匯入 SQL Migration 建立表格！');
+      }
+      throw err;
     }
   }
 
@@ -767,7 +847,11 @@ export class SupabaseProvider implements IDataProvider {
       await db.saveSalesOrderItems(mappedItems);
       console.log(`[Sync Pull] sales_order_items applied: ${mappedItems.length} rows`);
     } catch (err: any) {
-      console.error(`[Sync Pull] sales_order_items failed: ${err.message || err}`);
+      console.error(`[Sync Pull ERROR] sales_order_items failed (Schema 缺失?): ${err.message || err}`);
+      if (err.message && (err.message.includes('42P01') || err.message.toLowerCase().includes('relation') || err.message.toLowerCase().includes('could not find the table'))) {
+        alert('核心資料表 sales_order_items 缺失，請聯絡系統管理員匯入 SQL Migration 建立表格！');
+      }
+      throw err;
     }
   }
 
@@ -783,6 +867,11 @@ export class SupabaseProvider implements IDataProvider {
 
     // 2. Save locally
     await db.savePurchaseBatches(batches);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip purchase_batches cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
 
     // 3. Supabase Cloud Sync
     try {
@@ -846,6 +935,11 @@ export class SupabaseProvider implements IDataProvider {
 
     // 2. Save locally (which also triggers auto recalculated quantities updates)
     await db.savePurchaseBatchItems(items);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip purchase_batch_items cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
 
     // 3. Supabase Cloud Sync
     try {
@@ -984,6 +1078,11 @@ export class SupabaseProvider implements IDataProvider {
     const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
     await db.saveProductVariants(updatedVariants);
 
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip deleteProductGroup cloud soft delete (Read-Only Viewer/Helper)');
+      return;
+    }
+
     const nowStr = new Date().toISOString();
     const { error: groupError } = await supabase
       .from('product_groups')
@@ -1026,6 +1125,11 @@ export class SupabaseProvider implements IDataProvider {
     const variants = await db.getProductVariants();
     const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
     await db.saveProductVariants(updatedVariants);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip deleteProductGroups cloud soft delete (Read-Only Viewer/Helper)');
+      return;
+    }
 
     const nowStr = new Date().toISOString();
     const { error: groupError } = await supabase
@@ -1083,10 +1187,31 @@ export class SupabaseProvider implements IDataProvider {
       }
     } catch (err: any) {
       console.error('[Sync] 同步首頁大類圖片失敗:', err.message || err);
+      if (isSchemaMissingError(err)) {
+        alert('雲端資料表 dashboard_category_images 缺失，同步流程已中斷，請匯入 SQL Migration 建立表格！');
+        throw err;
+      }
     }
   }
 
   async saveDashboardCategoryImage(categoryKey: string, imageUrl: string | null, storagePath: string | null): Promise<void> {
+    // 1. 本地照舊保存
+    if (imageUrl) {
+      localStorage.setItem(`dashboard_cloud_img_${categoryKey}`, imageUrl);
+    } else {
+      localStorage.removeItem(`dashboard_cloud_img_${categoryKey}`);
+    }
+    if (storagePath) {
+      localStorage.setItem(`dashboard_cloud_path_${categoryKey}`, storagePath);
+    } else {
+      localStorage.removeItem(`dashboard_cloud_path_${categoryKey}`);
+    }
+
+    if (!(await this.canWriteCloud())) {
+      console.log(`[Sync Push] Skip dashboard_category_images cloud push for ${categoryKey} (Read-Only Viewer/Helper)`);
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('dashboard_category_images')
@@ -1100,17 +1225,6 @@ export class SupabaseProvider implements IDataProvider {
         });
 
       if (error) throw error;
-
-      if (imageUrl) {
-        localStorage.setItem(`dashboard_cloud_img_${categoryKey}`, imageUrl);
-      } else {
-        localStorage.removeItem(`dashboard_cloud_img_${categoryKey}`);
-      }
-      if (storagePath) {
-        localStorage.setItem(`dashboard_cloud_path_${categoryKey}`, storagePath);
-      } else {
-        localStorage.removeItem(`dashboard_cloud_path_${categoryKey}`);
-      }
       console.log(`[Sync Push] 首頁大類圖片已儲存並推送雲端: ${categoryKey}`);
     } catch (err: any) {
       console.error(`[Sync Push] 推送首頁大類圖片失敗 (${categoryKey}):`, err.message || err);

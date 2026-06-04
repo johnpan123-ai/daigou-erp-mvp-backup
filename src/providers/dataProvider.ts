@@ -127,7 +127,11 @@ class DynamicDataProvider implements IDataProvider {
   async deleteProductGroups(groupIds: string[]): Promise<void> {
     return this.getActiveProvider().deleteProductGroups(groupIds);
   }
+  async canWriteCloud(): Promise<boolean> {
+    return this.getActiveProvider().canWriteCloud();
+  }
 }
+
 
 export const dataProvider: IDataProvider = new DynamicDataProvider();
 export type { IDataProvider };
