@@ -28,3 +28,13 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Debug / scratch scripts
+scratch/
+debug_*
+query_*
+scan_*
+test_*
+inspect_*
+run_supabase_analysis*
+list_supabase_tables*
+search_*
