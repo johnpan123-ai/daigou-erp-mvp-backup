@@ -83,7 +83,7 @@ export default function Dashboard() {
         if (oldPath) {
           try {
             const { error: removeError } = await supabase.storage
-              .from('category-images')
+              .from('dashboard-category-images')
               .remove([oldPath]);
             if (removeError) {
               console.warn('[Storage] 刪除舊分類圖片失敗:', removeError.message);
@@ -97,7 +97,7 @@ export default function Dashboard() {
         const fileExt = file.name.split('.').pop();
         const newPath = `${activeCategoryForUpload}_${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
-          .from('category-images')
+          .from('dashboard-category-images')
           .upload(newPath, file, { cacheControl: '3600', upsert: true });
 
         if (uploadError) {
@@ -106,7 +106,7 @@ export default function Dashboard() {
 
         // 3. 取得 Public URL
         const { data: { publicUrl } } = supabase.storage
-          .from('category-images')
+          .from('dashboard-category-images')
           .getPublicUrl(newPath);
 
         // 4. 更新雲端資料庫與本地 localStorage 快取
