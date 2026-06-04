@@ -248,12 +248,14 @@ export class SupabaseProvider implements IDataProvider {
         console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
         
         // 1. 同時從 Supabase 抓取未刪除的資料
-        const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes] = await Promise.all([
+        const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes, poRes, poiRes] = await Promise.all([
           supabase.from('product_groups').select('*').is('deleted_at', null),
           supabase.from('product_categories').select('*').is('deleted_at', null),
           supabase.from('product_variants').select('*').is('deleted_at', null),
           supabase.from('purchase_batches').select('*').is('deleted_at', null),
-          supabase.from('purchase_batch_items').select('*').is('deleted_at', null)
+          supabase.from('purchase_batch_items').select('*').is('deleted_at', null),
+          supabase.from('private_orders').select('*').is('deleted_at', null),
+          supabase.from('private_order_items').select('*').is('deleted_at', null)
         ]);
 
         if (groupsRes.error) throw groupsRes.error;
@@ -261,28 +263,34 @@ export class SupabaseProvider implements IDataProvider {
         if (variantsRes.error) throw variantsRes.error;
         if (batchesRes.error) throw batchesRes.error;
         if (batchItemsRes.error) throw batchItemsRes.error;
+        if (poRes.error) throw poRes.error;
+        if (poiRes.error) throw poiRes.error;
 
         const gLen = groupsRes.data?.length || 0;
         const cLen = categoriesRes.data?.length || 0;
         const vLen = variantsRes.data?.length || 0;
         const bLen = batchesRes.data?.length || 0;
         const biLen = batchItemsRes.data?.length || 0;
+        const poLen = poRes.data?.length || 0;
+        const poiLen = poiRes.data?.length || 0;
 
-        console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆`);
+        console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆, private_orders = ${poLen} 筆, private_order_items = ${poiLen} 筆`);
         console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
         console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
         console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
         console.log('[Default Cost Sync] cloud pulled sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
+        console.log(`[Private Order Sync] cloud pulled orders count: ${poLen}`);
+        console.log(`[Private Order Sync] cloud pulled items count: ${poiLen}`);
 
         // Check if all of them are empty
-        if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
+        if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0 && poLen === 0 && poiLen === 0) {
           console.log('[Sync Pull] core skipped: empty cloud result');
           this.isPulled = true;
           return;
         }
 
         // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
-        console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆`);
+        console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆, privateOrders: ${poLen} 筆, privateOrderItems: ${poiLen} 筆`);
         
         await db.saveProductGroups(groupsRes.data || []);
         await db.saveProductCategories(categoriesRes.data || []);
@@ -291,6 +299,27 @@ export class SupabaseProvider implements IDataProvider {
         await db.saveProductVariants(variantsRes.data || []);
         await db.savePurchaseBatches(batchesRes.data || []);
         await db.savePurchaseBatchItems(batchItemsRes.data || []);
+
+        const mappedOrders: PrivateOrder[] = (poRes.data || []).map(r => ({
+          id: r.local_id || r.id,
+          product_group_id: r.product_group_id,
+          customer_name: r.customer_name,
+          contact: r.contact || '',
+          note: r.note || '',
+          created_at: r.created_at
+        }));
+
+        const mappedItems: PrivateOrderItem[] = (poiRes.data || []).map(r => ({
+          id: r.local_id || r.id,
+          private_order_id: r.private_order_id,
+          product_variant_id: r.product_variant_id,
+          quantity: r.quantity || 0,
+          amount: Number(r.amount || 0),
+          note: r.note || ''
+        }));
+
+        await db.savePrivateOrders(mappedOrders);
+        await db.savePrivateOrderItems(mappedItems);
 
         // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
         await this.pullSalesOrders();
@@ -1018,7 +1047,56 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {
-    return db.savePrivateOrders(orders);
+    // 1. 本地儲存
+    await db.savePrivateOrders(orders);
+
+    // 2. 判斷是否為唯讀 Viewer/Helper
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip private_orders cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    // 3. 防呆與空陣列檢查 (若 orders.length === 0，直接 skip 雲端 upsert)
+    if (!orders || orders.length === 0) {
+      console.log('[Private Order Sync] skip empty cloud upsert for private_orders');
+      return;
+    }
+
+    try {
+      // 4. 僅過濾出合法 UUID 的 active orders 進行 upsert
+      const activeOrders = orders.filter(o => isValidUuid(o.id) && isValidUuid(o.product_group_id));
+      if (activeOrders.length === 0) {
+        console.log('[Private Order Sync] skip empty active cloud upsert for private_orders');
+        return;
+      }
+
+      console.log(`[Private Order Sync] upsert orders count: ${activeOrders.length}`);
+      const upsertData = activeOrders.map(o => ({
+        id: o.id,
+        local_id: o.id,
+        product_group_id: o.product_group_id,
+        customer_name: o.customer_name,
+        contact: o.contact || null,
+        note: o.note || null,
+        status: 'pending'
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('private_orders')
+        .upsert(upsertData);
+
+      if (upsertError) {
+        console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
+        await this.pullCoreProductData(true); // 發生錯誤，將本地快取回滾至雲端最新狀態
+        alert(`雲端同步私下訂單失敗：${upsertError.message}。已回復本地快取資料！`);
+        throw upsertError;
+      }
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
+      await this.pullCoreProductData(true); // 發生錯誤，將本地快取回滾至雲端最新狀態
+      alert(`雲端同步私下訂單發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
   }
 
   async getPrivateOrderItems(): Promise<PrivateOrderItem[]> {
@@ -1026,7 +1104,81 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
-    return db.savePrivateOrderItems(items);
+    // 1. 本地儲存
+    await db.savePrivateOrderItems(items);
+
+    // 2. 判斷是否為唯讀 Viewer/Helper
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip private_order_items cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    // 3. 防呆與空陣列檢查 (若 items.length === 0，直接 skip 雲端 upsert)
+    if (!items || items.length === 0) {
+      console.log('[Private Order Sync] skip empty cloud upsert for private_order_items');
+      return;
+    }
+
+    try {
+      // 4. 僅過濾出合法 UUID 的 active items
+      const activeItems = items.filter(i => isValidUuid(i.id) && isValidUuid(i.private_order_id) && isValidUuid(i.product_variant_id));
+      if (activeItems.length === 0) {
+        console.log('[Private Order Sync] skip empty active cloud upsert for private_order_items');
+        return;
+      }
+
+      // 5. 確保父訂單已成功寫入雲端以避免外鍵衝突 (Foreign Key check)
+      const parentOrderIds = Array.from(new Set(activeItems.map(i => i.private_order_id)));
+      const { data: existingParentOrders, error: checkError } = await supabase
+        .from('private_orders')
+        .select('id')
+        .in('id', parentOrderIds);
+
+      if (checkError) {
+        console.error('[Private Order Sync] failed to verify parent orders:', checkError);
+        throw checkError;
+      }
+
+      const existingParentSet = new Set(existingParentOrders?.map(o => o.id) || []);
+      const readyItems = activeItems.filter(i => existingParentSet.has(i.private_order_id));
+      const skippedCount = activeItems.length - readyItems.length;
+
+      if (skippedCount > 0) {
+        console.warn(`[Private Order Sync] skipped ${skippedCount} items because their parent private_orders do not exist in Supabase yet`);
+      }
+
+      if (readyItems.length === 0) {
+        console.log('[Private Order Sync] skip items cloud upsert because no items have parent orders in Supabase');
+        return;
+      }
+
+      console.log(`[Private Order Sync] upsert items count: ${readyItems.length}`);
+      const upsertData = readyItems.map(i => ({
+        id: i.id,
+        local_id: i.id,
+        private_order_id: i.private_order_id,
+        product_variant_id: i.product_variant_id,
+        quantity: i.quantity || 0,
+        amount: i.amount || 0,
+        note: i.note || null
+      }));
+
+      const { error: upsertError } = await supabase
+        .from('private_order_items')
+        .upsert(upsertData);
+
+      if (upsertError) {
+        console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
+        await this.pullCoreProductData(true);
+        alert(`雲端同步私下訂單項目失敗：${upsertError.message}。已回復本地快取資料！`);
+        throw upsertError;
+      }
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步私下訂單項目發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
   }
 
   async getImportBatches(): Promise<ImportBatch[]> {
