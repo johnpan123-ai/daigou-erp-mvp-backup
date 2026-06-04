@@ -23,6 +23,7 @@ export default function Dashboard() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [activeCategoryForUpload, setActiveCategoryForUpload] = useState<string | null>(null);
+  const [canWrite, setCanWrite] = useState<boolean>(true);
   const [categoryImages, setCategoryImages] = useState<Record<string, string>>({
     all: '',
     hololive: '',
@@ -62,6 +63,10 @@ export default function Dashboard() {
 
   const triggerImageUpload = (categoryKey: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!canWrite) {
+      alert('無權限：唯讀角色（Viewer/Helper）無法上傳大類圖片');
+      return;
+    }
     setActiveCategoryForUpload(categoryKey);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -96,11 +101,19 @@ export default function Dashboard() {
         // 2. 上傳新圖片
         const fileExt = file.name.split('.').pop();
         const newPath = `${activeCategoryForUpload}_${Date.now()}.${fileExt}`;
+
+        const { data: { session } } = await supabase.auth.getSession();
+        const userEmail = session?.user?.email || 'not logged in';
+        console.log('[Storage Upload] bucket:', 'dashboard-category-images');
+        console.log('[Storage Upload] path:', newPath);
+        console.log('[Storage Upload] user:', userEmail);
+
         const { error: uploadError } = await supabase.storage
           .from('dashboard-category-images')
           .upload(newPath, file, { cacheControl: '3600', upsert: true });
 
         if (uploadError) {
+          console.error('[Storage Upload] error:', uploadError);
           throw uploadError;
         }
 
@@ -115,6 +128,7 @@ export default function Dashboard() {
         alert('雲端圖片上傳成功！');
       } catch (err: any) {
         console.error('上傳圖片至雲端失敗:', err);
+        console.error('[Storage Upload] error:', err.message || err);
         alert(`上傳圖片失敗: ${err.message || err}`);
       } finally {
         setIsLoading(false);
@@ -160,6 +174,9 @@ export default function Dashboard() {
       setPrivateOrderItems(fetchedPrivateItems || []);
       setInventory(fetchedInventory || []);
       setSalesOrderItems(fetchedOrderItems || []);
+
+      const userCanWrite = await dataProvider.canWriteCloud();
+      setCanWrite(userCanWrite);
     } catch (e) {
       console.error('Failed to load data on Dashboard', e);
     }
@@ -989,12 +1006,14 @@ export default function Dashboard() {
                 <span className="category-link">
                   查看訂購紀錄 <ChevronRight size={12} />
                 </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('all', e)}
-                >
-                  更換圖片
-                </button>
+                {canWrite && (
+                  <button 
+                    className="btn-change-image"
+                    onClick={(e) => triggerImageUpload('all', e)}
+                  >
+                    更換圖片
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1014,12 +1033,14 @@ export default function Dashboard() {
                 <span className="category-link">
                   查看訂購紀錄 <ChevronRight size={12} />
                 </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('hololive', e)}
-                >
-                  更換圖片
-                </button>
+                {canWrite && (
+                  <button 
+                    className="btn-change-image"
+                    onClick={(e) => triggerImageUpload('hololive', e)}
+                  >
+                    更換圖片
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1039,12 +1060,14 @@ export default function Dashboard() {
                 <span className="category-link">
                   查看訂購紀錄 <ChevronRight size={12} />
                 </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('vspo', e)}
-                >
-                  更換圖片
-                </button>
+                {canWrite && (
+                  <button 
+                    className="btn-change-image"
+                    onClick={(e) => triggerImageUpload('vspo', e)}
+                  >
+                    更換圖片
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1064,12 +1087,14 @@ export default function Dashboard() {
                 <span className="category-link">
                   查看訂購紀錄 <ChevronRight size={12} />
                 </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('agency', e)}
-                >
-                  更換圖片
-                </button>
+                {canWrite && (
+                  <button 
+                    className="btn-change-image"
+                    onClick={(e) => triggerImageUpload('agency', e)}
+                  >
+                    更換圖片
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1089,12 +1114,14 @@ export default function Dashboard() {
                 <span className="category-link">
                   查看訂購紀錄 <ChevronRight size={12} />
                 </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('other', e)}
-                >
-                  更換圖片
-                </button>
+                {canWrite && (
+                  <button 
+                    className="btn-change-image"
+                    onClick={(e) => triggerImageUpload('other', e)}
+                  >
+                    更換圖片
+                  </button>
+                )}
               </div>
             </div>
           </div>

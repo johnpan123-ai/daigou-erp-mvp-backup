@@ -155,6 +155,10 @@ export default function PurchaseManagement() {
   }, [toastMessage]);
 
   const toggleEditMode = () => {
+    if (!canWrite) {
+      alert('無權限：唯讀角色（Viewer/Helper）無法進入編輯模式');
+      return;
+    }
     const nextVal = !editMode;
     setEditMode(nextVal);
     localStorage.setItem('purchase_management_edit_mode', String(nextVal));
@@ -166,6 +170,8 @@ export default function PurchaseManagement() {
   const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
   const [categoryMap, setCategoryMap] = useState<Map<string, ProductCategory>>(new Map());
 
+  const [canWrite, setCanWrite] = useState<boolean>(true);
+
   const [variantDefaultJpyCosts, setVariantDefaultJpyCosts] = useState<Record<string, number>>(() => {
     try {
       const stored = localStorage.getItem('variant_default_jpy_costs');
@@ -175,7 +181,7 @@ export default function PurchaseManagement() {
     }
   });
 
-  const handleUpdateDefaultJpyCost = (variantId: string, valStr: string) => {
+  const handleUpdateDefaultJpyCost = async (variantId: string, valStr: string) => {
     const val = valStr === '' ? null : parseInt(valStr);
     const updated = { ...variantDefaultJpyCosts };
     if (val === null || isNaN(val) || val <= 0) {
@@ -185,6 +191,16 @@ export default function PurchaseManagement() {
     }
     setVariantDefaultJpyCosts(updated);
     localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
+
+    // Sync to Database
+    const dbVal = val === null || isNaN(val) ? 0 : val;
+    const allVars = await dataProvider.getProductVariants();
+    const dbTarget = allVars.find(v => v.id === variantId);
+    if (dbTarget) {
+      dbTarget.price_jpy = dbVal;
+      await dataProvider.saveProductVariants(allVars);
+      setVariants(prev => prev.map(v => v.id === variantId ? { ...v, price_jpy: dbVal } : v));
+    }
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
@@ -196,7 +212,7 @@ export default function PurchaseManagement() {
     }
   });
 
-  const handleUpdateDefaultTwdCost = (variantId: string, valStr: string) => {
+  const handleUpdateDefaultTwdCost = async (variantId: string, valStr: string) => {
     const val = valStr === '' ? null : parseInt(valStr);
     const updated = { ...variantDefaultTwdCosts };
     if (val === null || isNaN(val) || val <= 0) {
@@ -206,6 +222,16 @@ export default function PurchaseManagement() {
     }
     setVariantDefaultTwdCosts(updated);
     localStorage.setItem('variant_default_twd_costs', JSON.stringify(updated));
+
+    // Sync to Database
+    const dbVal = val === null || isNaN(val) ? 0 : val;
+    const allVars = await dataProvider.getProductVariants();
+    const dbTarget = allVars.find(v => v.id === variantId);
+    if (dbTarget) {
+      dbTarget.price_twd = dbVal;
+      await dataProvider.saveProductVariants(allVars);
+      setVariants(prev => prev.map(v => v.id === variantId ? { ...v, price_twd: dbVal } : v));
+    }
   };
 
   const cleanDailiTitle = (title: string): string => {
@@ -380,6 +406,43 @@ export default function PurchaseManagement() {
     });
 
     setSalesOrderItems(groupSOI);
+
+    // Hydrate write permissions and default costs from product variants
+    const userCanWrite = await dataProvider.canWriteCloud();
+    setCanWrite(userCanWrite);
+    if (!userCanWrite) {
+      setEditMode(false);
+      localStorage.setItem('purchase_management_edit_mode', 'false');
+    }
+
+    const jpyCosts = { ...variantDefaultJpyCosts };
+    const twdCosts = { ...variantDefaultTwdCosts };
+    let needsSave = false;
+
+    groupVars.forEach(v => {
+      if (v.price_jpy !== undefined && v.price_jpy > 0) {
+        jpyCosts[v.id] = v.price_jpy;
+      } else if (variantDefaultJpyCosts[v.id] > 0) {
+        v.price_jpy = variantDefaultJpyCosts[v.id];
+        jpyCosts[v.id] = variantDefaultJpyCosts[v.id];
+        needsSave = true;
+      }
+
+      if (v.price_twd !== undefined && v.price_twd > 0) {
+        twdCosts[v.id] = v.price_twd;
+      } else if (variantDefaultTwdCosts[v.id] > 0) {
+        v.price_twd = variantDefaultTwdCosts[v.id];
+        twdCosts[v.id] = variantDefaultTwdCosts[v.id];
+        needsSave = true;
+      }
+    });
+
+    setVariantDefaultJpyCosts(jpyCosts);
+    setVariantDefaultTwdCosts(twdCosts);
+
+    if (needsSave && userCanWrite) {
+      await dataProvider.saveProductVariants(allVars);
+    }
   };
 
 
@@ -827,6 +890,17 @@ export default function PurchaseManagement() {
         return sum + Math.max(totalDemand - purchased, 0);
       }, 0);
       return getShortage(itemsB) - getShortage(itemsA);
+    });
+  }
+
+  if (variants.length > 0) {
+    const sampleV = variants[0];
+    console.log('[Variant Price Sync] UI render price sample:', {
+      variantId: sampleV.id,
+      myacg_item_code: sampleV.myacg_item_code,
+      variant_name: sampleV.variant_name,
+      price_jpy: sampleV.price_jpy,
+      price_twd: sampleV.price_twd
     });
   }
 

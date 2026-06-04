@@ -118,6 +118,11 @@ export interface ProductVariant {
   note: string;
   sort_order: number;
 
+  // Cost and URL Sync properties
+  price_jpy?: number;
+  price_twd?: number;
+  product_url?: string;
+
   // Order Import specific flags
   catalog_missing?: boolean;
   source?: "inventory_import" | "myacg_order_import";
