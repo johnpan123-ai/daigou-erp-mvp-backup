@@ -227,26 +227,33 @@ export default function PurchaseRecords() {
     
     groupVars.forEach(v => {
       // 買動漫數量
-      const localMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment ?? 0);
-      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined)
+      const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
         ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
         : null;
-      const vMyacg = v.effective_myacg_quantity ?? autoMyacg ?? (v as any).myacg_quantity ?? localMyacg;
+      const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+        ? v.effective_myacg_quantity
+        : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+      const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
 
       // WACA 數量
       const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined)
+      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
         ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
         : null;
-      const vWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+      const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+      const vWaca = rawWaca >= 0 ? rawWaca : 0;
 
       // 私下數量
       const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const vPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+      const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+      const vPrivate = rawPrivate >= 0 ? rawPrivate : 0;
 
       // 已採購 / 已下單數量
       const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const vPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+      const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+      const vPurchased = rawPurchased >= 0 ? rawPurchased : 0;
 
       myacg += vMyacg;
       waca += vWaca;
@@ -281,26 +288,33 @@ export default function PurchaseRecords() {
     
     groupVars.forEach(v => {
       // 買動漫數量
-      const localMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment ?? 0);
-      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined)
+      const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
         ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
         : null;
-      const vMyacg = v.effective_myacg_quantity ?? autoMyacg ?? (v as any).myacg_quantity ?? localMyacg;
+      const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+        ? v.effective_myacg_quantity
+        : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+      const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
 
       // WACA 數量
       const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined)
+      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
         ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
         : null;
-      const vWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+      const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+      const vWaca = rawWaca >= 0 ? rawWaca : 0;
 
       // 私下數量
       const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const vPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+      const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+      const vPrivate = rawPrivate >= 0 ? rawPrivate : 0;
 
       // 已採購 / 已下單數量
       const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const vPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+      const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+      const vPurchased = rawPurchased >= 0 ? rawPurchased : 0;
 
       const demand = vMyacg + vWaca + vPrivate;
       

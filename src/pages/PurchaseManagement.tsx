@@ -100,23 +100,35 @@ export default function PurchaseManagement() {
 
   const getVariantDemands = (v: ProductVariant) => {
     const inventoryList = Array.from(inventoryMap.values());
-    const localMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventoryList, salesOrderItems) + (v.myacg_manual_adjustment ?? 0);
-    const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined)
+    
+    // 買動漫數量
+    const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventoryList, salesOrderItems);
+    const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+    const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
       ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
       : null;
-    const myacgDemand = v.effective_myacg_quantity ?? autoMyacg ?? (v as any).myacg_quantity ?? localMyacg;
+    const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+      ? v.effective_myacg_quantity
+      : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+    const myacgDemand = rawMyacg >= 0 ? rawMyacg : 0;
 
+    // WACA 數量
     const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-    const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined)
+    const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
       ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
       : null;
-    const wacaDemand = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+    const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+    const wacaDemand = rawWaca >= 0 ? rawWaca : 0;
 
+    // 私下數量
     const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-    const privateDemand = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+    const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+    const privateDemand = rawPrivate >= 0 ? rawPrivate : 0;
 
+    // 已採購 / 已下單數量
     const localPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-    const purchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+    const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+    const purchased = rawPurchased >= 0 ? rawPurchased : 0;
 
     const totalDemand = myacgDemand + wacaDemand + privateDemand;
     const gap = totalDemand - purchased;
@@ -378,10 +390,17 @@ export default function PurchaseManagement() {
     if (target) {
       if (platform === 'myacg') {
         const myacgQty = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-        const auto = target.effective_myacg_quantity ?? target.myacg_auto_quantity ?? (myacgQty >= 0 ? myacgQty : 0);
+        const rawAuto = (target.effective_myacg_quantity !== null && target.effective_myacg_quantity !== undefined && target.effective_myacg_quantity >= 0)
+          ? target.effective_myacg_quantity
+          : ((target.myacg_auto_quantity !== null && target.myacg_auto_quantity !== undefined && target.myacg_auto_quantity >= 0)
+            ? target.myacg_auto_quantity
+            : (myacgQty >= 0 ? myacgQty : 0));
+        const auto = rawAuto >= 0 ? rawAuto : 0;
         target.myacg_manual_adjustment = totalValue - auto;
       } else {
-        const auto = target.waca_auto_quantity || 0;
+        const auto = (target.waca_auto_quantity !== null && target.waca_auto_quantity !== undefined && target.waca_auto_quantity >= 0)
+          ? target.waca_auto_quantity
+          : 0;
         target.waca_manual_adjustment = totalValue - auto;
       }
       await dataProvider.saveProductVariants(allVars);
