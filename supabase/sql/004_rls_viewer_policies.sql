@@ -25,7 +25,7 @@ STABLE
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.profiles 
-    WHERE user_id = u_id AND role = 'owner'
+    WHERE id = u_id AND role = 'owner'
   );
 $$;
 
@@ -39,7 +39,7 @@ STABLE
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.profiles 
-    WHERE user_id = u_id AND role IN ('owner', 'staff', 'helper')
+    WHERE id = u_id AND role IN ('owner', 'staff', 'helper')
   );
 $$;
 

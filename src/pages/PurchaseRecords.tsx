@@ -32,6 +32,9 @@ export default function PurchaseRecords() {
 
   const [editMode, setEditMode] = useState<boolean>(false);
 
+  console.log(`[UI Render] UI groups count: ${groups.length}`);
+  console.log(`[UI Render] UI variants count: ${variants.length}`);
+
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem('erp_purchase_records_col_widths');
     if (saved) {
@@ -387,6 +390,8 @@ export default function PurchaseRecords() {
       dataProvider.getInventory(),
       dataProvider.getSalesOrderItems()
     ]);
+    console.log(`[UI Load] UI groups count: ${fetchedGroups.length}`);
+    console.log(`[UI Load] UI variants count: ${fetchedVars.length}`);
     setGroups(fetchedGroups);
     setVariants(fetchedVars);
     setCategories(fetchedCats);

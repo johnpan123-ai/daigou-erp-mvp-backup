@@ -270,6 +270,7 @@ export class SupabaseProvider implements IDataProvider {
 
         console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆`);
         console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
+        console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
 
         // Check if all of them are empty
         if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
@@ -321,17 +322,23 @@ export class SupabaseProvider implements IDataProvider {
   // === 3 張 Synced 表讀取 (Pull 後從本地快取讀取) ===
   async getProductGroups(): Promise<ProductGroup[]> {
     await this.pullCoreProductData();
-    return db.getProductGroups();
+    const data = await db.getProductGroups();
+    console.log(`[IndexedDB Get Groups] count: ${data.length}`);
+    return data;
   }
 
   async getProductCategories(): Promise<ProductCategory[]> {
     await this.pullCoreProductData();
-    return db.getProductCategories();
+    const data = await db.getProductCategories();
+    console.log(`[IndexedDB Get Categories] count: ${data.length}`);
+    return data;
   }
 
   async getProductVariants(): Promise<ProductVariant[]> {
     await this.pullCoreProductData();
-    return db.getProductVariants();
+    const data = await db.getProductVariants();
+    console.log(`[IndexedDB Get Variants] count: ${data.length}`);
+    return data;
   }
 
   async saveProductGroups(groups: ProductGroup[]): Promise<void> {

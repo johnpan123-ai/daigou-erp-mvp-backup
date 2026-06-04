@@ -45,6 +45,30 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
 
+  const providerMode = getProviderMode();
+  const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';
+
+  if (isCloudOrFallback && loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ 
+          width: '40px', 
+          height: '40px', 
+          border: '4px solid #cbd5e1', 
+          borderTopColor: 'var(--color-primary)', 
+          borderRadius: '50%', 
+          animation: 'spin 1s linear infinite' 
+        }} />
+        <span style={{ fontSize: '14px', color: '#64748b', fontWeight: 500 }}>正在初始化雲端同步...</span>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       
