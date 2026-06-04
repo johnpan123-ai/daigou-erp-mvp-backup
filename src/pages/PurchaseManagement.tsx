@@ -98,6 +98,32 @@ export default function PurchaseManagement() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const getVariantDemands = (v: ProductVariant) => {
+    const inventoryList = Array.from(inventoryMap.values());
+    const localMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventoryList, salesOrderItems) + (v.myacg_manual_adjustment ?? 0);
+    const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined)
+      ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+      : null;
+    const myacgDemand = v.effective_myacg_quantity ?? autoMyacg ?? (v as any).myacg_quantity ?? localMyacg;
+
+    const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+    const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined)
+      ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+      : null;
+    const wacaDemand = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+
+    const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+    const privateDemand = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+
+    const localPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+    const purchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+
+    const totalDemand = myacgDemand + wacaDemand + privateDemand;
+    const gap = totalDemand - purchased;
+
+    return { myacgDemand, wacaDemand, privateDemand, totalDemand, purchased, gap };
+  };
+
   const [editMode, setEditMode] = useState<boolean>(() => {
     return localStorage.getItem('purchase_management_edit_mode') === 'true';
   });
@@ -352,7 +378,7 @@ export default function PurchaseManagement() {
     if (target) {
       if (platform === 'myacg') {
         const myacgQty = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-        const auto = myacgQty >= 0 ? myacgQty : 0;
+        const auto = target.effective_myacg_quantity ?? target.myacg_auto_quantity ?? (myacgQty >= 0 ? myacgQty : 0);
         target.myacg_manual_adjustment = totalValue - auto;
       } else {
         const auto = target.waca_auto_quantity || 0;
@@ -539,12 +565,7 @@ export default function PurchaseManagement() {
 
 
   const getVariantShortageForModal = (v: ProductVariant) => {
-    const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-    const myacgDemand = myacgQty >= 0 ? myacgQty : 0;
-    const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-    const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-    const totalDemand = myacgDemand + wacaDemand + privateDemand;
-
+    const { totalDemand } = getVariantDemands(v);
     const purchased = purchaseBatchItems
       .filter(pbi => pbi.product_variant_id === v.id && pbi.purchase_batch_id !== editingBatchId)
       .reduce((sum, item) => sum + item.quantity, 0);
@@ -589,18 +610,9 @@ export default function PurchaseManagement() {
   };
 
   variants.forEach(v => {
-    const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-    const myacgDemand = myacgQty >= 0 ? myacgQty : 0;
-    const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-    
-    const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
-    const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
-
-    const vTotalDemand = myacgDemand + wacaDemand + privateDemand;
-    totalDemand += vTotalDemand;
-
+    const { totalDemand: vTotalDemand, purchased: vPurchased } = getVariantDemands(v);
     const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
-    const vPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+    totalDemand += vTotalDemand;
     totalPurchased += vPurchased;
     
     const needToBuy = Math.max(vTotalDemand - vPurchased, 0);
@@ -792,12 +804,8 @@ export default function PurchaseManagement() {
   if (sortMode === 'shortage') {
     sortedGroupEntries = sortedGroupEntries.sort(([, itemsA], [, itemsB]) => {
       const getShortage = (items: ProductVariant[]) => items.reduce((sum, v) => {
-        const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-        const myacgDemand = myacgQty >= 0 ? myacgQty : 0;
-        const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-        const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
-        const totalPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((s, i) => s + i.quantity, 0);
-        return sum + Math.max((myacgDemand + wacaDemand + privateDemand) - totalPurchased, 0);
+        const { totalDemand, purchased } = getVariantDemands(v);
+        return sum + Math.max(totalDemand - purchased, 0);
       }, 0);
       return getShortage(itemsB) - getShortage(itemsA);
     });
@@ -1139,21 +1147,12 @@ export default function PurchaseManagement() {
               // Compute Group Aggregates
               let pMyacg = 0, pWaca = 0, pManual = 0, pNeed = 0, pExcess = 0, pPurchased = 0, pDemand = 0;
               groupItems.forEach(v => {
-                const mQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-                const mDemand = mQty >= 0 ? mQty : 0;
-                const wDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-                const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
-                const priDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
+                const { myacgDemand, wacaDemand, privateDemand, totalDemand: tDemand, purchased: tPurchased } = getVariantDemands(v);
 
-                pMyacg += mDemand;
-                pWaca += wDemand;
-                pManual += priDemand;
-                
-                const tDemand = mDemand + wDemand + priDemand;
+                pMyacg += myacgDemand;
+                pWaca += wacaDemand;
+                pManual += privateDemand;
                 pDemand += tDemand;
-                
-                const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
-                const tPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
                 pPurchased += tPurchased;
                 
                 pNeed += Math.max(tDemand - tPurchased, 0);
@@ -1509,17 +1508,7 @@ export default function PurchaseManagement() {
                             });
                             
                             return filteredList.map((v, i) => {
-                              const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-                              const myacgDemand = (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
-                              const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-                              
-                              const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
-                              const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
-          
-                              const totalDemand = myacgDemand + wacaDemand + privateDemand;
-      
-                              const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
-                              const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+                              const { myacgDemand, wacaDemand, privateDemand, totalDemand, purchased: totalPurchased } = getVariantDemands(v);
                               
                               const needToBuy = Math.max(totalDemand - totalPurchased, 0);
                               const excessBuy = Math.max(totalPurchased - totalDemand, 0);
@@ -1713,15 +1702,7 @@ export default function PurchaseManagement() {
             }
 
             const itemsWithShortage = groupItems.map(v => {
-              const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
-              const myacgDemand = (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
-              const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-              const vPrivateItems = privateOrderItems.filter(poi => poi.product_variant_id === v.id);
-              const privateDemand = vPrivateItems.reduce((sum, item) => sum + item.quantity, 0);
-              const totalDemand = myacgDemand + wacaDemand + privateDemand;
-              
-              const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
-              const totalPurchased = vBatchItems.reduce((sum, item) => sum + item.quantity, 0);
+              const { totalDemand, purchased: totalPurchased } = getVariantDemands(v);
               const needToBuy = Math.max(totalDemand - totalPurchased, 0);
               
               return { variant: v, needToBuy };

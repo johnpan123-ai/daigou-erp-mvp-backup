@@ -31,6 +31,7 @@ export default function PurchaseRecords() {
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
 
   const [editMode, setEditMode] = useState<boolean>(false);
+  let sampleLogged = false;
 
   console.log(`[UI Render] UI groups count: ${groups.length}`);
   console.log(`[UI Render] UI variants count: ${variants.length}`);
@@ -225,17 +226,47 @@ export default function PurchaseRecords() {
     let wacaManual = 0;
     
     groupVars.forEach(v => {
-      const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-      myacg += (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
-      waca += (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-      privateOrder += privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      purchased += batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      myacgManual += (v.myacg_manual_adjustment || 0);
-      wacaManual += (v.waca_manual_adjustment || 0);
+      // 買動漫數量
+      const localMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment ?? 0);
+      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined)
+        ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+        : null;
+      const vMyacg = v.effective_myacg_quantity ?? autoMyacg ?? (v as any).myacg_quantity ?? localMyacg;
+
+      // WACA 數量
+      const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined)
+        ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+        : null;
+      const vWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+
+      // 私下數量
+      const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      const vPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+
+      // 已採購 / 已下單數量
+      const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      const vPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+
+      myacg += vMyacg;
+      waca += vWaca;
+      privateOrder += vPrivate;
+      purchased += vPurchased;
+      myacgManual += (v.myacg_manual_adjustment ?? 0);
+      wacaManual += (v.waca_manual_adjustment ?? 0);
+
+      if (!sampleLogged) {
+        console.log('[UI Quantity Calc] sample variant:', JSON.stringify(v));
+        console.log('[UI Quantity Calc] myacg computed:', vMyacg);
+        console.log('[UI Quantity Calc] waca computed:', vWaca);
+        console.log('[UI Quantity Calc] private computed:', vPrivate);
+        console.log('[UI Quantity Calc] purchased computed:', vPurchased);
+        sampleLogged = true;
+      }
     });
     
     const demand = myacg + waca + privateOrder;
-    const gap = Math.max(demand - purchased, 0);
+    const gap = demand - purchased;
     
     return { myacg, waca, privateOrder, purchased, gap, myacgManual, wacaManual };
   };
@@ -249,19 +280,33 @@ export default function PurchaseRecords() {
     let gap = 0;
     
     groupVars.forEach(v => {
-      const myacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-      const myacgDemand = (myacgQty >= 0 ? myacgQty : 0) + (v.myacg_manual_adjustment || 0);
-      const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-      const privateDemand = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      
-      const demand = myacgDemand + wacaDemand + privateDemand;
-      const purchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      
-      
+      // 買動漫數量
+      const localMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems) + (v.myacg_manual_adjustment ?? 0);
+      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined)
+        ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+        : null;
+      const vMyacg = v.effective_myacg_quantity ?? autoMyacg ?? (v as any).myacg_quantity ?? localMyacg;
+
+      // WACA 數量
+      const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined)
+        ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+        : null;
+      const vWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+
+      // 私下數量
+      const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      const vPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+
+      // 已採購 / 已下單數量
+      const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      const vPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+
+      const demand = vMyacg + vWaca + vPrivate;
       
       totalDemand += demand;
-      totalPurchased += purchased;
-      gap += Math.max(demand - purchased, 0);
+      totalPurchased += vPurchased;
+      gap += (demand - vPurchased);
     });
     
     return { demand: totalDemand, purchased: totalPurchased, gap };
@@ -392,6 +437,7 @@ export default function PurchaseRecords() {
     ]);
     console.log(`[UI Load] UI groups count: ${fetchedGroups.length}`);
     console.log(`[UI Load] UI variants count: ${fetchedVars.length}`);
+    console.log('[UI Load] variants sample:', fetchedVars.length > 0 ? JSON.stringify(fetchedVars[0]) : 'empty');
     setGroups(fetchedGroups);
     setVariants(fetchedVars);
     setCategories(fetchedCats);
@@ -1064,6 +1110,11 @@ export default function PurchaseRecords() {
                 <tbody>
                   {filteredAndSortedGroups.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
+                    console.log('[UI Details Before Render]', {
+                      groupId: g.id,
+                      title: g.title,
+                      details
+                    });
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
 
@@ -1353,6 +1404,11 @@ export default function PurchaseRecords() {
                 <tbody>
                   {filteredAndSortedGroups.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
+                    console.log('[UI Details Before Render]', {
+                      groupId: g.id,
+                      title: g.title,
+                      details
+                    });
                     const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);

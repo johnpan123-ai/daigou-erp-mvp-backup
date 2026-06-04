@@ -271,6 +271,7 @@ export class SupabaseProvider implements IDataProvider {
         console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆`);
         console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
         console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
+        console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
 
         // Check if all of them are empty
         if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0) {
@@ -284,6 +285,8 @@ export class SupabaseProvider implements IDataProvider {
         
         await db.saveProductGroups(groupsRes.data || []);
         await db.saveProductCategories(categoriesRes.data || []);
+        console.log(`[Before IndexedDB Save Variants] count: ${(variantsRes.data || []).length}`);
+        console.log('[Before IndexedDB Save Variants] sample:', (variantsRes.data || []).length > 0 ? JSON.stringify((variantsRes.data || [])[0]) : 'empty');
         await db.saveProductVariants(variantsRes.data || []);
         await db.savePurchaseBatches(batchesRes.data || []);
         await db.savePurchaseBatchItems(batchItemsRes.data || []);
@@ -337,7 +340,7 @@ export class SupabaseProvider implements IDataProvider {
   async getProductVariants(): Promise<ProductVariant[]> {
     await this.pullCoreProductData();
     const data = await db.getProductVariants();
-    console.log(`[IndexedDB Get Variants] count: ${data.length}`);
+    console.log(`[IndexedDB Read Variants] count: ${data.length}`);
     return data;
   }
 
@@ -587,6 +590,9 @@ export class SupabaseProvider implements IDataProvider {
       sanitizedVariants.push(updatedVar);
     }
 
+    const finalVars = variantsChanged ? sanitizedVariants : variants;
+    console.log(`[Before IndexedDB Save Variants] count: ${finalVars.length}`);
+    console.log('[Before IndexedDB Save Variants] sample:', finalVars.length > 0 ? JSON.stringify(finalVars[0]) : 'empty');
     if (variantsChanged) {
       await db.saveProductVariants(sanitizedVariants);
     } else {
@@ -626,13 +632,13 @@ export class SupabaseProvider implements IDataProvider {
         variant_name: v.variant_name,
         raw_variant_name: v.raw_variant_name || null,
         product_title: v.product_title,
-        myacg_manual_adjustment: v.myacg_manual_adjustment || 0,
-        waca_manual_adjustment: v.waca_manual_adjustment || 0,
-        private_manual_adjustment: v.private_manual_adjustment || 0,
-        purchased_manual_adjustment: v.purchased_manual_adjustment || 0,
-        myacg_auto_quantity: v.myacg_auto_quantity || 0,
-        effective_myacg_quantity: v.effective_myacg_quantity || 0,
-        waca_auto_quantity: v.waca_auto_quantity || 0,
+        myacg_manual_adjustment: v.myacg_manual_adjustment ?? 0,
+        waca_manual_adjustment: v.waca_manual_adjustment ?? 0,
+        private_manual_adjustment: v.private_manual_adjustment ?? 0,
+        purchased_manual_adjustment: v.purchased_manual_adjustment ?? 0,
+        myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
+        effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
+        waca_auto_quantity: v.waca_auto_quantity ?? 0,
         note: v.note || '',
         sort_order: v.sort_order || 0,
         catalog_missing: v.catalog_missing || false,
@@ -1073,21 +1079,8 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async deleteProductGroup(groupId: string): Promise<void> {
-    const groups = await db.getProductGroups();
-    const updatedGroups = groups.filter(g => g.id !== groupId);
-    await db.saveProductGroups(updatedGroups);
-
-    const categories = await db.getProductCategories();
-    const updatedCategories = categories.filter(c => c.product_group_id !== groupId);
-    await db.saveProductCategories(updatedCategories);
-
-    const variants = await db.getProductVariants();
-    const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
-    await db.saveProductVariants(updatedVariants);
-
     if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip deleteProductGroup cloud soft delete (Read-Only Viewer/Helper)');
-      return;
+      throw new Error("無權限，viewer 不可刪除商品群組");
     }
 
     const nowStr = new Date().toISOString();
@@ -1107,6 +1100,7 @@ export class SupabaseProvider implements IDataProvider {
       .eq('product_group_id', groupId);
     if (catError) {
       console.error('[Supabase] Failed to soft delete categories:', catError);
+      throw catError;
     }
 
     const { error: varError } = await supabase
@@ -1115,28 +1109,29 @@ export class SupabaseProvider implements IDataProvider {
       .eq('product_group_id', groupId);
     if (varError) {
       console.error('[Supabase] Failed to soft delete variants:', varError);
+      throw varError;
     }
-  }
 
-  async deleteProductGroups(groupIds: string[]): Promise<void> {
-    if (!groupIds || groupIds.length === 0) return;
-
+    // Only update local DB cache if Supabase soft delete succeeded
     const groups = await db.getProductGroups();
-    const updatedGroups = groups.filter(g => !groupIds.includes(g.id));
+    const updatedGroups = groups.filter(g => g.id !== groupId);
     await db.saveProductGroups(updatedGroups);
 
     const categories = await db.getProductCategories();
-    const updatedCategories = categories.filter(c => !c.product_group_id || !groupIds.includes(c.product_group_id));
+    const updatedCategories = categories.filter(c => c.product_group_id !== groupId);
     await db.saveProductCategories(updatedCategories);
 
     const variants = await db.getProductVariants();
-    const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
+    const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
     await db.saveProductVariants(updatedVariants);
+  }
 
+  async deleteProductGroups(groupIds: string[]): Promise<void> {
     if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip deleteProductGroups cloud soft delete (Read-Only Viewer/Helper)');
-      return;
+      throw new Error("無權限，viewer 不可刪除商品群組");
     }
+
+    if (!groupIds || groupIds.length === 0) return;
 
     const nowStr = new Date().toISOString();
     const { error: groupError } = await supabase
@@ -1155,6 +1150,7 @@ export class SupabaseProvider implements IDataProvider {
       .in('product_group_id', groupIds);
     if (catError) {
       console.error('[Supabase] Failed to soft delete categories:', catError);
+      throw catError;
     }
 
     const { error: varError } = await supabase
@@ -1163,7 +1159,21 @@ export class SupabaseProvider implements IDataProvider {
       .in('product_group_id', groupIds);
     if (varError) {
       console.error('[Supabase] Failed to soft delete variants:', varError);
+      throw varError;
     }
+
+    // Only update local DB cache if Supabase soft delete succeeded
+    const groups = await db.getProductGroups();
+    const updatedGroups = groups.filter(g => !groupIds.includes(g.id));
+    await db.saveProductGroups(updatedGroups);
+
+    const categories = await db.getProductCategories();
+    const updatedCategories = categories.filter(c => !c.product_group_id || !groupIds.includes(c.product_group_id));
+    await db.saveProductCategories(updatedCategories);
+
+    const variants = await db.getProductVariants();
+    const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
+    await db.saveProductVariants(updatedVariants);
   }
 
   async pullDashboardCategoryImages(): Promise<void> {

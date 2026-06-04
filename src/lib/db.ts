@@ -1020,6 +1020,8 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async getProductVariants(): Promise<ProductVariant[]> {
     const variants = loadData<ProductVariant[]>('erp_product_variants', []);
+    console.log(`[IndexedDB Read Variants] count: ${variants.length}`);
+    console.log('[IndexedDB Read Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
     const salesOrderItems = await this.getSalesOrderItems();
     const orders = await this.getSalesOrders();
     const orderMap = new Map(orders.map(o => [o.id, o]));
@@ -1119,6 +1121,11 @@ export class LocalStorageAdapter implements DatabaseAdapter {
   }
 
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
+    if (variants.length === 0) {
+      console.warn("[IndexedDB Save Variants] SKIP empty variants save");
+      return;
+    }
+    console.log(`[IndexedDB Save Variants] count: ${variants.length}`);
     saveData('erp_product_variants', variants);
   }
 
@@ -1942,6 +1949,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async getProductVariants(): Promise<ProductVariant[]> {
     const variants = await this.get<ProductVariant[]>('erp_product_variants', []);
+    console.log(`[IndexedDB Read Variants] count: ${variants.length}`);
+    console.log('[IndexedDB Read Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
     const salesOrderItems = await this.getSalesOrderItems();
     const orders = await this.getSalesOrders();
     const orderMap = new Map(orders.map(o => [o.id, o]));
@@ -2038,6 +2047,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
+    if (variants.length === 0) {
+      console.warn("[IndexedDB Save Variants] SKIP empty variants save");
+      return;
+    }
     console.log(`[IndexedDB Save Variants] count: ${variants.length}`);
     await this.set('erp_product_variants', variants);
   }
