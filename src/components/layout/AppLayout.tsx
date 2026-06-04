@@ -43,6 +43,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();
   const { role, displayName, isProfileLoading } = useRole();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const location = useLocation();
 
   return (
     <div className="app-shell">
@@ -135,9 +136,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-md">
             {/* Supabase Auth Status */}
             {(() => {
-              const currentMode = getProviderMode();
-              
-              if (currentMode === 'local') {
+              if (loading || isProfileLoading) {
+                return <span className="text-xs text-muted">載入中...</span>;
+              }
+
+              if (!user) {
                 return (
                   <div className="flex items-center gap-sm text-xs" style={{ borderRight: '1px solid var(--color-border)', paddingRight: '12px', marginRight: '4px' }}>
                     <span style={{ color: 'var(--color-text-secondary)' }}>本地端</span>
@@ -145,20 +148,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
                       owner
                     </span>
-                  </div>
-                );
-              }
-
-              if (loading || isProfileLoading) {
-                return <span className="text-xs text-muted">載入中...</span>;
-              }
-
-              if (!user) {
-                return (
-                  <div className="flex items-center gap-xs">
-                    <span className="text-xs text-muted" style={{ marginRight: '4px' }}>未登入</span>
-                    <Link to="/login" className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid var(--color-border)' }}>
-                      前往登入
+                    <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', color: '#fff', backgroundColor: 'var(--color-primary)', border: 'none', borderRadius: '4px', fontWeight: 600, marginLeft: '8px' }}>
+                      登入雲端
                     </Link>
                   </div>
                 );
@@ -168,7 +159,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="flex items-center gap-sm text-xs" style={{ borderRight: '1px solid var(--color-border)', paddingRight: '12px', marginRight: '4px' }}>
                   <div className="flex flex-col items-end gap-2xs hide-on-mobile" style={{ lineHeight: '1.2' }}>
                     <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                      {displayName || '未命名'}
+                      {displayName || '已登入'}
                     </span>
                     <span className="text-muted" style={{ fontSize: '10px' }}>
                       {user.email}
@@ -188,7 +179,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   <button 
                     onClick={signOut} 
                     className="btn btn-ghost text-danger" 
-                    style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5' }}
+                    style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5', marginLeft: '8px' }}
                   >
                     登出
                   </button>
@@ -228,6 +219,31 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Page Content */}
         <div className="page-content">
+          {/* Local Mode Warning Banner */}
+          {!user && getProviderMode() === 'local' && location.pathname !== '/login' && (
+            <div style={{
+              backgroundColor: '#fffbeb',
+              border: '1px solid #fef3c7',
+              color: '#d97706',
+              padding: '12px 20px',
+              borderRadius: '8px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '13px',
+              fontWeight: 500,
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+            }}>
+              <div className="flex items-center gap-sm">
+                <span style={{ fontSize: '16px' }}>💡</span>
+                <span>目前為本地模式，資料只存在此瀏覽器。登入後可啟用雲端同步。</span>
+              </div>
+              <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', backgroundColor: '#d97706', borderColor: '#d97706', color: '#fff', fontWeight: 600 }}>
+                登入雲端
+              </Link>
+            </div>
+          )}
           <div className={(mode === 'mobile' && !isMobile) ? 'mobile-preview-frame' : ''}>
             {children}
           </div>

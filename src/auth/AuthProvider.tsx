@@ -71,6 +71,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (currentUser) {
+        if (currentMode === 'local') {
+          console.log('[Provider Mode] auto switched to cloud mode after login');
+          setProviderMode('cloud');
+          window.location.reload();
+          return;
+        }
         fetchProfile(currentUser.id);
       } else {
         setProfile(null);
@@ -93,6 +99,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (currentUser) {
+        if (currentMode === 'local') {
+          console.log('[Provider Mode] auto switched to cloud mode after login');
+          setProviderMode('cloud');
+          window.location.reload();
+          return;
+        }
         fetchProfile(currentUser.id);
       } else {
         setProfile(null);

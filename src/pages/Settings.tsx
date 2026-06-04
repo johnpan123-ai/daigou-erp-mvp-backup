@@ -301,7 +301,9 @@ export default function Settings() {
                 if (currentMode !== 'cloud') {
                   if (!user) {
                     console.log('[Provider Mode] blocked: login required');
-                    alert('請先登入後再使用雲端模式');
+                    if (confirm('請先登入後再使用雲端模式！點擊「確定」將為您導向登入頁面。')) {
+                      window.location.href = '/login';
+                    }
                     return;
                   }
                   setProviderMode('cloud');
