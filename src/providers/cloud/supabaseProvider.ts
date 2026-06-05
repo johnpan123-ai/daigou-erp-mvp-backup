@@ -84,6 +84,7 @@
 
 import { supabase } from './supabaseClient';
 import { db } from '../../lib/db';
+import { getProviderMode } from '../providerMode';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -282,6 +283,47 @@ export class SupabaseProvider implements IDataProvider {
         console.log(`[Private Order Sync] cloud pulled orders count: ${poLen}`);
         console.log(`[Private Order Sync] cloud pulled items count: ${poiLen}`);
 
+        // A. Auth/session role check
+        const role = await this.getRole();
+        console.log(`[Cloud Pull Guard] session ok: ${session.user.email} | role: ${role || 'null'}`);
+        if (!role) {
+          const roleMsg = `[Cloud Pull Guard] User role is unreadable or null. Aborting sync.`;
+          console.warn(roleMsg);
+          console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
+          console.log('[Cloud Pull Guard] keep local cache');
+          throw new Error(roleMsg);
+        }
+
+        // B. Pull 結果完整性防呆
+        const localGroups = await db.getProductGroups();
+        const localVariants = await db.getProductVariants();
+        const localSalesOrders = await db.getSalesOrders();
+        const localSalesOrderItems = await db.getSalesOrderItems();
+
+        const lg = localGroups.length;
+        const lv = localVariants.length;
+        const lso = localSalesOrders.length;
+        const lsoi = localSalesOrderItems.length;
+
+        console.log(`[Cloud Pull Guard] local counts - groups: ${lg}, variants: ${lv}, orders: ${lso}, items: ${lsoi}`);
+        console.log(`[Cloud Pull Guard] remote counts - groups: ${gLen}, variants: ${vLen}`);
+
+        // If local has data, but remote returns 0 for core tables, treat as suspicious empty pull.
+        // Exception: new empty account initialization (local count is 0).
+        const isNewAccount = (lg === 0 && lv === 0);
+        const isSuspicious = !isNewAccount && (
+          (lg > 0 && gLen === 0) || 
+          (lv > 0 && vLen === 0)
+        );
+
+        if (isSuspicious) {
+          const msg = `[Cloud Pull Guard] Suspicious empty pull detected! Local variants: ${lv}, remote variants: ${vLen}. Local groups: ${lg}, remote groups: ${gLen}.`;
+          console.warn(msg);
+          console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
+          console.log('[Cloud Pull Guard] keep local cache');
+          throw new Error(msg);
+        }
+
         // Check if all of them are empty
         if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0 && poLen === 0 && poiLen === 0) {
           console.log('[Sync Pull] core skipped: empty cloud result');
@@ -298,7 +340,15 @@ export class SupabaseProvider implements IDataProvider {
         console.log('[Before IndexedDB Save Variants] sample:', (variantsRes.data || []).length > 0 ? JSON.stringify((variantsRes.data || [])[0]) : 'empty');
         await db.saveProductVariants(variantsRes.data || []);
         await db.savePurchaseBatches(batchesRes.data || []);
-        await db.savePurchaseBatchItems(batchItemsRes.data || []);
+        const mappedBatchItems = (batchItemsRes.data || []).map((r: any) => ({
+          id: r.local_id || r.id,
+          purchase_batch_id: r.purchase_batch_id,
+          product_variant_id: r.product_variant_id,
+          quantity: r.quantity || 0,
+          cost: Number(r.cost ?? 0),
+          note: r.note || ''
+        }));
+        await db.savePurchaseBatchItems(mappedBatchItems);
 
         const mappedOrders: PrivateOrder[] = (poRes.data || []).map(r => ({
           id: r.local_id || r.id,
@@ -838,6 +888,20 @@ export class SupabaseProvider implements IDataProvider {
         throw error;
       }
 
+      const localOrders = await db.getSalesOrders();
+      const lso = localOrders.length;
+      const rso = data?.length || 0;
+
+      console.log(`[Cloud Pull Guard] sales_orders - local count: ${lso}, remote count: ${rso}`);
+
+      if (lso > 0 && rso === 0) {
+        const msg = '[Cloud Pull Guard] Suspicious empty pull for sales_orders!';
+        console.warn(msg);
+        console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
+        console.log('[Cloud Pull Guard] keep local cache');
+        throw new Error(msg);
+      }
+
       const rows = data || [];
       const mappedOrders: SalesOrder[] = rows.map(r => ({
         id: r.local_id || r.id,
@@ -868,6 +932,20 @@ export class SupabaseProvider implements IDataProvider {
 
       if (error) {
         throw error;
+      }
+
+      const localItems = await db.getSalesOrderItems();
+      const lsoi = localItems.length;
+      const rsoi = data?.length || 0;
+
+      console.log(`[Cloud Pull Guard] sales_order_items - local count: ${lsoi}, remote count: ${rsoi}`);
+
+      if (lsoi > 0 && rsoi === 0) {
+        const msg = '[Cloud Pull Guard] Suspicious empty pull for sales_order_items!';
+        console.warn(msg);
+        console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
+        console.log('[Cloud Pull Guard] keep local cache');
+        throw new Error(msg);
       }
 
       const orders = await db.getSalesOrders();
@@ -1052,8 +1130,14 @@ export class SupabaseProvider implements IDataProvider {
 
     // 2. 判斷是否為唯讀 Viewer/Helper
     if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip private_orders cloud push (Read-Only Viewer/Helper)');
-      return;
+      const mode = getProviderMode();
+      const role = await this.getRole();
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email || 'unknown';
+      const msg = `[Sync Push WARNING] Cannot push private_orders to cloud. User: ${email}, Role: ${role}, Provider Mode: ${mode}`;
+      console.warn(msg);
+      alert(`儲存失敗：您目前在雲端模式下是唯讀權限 (${role || '未登入'})，無法將私下登記紀錄存入雲端。`);
+      throw new Error(msg);
     }
 
     // 3. 防呆與空陣列檢查 (若 orders.length === 0，直接 skip 雲端 upsert)
@@ -1109,8 +1193,14 @@ export class SupabaseProvider implements IDataProvider {
 
     // 2. 判斷是否為唯讀 Viewer/Helper
     if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip private_order_items cloud push (Read-Only Viewer/Helper)');
-      return;
+      const mode = getProviderMode();
+      const role = await this.getRole();
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email || 'unknown';
+      const msg = `[Sync Push WARNING] Cannot push private_order_items to cloud. User: ${email}, Role: ${role}, Provider Mode: ${mode}`;
+      console.warn(msg);
+      alert(`儲存失敗：您目前在雲端模式下是唯讀權限 (${role || '未登入'})，無法將私下登記項目存入雲端。`);
+      throw new Error(msg);
     }
 
     // 3. 防呆與空陣列檢查 (若 items.length === 0，直接 skip 雲端 upsert)
