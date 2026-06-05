@@ -661,7 +661,7 @@ export default function PurchaseRecords() {
 
 
   return (
-    <div className="flex-col gap-lg">
+    <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '80px' : '0px' }}>
       <style>{`
         .erp-table th {
           padding: 0 !important;
@@ -715,7 +715,7 @@ export default function PurchaseRecords() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: isMobile ? '4px' : '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', width: '100%', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ display: 'flex', gap: isMobile ? '4px' : '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', width: '100%', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
         <button 
           onClick={() => setActiveTab('all')}
           style={{
@@ -996,7 +996,8 @@ export default function PurchaseRecords() {
           padding: '16px',
           marginBottom: '16px',
           display: 'flex',
-          alignItems: 'center',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'center',
           justifyContent: 'space-between',
           gap: '12px'
         }}>
@@ -1060,7 +1061,7 @@ export default function PurchaseRecords() {
           />
 
         ) : (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%' }}>
             {activeTab === 'proxy' ? (
               <ScrollWrapper isMobile={isMobile}>
                 <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: isMobile ? '1200px' : undefined }}>

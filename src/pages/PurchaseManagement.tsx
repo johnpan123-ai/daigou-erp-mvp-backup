@@ -992,7 +992,7 @@ export default function PurchaseManagement() {
         </div>
       </div>
 
-      <div style={{ padding: '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
+      <div style={{ padding: '24px', paddingBottom: isMobile ? '80px' : '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
         
         {/* Top Summary Cards */}
         {activeTab === 'worksheet' && (
@@ -1005,7 +1005,7 @@ export default function PurchaseManagement() {
                 <AlertTriangle size={20} color="#ef4444" />
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>{totalShortage}</span>
+                <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#ef4444' }}>{totalShortage}</span>
                 <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
               </div>
               <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>需採購補齊</div>
@@ -1018,7 +1018,7 @@ export default function PurchaseManagement() {
                 <RefreshCw size={20} color="#f97316" />
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#f97316' }}>{totalExcess}</span>
+                <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#f97316' }}>{totalExcess}</span>
                 <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
               </div>
               <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>數量過多</div>
@@ -1031,7 +1031,7 @@ export default function PurchaseManagement() {
                 <Package size={20} color="#64748b" />
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{totalDemand}</span>
+                <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#1e293b' }}>{totalDemand}</span>
                 <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
               </div>
               <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有需求加總</div>
@@ -1044,7 +1044,7 @@ export default function PurchaseManagement() {
                 <DollarSign size={20} color="#10b981" />
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: '28px', fontWeight: 700, color: '#1e293b' }}>{(isDaili ? dailiTotalOrderAmount : totalOrdersAmount).toLocaleString()}</span>
+                <span style={{ fontSize: isMobile ? '20px' : '28px', fontWeight: 700, color: '#1e293b' }}>{(isDaili ? dailiTotalOrderAmount : totalOrdersAmount).toLocaleString()}</span>
                 <span style={{ fontSize: '13px', color: '#64748b' }}>NT$</span>
               </div>
               <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>{isDaili ? '總需求數量 × 買動漫售價' : '訂單商品總額'}</div>
@@ -1059,7 +1059,7 @@ export default function PurchaseManagement() {
                     <DollarSign size={20} color="#ef4444" />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>NT$ {dailiNeedToBuyCost.toLocaleString()}</span>
+                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#ef4444' }}>NT$ {dailiNeedToBuyCost.toLocaleString()}</span>
                   </div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>缺少數量 × 台幣成本</div>
                 </div>
@@ -1071,7 +1071,7 @@ export default function PurchaseManagement() {
                     <CheckSquare size={20} color="#2563eb" />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>NT$ {dailiPurchasedCost.toLocaleString()}</span>
+                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#2563eb' }}>NT$ {dailiPurchasedCost.toLocaleString()}</span>
                   </div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>採購批次已付台幣成本</div>
                 </div>
@@ -1083,7 +1083,7 @@ export default function PurchaseManagement() {
                     <Package size={20} color="#16a34a" />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>NT$ {dailiTotalCost.toLocaleString()}</span>
+                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#16a34a' }}>NT$ {dailiTotalCost.toLocaleString()}</span>
                   </div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>待採購成本 + 已採購成本</div>
                 </div>
@@ -1095,7 +1095,7 @@ export default function PurchaseManagement() {
                     <DollarSign size={20} color="#ca8a04" />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>NT$ {dailiGrossProfit.toLocaleString()}</span>
+                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#ca8a04' }}>NT$ {dailiGrossProfit.toLocaleString()}</span>
                   </div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>訂單總金額 - 總成本</div>
                 </div>
@@ -1161,6 +1161,7 @@ export default function PurchaseManagement() {
           alignItems: 'center', 
           marginBottom: '16px', 
           width: '100%', 
+          maxWidth: '100%',
           overflowX: 'auto', 
           WebkitOverflowScrolling: 'touch'
         }}>
@@ -1223,53 +1224,71 @@ export default function PurchaseManagement() {
 
         {/* Toolbar */}
         {activeTab === 'worksheet' && (
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', padding: '16px', backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-            <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
-              <div 
-                style={{ padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
-                onClick={() => setFilterMode('all')}
-              >顯示全部商品</div>
-              <div 
-                style={{ padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
-                onClick={() => setFilterMode('abnormal')}
-              >缺貨採購模式</div>
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: isMobile ? 'column' : 'row',
+            alignItems: isMobile ? 'stretch' : 'center', 
+            gap: isMobile ? '12px' : '0px',
+            marginBottom: '16px', 
+            padding: '16px', 
+            backgroundColor: '#fff', 
+            borderRadius: '12px', 
+            border: '1px solid #e5e7eb', 
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)' 
+          }}>
+            {/* Row 1: Mode Toggle Buttons */}
+            <div style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-start' }}>
+              <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px', width: isMobile ? '100%' : 'auto' }}>
+                <div 
+                  style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                  onClick={() => setFilterMode('all')}
+                >顯示全部商品</div>
+                <div 
+                  style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                  onClick={() => setFilterMode('abnormal')}
+                >缺貨採購模式</div>
+              </div>
             </div>
 
-            <div style={{ margin: '0 16px', width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>
+            {!isMobile && <div style={{ margin: '0 16px', width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>}
 
-            <select 
-              className="input" 
-              style={{ width: '200px', height: '36px', fontSize: '13px', padding: '0 12px' }}
-              value={sortMode}
-              onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
-            >
-              <option value="catalog">依商品主檔順序排序</option>
-              <option value="shortage">依缺貨多寡排序</option>
-            </select>
-
-            <div style={{ margin: '0 16px', width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>設定匯率:</span>
-              <input 
-                type="number" 
-                step="0.0001"
-                min="0"
+            {/* Row 2: Sort Select & Exchange Rate */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <select 
                 className="input" 
-                style={{ width: '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
-                value={exchangeRate || ''}
-                onChange={e => {
-                  const val = parseFloat(e.target.value) || 0;
-                  setExchangeRate(val);
-                  localStorage.setItem('erp_exchange_rate', String(val));
-                }}
-              />
-            </div>
-            
-            <div style={{ flex: 1 }}></div>
+                style={{ width: isMobile ? '100%' : '200px', height: '36px', fontSize: '13px', padding: '0 12px' }}
+                value={sortMode}
+                onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
+              >
+                <option value="catalog">依商品主檔順序排序</option>
+                <option value="shortage">依缺貨多寡排序</option>
+              </select>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: '240px' }}>
+              {!isMobile && <div style={{ margin: '0 16px', width: '1px', height: '24px', backgroundColor: '#e2e8f0' }}></div>}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: isMobile ? '100%' : 'auto' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>設定匯率:</span>
+                <input 
+                  type="number" 
+                  step="0.0001"
+                  min="0"
+                  className="input" 
+                  style={{ flex: isMobile ? 1 : 'none', width: isMobile ? 'auto' : '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                  value={exchangeRate || ''}
+                  onChange={e => {
+                    const val = parseFloat(e.target.value) || 0;
+                    setExchangeRate(val);
+                    localStorage.setItem('erp_exchange_rate', String(val));
+                  }}
+                />
+              </div>
+            </div>
+
+            {!isMobile && <div style={{ flex: 1 }}></div>}
+
+            {/* Row 3: Search bar & Action Buttons */}
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: isMobile ? '100%' : '240px' }}>
                 <Search size={16} style={{ color: '#64748b', marginRight: '8px' }} />
                 <input 
                   type="text" 
@@ -1279,35 +1298,43 @@ export default function PurchaseManagement() {
                   style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '13px', color: '#334155' }}
                 />
               </div>
-              <button 
-                className="btn btn-outline" 
-                style={{ 
-                  fontSize: '13px', 
-                  padding: '6px 12px', 
-                  backgroundColor: '#fdf2f8', 
-                  color: '#db2777', 
-                  borderColor: '#fbcfe8',
-                  opacity: editMode ? 1 : 0.6,
-                  cursor: editMode ? 'pointer' : 'not-allowed'
-                }} 
-                onClick={openPrivateOrderModal}
-                disabled={!editMode}
-              >
-                <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 私下登記
-              </button>
-              <button 
-                className="btn btn-primary" 
-                style={{ 
-                  fontSize: '13px', 
-                  padding: '6px 12px',
-                  opacity: editMode ? 1 : 0.6,
-                  cursor: editMode ? 'pointer' : 'not-allowed'
-                }} 
-                onClick={openBatchModal}
-                disabled={!editMode}
-              >
-                <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
-              </button>
+
+              <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto' }}>
+                <button 
+                  className="btn btn-outline" 
+                  style={{ 
+                    flex: isMobile ? 1 : 'none',
+                    fontSize: '13px', 
+                    padding: '6px 12px', 
+                    backgroundColor: '#fdf2f8', 
+                    color: '#db2777', 
+                    borderColor: '#fbcfe8',
+                    opacity: editMode ? 1 : 0.6,
+                    cursor: editMode ? 'pointer' : 'not-allowed'
+                  }}
+                  disabled={!editMode}
+                  onClick={openPrivateOrderModal}
+                >
+                  <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 私下登記
+                </button>
+                <button 
+                  className="btn btn-outline" 
+                  style={{ 
+                    flex: isMobile ? 1 : 'none',
+                    fontSize: '13px', 
+                    padding: '6px 12px', 
+                    backgroundColor: '#eff6ff', 
+                    color: '#2563eb', 
+                    borderColor: '#bfdbfe',
+                    opacity: editMode ? 1 : 0.6,
+                    cursor: editMode ? 'pointer' : 'not-allowed'
+                  }}
+                  disabled={!editMode}
+                  onClick={openBatchModal}
+                >
+                  <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1377,7 +1404,7 @@ export default function PurchaseManagement() {
                 
                 
                 return (
-                  <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
+                  <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden', borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
                     <ScrollWrapper isMobile={isMobile}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
                       {isDaili ? (
@@ -1590,7 +1617,7 @@ export default function PurchaseManagement() {
 
               // CATEGORY CARD RENDERING
               return (
-                <div key={groupKey} className="card shadow-sm rounded-lg bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
+                <div key={groupKey} className="card shadow-sm rounded-lg bg-white" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden', borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
                   
                   {/* Category Header Row */}
                   <div 
@@ -1636,12 +1663,19 @@ export default function PurchaseManagement() {
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: '#64748b' }}>
-                      <span>總需求 {pDemand}</span>
-                      <span>已採購 {pPurchased}</span>
-                      <span>待採購 {pNeed}</span>
-                      <span>多買 {pExcess}</span>
-                      <span>私下 {pManual}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '16px', fontSize: '13px', color: '#64748b' }}>
+                      {!isMobile && (
+                        <>
+                          <span>總需求 {pDemand}</span>
+                          <span>已採購 {pPurchased}</span>
+                          <span>待採購 {pNeed}</span>
+                          <span>多買 {pExcess}</span>
+                          <span>私下 {pManual}</span>
+                        </>
+                      )}
+                      {isMobile && pNeed > 0 && (
+                        <span style={{ color: '#ef4444', fontWeight: 600 }}>缺 {pNeed}</span>
+                      )}
                       <div style={{ color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
                         {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
                       </div>
@@ -1984,6 +2018,9 @@ export default function PurchaseManagement() {
                       key={g.groupKey} 
                       className="card shadow-sm rounded-lg overflow-hidden bg-white" 
                       style={{ 
+                        width: '100%',
+                        maxWidth: '100%',
+                        overflow: 'hidden',
                         borderTop: '1px solid #e5e7eb', 
                         borderRight: '1px solid #e5e7eb', 
                         borderBottom: '1px solid #e5e7eb', 
@@ -2019,6 +2056,9 @@ export default function PurchaseManagement() {
                     key={g.groupKey} 
                     className="card shadow-sm rounded-lg overflow-hidden bg-white" 
                     style={{ 
+                      width: '100%',
+                      maxWidth: '100%',
+                      overflow: 'hidden',
                       borderTop: '1px solid #e5e7eb', 
                       borderRight: '1px solid #e5e7eb', 
                       borderBottom: '1px solid #e5e7eb', 
