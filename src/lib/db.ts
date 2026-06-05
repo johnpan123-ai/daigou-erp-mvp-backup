@@ -340,7 +340,7 @@ export interface DatabaseAdapter {
   saveProductGroups(groups: ProductGroup[]): Promise<void>;
   getProductCategories(): Promise<ProductCategory[]>;
   saveProductCategories(categories: ProductCategory[]): Promise<void>;
-  getProductVariants(): Promise<ProductVariant[]>;
+  getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
 
   getPurchaseBatches(): Promise<PurchaseBatch[]>;
@@ -691,7 +691,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
     const groups = await this.getProductGroups();
     const categories = await this.getProductCategories();
-    const variants = await this.getProductVariants();
+    const variants = await this.getProductVariants({ recalc: true });
 
     let categoriesUpdated = false;
     let variantsUpdated = false;
@@ -951,7 +951,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     }
 
     // Recalculate auto quantities based on new inventory sold numbers
-    await this.getProductVariants();
+    await this.getProductVariants({ recalc: true });
 
     return { filledVariantsCount, affectedGroupsCount };
   }
@@ -1000,8 +1000,6 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
     saveData('erp_sales_order_items', items);
-    // Trigger recalculation and persistence of variant auto quantities
-    await this.getProductVariants();
   }
 
   async getProductGroups(): Promise<ProductGroup[]> {
@@ -1022,14 +1020,22 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
 
 
-  async getProductVariants(): Promise<ProductVariant[]> {
+  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
     const variants = loadData<ProductVariant[]>('erp_product_variants', []);
     console.log(`[IndexedDB Read Variants] count: ${variants.length}`);
     console.log('[IndexedDB Read Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
+    
+    const recalc = options?.recalc ?? false;
+    const inventory = await this.getInventory();
+    
+    if (!recalc || inventory.length === 0) {
+      console.log(`[getProductVariants Local] Skipping recalculation. recalc=${recalc}, inventory=${inventory.length}`);
+      return variants;
+    }
+    
     const salesOrderItems = await this.getSalesOrderItems();
     const orders = await this.getSalesOrders();
     const orderMap = new Map(orders.map(o => [o.id, o]));
-    const inventory = await this.getInventory();
     
     // 1. Calculate orders demand for myacg
     const myacgOrderDemandMap = new Map<string, number>();
@@ -1622,7 +1628,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
     const groups = await this.getProductGroups();
     const categories = await this.getProductCategories();
-    const variants = await this.getProductVariants();
+    const variants = await this.getProductVariants({ recalc: true });
 
     let categoriesUpdated = false;
     let variantsUpdated = false;
@@ -1880,7 +1886,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
 
     // Recalculate auto quantities based on new inventory sold numbers
-    await this.getProductVariants();
+    await this.getProductVariants({ recalc: true });
 
     return { filledVariantsCount, affectedGroupsCount };
   }
@@ -1929,8 +1935,6 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
     await this.set('erp_sales_order_items', items);
-    // Trigger recalculation and persistence of variant auto quantities
-    await this.getProductVariants();
   }
 
   async getProductGroups(): Promise<ProductGroup[]> {
@@ -1951,14 +1955,22 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     await this.set('erp_product_categories', categories);
   }
 
-  async getProductVariants(): Promise<ProductVariant[]> {
+  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
     const variants = await this.get<ProductVariant[]>('erp_product_variants', []);
     console.log(`[IndexedDB Read Variants] count: ${variants.length}`);
     console.log('[IndexedDB Read Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
+    
+    const recalc = options?.recalc ?? false;
+    const inventory = await this.getInventory();
+    
+    if (!recalc || inventory.length === 0) {
+      console.log(`[getProductVariants IndexedDB] Skipping recalculation. recalc=${recalc}, inventory=${inventory.length}`);
+      return variants;
+    }
+    
     const salesOrderItems = await this.getSalesOrderItems();
     const orders = await this.getSalesOrders();
     const orderMap = new Map(orders.map(o => [o.id, o]));
-    const inventory = await this.getInventory();
     
     // 1. Calculate orders demand for myacg
     const myacgOrderDemandMap = new Map<string, number>();

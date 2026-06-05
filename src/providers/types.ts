@@ -26,7 +26,7 @@ export interface IDataProvider {
   saveProductGroups(groups: ProductGroup[]): Promise<void>;
   getProductCategories(): Promise<ProductCategory[]>;
   saveProductCategories(categories: ProductCategory[]): Promise<void>;
-  getProductVariants(): Promise<ProductVariant[]>;
+  getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
 
   getPurchaseBatches(): Promise<PurchaseBatch[]>;

@@ -61,8 +61,8 @@ class DynamicDataProvider implements IDataProvider {
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
     return this.getActiveProvider().saveProductCategories(categories);
   }
-  async getProductVariants(): Promise<ProductVariant[]> {
-    return this.getActiveProvider().getProductVariants();
+  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
+    return this.getActiveProvider().getProductVariants(options);
   }
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
     return this.getActiveProvider().saveProductVariants(variants);

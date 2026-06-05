@@ -417,9 +417,13 @@ export class SupabaseProvider implements IDataProvider {
     return data;
   }
 
-  async getProductVariants(): Promise<ProductVariant[]> {
-    await this.pullCoreProductData();
-    const data = await db.getProductVariants();
+  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
+    try {
+      await this.pullCoreProductData();
+    } catch (err) {
+      console.warn('[Sync] pullCoreProductData failed in getProductVariants, falling back to local cache', err);
+    }
+    const data = await db.getProductVariants(options);
     console.log(`[IndexedDB Read Variants] count: ${data.length}`);
     return data;
   }
@@ -1323,7 +1327,7 @@ export class SupabaseProvider implements IDataProvider {
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
     const result = await db.syncProductGroupsWithInventory();
     const categories = await db.getProductCategories();
-    const variants = await db.getProductVariants();
+    const variants = await db.getProductVariants({ recalc: true });
     await this.saveProductCategories(categories);
     await this.saveProductVariants(variants);
     return result;

@@ -46,8 +46,8 @@ export class LocalProvider implements IDataProvider {
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
     return db.saveProductCategories(categories);
   }
-  async getProductVariants(): Promise<ProductVariant[]> {
-    return db.getProductVariants();
+  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
+    return db.getProductVariants(options);
   }
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
     return db.saveProductVariants(variants);
