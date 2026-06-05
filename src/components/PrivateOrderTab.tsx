@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { PrivateOrder, PrivateOrderItem, ProductVariant } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
+import { useViewport } from '../contexts/ViewportContext';
 
 interface PrivateOrderTabProps {
   orders: PrivateOrder[];
@@ -13,6 +14,7 @@ interface PrivateOrderTabProps {
 }
 
 export default function PrivateOrderTab({ orders, orderItems, variants, onRefresh, onEditOrder, getDisplayProductName }: PrivateOrderTabProps) {
+  const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const toggleExpand = (id: string) => {
@@ -54,56 +56,72 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
           return (
             <div key={order.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
               {/* Order Header */}
-              <div 
-                style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', backgroundColor: isExpanded ? '#fdf2f8' : '#fff' }}
-                onClick={() => toggleExpand(order.id)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  {isExpanded ? <ChevronDown size={18} className="text-muted"/> : <ChevronRight size={18} className="text-muted"/>}
-                  <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px' }}>{order.customer_name}</div>
-                  {order.contact && <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 8px', borderRadius: '12px' }}>{order.contact}</div>}
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>{order.created_at.split('T')[0]}</div>
-                  {order.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>({order.note})</div>}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '24px', fontSize: '14px' }}>
-                  <div><span style={{ color: '#94a3b8' }}>款數:</span> <span style={{ fontWeight: 500 }}>{items.length}</span></div>
-                  <div><span style={{ color: '#94a3b8' }}>總數:</span> <span style={{ fontWeight: 600, color: '#db2777' }}>{totalQty}</span></div>
-                  <div style={{ width: '100px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>NT$ {totalAmount.toLocaleString()}</span></div>
-                  
-                  <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
-                    <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditOrder(order)} title="編輯登記與明細">
-                      <Edit2 size={16} />
-                    </button>
-                    <button className="btn btn-ghost" style={{ padding: '4px', color: '#ef4444' }} onClick={() => handleDeleteOrder(order)} title="刪除登記">
-                      <Trash2 size={16} />
-                    </button>
+              {isMobile ? (
+                <div 
+                  style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', cursor: 'pointer', backgroundColor: isExpanded ? '#fdf2f8' : '#fff' }}
+                  onClick={() => toggleExpand(order.id)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {isExpanded ? <ChevronDown size={18} className="text-muted"/> : <ChevronRight size={18} className="text-muted"/>}
+                      <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px' }}>{order.customer_name}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {order.contact && <div style={{ fontSize: '12px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 8px', borderRadius: '12px' }}>{order.contact}</div>}
+                      <div style={{ fontSize: '12px', color: '#94a3b8' }}>{order.created_at.split('T')[0]}</div>
+                    </div>
+                  </div>
+                  {order.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', paddingLeft: '26px' }}>({order.note})</div>}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: '26px', fontSize: '14px', borderTop: '1px dashed #e2e8f0', paddingTop: '8px' }}>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <div><span style={{ color: '#94a3b8' }}>款:</span> <span style={{ fontWeight: 500 }}>{items.length}</span></div>
+                      <div><span style={{ color: '#94a3b8' }}>數:</span> <span style={{ fontWeight: 600, color: '#db2777' }}>{totalQty}</span></div>
+                      <div><span style={{ color: '#94a3b8' }}>金:</span> <span style={{ fontWeight: 600, color: '#059669' }}>NT$ {totalAmount.toLocaleString()}</span></div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                      <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditOrder(order)} title="編輯登記與明細">
+                        <Edit2 size={16} />
+                      </button>
+                      <button className="btn btn-ghost" style={{ padding: '4px', color: '#ef4444' }} onClick={() => handleDeleteOrder(order)} title="刪除登記">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div 
+                  style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', backgroundColor: isExpanded ? '#fdf2f8' : '#fff' }}
+                  onClick={() => toggleExpand(order.id)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    {isExpanded ? <ChevronDown size={18} className="text-muted"/> : <ChevronRight size={18} className="text-muted"/>}
+                    <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px' }}>{order.customer_name}</div>
+                    {order.contact && <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 8px', borderRadius: '12px' }}>{order.contact}</div>}
+                    <div style={{ fontSize: '12px', color: '#94a3b8' }}>{order.created_at.split('T')[0]}</div>
+                    {order.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>({order.note})</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '24px', fontSize: '14px' }}>
+                    <div><span style={{ color: '#94a3b8' }}>款數:</span> <span style={{ fontWeight: 500 }}>{items.length}</span></div>
+                    <div><span style={{ color: '#94a3b8' }}>總數:</span> <span style={{ fontWeight: 600, color: '#db2777' }}>{totalQty}</span></div>
+                    <div style={{ width: '100px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>NT$ {totalAmount.toLocaleString()}</span></div>
+                    
+                    <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                      <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditOrder(order)} title="編輯登記與明細">
+                        <Edit2 size={16} />
+                      </button>
+                      <button className="btn btn-ghost" style={{ padding: '4px', color: '#ef4444' }} onClick={() => handleDeleteOrder(order)} title="刪除登記">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Items List */}
               {isExpanded && (
                 <div style={{ padding: '16px', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
-                    <colgroup>
-                      <col style={{ width: '40%' }} />
-                      <col style={{ width: '10%' }} />
-                      <col style={{ width: '12%' }} />
-                      <col style={{ width: '12%' }} />
-                      <col style={{ width: '16%' }} />
-                      <col style={{ width: '10%' }} />
-                    </colgroup>
-                    <thead>
-                      <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
-                        <th style={{ padding: '8px', textAlign: 'left' }}>商品名稱</th>
-                        <th style={{ padding: '8px', textAlign: 'center' }}>數量</th>
-                        <th style={{ padding: '8px', textAlign: 'right' }}>金額</th>
-                        <th style={{ padding: '8px', textAlign: 'right' }}>小計</th>
-                        <th style={{ padding: '8px', textAlign: 'left' }}>備註</th>
-                        <th style={{ padding: '8px', textAlign: 'center' }}>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  {isMobile ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {items.sort((a, b) => {
                         const idxA = variants.findIndex(v => v.id === a.product_variant_id);
                         const idxB = variants.findIndex(v => v.id === b.product_variant_id);
@@ -111,23 +129,101 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
                       }).map(item => {
                         const variant = variantMap.get(item.product_variant_id);
                         return (
-                          <tr key={item.id} style={{ borderBottom: '1px solid #fdf2f8' }}>
-                            <td style={{ padding: '8px', color: '#0f172a', wordBreak: 'break-word' }}>{variant ? getDisplayProductName(variant) : '未知商品'}</td>
-                            <td style={{ padding: '8px', textAlign: 'center', fontWeight: 500 }}>{item.quantity}</td>
-                            <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>NT$ {item.amount.toLocaleString()}</td>
-                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>NT$ {(item.quantity * item.amount).toLocaleString()}</td>
-                            <td style={{ padding: '8px', color: '#64748b', wordBreak: 'break-word' }}>{item.note}</td>
-                            <td style={{ padding: '8px', textAlign: 'center' }}>
-                              {/* inline item edit removed, use whole document edit from order header */}
-                            </td>
-                          </tr>
+                          <div key={item.id} style={{ 
+                            padding: '12px', 
+                            border: '1px solid #fbcfe8', 
+                            borderRadius: '8px', 
+                            backgroundColor: '#fffdfa',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                          }}>
+                            {/* 第一行：商品名稱 */}
+                            <div style={{ 
+                              fontWeight: 600, 
+                              color: '#1e293b', 
+                              fontSize: '13px', 
+                              lineHeight: '1.4', 
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}>
+                              {variant ? getDisplayProductName(variant) : '未知商品'}
+                            </div>
+                            
+                            {/* 第二行：數量、成本/金額、小計 */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#475569' }}>
+                              <span style={{ backgroundColor: '#fce7f3', color: '#db2777', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                數量: <strong style={{ color: '#0f172a' }}>{item.quantity}</strong>
+                              </span>
+                              <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px' }}>
+                                金額: <strong>NT$ {item.amount.toLocaleString()}</strong>
+                              </span>
+                              <span style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                小計: <strong>NT$ {(item.quantity * item.amount).toLocaleString()}</strong>
+                              </span>
+                            </div>
+                            
+                            {/* 第三行：備註 */}
+                            {item.note && (
+                              <div style={{ fontSize: '12px', color: '#64748b', backgroundColor: '#fff', padding: '6px 8px', borderRadius: '4px', borderLeft: '3px solid #cbd5e1', wordBreak: 'break-word' }}>
+                                <strong>備註：</strong>{item.note}
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                       {items.length === 0 && (
-                        <tr><td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: '#94a3b8' }}>無明細</td></tr>
+                        <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>無明細</div>
                       )}
-                    </tbody>
-                  </table>
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: '40%' }} />
+                        <col style={{ width: '10%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '10%' }} />
+                      </colgroup>
+                      <thead>
+                        <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>商品名稱</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>數量</th>
+                          <th style={{ padding: '8px', textAlign: 'right' }}>金額</th>
+                          <th style={{ padding: '8px', textAlign: 'right' }}>小計</th>
+                          <th style={{ padding: '8px', textAlign: 'left' }}>備註</th>
+                          <th style={{ padding: '8px', textAlign: 'center' }}>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.sort((a, b) => {
+                          const idxA = variants.findIndex(v => v.id === a.product_variant_id);
+                          const idxB = variants.findIndex(v => v.id === b.product_variant_id);
+                          return idxA - idxB;
+                        }).map(item => {
+                          const variant = variantMap.get(item.product_variant_id);
+                          return (
+                            <tr key={item.id} style={{ borderBottom: '1px solid #fdf2f8' }}>
+                              <td style={{ padding: '8px', color: '#0f172a', wordBreak: 'break-word' }}>{variant ? getDisplayProductName(variant) : '未知商品'}</td>
+                              <td style={{ padding: '8px', textAlign: 'center', fontWeight: 500 }}>{item.quantity}</td>
+                              <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>NT$ {item.amount.toLocaleString()}</td>
+                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>NT$ {(item.quantity * item.amount).toLocaleString()}</td>
+                              <td style={{ padding: '8px', color: '#64748b', wordBreak: 'break-word' }}>{item.note}</td>
+                              <td style={{ padding: '8px', textAlign: 'center' }}>
+                                {/* inline item edit removed, use whole document edit from order header */}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {items.length === 0 && (
+                          <tr><td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: '#94a3b8' }}>無明細</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )}
             </div>

@@ -6,6 +6,7 @@ import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, 
 import { Receipt, Search, Trash2, Calendar } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useViewport } from '../contexts/ViewportContext';
 
 const DEFAULT_COL_WIDTHS = {
   title: 350,
@@ -20,7 +21,19 @@ const DEFAULT_COL_WIDTHS = {
   productUrl: 120
 };
 
+const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) => {
+  if (isMobile) {
+    return (
+      <div className="mobile-scroll-wrapper" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        {children}
+      </div>
+    );
+  }
+  return <>{children}</>;
+};
+
 export default function PurchaseRecords() {
+  const { isMobile } = useViewport();
 
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -702,7 +715,7 @@ export default function PurchaseRecords() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: isMobile ? '4px' : '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', width: '100%', WebkitOverflowScrolling: 'touch' }}>
         <button 
           onClick={() => setActiveTab('all')}
           style={{
@@ -715,7 +728,9 @@ export default function PurchaseRecords() {
             borderBottom: activeTab === 'all' ? '2px solid #2563eb' : '2px solid transparent',
             color: activeTab === 'all' ? '#2563eb' : '#64748b',
             transition: 'all 0.2s',
-            marginBottom: '-1px'
+            marginBottom: '-1px',
+            whiteSpace: 'nowrap',
+            flex: isMobile ? '0 0 auto' : undefined
           }}
         >
           全部商品 ({groups.length})
@@ -732,7 +747,9 @@ export default function PurchaseRecords() {
             borderBottom: activeTab === 'hololive' ? '2px solid #2563eb' : '2px solid transparent',
             color: activeTab === 'hololive' ? '#2563eb' : '#64748b',
             transition: 'all 0.2s',
-            marginBottom: '-1px'
+            marginBottom: '-1px',
+            whiteSpace: 'nowrap',
+            flex: isMobile ? '0 0 auto' : undefined
           }}
         >
           Hololive商品 ({groups.filter(isHololiveProduct).length})
@@ -749,7 +766,9 @@ export default function PurchaseRecords() {
             borderBottom: activeTab === 'vspo' ? '2px solid #2563eb' : '2px solid transparent',
             color: activeTab === 'vspo' ? '#2563eb' : '#64748b',
             transition: 'all 0.2s',
-            marginBottom: '-1px'
+            marginBottom: '-1px',
+            whiteSpace: 'nowrap',
+            flex: isMobile ? '0 0 auto' : undefined
           }}
         >
           VSPO商品 ({groups.filter(isVspoProduct).length})
@@ -766,7 +785,9 @@ export default function PurchaseRecords() {
             borderBottom: activeTab === 'proxy' ? '2px solid #2563eb' : '2px solid transparent',
             color: activeTab === 'proxy' ? '#2563eb' : '#64748b',
             transition: 'all 0.2s',
-            marginBottom: '-1px'
+            marginBottom: '-1px',
+            whiteSpace: 'nowrap',
+            flex: isMobile ? '0 0 auto' : undefined
           }}
         >
           代理版商品 ({groups.filter(isProxyProduct).length})
@@ -783,7 +804,9 @@ export default function PurchaseRecords() {
             borderBottom: activeTab === 'other' ? '2px solid #2563eb' : '2px solid transparent',
             color: activeTab === 'other' ? '#2563eb' : '#64748b',
             transition: 'all 0.2s',
-            marginBottom: '-1px'
+            marginBottom: '-1px',
+            whiteSpace: 'nowrap',
+            flex: isMobile ? '0 0 auto' : undefined
           }}
         >
           其他商品 ({groups.filter(isOtherProduct).length})
@@ -1039,7 +1062,8 @@ export default function PurchaseRecords() {
         ) : (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             {activeTab === 'proxy' ? (
-              <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <ScrollWrapper isMobile={isMobile}>
+                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: isMobile ? '1200px' : undefined }}>
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -1332,8 +1356,10 @@ export default function PurchaseRecords() {
                   })}
                 </tbody>
               </table>
+              </ScrollWrapper>
             ) : (
-              <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <ScrollWrapper isMobile={isMobile}>
+                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: isMobile ? '1200px' : undefined }}>
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -1648,6 +1674,7 @@ export default function PurchaseRecords() {
                   })}
                 </tbody>
               </table>
+              </ScrollWrapper>
             )}
           </div>
         )}

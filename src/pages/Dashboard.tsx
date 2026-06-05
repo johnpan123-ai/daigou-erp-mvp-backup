@@ -897,6 +897,72 @@ export default function Dashboard() {
           white-space: normal;
           word-break: break-all;
         }
+
+        @media (max-width: 1024px) {
+          .kpi-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+          }
+          .category-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .category-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+          }
+          .urgent-table-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+          }
+          .urgent-table {
+            min-width: 700px;
+          }
+        }
+
+        @media (max-width: 600px) {
+          .kpi-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+          }
+          .kpi-card {
+            padding: 12px 14px;
+            height: 96px;
+            gap: 8px;
+            border-radius: 12px;
+          }
+          .kpi-icon-wrapper {
+            width: 36px;
+            height: 36px;
+          }
+          .kpi-icon-wrapper svg {
+            width: 18px;
+            height: 18px;
+          }
+          .kpi-value {
+            font-size: 18px;
+          }
+          .kpi-value span {
+            font-size: 11px;
+          }
+          .kpi-label {
+            font-size: 11px;
+            margin-bottom: 0px;
+          }
+          .kpi-sub {
+            font-size: 9px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .category-grid {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+        }
       `}</style>
 
       {/* Header section */}

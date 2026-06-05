@@ -9,6 +9,7 @@ import type {
 import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign } from 'lucide-react';
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
+import { useViewport } from '../contexts/ViewportContext';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -93,7 +94,19 @@ const renderStatusBadge = (needToBuy: number, excessBuy: number, totalDemand: nu
   );
 };
 
+const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) => {
+  if (isMobile) {
+    return (
+      <div className="mobile-scroll-wrapper" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        {children}
+      </div>
+    );
+  }
+  return <>{children}</>;
+};
+
 export default function PurchaseManagement() {
+  const { isMobile } = useViewport();
 
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -983,7 +996,7 @@ export default function PurchaseManagement() {
         
         {/* Top Summary Cards */}
         {activeTab === 'worksheet' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
             
             {/* Total Shortage */}
             <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
@@ -1143,18 +1156,66 @@ export default function PurchaseManagement() {
         )}
 
         {/* Tab Header */}
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
-          <div style={{ display: 'flex', backgroundColor: '#e2e8f0', padding: '4px', borderRadius: '8px', marginRight: 'auto' }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          marginBottom: '16px', 
+          width: '100%', 
+          overflowX: 'auto', 
+          WebkitOverflowScrolling: 'touch'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            backgroundColor: '#e2e8f0', 
+            padding: '4px', 
+            borderRadius: '8px', 
+            marginRight: 'auto',
+            width: 'max-content',
+            flexShrink: 0
+          }}>
             <div 
-              style={{ padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', borderRadius: '6px', color: activeTab === 'worksheet' ? '#1e293b' : '#64748b', backgroundColor: activeTab === 'worksheet' ? '#fff' : 'transparent', boxShadow: activeTab === 'worksheet' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '8px 16px', 
+                cursor: 'pointer', 
+                fontWeight: 600, 
+                fontSize: '14px', 
+                borderRadius: '6px', 
+                color: activeTab === 'worksheet' ? '#1e293b' : '#64748b', 
+                backgroundColor: activeTab === 'worksheet' ? '#fff' : 'transparent', 
+                boxShadow: activeTab === 'worksheet' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none', 
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto'
+              }}
               onClick={() => setActiveTab('worksheet')}
             >代購工作規格表</div>
             <div 
-              style={{ padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', borderRadius: '6px', color: activeTab === 'purchase_batches' ? '#1e293b' : '#64748b', backgroundColor: activeTab === 'purchase_batches' ? '#fff' : 'transparent', boxShadow: activeTab === 'purchase_batches' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '8px 16px', 
+                cursor: 'pointer', 
+                fontWeight: 600, 
+                fontSize: '14px', 
+                borderRadius: '6px', 
+                color: activeTab === 'purchase_batches' ? '#1e293b' : '#64748b', 
+                backgroundColor: activeTab === 'purchase_batches' ? '#fff' : 'transparent', 
+                boxShadow: activeTab === 'purchase_batches' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none', 
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto'
+              }}
               onClick={() => setActiveTab('purchase_batches')}
             >採購批次紀錄</div>
             <div 
-              style={{ padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '14px', borderRadius: '6px', color: activeTab === 'private_orders' ? '#1e293b' : '#64748b', backgroundColor: activeTab === 'private_orders' ? '#fff' : 'transparent', boxShadow: activeTab === 'private_orders' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '8px 16px', 
+                cursor: 'pointer', 
+                fontWeight: 600, 
+                fontSize: '14px', 
+                borderRadius: '6px', 
+                color: activeTab === 'private_orders' ? '#1e293b' : '#64748b', 
+                backgroundColor: activeTab === 'private_orders' ? '#fff' : 'transparent', 
+                boxShadow: activeTab === 'private_orders' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none', 
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto'
+              }}
               onClick={() => setActiveTab('private_orders')}
             >私下登記紀錄</div>
           </div>
@@ -1317,7 +1378,8 @@ export default function PurchaseManagement() {
                 
                 return (
                   <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
+                    <ScrollWrapper isMobile={isMobile}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
                       {isDaili ? (
                         <>
                           <colgroup>
@@ -1521,6 +1583,7 @@ export default function PurchaseManagement() {
                         </tr>
                       </tbody>
                     </table>
+                    </ScrollWrapper>
                   </div>
                 );
               }
@@ -1588,7 +1651,8 @@ export default function PurchaseManagement() {
                   {/* Expanded SKU Table */}
                   {isExpanded && (
                     <div style={{ borderTop: '1px solid #f1f5f9' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
+                      <ScrollWrapper isMobile={isMobile}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
                         {isDaili ? (
                           <>
                             <colgroup>
@@ -1816,7 +1880,8 @@ export default function PurchaseManagement() {
                           })()}
                         </tbody>
                       </table>
-                    </div>
+                    </ScrollWrapper>
+                  </div>
                   )}
                 </div>
               );
