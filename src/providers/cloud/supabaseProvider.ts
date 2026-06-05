@@ -236,164 +236,173 @@ export class SupabaseProvider implements IDataProvider {
 
     this.pullPromise = (async () => {
       try {
-        console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
-        
-        // 等待並獲取當前登入的 session，確保 JWT token 已載入 client
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session) {
-          console.warn('[Sync] Supabase 尚未偵測到有效登入 Session，略過雲端 Pull 以避免覆蓋本機資料。');
-          return;
-        }
+        try {
+          console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
+          
+          // 等待並獲取當前登入的 session，確保 JWT token 已載入 client
+          const { data: { session } } = await supabase.auth.getSession();
+          
+          if (!session) {
+            console.warn('[Sync] Supabase 尚未偵測到有效登入 Session，略過雲端 Pull 以避免覆蓋本機資料。');
+            return;
+          }
 
-        console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
-        
-        // 1. 同時從 Supabase 抓取未刪除的資料
-        const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes, poRes, poiRes] = await Promise.all([
-          supabase.from('product_groups').select('*').is('deleted_at', null),
-          supabase.from('product_categories').select('*').is('deleted_at', null),
-          supabase.from('product_variants').select('*').is('deleted_at', null),
-          supabase.from('purchase_batches').select('*').is('deleted_at', null),
-          supabase.from('purchase_batch_items').select('*').is('deleted_at', null),
-          supabase.from('private_orders').select('*').is('deleted_at', null),
-          supabase.from('private_order_items').select('*').is('deleted_at', null)
-        ]);
+          console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
+          
+          // 1. 同時從 Supabase 抓取未刪除的資料
+          const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes, poRes, poiRes] = await Promise.all([
+            supabase.from('product_groups').select('*').is('deleted_at', null),
+            supabase.from('product_categories').select('*').is('deleted_at', null),
+            supabase.from('product_variants').select('*').is('deleted_at', null),
+            supabase.from('purchase_batches').select('*').is('deleted_at', null),
+            supabase.from('purchase_batch_items').select('*').is('deleted_at', null),
+            supabase.from('private_orders').select('*').is('deleted_at', null),
+            supabase.from('private_order_items').select('*').is('deleted_at', null)
+          ]);
 
-        if (groupsRes.error) throw groupsRes.error;
-        if (categoriesRes.error) throw categoriesRes.error;
-        if (variantsRes.error) throw variantsRes.error;
-        if (batchesRes.error) throw batchesRes.error;
-        if (batchItemsRes.error) throw batchItemsRes.error;
-        if (poRes.error) throw poRes.error;
-        if (poiRes.error) throw poiRes.error;
+          if (groupsRes.error) throw groupsRes.error;
+          if (categoriesRes.error) throw categoriesRes.error;
+          if (variantsRes.error) throw variantsRes.error;
+          if (batchesRes.error) throw batchesRes.error;
+          if (batchItemsRes.error) throw batchItemsRes.error;
+          if (poRes.error) throw poRes.error;
+          if (poiRes.error) throw poiRes.error;
 
-        const gLen = groupsRes.data?.length || 0;
-        const cLen = categoriesRes.data?.length || 0;
-        const vLen = variantsRes.data?.length || 0;
-        const bLen = batchesRes.data?.length || 0;
-        const biLen = batchItemsRes.data?.length || 0;
-        const poLen = poRes.data?.length || 0;
-        const poiLen = poiRes.data?.length || 0;
+          const gLen = groupsRes.data?.length || 0;
+          const cLen = categoriesRes.data?.length || 0;
+          const vLen = variantsRes.data?.length || 0;
+          const bLen = batchesRes.data?.length || 0;
+          const biLen = batchItemsRes.data?.length || 0;
+          const poLen = poRes.data?.length || 0;
+          const poiLen = poiRes.data?.length || 0;
 
-        console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆, private_orders = ${poLen} 筆, private_order_items = ${poiLen} 筆`);
-        console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
-        console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
-        console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
-        console.log('[Default Cost Sync] cloud pulled sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
-        console.log(`[Private Order Sync] cloud pulled orders count: ${poLen}`);
-        console.log(`[Private Order Sync] cloud pulled items count: ${poiLen}`);
+          console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆, private_orders = ${poLen} 筆, private_order_items = ${poiLen} 筆`);
+          console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
+          console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
+          console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
+          console.log('[Default Cost Sync] cloud pulled sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
+          console.log(`[Private Order Sync] cloud pulled orders count: ${poLen}`);
+          console.log(`[Private Order Sync] cloud pulled items count: ${poiLen}`);
 
-        // A. Auth/session role check
-        const role = await this.getRole();
-        console.log(`[Cloud Pull Guard] session ok: ${session.user.email} | role: ${role || 'null'}`);
-        if (!role) {
-          const roleMsg = `[Cloud Pull Guard] User role is unreadable or null. Aborting sync.`;
-          console.warn(roleMsg);
-          console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-          console.log('[Cloud Pull Guard] keep local cache');
-          throw new Error(roleMsg);
-        }
+          // A. Auth/session role check
+          const role = await this.getRole();
+          console.log(`[Cloud Pull Guard] session ok: ${session.user.email} | role: ${role || 'null'}`);
+          if (!role) {
+            const roleMsg = `[Cloud Pull Guard] User role is unreadable or null. Aborting sync.`;
+            console.warn(roleMsg);
+            console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
+            console.log('[Cloud Pull Guard] keep local cache');
+            throw new Error(roleMsg);
+          }
 
-        // B. Pull 結果完整性防呆
-        const localGroups = await db.getProductGroups();
-        const localVariants = await db.getProductVariants();
-        const localSalesOrders = await db.getSalesOrders();
-        const localSalesOrderItems = await db.getSalesOrderItems();
+          // B. Pull 結果完整性防呆
+          const localGroups = await db.getProductGroups();
+          const localVariants = await db.getProductVariants();
+          const localSalesOrders = await db.getSalesOrders();
+          const localSalesOrderItems = await db.getSalesOrderItems();
 
-        const lg = localGroups.length;
-        const lv = localVariants.length;
-        const lso = localSalesOrders.length;
-        const lsoi = localSalesOrderItems.length;
+          const lg = localGroups.length;
+          const lv = localVariants.length;
+          const lso = localSalesOrders.length;
+          const lsoi = localSalesOrderItems.length;
 
-        console.log(`[Cloud Pull Guard] local counts - groups: ${lg}, variants: ${lv}, orders: ${lso}, items: ${lsoi}`);
-        console.log(`[Cloud Pull Guard] remote counts - groups: ${gLen}, variants: ${vLen}`);
+          console.log(`[Cloud Pull Guard] local counts - groups: ${lg}, variants: ${lv}, orders: ${lso}, items: ${lsoi}`);
+          console.log(`[Cloud Pull Guard] remote counts - groups: ${gLen}, variants: ${vLen}`);
 
-        // If local has data, but remote returns 0 for core tables, treat as suspicious empty pull.
-        // Exception: new empty account initialization (local count is 0).
-        const isNewAccount = (lg === 0 && lv === 0);
-        const isSuspicious = !isNewAccount && (
-          (lg > 0 && gLen === 0) || 
-          (lv > 0 && vLen === 0)
-        );
+          // If local has data, but remote returns 0 for core tables, treat as suspicious empty pull.
+          // Exception: new empty account initialization (local count is 0).
+          const isNewAccount = (lg === 0 && lv === 0);
+          const isSuspicious = !isNewAccount && (
+            (lg > 0 && gLen === 0) || 
+            (lv > 0 && vLen === 0)
+          );
 
-        if (isSuspicious) {
-          const msg = `[Cloud Pull Guard] Suspicious empty pull detected! Local variants: ${lv}, remote variants: ${vLen}. Local groups: ${lg}, remote groups: ${gLen}.`;
-          console.warn(msg);
-          console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-          console.log('[Cloud Pull Guard] keep local cache');
-          throw new Error(msg);
-        }
+          if (isSuspicious) {
+            const msg = `[Cloud Pull Guard] Suspicious empty pull detected! Local variants: ${lv}, remote variants: ${vLen}. Local groups: ${lg}, remote groups: ${gLen}.`;
+            console.warn(msg);
+            console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
+            console.log('[Cloud Pull Guard] keep local cache');
+            throw new Error(msg);
+          }
 
-        // Check if all of them are empty
-        if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0 && poLen === 0 && poiLen === 0) {
-          console.log('[Sync Pull] core skipped: empty cloud result');
+          // Check if all of them are empty
+          if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0 && poLen === 0 && poiLen === 0) {
+            console.log('[Sync Pull] core skipped: empty cloud result');
+            this.isPulled = true;
+            return;
+          }
+
+          // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
+          console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆, privateOrders: ${poLen} 筆, privateOrderItems: ${poiLen} 筆`);
+          
+          await db.saveProductGroups(groupsRes.data || []);
+          await db.saveProductCategories(categoriesRes.data || []);
+          console.log(`[Before IndexedDB Save Variants] count: ${(variantsRes.data || []).length}`);
+          console.log('[Before IndexedDB Save Variants] sample:', (variantsRes.data || []).length > 0 ? JSON.stringify((variantsRes.data || [])[0]) : 'empty');
+          await db.saveProductVariants(variantsRes.data || []);
+          await db.savePurchaseBatches(batchesRes.data || []);
+          const mappedBatchItems = (batchItemsRes.data || []).map((r: any) => ({
+            id: r.local_id || r.id,
+            purchase_batch_id: r.purchase_batch_id,
+            product_variant_id: r.product_variant_id,
+            quantity: r.quantity || 0,
+            cost: Number(r.cost ?? 0),
+            note: r.note || ''
+          }));
+          await db.savePurchaseBatchItems(mappedBatchItems);
+
+          const mappedOrders: PrivateOrder[] = (poRes.data || []).map(r => ({
+            id: r.local_id || r.id,
+            product_group_id: r.product_group_id,
+            customer_name: r.customer_name,
+            contact: r.contact || '',
+            note: r.note || '',
+            created_at: r.created_at
+          }));
+
+          const mappedItems: PrivateOrderItem[] = (poiRes.data || []).map(r => ({
+            id: r.local_id || r.id,
+            private_order_id: r.private_order_id,
+            product_variant_id: r.product_variant_id,
+            quantity: r.quantity || 0,
+            amount: Number(r.amount || 0),
+            note: r.note || ''
+          }));
+
+          await db.savePrivateOrders(mappedOrders);
+          await db.savePrivateOrderItems(mappedItems);
+
+          // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
+          await this.pullSalesOrders();
+          await this.pullSalesOrderItems();
+          await this.pullDashboardCategoryImages();
+
+          // 4. 呼叫既有的重新計算流程（即 db.getProductVariants），依雲端訂單重新計算
+          console.log('[Sync] 觸發本地變體 auto quantity 重新計算...');
+          const recalculatedVariants = await db.getProductVariants();
+
+          // 5. 將重新計算後的變體資料庫存儲存至本地，絕不推送回雲端，防止洗掉雲端數量
+          await db.saveProductVariants(recalculatedVariants);
+
           this.isPulled = true;
-          return;
+          console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
+        } catch (err: any) {
+          console.error('[Sync] 商品核心主檔同步失敗:', err);
+          if (isSchemaMissingError(err)) {
+            alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
+            this.isPulled = false;
+            throw err;
+          }
+          console.log('[Sync Pull] core failed: keep local cache');
         }
-
-        // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
-        console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆, privateOrders: ${poLen} 筆, privateOrderItems: ${poiLen} 筆`);
         
-        await db.saveProductGroups(groupsRes.data || []);
-        await db.saveProductCategories(categoriesRes.data || []);
-        console.log(`[Before IndexedDB Save Variants] count: ${(variantsRes.data || []).length}`);
-        console.log('[Before IndexedDB Save Variants] sample:', (variantsRes.data || []).length > 0 ? JSON.stringify((variantsRes.data || [])[0]) : 'empty');
-        await db.saveProductVariants(variantsRes.data || []);
-        await db.savePurchaseBatches(batchesRes.data || []);
-        const mappedBatchItems = (batchItemsRes.data || []).map((r: any) => ({
-          id: r.local_id || r.id,
-          purchase_batch_id: r.purchase_batch_id,
-          product_variant_id: r.product_variant_id,
-          quantity: r.quantity || 0,
-          cost: Number(r.cost ?? 0),
-          note: r.note || ''
-        }));
-        await db.savePurchaseBatchItems(mappedBatchItems);
-
-        const mappedOrders: PrivateOrder[] = (poRes.data || []).map(r => ({
-          id: r.local_id || r.id,
-          product_group_id: r.product_group_id,
-          customer_name: r.customer_name,
-          contact: r.contact || '',
-          note: r.note || '',
-          created_at: r.created_at
-        }));
-
-        const mappedItems: PrivateOrderItem[] = (poiRes.data || []).map(r => ({
-          id: r.local_id || r.id,
-          private_order_id: r.private_order_id,
-          product_variant_id: r.product_variant_id,
-          quantity: r.quantity || 0,
-          amount: Number(r.amount || 0),
-          note: r.note || ''
-        }));
-
-        await db.savePrivateOrders(mappedOrders);
-        await db.savePrivateOrderItems(mappedItems);
-
-        // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
-        await this.pullSalesOrders();
-        await this.pullSalesOrderItems();
-        await this.pullDashboardCategoryImages();
-
-        // 4. 呼叫既有的重新計算流程（即 db.getProductVariants），依雲端訂單重新計算
-        console.log('[Sync] 觸發本地變體 auto quantity 重新計算...');
-        const recalculatedVariants = await db.getProductVariants();
-
-        // 5. 將重新計算後的變體資料庫存同步回雲端，維持兩端一致
-        await this.saveProductVariants(recalculatedVariants);
-
-        this.isPulled = true;
-        console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
-      } catch (err: any) {
-        console.error('[Sync] 商品核心主檔同步失敗:', err);
-        if (isSchemaMissingError(err)) {
-          alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
-          this.isPulled = false;
-          throw err;
+        // === pullCoreProductData() ↓ pullInventory() ===
+        // 在 core sync 成功或失敗完畢後，接續拉取庫存 (使用獨立 try-catch 避免阻礙 core data 流程)
+        try {
+          await this.pullInventory();
+        } catch (e) {
+          console.error('[Sync] 庫存拉取失敗，但不影響核心主檔：', e);
         }
-        console.log('[Sync Pull] core failed: keep local cache');
-        // 為了不讓 UI 因為連線問題崩潰，我們不向上拋出錯誤，而是印出錯誤並使用本地現有快取
       } finally {
         this.pullPromise = null;
       }
@@ -764,7 +773,54 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
-    return db.upsertInventory(items);
+    const stats = await db.upsertInventory(items);
+    
+    if (!(await this.canWriteCloud())) {
+      console.log('[Inventory Sync] Skip inventory cloud push (Read-Only Viewer/Helper)');
+      return stats;
+    }
+
+    try {
+      const allInventory = await db.getInventory();
+      if (allInventory.length === 0) {
+        console.log('[Inventory Sync] push skipped: empty local array');
+        return stats;
+      }
+
+      console.log(`[Inventory Sync] push starting: ${allInventory.length} rows`);
+      const upsertData = allInventory.map(item => ({
+        local_id: item.myacg_item_code,
+        myacg_item_code: item.myacg_item_code,
+        product_id: item.product_id || null,
+        product_title: item.product_title,
+        normalized_product_title: item.normalized_product_title || null,
+        raw_variant_name: item.raw_variant_name || null,
+        listing_type: item.listing_type || null,
+        final_price: item.final_price ?? 0,
+        myacg_available_quantity: item.myacg_available_quantity ?? 0,
+        myacg_sold_quantity: item.myacg_sold_quantity ?? 0,
+        myacg_demand_quantity: item.myacg_demand_quantity ?? 0,
+        myacg_listed_at: item.myacg_listed_at || null,
+        import_sort_index: item.import_sort_index || null
+      }));
+
+      const { error } = await supabase
+        .from('inventory_items')
+        .upsert(upsertData, { onConflict: 'myacg_item_code' });
+
+      if (error) {
+        console.error('[Inventory Sync ERROR] push failed:', error);
+        alert(`雲端同步庫存失敗：${error.message || JSON.stringify(error)}`);
+        throw error;
+      } else {
+        console.log(`[Inventory Sync] push success: ${upsertData.length} rows`);
+      }
+    } catch (err: any) {
+      console.error('[Inventory Sync ERROR] push failed:', err.message || err);
+      throw err;
+    }
+    
+    return stats;
   }
 
   async getSalesOrders(): Promise<SalesOrder[]> {
@@ -985,6 +1041,54 @@ export class SupabaseProvider implements IDataProvider {
         alert('核心資料表 sales_order_items 缺失，請聯絡系統管理員匯入 SQL Migration 建立表格！');
       }
       throw err;
+    }
+  }
+
+  async pullInventory(): Promise<void> {
+    try {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .is('deleted_at', null);
+
+      if (error) {
+        throw error;
+      }
+
+      const localInv = await db.getInventory();
+      const linv = localInv.length;
+      const rinv = data?.length || 0;
+
+      console.log(`[Inventory Sync] pulled count: ${rinv}`);
+
+      if (linv > 0 && rinv === 0) {
+        console.warn('[Inventory Sync] Suspicious empty pull for inventory_items, aborting save');
+        return;
+      }
+
+      const rows = data || [];
+      const mappedItems: InventoryItem[] = rows.map(r => ({
+        myacg_item_code: r.myacg_item_code,
+        product_id: r.product_id || undefined,
+        product_title: r.product_title,
+        normalized_product_title: r.normalized_product_title || undefined,
+        raw_variant_name: r.raw_variant_name || '',
+        listing_type: r.listing_type || '',
+        final_price: r.final_price || 0,
+        myacg_available_quantity: r.myacg_available_quantity || 0,
+        myacg_sold_quantity: r.myacg_sold_quantity || 0,
+        myacg_demand_quantity: r.myacg_demand_quantity || undefined,
+        myacg_listed_at: r.myacg_listed_at || '',
+        import_sort_index: r.import_sort_index || undefined
+      }));
+
+      await db.saveInventory(mappedItems);
+      console.log(`[Inventory Sync] save count: ${mappedItems.length}`);
+      if (mappedItems.length > 0) {
+        console.log(`[Inventory Sync] sample: ${JSON.stringify(mappedItems[0])}`);
+      }
+    } catch (err: any) {
+      console.error(`[Inventory Sync ERROR] pull failed: ${err.message || err}`);
     }
   }
 

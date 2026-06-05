@@ -329,6 +329,7 @@ export interface ImportStats {
 
 export interface DatabaseAdapter {
   getInventory(): Promise<InventoryItem[]>;
+  saveInventory(items: InventoryItem[]): Promise<void>;
   upsertInventory(items: InventoryItem[]): Promise<ImportStats>;
   
   getSalesOrders(): Promise<SalesOrder[]>;
