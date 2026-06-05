@@ -803,6 +803,8 @@ export class SupabaseProvider implements IDataProvider {
         import_sort_index: item.import_sort_index || null
       }));
 
+      console.log('[Inventory Sync] actual upsert payload sample', JSON.stringify(upsertData[0]));
+
       const { error } = await supabase
         .from('inventory_items')
         .upsert(upsertData, { onConflict: 'myacg_item_code' });
