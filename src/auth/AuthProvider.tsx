@@ -19,11 +19,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function hasStoredSupabaseSession(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error('Error checking localStorage:', e);
+  }
+  return false;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [authPending, setAuthPending] = useState(false);
+
+  // Fallback timeout for when refresh fails permanently or offline too long
+  useEffect(() => {
+    if (authPending) {
+      const timer = setTimeout(() => {
+        console.log('[Provider Mode] auth refresh timed out, falling back to local');
+        setProviderMode('local');
+        window.location.reload();
+      }, 15000); // 15 seconds timeout
+      return () => clearTimeout(timer);
+    }
+  }, [authPending]);
 
   const fetchProfile = async (userId: string) => {
     // Only query database if not in pure local mode
@@ -60,17 +88,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setLoading(false);
 
       const currentMode = getProviderMode();
       if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
-        console.log('[Provider Mode] blocked: login required');
-        setProviderMode('local');
-        window.location.reload();
-        return;
+        if (hasStoredSupabaseSession()) {
+          console.log('[Provider Mode] auth pending, do not fallback local');
+          setAuthPending(true);
+          setLoading(true); // Keep loading spinner active
+          return;
+        } else {
+          console.log('[Provider Mode] no stored session, staying in cloud read-only mode');
+          setLoading(false);
+          setProfile(null);
+          setProfileLoading(false);
+          return;
+        }
       }
 
+      setLoading(false);
+
       if (currentUser) {
+        setAuthPending(false);
         if (currentMode === 'local') {
           console.log('[Provider Mode] auto switched to cloud mode after login');
           setProviderMode('cloud');
@@ -88,17 +126,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setLoading(false);
 
       const currentMode = getProviderMode();
       if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
-        console.log('[Provider Mode] blocked: login required');
-        setProviderMode('local');
-        window.location.reload();
-        return;
+        if (hasStoredSupabaseSession()) {
+          console.log('[Provider Mode] keep cloud mode during auth refresh');
+          setAuthPending(true);
+          setLoading(true); // Keep loading spinner active
+          return;
+        } else {
+          console.log('[Provider Mode] no stored session, staying in cloud read-only mode');
+          setLoading(false);
+          setProfile(null);
+          setProfileLoading(false);
+          return;
+        }
       }
 
+      setLoading(false);
+
       if (currentUser) {
+        setAuthPending(false);
         if (currentMode === 'local') {
           console.log('[Provider Mode] auto switched to cloud mode after login');
           setProviderMode('cloud');
@@ -118,6 +166,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    console.log('[Provider Mode] explicit logout, switch to local');
     await supabase.auth.signOut();
     setProfile(null);
     setProviderMode('local');

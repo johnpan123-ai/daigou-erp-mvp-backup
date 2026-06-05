@@ -41,16 +41,18 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { mode, setMode, isMobile } = useViewport();
   const { user, loading, signOut } = useAuth();
-  const { role, displayName, isProfileLoading } = useRole();
+  const { role, displayName, isProfileLoading, canViewPage } = useRole();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!loading && !user && location.pathname !== '/login') {
-      navigate('/login', { replace: true });
+    if (!loading) {
+      if (!canViewPage(location.pathname)) {
+        navigate('/dashboard', { replace: true });
+      }
     }
-  }, [loading, user, location.pathname, navigate]);
+  }, [loading, location.pathname, navigate, canViewPage]);
 
   const providerMode = getProviderMode();
   const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';
@@ -98,11 +100,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             主選單
           </div>
           <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label="主頁面" onClick={() => setIsMobileMenuOpen(false)} />
-          <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="商品清單匯入" onClick={() => setIsMobileMenuOpen(false)} />
-          <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
+          {user && canViewPage('/inventory') && (
+            <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="商品清單匯入" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
+          {canViewPage('/orders-import') && (
+            <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
           <SidebarItem to="/purchase-records" icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
-          <SidebarItem to="/purchasing" icon={<BarChart3 size={20} />} label="採購差異總覽" onClick={() => setIsMobileMenuOpen(false)} />
-          <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
+          {canViewPage('/purchasing') && (
+            <SidebarItem to="/purchasing" icon={<BarChart3 size={20} />} label="採購差異總覽" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
+          {canViewPage('/settings') && (
+            <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
         </nav>
       </aside>
 
@@ -172,15 +182,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               }
 
               if (!user) {
+                const isCloud = providerMode === 'cloud' || providerMode === 'fallback';
                 return (
                   <div className="flex items-center gap-sm text-xs" style={{ borderRight: '1px solid var(--color-border)', paddingRight: '12px', marginRight: '4px' }}>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>本地端</span>
-                    <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>本地管理員</span>
-                    <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
-                      owner
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      {isCloud ? '雲端唯讀' : '本地端'}
                     </span>
+                    <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
+                      {isCloud ? '訪客' : '本地管理員'}
+                    </span>
+                    {!isCloud && (
+                      <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
+                        owner
+                      </span>
+                    )}
                     <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', color: '#fff', backgroundColor: 'var(--color-primary)', border: 'none', borderRadius: '4px', fontWeight: 600, marginLeft: '8px' }}>
-                      登入雲端
+                      {isCloud ? '管理員登入' : '登入雲端'}
                     </Link>
                   </div>
                 );

@@ -17,15 +17,15 @@ export function getProviderMode(): ProviderMode {
   
   // If invalid value (not set is fine, but any other value is invalid)
   if (mode !== null) {
-    console.log('[Provider Mode] invalid value fallback: local');
-    localStorage.setItem(PROVIDER_MODE_KEY, 'local');
+    console.log('[Provider Mode] invalid value fallback: cloud');
+    localStorage.setItem(PROVIDER_MODE_KEY, 'cloud');
   }
   
   if (!hasLoggedLoad) {
-    console.log('[Provider Mode] loaded: local');
+    console.log('[Provider Mode] loaded: cloud');
     hasLoggedLoad = true;
   }
-  return 'local';
+  return 'cloud';
 }
 
 export function setProviderMode(mode: ProviderMode): void {
