@@ -789,7 +789,6 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log(`[Inventory Sync] push starting: ${allInventory.length} rows`);
       const upsertData = allInventory.map(item => ({
-        local_id: item.myacg_item_code,
         myacg_item_code: item.myacg_item_code,
         product_id: item.product_id || null,
         product_title: item.product_title,
