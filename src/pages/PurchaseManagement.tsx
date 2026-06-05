@@ -121,14 +121,14 @@ export default function PurchaseManagement() {
     const wacaDemand = rawWaca >= 0 ? rawWaca : 0;
 
     // 私下數量
-    const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-    const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-    const privateDemand = rawPrivate >= 0 ? rawPrivate : 0;
+    const privateDemand = privateOrderItems
+      .filter(poi => poi.product_variant_id === v.id)
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 
     // 已採購 / 已下單數量
-    const localPurchased = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-    const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
-    const purchased = rawPurchased >= 0 ? rawPurchased : 0;
+    const purchased = purchaseBatchItems
+      .filter(pbi => pbi.product_variant_id === v.id)
+      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 
     const totalDemand = myacgDemand + wacaDemand + privateDemand;
     const gap = totalDemand - purchased;
