@@ -83,7 +83,7 @@
 })();
 
 import { supabase } from './supabaseClient';
-import { db } from '../../lib/db';
+import { db, calculateFinalMyacgDemand } from '../../lib/db';
 import { getProviderMode } from '../providerMode';
 import type { IDataProvider } from '../types';
 import type { 
@@ -688,13 +688,21 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     const finalVars = variantsChanged ? sanitizedVariants : variants;
-    console.log(`[Before IndexedDB Save Variants] count: ${finalVars.length}`);
-    console.log('[Before IndexedDB Save Variants] sample:', finalVars.length > 0 ? JSON.stringify(finalVars[0]) : 'empty');
-    if (variantsChanged) {
-      await db.saveProductVariants(sanitizedVariants);
-    } else {
-      await db.saveProductVariants(variants);
+    
+    // 安全合併：獲取本地所有 variants，合併後儲存，避免覆蓋 IndexedDB 清空其他規格
+    const allLocalVars = await db.getProductVariants();
+    const allLocalVarsMap = new Map(allLocalVars.map(v => [v.id, v]));
+    for (const v of finalVars) {
+      const existing = allLocalVarsMap.get(v.id);
+      if (existing) {
+        allLocalVarsMap.set(v.id, { ...existing, ...v });
+      } else {
+        allLocalVarsMap.set(v.id, v);
+      }
     }
+    const mergedVars = Array.from(allLocalVarsMap.values());
+    console.log(`[Before IndexedDB Save Variants] merged count: ${mergedVars.length}`);
+    await db.saveProductVariants(mergedVars);
 
     if (!(await this.canWriteCloud())) {
       console.log('[Sync Push] Skip product_variants cloud push (Read-Only Viewer/Helper)');
@@ -720,29 +728,35 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log(`[Cloud Push] product_variants count: ${validVariants.length}`);
 
-      const upsertData = validVariants.map(v => ({
-        id: v.id,
-        local_id: v.id,
-        product_group_id: v.product_group_id,
-        product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
-        myacg_item_code: v.myacg_item_code,
-        variant_name: v.variant_name,
-        raw_variant_name: v.raw_variant_name || null,
-        product_title: v.product_title,
-        myacg_manual_adjustment: v.myacg_manual_adjustment ?? 0,
-        waca_manual_adjustment: v.waca_manual_adjustment ?? 0,
-        private_manual_adjustment: v.private_manual_adjustment ?? 0,
-        purchased_manual_adjustment: v.purchased_manual_adjustment ?? 0,
-        myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
-        effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
-        waca_auto_quantity: v.waca_auto_quantity ?? 0,
-        note: v.note || '',
-        sort_order: v.sort_order || 0,
-        catalog_missing: v.catalog_missing || false,
-        source: v.source || null,
-        default_jpy_cost: v.default_jpy_cost ?? null,
-        default_twd_cost: v.default_twd_cost ?? null
-      }));
+      const upsertData = validVariants.map(v => {
+        const payload: any = {
+          id: v.id,
+          local_id: v.id,
+          product_group_id: v.product_group_id,
+          product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
+          myacg_item_code: v.myacg_item_code,
+          variant_name: v.variant_name,
+          raw_variant_name: v.raw_variant_name || null,
+          product_title: v.product_title,
+          note: v.note || '',
+          sort_order: v.sort_order || 0,
+          catalog_missing: v.catalog_missing || false,
+          source: v.source || null,
+          default_jpy_cost: v.default_jpy_cost ?? null,
+          default_twd_cost: v.default_twd_cost ?? null,
+          updated_at: new Date().toISOString()
+        };
+
+        if (v.myacg_manual_adjustment !== undefined) payload.myacg_manual_adjustment = v.myacg_manual_adjustment;
+        if (v.waca_manual_adjustment !== undefined) payload.waca_manual_adjustment = v.waca_manual_adjustment;
+        if (v.private_manual_adjustment !== undefined) payload.private_manual_adjustment = v.private_manual_adjustment;
+        if (v.purchased_manual_adjustment !== undefined) payload.purchased_manual_adjustment = v.purchased_manual_adjustment;
+        if (v.myacg_auto_quantity !== undefined) payload.myacg_auto_quantity = v.myacg_auto_quantity;
+        if (v.effective_myacg_quantity !== undefined) payload.effective_myacg_quantity = v.effective_myacg_quantity;
+        if (v.waca_auto_quantity !== undefined) payload.waca_auto_quantity = v.waca_auto_quantity;
+
+        return payload;
+      });
 
       console.log('[Default Cost Sync] save payload sample:', upsertData.length > 0 ? JSON.stringify(upsertData[0]) : 'empty');
 
@@ -1406,13 +1420,101 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
+    // 1. 先執行 db.createPurchaseRecordFromInventory(itemCodes)
     await db.createPurchaseRecordFromInventory(itemCodes);
+    
+    // 2. 接著重新取得 groups, categories, inventory, salesOrderItems, variants
     const groups = await db.getProductGroups();
     const categories = await db.getProductCategories();
-    const variants = await db.getProductVariants();
+    const inventory = await db.getInventory();
+    const salesOrderItems = await db.getSalesOrderItems();
+    const allVariants = await db.getProductVariants();
+    
+    // 3. 只針對本次 itemCodes 對應到的 variants 重新計算：myacg_auto_quantity, effective_myacg_quantity
+    const targetCodes = new Set(itemCodes.map(code => code.trim().toUpperCase()));
+    const targetVariants: ProductVariant[] = [];
+    
+    console.log(`[Import Quantity Debug] target itemCodes: ${JSON.stringify(itemCodes)}`);
+    
+    for (const v of allVariants) {
+      if (v.myacg_item_code && targetCodes.has(v.myacg_item_code.trim().toUpperCase())) {
+        const matchedInv = inventory.find(i => i.myacg_item_code.trim().toUpperCase() === v.myacg_item_code.trim().toUpperCase());
+        console.log(`[Import Quantity Debug] inventory matched: SKU=${v.myacg_item_code}, found=${!!matchedInv}, sold_qty=${matchedInv?.myacg_sold_quantity}`);
+        
+        const effectiveMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+        
+        console.log(`[Import Quantity Debug] variant recalculated: SKU=${v.myacg_item_code}, old_auto=${v.myacg_auto_quantity}, new_auto=${effectiveMyacg}`);
+        
+        v.myacg_auto_quantity = effectiveMyacg;
+        v.effective_myacg_quantity = effectiveMyacg;
+        targetVariants.push(v);
+      }
+    }
+    
+    // 4. 儲存前加 log
+    if (targetVariants.length > 0) {
+      console.log(`[Import Quantity Debug] save variants sample: ${JSON.stringify(targetVariants[0])}`);
+    } else {
+      console.log(`[Import Quantity Debug] save variants sample: empty`);
+    }
+    
+    // 5. 本地儲存：必須是 allVariants，以防覆蓋 IndexedDB 清空其他規格
+    await db.saveProductVariants(allVariants);
+    
+    // 6. 雲端同步更新的 groups, categories
     await this.saveProductGroups(groups);
     await this.saveProductCategories(categories);
-    await this.saveProductVariants(variants);
+    
+    // 7. 雲端同步 targetVariants（只 upsert 本次更新的規格，且只包含已定義欄位）
+    if (await this.canWriteCloud()) {
+      if (targetVariants.length > 0) {
+        const validVariants = targetVariants.filter(v => 
+          isValidUuid(v.id) && isValidUuid(v.product_group_id)
+        );
+        
+        if (validVariants.length > 0) {
+          console.log(`[Cloud Push] upserting target variants count: ${validVariants.length}`);
+          const upsertData = validVariants.map(v => {
+            const payload: any = {
+              id: v.id,
+              local_id: v.id,
+              product_group_id: v.product_group_id,
+              product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
+              myacg_item_code: v.myacg_item_code,
+              variant_name: v.variant_name,
+              raw_variant_name: v.raw_variant_name || null,
+              product_title: v.product_title,
+              note: v.note || '',
+              sort_order: v.sort_order || 0,
+              catalog_missing: v.catalog_missing || false,
+              source: v.source || null,
+              default_jpy_cost: v.default_jpy_cost ?? null,
+              default_twd_cost: v.default_twd_cost ?? null,
+              updated_at: new Date().toISOString()
+            };
+            
+            if (v.myacg_manual_adjustment !== undefined) payload.myacg_manual_adjustment = v.myacg_manual_adjustment;
+            if (v.waca_manual_adjustment !== undefined) payload.waca_manual_adjustment = v.waca_manual_adjustment;
+            if (v.private_manual_adjustment !== undefined) payload.private_manual_adjustment = v.private_manual_adjustment;
+            if (v.purchased_manual_adjustment !== undefined) payload.purchased_manual_adjustment = v.purchased_manual_adjustment;
+            if (v.myacg_auto_quantity !== undefined) payload.myacg_auto_quantity = v.myacg_auto_quantity;
+            if (v.effective_myacg_quantity !== undefined) payload.effective_myacg_quantity = v.effective_myacg_quantity;
+            if (v.waca_auto_quantity !== undefined) payload.waca_auto_quantity = v.waca_auto_quantity;
+            
+            return payload;
+          });
+          
+          const { error } = await supabase
+            .from('product_variants')
+            .upsert(upsertData);
+            
+          if (error) {
+            console.error(`[Cloud Push ERROR] Supabase error message: ${error.message || JSON.stringify(error)}`);
+            throw error;
+          }
+        }
+      }
+    }
   }
 
   async reparseProductVariants(): Promise<void> {

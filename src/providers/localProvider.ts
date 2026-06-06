@@ -1,5 +1,5 @@
 import type { IDataProvider } from './types';
-import { db } from '../lib/db';
+import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { 
   InventoryItem, 
   SalesOrder, 
@@ -50,7 +50,18 @@ export class LocalProvider implements IDataProvider {
     return db.getProductVariants(options);
   }
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
-    return db.saveProductVariants(variants);
+    const allLocalVars = await db.getProductVariants();
+    const allLocalVarsMap = new Map(allLocalVars.map(v => [v.id, v]));
+    for (const v of variants) {
+      const existing = allLocalVarsMap.get(v.id);
+      if (existing) {
+        allLocalVarsMap.set(v.id, { ...existing, ...v });
+      } else {
+        allLocalVarsMap.set(v.id, v);
+      }
+    }
+    const mergedVars = Array.from(allLocalVarsMap.values());
+    return db.saveProductVariants(mergedVars);
   }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return db.getPurchaseBatches();
@@ -95,7 +106,28 @@ export class LocalProvider implements IDataProvider {
     return db.clearPurchaseRecords();
   }
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
-    return db.createPurchaseRecordFromInventory(itemCodes);
+    await db.createPurchaseRecordFromInventory(itemCodes);
+    const inventory = await db.getInventory();
+    const salesOrderItems = await db.getSalesOrderItems();
+    const allVariants = await db.getProductVariants();
+    
+    const targetCodes = new Set(itemCodes.map(code => code.trim().toUpperCase()));
+    let changed = false;
+    
+    for (const v of allVariants) {
+      if (v.myacg_item_code && targetCodes.has(v.myacg_item_code.trim().toUpperCase())) {
+        const effectiveMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+        if (v.myacg_auto_quantity !== effectiveMyacg || v.effective_myacg_quantity !== effectiveMyacg) {
+          v.myacg_auto_quantity = effectiveMyacg;
+          v.effective_myacg_quantity = effectiveMyacg;
+          changed = true;
+        }
+      }
+    }
+    
+    if (changed) {
+      await db.saveProductVariants(allVariants);
+    }
   }
   async reparseProductVariants(): Promise<void> {
     return db.reparseProductVariants();
