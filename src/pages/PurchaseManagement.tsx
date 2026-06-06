@@ -1961,8 +1961,8 @@ export default function PurchaseManagement() {
             };
           }).filter((g): g is NonNullable<typeof g> => g !== null);
 
-          // 2. Sort by totalShortage descending
-          shortageGroups.sort((a, b) => b.totalShortage - a.totalShortage);
+          // 2. Sort by totalShortage descending (commented out to inherit standard mode sorting)
+          // shortageGroups.sort((a, b) => b.totalShortage - a.totalShortage);
 
           // 3. Stats
           const totalAbnormalProductsCount = shortageGroups.length;
