@@ -67,6 +67,9 @@ class DynamicDataProvider implements IDataProvider {
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
     return this.getActiveProvider().saveProductVariants(variants);
   }
+  async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
+    return this.getActiveProvider().updateProductVariantPatch(id, patch);
+  }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return this.getActiveProvider().getPurchaseBatches();
   }

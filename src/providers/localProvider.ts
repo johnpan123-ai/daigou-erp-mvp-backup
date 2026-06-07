@@ -63,6 +63,9 @@ export class LocalProvider implements IDataProvider {
     const mergedVars = Array.from(allLocalVarsMap.values());
     return db.saveProductVariants(mergedVars);
   }
+  async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
+    return db.updateProductVariantPatch(id, patch);
+  }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return db.getPurchaseBatches();
   }

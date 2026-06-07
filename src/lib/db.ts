@@ -125,6 +125,9 @@ export interface ProductVariant {
   // Cost Sync fields
   default_jpy_cost?: number | null;
   default_twd_cost?: number | null;
+
+  updated_at?: string;
+  version?: number;
 }
 
 export interface ImportBatch {
@@ -343,6 +346,7 @@ export interface DatabaseAdapter {
   saveProductCategories(categories: ProductCategory[]): Promise<void>;
   getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
+  updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void>;
 
   getPurchaseBatches(): Promise<PurchaseBatch[]>;
   savePurchaseBatches(batches: PurchaseBatch[]): Promise<void>;
@@ -1138,6 +1142,32 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     }
     console.log(`[IndexedDB Save Variants] count: ${variants.length}`);
     saveData('erp_product_variants', variants);
+  }
+
+  async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
+    const whitelist = new Set([
+      'myacg_manual_adjustment',
+      'waca_manual_adjustment',
+      'private_manual_adjustment',
+      'purchased_manual_adjustment',
+      'default_jpy_cost',
+      'default_twd_cost',
+      'note',
+      'updated_at',
+      'version'
+    ]);
+    for (const key of Object.keys(patch)) {
+      if (!whitelist.has(key)) {
+        throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatch`);
+      }
+    }
+
+    const variants = await this.getProductVariants();
+    const targetIdx = variants.findIndex(v => v.id === id);
+    if (targetIdx !== -1) {
+      variants[targetIdx] = { ...variants[targetIdx], ...patch };
+      await this.saveProductVariants(variants);
+    }
   }
 
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
@@ -2070,6 +2100,32 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
     console.log(`[IndexedDB Save Variants] count: ${variants.length}`);
     await this.set('erp_product_variants', variants);
+  }
+  
+  async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
+    const whitelist = new Set([
+      'myacg_manual_adjustment',
+      'waca_manual_adjustment',
+      'private_manual_adjustment',
+      'purchased_manual_adjustment',
+      'default_jpy_cost',
+      'default_twd_cost',
+      'note',
+      'updated_at',
+      'version'
+    ]);
+    for (const key of Object.keys(patch)) {
+      if (!whitelist.has(key)) {
+        throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatch`);
+      }
+    }
+
+    const variants = await this.getProductVariants();
+    const targetIdx = variants.findIndex(v => v.id === id);
+    if (targetIdx !== -1) {
+      variants[targetIdx] = { ...variants[targetIdx], ...patch };
+      await this.saveProductVariants(variants);
+    }
   }
 
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {

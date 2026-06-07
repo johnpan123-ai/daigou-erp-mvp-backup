@@ -217,19 +217,11 @@ export default function PurchaseManagement() {
     setVariantDefaultJpyCosts(updated);
     localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
 
-    const allVars = await dataProvider.getProductVariants();
-    const target = allVars.find(v => v.id === variantId);
-    if (target) {
-      const updatedVars = allVars.map(v => 
-        v.id === variantId 
-          ? { ...v, default_jpy_cost: val } 
-          : v
-      );
-      if (updatedVars.length > 0) {
-        await dataProvider.saveProductVariants(updatedVars);
-      }
-      setVariants(variants.map(v => v.id === variantId ? { ...v, default_jpy_cost: val } : v));
-    }
+    await dataProvider.updateProductVariantPatch(variantId, {
+      default_jpy_cost: val,
+      updated_at: new Date().toISOString()
+    });
+    setVariants(variants.map(v => v.id === variantId ? { ...v, default_jpy_cost: val } : v));
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
@@ -257,19 +249,11 @@ export default function PurchaseManagement() {
     setVariantDefaultTwdCosts(updated);
     localStorage.setItem('variant_default_twd_costs', JSON.stringify(updated));
 
-    const allVars = await dataProvider.getProductVariants();
-    const target = allVars.find(v => v.id === variantId);
-    if (target) {
-      const updatedVars = allVars.map(v => 
-        v.id === variantId 
-          ? { ...v, default_twd_cost: val } 
-          : v
-      );
-      if (updatedVars.length > 0) {
-        await dataProvider.saveProductVariants(updatedVars);
-      }
-      setVariants(variants.map(v => v.id === variantId ? { ...v, default_twd_cost: val } : v));
-    }
+    await dataProvider.updateProductVariantPatch(variantId, {
+      default_twd_cost: val,
+      updated_at: new Date().toISOString()
+    });
+    setVariants(variants.map(v => v.id === variantId ? { ...v, default_twd_cost: val } : v));
   };
 
   const cleanDailiTitle = (title: string): string => {
@@ -521,6 +505,7 @@ export default function PurchaseManagement() {
     const allVars = await dataProvider.getProductVariants();
     const target = allVars.find(v => v.id === vId);
     if (target) {
+      let patch: Partial<ProductVariant> = {};
       if (platform === 'myacg') {
         const myacgQty = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
         const rawAuto = (target.effective_myacg_quantity !== null && target.effective_myacg_quantity !== undefined && target.effective_myacg_quantity >= 0)
@@ -529,15 +514,18 @@ export default function PurchaseManagement() {
             ? target.myacg_auto_quantity
             : (myacgQty >= 0 ? myacgQty : 0));
         const auto = rawAuto >= 0 ? rawAuto : 0;
-        target.myacg_manual_adjustment = totalValue - auto;
+        const manualAdj = totalValue - auto;
+        patch = { myacg_manual_adjustment: manualAdj };
       } else {
         const auto = (target.waca_auto_quantity !== null && target.waca_auto_quantity !== undefined && target.waca_auto_quantity >= 0)
           ? target.waca_auto_quantity
           : 0;
-        target.waca_manual_adjustment = totalValue - auto;
+        const manualAdj = totalValue - auto;
+        patch = { waca_manual_adjustment: manualAdj };
       }
-      await dataProvider.saveProductVariants(allVars);
-      setVariants(variants.map(v => v.id === vId ? target : v));
+      patch.updated_at = new Date().toISOString();
+      await dataProvider.updateProductVariantPatch(vId, patch);
+      setVariants(variants.map(v => v.id === vId ? { ...v, ...patch } : v));
     }
   };
 

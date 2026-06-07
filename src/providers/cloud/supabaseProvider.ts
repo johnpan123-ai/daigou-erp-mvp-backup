@@ -634,6 +634,11 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
+  /**
+   * WARNING: Do NOT use this method for single-field UI updates.
+   * This is reserved for bulk import or full synchronization.
+   * For single-field or local updates, use updateProductVariantPatch instead.
+   */
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
     if (!variants || variants.length === 0) {
       console.warn("[Sync Push] SKIP saveProductVariants because variants array is empty");
@@ -776,6 +781,62 @@ export class SupabaseProvider implements IDataProvider {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
       await this.pullCoreProductData(true);
       alert(`雲端同步商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
+  async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
+    const whitelist = new Set([
+      'myacg_manual_adjustment',
+      'waca_manual_adjustment',
+      'private_manual_adjustment',
+      'purchased_manual_adjustment',
+      'default_jpy_cost',
+      'default_twd_cost',
+      'note',
+      'updated_at',
+      'version'
+    ]);
+    for (const key of Object.keys(patch)) {
+      if (!whitelist.has(key)) {
+        throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatch`);
+      }
+    }
+
+    // 1. Update local IndexedDB
+    await db.updateProductVariantPatch(id, patch);
+
+    // 2. Check cloud write permission
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip updateProductVariantPatch cloud update (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    try {
+      console.log(`[Cloud Patch] product_variants target id: ${id}, patch keys: ${Object.keys(patch).join(', ')}`);
+      
+      const finalPatch = {
+        ...patch,
+        updated_at: patch.updated_at || new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('product_variants')
+        .update(finalPatch)
+        .eq('id', id);
+
+      if (error) {
+        console.error(`[Cloud Patch ERROR] Supabase error message: ${error.message}`);
+        await this.pullCoreProductData(true);
+        alert(`雲端局部更新商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
+        throw error;
+      } else {
+        console.log(`[Sync Patch] product_variants update success for id: ${id}`);
+      }
+    } catch (err: any) {
+      console.error(`[Cloud Patch ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullCoreProductData(true);
+      alert(`雲端局部更新商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
       throw err;
     }
   }

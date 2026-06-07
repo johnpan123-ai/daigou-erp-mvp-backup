@@ -603,14 +603,15 @@ export default function PurchaseRecords() {
     const dbTarget = allVars.find(v => v.id === targetVar.id);
     
     if (dbTarget) {
+      let patch: Partial<ProductVariant> = {};
       if (platform === 'myacg') {
-        dbTarget.myacg_manual_adjustment = totalValue;
+        patch = { myacg_manual_adjustment: totalValue };
       } else {
-        dbTarget.waca_manual_adjustment = totalValue;
+        patch = { waca_manual_adjustment: totalValue };
       }
-      
-      await dataProvider.saveProductVariants(allVars);
-      setVariants(variants.map(v => v.id === targetVar.id ? dbTarget : v));
+      patch.updated_at = new Date().toISOString();
+      await dataProvider.updateProductVariantPatch(targetVar.id, patch);
+      setVariants(variants.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
     }
   };
 
