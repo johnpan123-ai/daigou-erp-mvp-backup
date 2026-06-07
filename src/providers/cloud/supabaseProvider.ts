@@ -739,21 +739,21 @@ export class SupabaseProvider implements IDataProvider {
           raw_variant_name: v.raw_variant_name || null,
           product_title: v.product_title,
           note: v.note || '',
-          sort_order: v.sort_order || 0,
+          sort_order: v.sort_order ?? 0,
           catalog_missing: v.catalog_missing || false,
           source: v.source || null,
           default_jpy_cost: v.default_jpy_cost ?? null,
           default_twd_cost: v.default_twd_cost ?? null,
+          myacg_manual_adjustment: v.myacg_manual_adjustment ?? 0,
+          waca_manual_adjustment: v.waca_manual_adjustment ?? 0,
+          private_manual_adjustment: v.private_manual_adjustment ?? 0,
+          purchased_manual_adjustment: v.purchased_manual_adjustment ?? 0,
+          myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
+          effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
+          waca_auto_quantity: v.waca_auto_quantity ?? 0,
+          version: (v as any).version ?? 1,
           updated_at: new Date().toISOString()
         };
-
-        if (v.myacg_manual_adjustment !== undefined) payload.myacg_manual_adjustment = v.myacg_manual_adjustment;
-        if (v.waca_manual_adjustment !== undefined) payload.waca_manual_adjustment = v.waca_manual_adjustment;
-        if (v.private_manual_adjustment !== undefined) payload.private_manual_adjustment = v.private_manual_adjustment;
-        if (v.purchased_manual_adjustment !== undefined) payload.purchased_manual_adjustment = v.purchased_manual_adjustment;
-        if (v.myacg_auto_quantity !== undefined) payload.myacg_auto_quantity = v.myacg_auto_quantity;
-        if (v.effective_myacg_quantity !== undefined) payload.effective_myacg_quantity = v.effective_myacg_quantity;
-        if (v.waca_auto_quantity !== undefined) payload.waca_auto_quantity = v.waca_auto_quantity;
 
         return payload;
       });
