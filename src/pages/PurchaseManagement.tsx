@@ -6,7 +6,7 @@ import type {
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
 } from '../lib/db';
-import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy } from 'lucide-react';
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
@@ -526,6 +526,60 @@ export default function PurchaseManagement() {
       patch.updated_at = new Date().toISOString();
       await dataProvider.updateProductVariantPatch(vId, patch);
       setVariants(variants.map(v => v.id === vId ? { ...v, ...patch } : v));
+    }
+  };
+
+  const handleCopyAllGroupPurchasedLedger = async () => {
+    if (purchaseBatchItems.length === 0) {
+      alert('本商品無任何採購紀錄，無法複製。');
+      return;
+    }
+
+    const ledgerMap = new Map<string, { name: string; quantity: number; cost: number }>();
+    
+    for (const item of purchaseBatchItems) {
+      const variant = variants.find(v => v.id === item.product_variant_id);
+      if (!variant) continue;
+
+      const catName = variant.product_category_id ? (categoryMap.get(variant.product_category_id)?.title || '') : '';
+      const varName = variant.variant_name || '';
+      let displayName = '';
+      if (catName && varName) {
+        displayName = `${catName}-${varName}`;
+      } else if (catName) {
+        displayName = catName;
+      } else if (varName) {
+        displayName = varName;
+      } else {
+        displayName = variant.product_title || '未命名商品';
+      }
+
+      const costVal = item.cost ?? 0;
+      const key = `${displayName}_${costVal}`;
+      const existing = ledgerMap.get(key);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        ledgerMap.set(key, {
+          name: displayName,
+          quantity: item.quantity,
+          cost: costVal
+        });
+      }
+    }
+
+    const tsvRows = Array.from(ledgerMap.values()).map(row => {
+      return `${row.name}\t${row.quantity}\t\t${row.cost}`;
+    });
+
+    const tsvString = tsvRows.join('\n');
+
+    try {
+      await navigator.clipboard.writeText(tsvString);
+      alert('已複製本商品全部已採購帳目（TSV 格式）至剪貼簿！');
+    } catch (err) {
+      console.error('Failed to copy ledger:', err);
+      alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
     }
   };
 
@@ -1288,6 +1342,23 @@ export default function PurchaseManagement() {
               </div>
 
               <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto' }}>
+                {canWrite && (
+                  <button 
+                    className="btn btn-outline" 
+                    style={{ 
+                      flex: isMobile ? 1 : 'none',
+                      fontSize: '13px', 
+                      padding: '6px 12px', 
+                      backgroundColor: '#f0fdf4', 
+                      color: '#16a34a', 
+                      borderColor: '#bbf7d0',
+                      cursor: 'pointer'
+                    }}
+                    onClick={handleCopyAllGroupPurchasedLedger}
+                  >
+                    <Copy size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 複製已採購帳目
+                  </button>
+                )}
                 <button 
                   className="btn btn-outline" 
                   style={{ 
@@ -2096,9 +2167,11 @@ export default function PurchaseManagement() {
             batches={purchaseBatches} 
             batchItems={purchaseBatchItems} 
             variants={variants} 
+            categoryMap={categoryMap}
             onRefresh={loadData} 
             onEditBatch={handleEditBatch}
             getDisplayProductName={getDisplayProductName}
+            canWrite={canWrite}
           />
         )}
 

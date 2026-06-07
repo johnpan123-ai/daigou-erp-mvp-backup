@@ -1,19 +1,21 @@
 import { useState } from 'react';
-import type { PurchaseBatch, PurchaseBatchItem, ProductVariant } from '../lib/db';
+import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
-import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Trash2, Edit2, Copy } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
 
 interface PurchaseBatchTabProps {
   batches: PurchaseBatch[];
   batchItems: PurchaseBatchItem[];
   variants: ProductVariant[];
+  categoryMap: Map<string, ProductCategory>;
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
   getDisplayProductName: (v: ProductVariant) => string;
+  canWrite?: boolean;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, onRefresh, onEditBatch, getDisplayProductName }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, onRefresh, onEditBatch, getDisplayProductName, canWrite }: PurchaseBatchTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -34,6 +36,61 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
     await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
     
     onRefresh();
+  };
+
+  const handleCopyBatchLedger = async (batch: PurchaseBatch) => {
+    const items = batchItems.filter(i => i.purchase_batch_id === batch.id);
+    if (items.length === 0) {
+      alert('此批次無任何採購商品！');
+      return;
+    }
+
+    const ledgerMap = new Map<string, { name: string; quantity: number; cost: number }>();
+    
+    for (const item of items) {
+      const variant = variantMap.get(item.product_variant_id);
+      if (!variant) continue;
+
+      const catName = variant.product_category_id ? (categoryMap.get(variant.product_category_id)?.title || '') : '';
+      const varName = variant.variant_name || '';
+      let displayName = '';
+      if (catName && varName) {
+        displayName = `${catName}-${varName}`;
+      } else if (catName) {
+        displayName = catName;
+      } else if (varName) {
+        displayName = varName;
+      } else {
+        displayName = variant.product_title || '未命名商品';
+      }
+
+      const costVal = item.cost ?? 0;
+      const key = `${displayName}_${costVal}`;
+      const existing = ledgerMap.get(key);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        ledgerMap.set(key, {
+          name: displayName,
+          quantity: item.quantity,
+          cost: costVal
+        });
+      }
+    }
+
+    const tsvRows = Array.from(ledgerMap.values()).map(row => {
+      return `${row.name}\t${row.quantity}\t\t${row.cost}`;
+    });
+
+    const tsvString = tsvRows.join('\n');
+
+    try {
+      await navigator.clipboard.writeText(tsvString);
+      alert('已複製本批次帳目（TSV 格式）至剪貼簿！');
+    } catch (err) {
+      console.error('Failed to copy ledger:', err);
+      alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
+    }
   };
 
   const variantMap = new Map(variants.map(v => [v.id, v]));
@@ -76,6 +133,11 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
                       <div><span style={{ color: '#94a3b8' }}>金:</span> <span style={{ fontWeight: 600, color: '#059669' }}>¥ {totalCost.toLocaleString()}</span></div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                      {canWrite && (
+                        <button className="btn btn-ghost" style={{ padding: '4px', color: '#2563eb' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
+                          <Copy size={16} />
+                        </button>
+                      )}
                       <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditBatch(batch)} title="編輯批次與明細">
                         <Edit2 size={16} />
                       </button>
@@ -102,6 +164,11 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, onRefr
                     <div style={{ width: '100px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>¥ {totalCost.toLocaleString()}</span></div>
                     
                     <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                      {canWrite && (
+                        <button className="btn btn-ghost" style={{ padding: '4px', color: '#2563eb' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
+                          <Copy size={16} />
+                        </button>
+                      )}
                       <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditBatch(batch)} title="編輯批次與明細">
                         <Edit2 size={16} />
                       </button>
