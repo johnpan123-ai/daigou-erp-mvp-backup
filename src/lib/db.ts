@@ -347,6 +347,7 @@ export interface DatabaseAdapter {
   getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
   updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void>;
+  updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void>;
 
   getPurchaseBatches(): Promise<PurchaseBatch[]>;
   savePurchaseBatches(batches: PurchaseBatch[]): Promise<void>;
@@ -1166,6 +1167,40 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     const targetIdx = variants.findIndex(v => v.id === id);
     if (targetIdx !== -1) {
       variants[targetIdx] = { ...variants[targetIdx], ...patch };
+      await this.saveProductVariants(variants);
+    }
+  }
+
+  async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
+    const whitelist = new Set([
+      'myacg_manual_adjustment',
+      'waca_manual_adjustment',
+      'private_manual_adjustment',
+      'purchased_manual_adjustment',
+      'default_jpy_cost',
+      'default_twd_cost',
+      'note',
+      'updated_at',
+      'version'
+    ]);
+    for (const item of patches) {
+      for (const key of Object.keys(item.patch)) {
+        if (!whitelist.has(key)) {
+          throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatchBulk`);
+        }
+      }
+    }
+
+    const variants = await this.getProductVariants();
+    let changed = false;
+    for (const item of patches) {
+      const targetIdx = variants.findIndex(v => v.id === item.id);
+      if (targetIdx !== -1) {
+        variants[targetIdx] = { ...variants[targetIdx], ...item.patch };
+        changed = true;
+      }
+    }
+    if (changed) {
       await this.saveProductVariants(variants);
     }
   }
@@ -2124,6 +2159,40 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     const targetIdx = variants.findIndex(v => v.id === id);
     if (targetIdx !== -1) {
       variants[targetIdx] = { ...variants[targetIdx], ...patch };
+      await this.saveProductVariants(variants);
+    }
+  }
+
+  async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
+    const whitelist = new Set([
+      'myacg_manual_adjustment',
+      'waca_manual_adjustment',
+      'private_manual_adjustment',
+      'purchased_manual_adjustment',
+      'default_jpy_cost',
+      'default_twd_cost',
+      'note',
+      'updated_at',
+      'version'
+    ]);
+    for (const item of patches) {
+      for (const key of Object.keys(item.patch)) {
+        if (!whitelist.has(key)) {
+          throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatchBulk`);
+        }
+      }
+    }
+
+    const variants = await this.getProductVariants();
+    let changed = false;
+    for (const item of patches) {
+      const targetIdx = variants.findIndex(v => v.id === item.id);
+      if (targetIdx !== -1) {
+        variants[targetIdx] = { ...variants[targetIdx], ...item.patch };
+        changed = true;
+      }
+    }
+    if (changed) {
       await this.saveProductVariants(variants);
     }
   }

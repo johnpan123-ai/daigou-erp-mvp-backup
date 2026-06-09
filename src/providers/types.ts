@@ -29,6 +29,7 @@ export interface IDataProvider {
   getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
   updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void>;
+  updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void>;
 
   getPurchaseBatches(): Promise<PurchaseBatch[]>;
   savePurchaseBatches(batches: PurchaseBatch[]): Promise<void>;

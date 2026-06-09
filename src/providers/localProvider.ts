@@ -66,6 +66,9 @@ export class LocalProvider implements IDataProvider {
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
     return db.updateProductVariantPatch(id, patch);
   }
+  async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
+    return db.updateProductVariantPatchBulk(patches);
+  }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return db.getPurchaseBatches();
   }

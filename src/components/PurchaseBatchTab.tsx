@@ -13,11 +13,14 @@ interface PurchaseBatchTabProps {
   onEditBatch: (batch: PurchaseBatch) => void;
   getDisplayProductName: (v: ProductVariant) => string;
   canWrite?: boolean;
+  isDaili?: boolean;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, onRefresh, onEditBatch, getDisplayProductName, canWrite }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
+  const currencySymbol = isDaili ? 'NT$ ' : '¥ ';
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedIds);
@@ -95,7 +98,23 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
 
   const variantMap = new Map(variants.map(v => [v.id, v]));
 
+  const sortedBatches = [...batches].sort((a, b) => {
+    const itemsA = batchItems.filter(i => i.purchase_batch_id === a.id);
+    const itemsB = batchItems.filter(i => i.purchase_batch_id === b.id);
+    const costA = itemsA.reduce((sum, i) => sum + (i.quantity * i.cost), 0);
+    const costB = itemsB.reduce((sum, i) => sum + (i.quantity * i.cost), 0);
 
+    if (sortBy === 'date_desc') {
+      return b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at);
+    } else if (sortBy === 'date_asc') {
+      return a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at);
+    } else if (sortBy === 'amount_desc') {
+      return costB - costA;
+    } else if (sortBy === 'amount_asc') {
+      return costA - costB;
+    }
+    return 0;
+  });
 
   if (batches.length === 0) {
     return <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>目前沒有採購批次紀錄。</div>;
@@ -103,8 +122,24 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
 
   return (
     <div style={{ padding: '16px', backgroundColor: '#f8fafc', flex: 1, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>排序方式:</span>
+          <select 
+            className="input" 
+            style={{ width: '200px', height: '32px', fontSize: '13px', padding: '0 8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as any)}
+          >
+            <option value="date_desc">採購日期（新 → 舊）</option>
+            <option value="date_asc">採購日期（舊 → 新）</option>
+            <option value="amount_desc">總金額（高 → 低）</option>
+            <option value="amount_asc">總金額（低 → 高）</option>
+          </select>
+        </div>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {batches.map(batch => {
+        {sortedBatches.map(batch => {
           const items = batchItems.filter(i => i.purchase_batch_id === batch.id);
           const totalQty = items.reduce((sum, i) => sum + i.quantity, 0);
           const totalCost = items.reduce((sum, i) => sum + (i.quantity * i.cost), 0);
@@ -129,8 +164,8 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: '26px', fontSize: '14px', borderTop: '1px dashed #e2e8f0', paddingTop: '8px' }}>
                     <div style={{ display: 'flex', gap: '12px' }}>
                       <div><span style={{ color: '#94a3b8' }}>款:</span> <span style={{ fontWeight: 500 }}>{items.length}</span></div>
-                      <div><span style={{ color: '#94a3b8' }}>數:</span> <span style={{ fontWeight: 600, color: '#2563eb' }}>{totalQty}</span></div>
-                      <div><span style={{ color: '#94a3b8' }}>金:</span> <span style={{ fontWeight: 600, color: '#059669' }}>¥ {totalCost.toLocaleString()}</span></div>
+                      <div><span style={{ color: '#94a3b8' }}>件:</span> <span style={{ fontWeight: 600, color: '#2563eb' }}>{totalQty}</span></div>
+                      <div><span style={{ color: '#94a3b8' }}>金:</span> <span style={{ fontWeight: 600, color: '#059669' }}>{currencySymbol}{totalCost.toLocaleString()}</span></div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
                       {canWrite && (
@@ -159,9 +194,9 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                     {batch.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>({batch.note})</div>}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '24px', fontSize: '14px' }}>
-                    <div><span style={{ color: '#94a3b8' }}>款數:</span> <span style={{ fontWeight: 500 }}>{items.length}</span></div>
-                    <div><span style={{ color: '#94a3b8' }}>總數:</span> <span style={{ fontWeight: 600, color: '#2563eb' }}>{totalQty}</span></div>
-                    <div style={{ width: '100px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>¥ {totalCost.toLocaleString()}</span></div>
+                    <div><span style={{ color: '#94a3b8' }}>款數:</span> <span style={{ fontWeight: 500 }}>{items.length} 款</span></div>
+                    <div><span style={{ color: '#94a3b8' }}>總件數:</span> <span style={{ fontWeight: 600, color: '#2563eb' }}>{totalQty} 件</span></div>
+                    <div style={{ width: '150px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>{currencySymbol}{totalCost.toLocaleString()}</span></div>
                     
                     <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
                       {canWrite && (
@@ -221,10 +256,10 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                                 數量: <strong style={{ color: '#0f172a' }}>{item.quantity}</strong>
                               </span>
                               <span style={{ backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px' }}>
-                                成本: <strong>¥ {item.cost.toLocaleString()}</strong>
+                                成本: <strong>{currencySymbol}{item.cost.toLocaleString()}</strong>
                               </span>
                               <span style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                                小計: <strong>¥ {(item.quantity * item.cost).toLocaleString()}</strong>
+                                小計: <strong>{currencySymbol}{(item.quantity * item.cost).toLocaleString()}</strong>
                               </span>
                             </div>
                             
@@ -272,8 +307,8 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                             <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                               <td style={{ padding: '8px', color: '#0f172a', wordBreak: 'break-word' }}>{variant ? getDisplayProductName(variant) : '未知商品'}</td>
                               <td style={{ padding: '8px', textAlign: 'center', fontWeight: 500 }}>{item.quantity}</td>
-                              <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>¥ {item.cost.toLocaleString()}</td>
-                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>¥ {(item.quantity * item.cost).toLocaleString()}</td>
+                              <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>{currencySymbol}{item.cost.toLocaleString()}</td>
+                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 500 }}>{currencySymbol}{(item.quantity * item.cost).toLocaleString()}</td>
                               <td style={{ padding: '8px', color: '#64748b', wordBreak: 'break-word' }}>{item.note}</td>
                               <td style={{ padding: '8px', textAlign: 'center' }}>
                                 {/* inline item edit removed, use whole document edit from batch header */}

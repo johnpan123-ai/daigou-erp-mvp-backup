@@ -237,6 +237,7 @@ export default function PurchaseRecords() {
     let purchased = 0;
     let myacgManual = 0;
     let wacaManual = 0;
+    let totalGap = 0;
     
     groupVars.forEach(v => {
       // 買動漫數量
@@ -275,6 +276,9 @@ export default function PurchaseRecords() {
       myacgManual += (v.myacg_manual_adjustment ?? 0);
       wacaManual += (v.waca_manual_adjustment ?? 0);
 
+      const vTotalDemand = vMyacg + vWaca + vPrivate;
+      totalGap += Math.max(vTotalDemand - vPurchased, 0);
+
       if (!sampleLogged) {
         console.log('[UI Quantity Calc] sample variant:', JSON.stringify(v));
         console.log('[UI Quantity Calc] myacg computed:', vMyacg);
@@ -285,10 +289,7 @@ export default function PurchaseRecords() {
       }
     });
     
-    const demand = myacg + waca + privateOrder;
-    const gap = demand - purchased;
-    
-    return { myacg, waca, privateOrder, purchased, gap, myacgManual, wacaManual };
+    return { myacg, waca, privateOrder, purchased, gap: totalGap, myacgManual, wacaManual };
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
@@ -333,7 +334,7 @@ export default function PurchaseRecords() {
       
       totalDemand += demand;
       totalPurchased += vPurchased;
-      gap += (demand - vPurchased);
+      gap += Math.max(demand - vPurchased, 0);
     });
     
     return { demand: totalDemand, purchased: totalPurchased, gap };

@@ -841,6 +841,92 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
+  async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
+    const whitelist = new Set([
+      'myacg_manual_adjustment',
+      'waca_manual_adjustment',
+      'private_manual_adjustment',
+      'purchased_manual_adjustment',
+      'default_jpy_cost',
+      'default_twd_cost',
+      'note',
+      'updated_at',
+      'version'
+    ]);
+    for (const item of patches) {
+      for (const key of Object.keys(item.patch)) {
+        if (!whitelist.has(key)) {
+          throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatchBulk`);
+        }
+      }
+    }
+
+    // 1. Update local IndexedDB in one bulk save
+    await db.updateProductVariantPatchBulk(patches);
+
+    // 2. Check cloud write permission
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip updateProductVariantPatchBulk cloud update (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    if (patches.length === 0) return;
+
+    try {
+      console.log(`[Cloud Patch Bulk] product_variants target count: ${patches.length}`);
+      
+      const allLocalVars = await db.getProductVariants();
+      const upsertData = [];
+      for (const item of patches) {
+        const v = allLocalVars.find(x => x.id === item.id);
+        if (v) {
+          upsertData.push({
+            id: v.id,
+            local_id: v.id,
+            product_group_id: v.product_group_id,
+            product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
+            myacg_item_code: v.myacg_item_code,
+            variant_name: v.variant_name,
+            raw_variant_name: v.raw_variant_name || null,
+            product_title: v.product_title,
+            note: v.note || '',
+            sort_order: v.sort_order ?? 0,
+            catalog_missing: v.catalog_missing || false,
+            source: v.source || null,
+            myacg_manual_adjustment: v.myacg_manual_adjustment ?? 0,
+            waca_manual_adjustment: v.waca_manual_adjustment ?? 0,
+            private_manual_adjustment: v.private_manual_adjustment ?? 0,
+            purchased_manual_adjustment: v.purchased_manual_adjustment ?? 0,
+            myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
+            effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
+            waca_auto_quantity: v.waca_auto_quantity ?? 0,
+            version: (v as any).version ?? 1,
+            ...item.patch,
+            updated_at: item.patch.updated_at || new Date().toISOString()
+          });
+        }
+      }
+
+      const { error } = await supabase
+        .from('product_variants')
+        .upsert(upsertData);
+
+      if (error) {
+        console.error(`[Cloud Patch Bulk ERROR] Supabase error message: ${error.message}`);
+        await this.pullCoreProductData(true);
+        alert(`雲端批量局部更新商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
+        throw error;
+      } else {
+        console.log(`[Sync Patch Bulk] product_variants bulk update success for count: ${patches.length}`);
+      }
+    } catch (err: any) {
+      console.error(`[Cloud Patch Bulk ERROR] Supabase error message: ${err.message || err}`);
+      await this.pullCoreProductData(true);
+      alert(`雲端批量局部更新商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
 
   // === 4 張非 Synced 核心表與本地輔助表 (完全委託本地 db) ===
   async getInventory(): Promise<InventoryItem[]> {
