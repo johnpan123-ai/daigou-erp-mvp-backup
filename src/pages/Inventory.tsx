@@ -1444,7 +1444,7 @@ export default function Inventory() {
 
                       {/* Nested SKU details */}
                       {!isSingle && isExpanded && g.skus.map(sku => (
-                        <tr key={sku.myacg_item_code} style={{ backgroundColor: '#f8fafc' }}>
+                        <tr key={sku.inventory_key || `${sku.myacg_item_code}-${sku.raw_variant_name || ""}`} style={{ backgroundColor: '#f8fafc' }}>
                           <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                             <input 
                               type="checkbox" 

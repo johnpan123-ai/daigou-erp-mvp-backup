@@ -11,6 +11,7 @@ export interface InventoryItem {
   myacg_sold_quantity: number;
   myacg_demand_quantity?: number;
   myacg_listed_at: string;
+  inventory_key?: string; // New composite field
 }
 
 export interface SalesOrder {
@@ -400,27 +401,131 @@ export const getBaseSku = (code: string): string => {
   return clean;
 };
 
-export const findMatchingInventoryItem = (variantCode: string, inventory: InventoryItem[]): InventoryItem | undefined => {
-  if (!variantCode) return undefined;
-  const cleanCode = variantCode.trim().toUpperCase();
-  return inventory.find(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
+export const findMatchingInventoryItem = (
+  variantOrCode: string | ProductVariant,
+  inventory: InventoryItem[]
+): InventoryItem | undefined => {
+  if (!variantOrCode) return undefined;
+
+  let cleanCode: string;
+  let rawVariantName: string | undefined = undefined;
+  let variantName: string | undefined = undefined;
+
+  if (typeof variantOrCode === 'string') {
+    cleanCode = variantOrCode.trim().toUpperCase();
+  } else {
+    cleanCode = (variantOrCode.myacg_item_code || '').trim().toUpperCase();
+    rawVariantName = variantOrCode.raw_variant_name;
+    variantName = variantOrCode.variant_name;
+  }
+
+  if (!cleanCode) return undefined;
+
+  const matches = inventory.filter(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
+  if (matches.length === 0) return undefined;
+
+  // Priority 1: Match by SKU + raw_variant_name
+  if (rawVariantName) {
+    const cleanRaw = rawVariantName.trim();
+    const matchRaw = matches.find(i => i.raw_variant_name?.trim() === cleanRaw);
+    if (matchRaw) return matchRaw;
+  }
+
+  // Priority 2: Match by SKU + variant_name (for compatibility)
+  if (variantName) {
+    const cleanVar = variantName.trim();
+    const matchVar = matches.find(i => i.raw_variant_name?.trim() === cleanVar);
+    if (matchVar) return matchVar;
+  }
+
+  // Priority 3: Fallback to SKU only.
+  // ONLY fallback to SKU-only matching if:
+  // 1. Input has no spec name (neither rawVariantName nor variantName).
+  // 2. OR if the inventory item has no raw_variant_name.
+  if (!rawVariantName && !variantName) {
+    return matches[0];
+  } else {
+    // Input has a spec name. We can match an inventory item only if it has NO raw_variant_name.
+    return matches.find(i => !i.raw_variant_name || i.raw_variant_name.trim() === '');
+  }
 };
 
-export const findMatchingVariant = (itemCode: string, variants: ProductVariant[]): ProductVariant | undefined => {
-  if (!itemCode) return undefined;
-  const cleanCode = itemCode.trim().toUpperCase();
-  return variants.find(v => v.myacg_item_code.trim().toUpperCase() === cleanCode);
+export const findInventoryItemForVariant = findMatchingInventoryItem;
+
+export const findMatchingVariant = (
+  itemOrCode: string | InventoryItem,
+  variants: ProductVariant[],
+  productGroupId?: string
+): ProductVariant | undefined => {
+  if (!itemOrCode) return undefined;
+
+  let cleanCode: string;
+  let rawVariantName: string | undefined = undefined;
+
+  if (typeof itemOrCode === 'string') {
+    cleanCode = itemOrCode.trim().toUpperCase();
+  } else {
+    cleanCode = (itemOrCode.myacg_item_code || '').trim().toUpperCase();
+    rawVariantName = itemOrCode.raw_variant_name;
+  }
+
+  if (!cleanCode) return undefined;
+
+  // Filter variants by productGroupId if provided
+  const targetVariants = productGroupId 
+    ? variants.filter(v => v.product_group_id === productGroupId)
+    : variants;
+
+  // Priority 1: Match by SKU + raw_variant_name
+  if (rawVariantName) {
+    const cleanRaw = rawVariantName.trim();
+    const matchRaw = targetVariants.find(
+      v => v.myacg_item_code.trim().toUpperCase() === cleanCode && v.raw_variant_name?.trim() === cleanRaw
+    );
+    if (matchRaw) return matchRaw;
+
+    // Priority 2: Match by SKU + variant_name (compatibility)
+    const matchVarName = targetVariants.find(
+      v => v.myacg_item_code.trim().toUpperCase() === cleanCode && v.variant_name?.trim() === cleanRaw
+    );
+    if (matchVarName) return matchVarName;
+  }
+
+  // Priority 3: Fallback to SKU only.
+  // ONLY fallback to SKU-only matching if:
+  // 1. The incoming item/variant has no spec name (raw_variant_name is empty/falsy).
+  // 2. OR if the matched variant in the database has no spec name (v.raw_variant_name is empty/falsy).
+  const skuMatches = targetVariants.filter(v => v.myacg_item_code.trim().toUpperCase() === cleanCode);
+  
+  if (!rawVariantName) {
+    // If incoming has no spec name, we can match any SKU match, preferably one with no raw_variant_name.
+    if (skuMatches.length === 1) {
+      return skuMatches[0];
+    }
+    if (skuMatches.length > 1) {
+      return skuMatches.find(v => !v.raw_variant_name) || skuMatches[0];
+    }
+  } else {
+    // Incoming has a spec name, but we didn't find an exact match in Priority 1/2.
+    // We can only match a database variant if it has NO raw_variant_name (meaning it's a legacy variant with no spec).
+    const legacyMatches = skuMatches.filter(v => !v.raw_variant_name || v.raw_variant_name.trim() === '');
+    if (legacyMatches.length > 0) {
+      // Return the first legacy variant that has no spec name
+      return legacyMatches[0];
+    }
+  }
+
+  return undefined;
 };
 
 export const calculateFinalMyacgDemand = (
-  variantCode: string, 
+  variantOrCode: string | ProductVariant, 
   inventory: InventoryItem[], 
-  salesOrderItems: SalesOrderItem[]
+  salesOrderItems?: SalesOrderItem[]
 ): number => {
   void salesOrderItems;
-  if (!variantCode) return -1;
-  const cleanCode = variantCode.trim().toUpperCase();
-  const invItem = inventory.find(i => i.myacg_item_code.trim().toUpperCase() === cleanCode);
+  if (!variantOrCode) return -1;
+  const invItem = findMatchingInventoryItem(variantOrCode, inventory);
   return invItem ? (invItem.myacg_sold_quantity ?? 0) : -1;
 };
 
@@ -592,7 +697,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         }
 
         // 3. Variant
-        let variant = variants.find(v => v.myacg_item_code === item.myacg_item_code && v.product_group_id === group!.id);
+        let variant = findMatchingVariant(item, variants, group!.id);
         if (!variant) {
           variant = {
             id: crypto.randomUUID(),
@@ -628,7 +733,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       
       // Update existing variants that were already in the group
       for (const existingVar of existingVars) {
-        const invItem = findMatchingInventoryItem(existingVar.myacg_item_code, targetItems);
+        const invItem = findMatchingInventoryItem(existingVar, targetItems);
         const rawName = invItem ? invItem.raw_variant_name : existingVar.raw_variant_name;
         if (rawName) {
           const spec = resolvedSpecs[rawName];
@@ -678,7 +783,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         const variantsInCat = variants.filter(v => v.product_group_id === group.id && v.product_category_id === cat.id);
         let minSort = 9999;
         for (const v of variantsInCat) {
-            const invItem = targetItems.find(i => i.myacg_item_code === v.myacg_item_code);
+            const invItem = findMatchingInventoryItem(v, targetItems);
             const vSort = (invItem?.import_sort_index ?? v.sort_order ?? 9999);
             if (vSort < minSort) minSort = vSort;
         }
@@ -790,20 +895,15 @@ export class LocalStorageAdapter implements DatabaseAdapter {
          (v.product_category_id && categories.some(c => c.id === v.product_category_id && c.product_group_id === group.id)));
 
       const missingItems = matchingItems.filter(item => {
-        const baseItem = getBaseSku(item.myacg_item_code);
-        const hasVariant = existingVariants.some(v => 
-          v.myacg_item_code === item.myacg_item_code ||
-          (getBaseSku(v.myacg_item_code) === baseItem && 
-           (v.myacg_item_code === getBaseSku(v.myacg_item_code) || item.myacg_item_code === baseItem))
-        );
-        return !hasVariant;
+        const matchingVar = findMatchingVariant(item, existingVariants, group.id);
+        return !matchingVar;
       });
       
       let groupChanged = false;
 
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
-        const invItem = findMatchingInventoryItem(v.myacg_item_code, matchingItems);
+        const invItem = findMatchingInventoryItem(v, matchingItems);
         if (invItem) {
           let updated = false;
           if (v.catalog_missing !== false) {
@@ -881,7 +981,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         for (const item of matchingItems) {
             if (missingItems.includes(item)) continue; 
             
-            const existingVar = findMatchingVariant(item.myacg_item_code, variants);
+            const existingVar = findMatchingVariant(item, variants, group.id);
             if (existingVar) {
                 let updated = false;
                 if (existingVar.product_title !== item.product_title) {
@@ -1100,10 +1200,10 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     let changed = false;
     for (const v of variants) {
       // Find matching inventory item using fuzzy matching helpers
-      const invItem = findMatchingInventoryItem(v.myacg_item_code, inventory);
+      const invItem = findMatchingInventoryItem(v, inventory);
 
       
-      const effectiveMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      const effectiveMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
 
       if (invItem) {
         const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;
@@ -1438,25 +1538,33 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     const current = await this.getInventory();
-    const currentMap = new Map(current.map(i => [i.myacg_item_code, i]));
+    
+    // Map of existing inventory items, keyed by their inventory_key
+    const currentMap = new Map<string, InventoryItem>();
+    for (const i of current) {
+      const key = i.inventory_key || `${normalizeProductTitle(i.product_title)}::${i.myacg_item_code}::${i.raw_variant_name || ''}`;
+      i.inventory_key = key;
+      currentMap.set(key, i);
+    }
     
     let newCount = 0;
     let updatedCount = 0;
     let unchangedCount = 0;
     const groupSet = new Set<string>();
 
-    // Pre-aggregate the incoming items by myacg_item_code to handle duplicates inside the same file
+    // Pre-aggregate the incoming items by inventory_key to avoid merging different specs
     const aggregatedItemsMap = new Map<string, InventoryItem>();
     for (const item of items) {
-      const code = item.myacg_item_code;
-      const existingAgg = aggregatedItemsMap.get(code);
+      const key = `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`;
+      item.inventory_key = key;
+      const existingAgg = aggregatedItemsMap.get(key);
       if (!existingAgg) {
-        aggregatedItemsMap.set(code, { ...item });
+        aggregatedItemsMap.set(key, { ...item });
       } else {
         existingAgg.raw_variant_name = item.raw_variant_name || existingAgg.raw_variant_name;
         existingAgg.product_title = item.product_title || existingAgg.product_title;
 
-        // Sum quantities
+        // Sum quantities for items with the exact same spec/name key
         existingAgg.myacg_sold_quantity = (existingAgg.myacg_sold_quantity ?? 0) + (item.myacg_sold_quantity ?? 0);
         existingAgg.myacg_available_quantity = (existingAgg.myacg_available_quantity ?? 0) + (item.myacg_available_quantity ?? 0);
         if (item.myacg_demand_quantity !== undefined) {
@@ -1471,10 +1579,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       item.listing_type = determineListingType(item.product_title);
       groupSet.add(item.normalized_product_title);
 
-      const existing = currentMap.get(item.myacg_item_code);
+      const existing = currentMap.get(item.inventory_key!);
       if (!existing) {
         newCount++;
-        currentMap.set(item.myacg_item_code, item);
+        currentMap.set(item.inventory_key!, item);
       } else {
         item.raw_variant_name = item.raw_variant_name || existing.raw_variant_name;
         item.product_title = item.product_title || existing.product_title;
@@ -1495,7 +1603,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         } else {
           unchangedCount++;
         }
-        currentMap.set(item.myacg_item_code, { ...existing, ...item });
+        currentMap.set(item.inventory_key!, { ...existing, ...item });
       }
     }
     await this.saveInventory(Array.from(currentMap.values()));
@@ -1589,7 +1697,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         }
 
         // 3. Variant
-        let variant = variants.find(v => v.myacg_item_code === item.myacg_item_code && v.product_group_id === group!.id);
+        let variant = findMatchingVariant(item, variants, group!.id);
         if (!variant) {
           variant = {
             id: crypto.randomUUID(),
@@ -1625,7 +1733,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       
       // Update existing variants that were already in the group
       for (const existingVar of existingVars) {
-        const invItem = findMatchingInventoryItem(existingVar.myacg_item_code, targetItems);
+        const invItem = findMatchingInventoryItem(existingVar, targetItems);
         const rawName = invItem ? invItem.raw_variant_name : existingVar.raw_variant_name;
         if (rawName) {
           const spec = resolvedSpecs[rawName];
@@ -1675,7 +1783,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         const variantsInCat = variants.filter(v => v.product_group_id === group.id && v.product_category_id === cat.id);
         let minSort = 9999;
         for (const v of variantsInCat) {
-            const invItem = targetItems.find(i => i.myacg_item_code === v.myacg_item_code);
+            const invItem = findMatchingInventoryItem(v, targetItems);
             const vSort = (invItem?.import_sort_index ?? v.sort_order ?? 9999);
             if (vSort < minSort) minSort = vSort;
         }
@@ -1785,20 +1893,15 @@ export class IndexedDbAdapter implements DatabaseAdapter {
          (v.product_category_id && categories.some(c => c.id === v.product_category_id && c.product_group_id === group.id)));
 
       const missingItems = matchingItems.filter(item => {
-        const baseItem = getBaseSku(item.myacg_item_code);
-        const hasVariant = existingVariants.some(v => 
-          v.myacg_item_code === item.myacg_item_code ||
-          (getBaseSku(v.myacg_item_code) === baseItem && 
-           (v.myacg_item_code === getBaseSku(v.myacg_item_code) || item.myacg_item_code === baseItem))
-        );
-        return !hasVariant;
+        const matchingVar = findMatchingVariant(item, existingVariants, group.id);
+        return !matchingVar;
       });
       
       let groupChanged = false;
 
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
-        const invItem = findMatchingInventoryItem(v.myacg_item_code, matchingItems);
+        const invItem = findMatchingInventoryItem(v, matchingItems);
         if (invItem) {
           let updated = false;
           if (v.catalog_missing !== false) {
@@ -1876,7 +1979,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         for (const item of matchingItems) {
             if (missingItems.includes(item)) continue; 
             
-            const existingVar = findMatchingVariant(item.myacg_item_code, variants);
+            const existingVar = findMatchingVariant(item, variants, group.id);
             if (existingVar) {
                 let updated = false;
                 if (existingVar.product_title !== item.product_title) {
@@ -2095,9 +2198,9 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     let changed = false;
     for (const v of variants) {
       // Find matching inventory item using fuzzy matching helpers
-      const invItem = findMatchingInventoryItem(v.myacg_item_code, inventory);
+      const invItem = findMatchingInventoryItem(v, inventory);
 
-      const effectiveMyacg = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      const effectiveMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
 
       if (invItem) {
         const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;
