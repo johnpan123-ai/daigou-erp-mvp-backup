@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory } from '../lib/db';
+import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory, ProductGroup } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2, Copy } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
@@ -9,6 +9,7 @@ interface PurchaseBatchTabProps {
   batchItems: PurchaseBatchItem[];
   variants: ProductVariant[];
   categoryMap: Map<string, ProductCategory>;
+  groups?: ProductGroup[];
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
   getDisplayProductName: (v: ProductVariant) => string;
@@ -16,7 +17,7 @@ interface PurchaseBatchTabProps {
   isDaili?: boolean;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, groups = [], onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
@@ -49,23 +50,19 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
     }
 
     const ledgerMap = new Map<string, { name: string; quantity: number; cost: number }>();
+    const groupMap = new Map((groups || []).map(g => [g.id, g]));
     
     for (const item of items) {
       const variant = variantMap.get(item.product_variant_id);
       if (!variant) continue;
 
-      const catName = variant.product_category_id ? (categoryMap.get(variant.product_category_id)?.title || '') : '';
+      const g = variant.product_group_id ? groupMap.get(variant.product_group_id) : null;
+      const groupTitle = g?.normalized_title
+        || g?.title
+        || variant.product_title
+        || '未命名商品';
       const varName = variant.variant_name || '';
-      let displayName = '';
-      if (catName && varName) {
-        displayName = `${catName}-${varName}`;
-      } else if (catName) {
-        displayName = catName;
-      } else if (varName) {
-        displayName = varName;
-      } else {
-        displayName = variant.product_title || '未命名商品';
-      }
+      const displayName = varName ? `${groupTitle}-${varName}` : groupTitle;
 
       const costVal = item.cost ?? 0;
       const key = `${displayName}_${costVal}`;

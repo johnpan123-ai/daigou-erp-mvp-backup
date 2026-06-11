@@ -190,6 +190,7 @@ export default function PurchaseManagement() {
   };
 
   const [group, setGroup] = useState<ProductGroup | null>(null);
+  const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
   const [categoryMap, setCategoryMap] = useState<Map<string, ProductCategory>>(new Map());
@@ -383,6 +384,7 @@ export default function PurchaseManagement() {
       return;
     }
     setGroup(g);
+    setGroups(allGroups);
 
     const allVars = await dataProvider.getProductVariants();
     const allCats = await dataProvider.getProductCategories();
@@ -542,23 +544,21 @@ export default function PurchaseManagement() {
     }
 
     const ledgerMap = new Map<string, { name: string; quantity: number; cost: number }>();
+    const groupMap = new Map(groups.map(g => [g.id, g]));
     
     for (const item of purchaseBatchItems) {
       const variant = variants.find(v => v.id === item.product_variant_id);
       if (!variant) continue;
 
-      const catName = variant.product_category_id ? (categoryMap.get(variant.product_category_id)?.title || '') : '';
+      const g = variant.product_group_id ? groupMap.get(variant.product_group_id) : null;
+      const groupTitle = g?.normalized_title
+        || g?.title
+        || group?.normalized_title
+        || group?.title
+        || variant.product_title
+        || '未命名商品';
       const varName = variant.variant_name || '';
-      let displayName = '';
-      if (catName && varName) {
-        displayName = `${catName}-${varName}`;
-      } else if (catName) {
-        displayName = catName;
-      } else if (varName) {
-        displayName = varName;
-      } else {
-        displayName = variant.product_title || '未命名商品';
-      }
+      const displayName = varName ? `${groupTitle}-${varName}` : groupTitle;
 
       const costVal = item.cost ?? 0;
       const key = `${displayName}_${costVal}`;
@@ -2372,6 +2372,7 @@ export default function PurchaseManagement() {
             batchItems={purchaseBatchItems} 
             variants={variants} 
             categoryMap={categoryMap}
+            groups={groups}
             onRefresh={loadData} 
             onEditBatch={handleEditBatch}
             getDisplayProductName={getDisplayProductName}
