@@ -83,7 +83,7 @@
 })();
 
 import { supabase } from './supabaseClient';
-import { db, calculateFinalMyacgDemand } from '../../lib/db';
+import { db, calculateFinalMyacgDemand, normalizeProductTitle } from '../../lib/db';
 import { getProviderMode } from '../providerMode';
 import type { IDataProvider } from '../types';
 import type { 
@@ -950,6 +950,7 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log(`[Inventory Sync] push starting: ${allInventory.length} rows`);
       const upsertData = allInventory.map(item => ({
+        inventory_key: item.inventory_key || `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`,
         myacg_item_code: item.myacg_item_code,
         product_id: item.product_id || null,
         product_title: item.product_title,
@@ -968,7 +969,7 @@ export class SupabaseProvider implements IDataProvider {
 
       const { error } = await supabase
         .from('inventory_items')
-        .upsert(upsertData, { onConflict: 'myacg_item_code' });
+        .upsert(upsertData, { onConflict: 'inventory_key' });
 
       if (error) {
         console.error('[Inventory Sync ERROR] push failed:', error);
@@ -1230,6 +1231,7 @@ export class SupabaseProvider implements IDataProvider {
 
       const rows = data || [];
       const mappedItems: InventoryItem[] = rows.map(r => ({
+        inventory_key: r.inventory_key || `${normalizeProductTitle(r.product_title)}::${r.myacg_item_code}::${r.raw_variant_name || ''}`,
         myacg_item_code: r.myacg_item_code,
         product_id: r.product_id || undefined,
         product_title: r.product_title,
