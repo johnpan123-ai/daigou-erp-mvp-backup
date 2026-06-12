@@ -55,5 +55,8 @@ export interface IDataProvider {
   deleteProductGroup(groupId: string): Promise<void>;
   deleteProductGroups(groupIds: string[]): Promise<void>;
   canWriteCloud(): Promise<boolean>;
+  getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
+  saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
+  restoreBackup(backupData: any): Promise<boolean>;
 }
 

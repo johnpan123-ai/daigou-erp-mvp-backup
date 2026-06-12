@@ -173,5 +173,14 @@ export class LocalProvider implements IDataProvider {
   async canWriteCloud(): Promise<boolean> {
     return true;
   }
+  async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {
+    return db.getLastImportBackup();
+  }
+  async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
+    return db.saveLastImportBackup(backup);
+  }
+  async restoreBackup(backupData: any): Promise<boolean> {
+    return db.importData(JSON.stringify(backupData));
+  }
 }
 

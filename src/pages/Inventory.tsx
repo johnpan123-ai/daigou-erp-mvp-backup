@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
-import { Upload, RefreshCw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
+import { Upload, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 
 interface InventoryGroup {
@@ -95,6 +95,8 @@ export default function Inventory() {
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const [lastBackupTime, setLastBackupTime] = useState<string | null>(null);
+  const [isRollbackPending, setIsRollbackPending] = useState(false);
 
   useEffect(() => {
     loadItems();
@@ -105,6 +107,13 @@ export default function Inventory() {
     setItems(data);
     const groups = await dataProvider.getProductGroups();
     setProductGroups(groups);
+    
+    try {
+      const backup = await dataProvider.getLastImportBackup();
+      setLastBackupTime(backup ? backup.timestamp : null);
+    } catch (backupErr) {
+      console.error('Failed to load last import backup timestamp:', backupErr);
+    }
     
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -125,6 +134,28 @@ export default function Inventory() {
 
     setIsImporting(true);
     try {
+      console.log('[Import Backup] Creating pre-import snapshot...');
+      try {
+        const backupData = {
+          inventory: await dataProvider.getInventory(),
+          salesOrders: await dataProvider.getSalesOrders(),
+          salesOrderItems: await dataProvider.getSalesOrderItems(),
+          productGroups: await dataProvider.getProductGroups(),
+          productCategories: await dataProvider.getProductCategories(),
+          productVariants: await dataProvider.getProductVariants(),
+          purchaseBatches: await dataProvider.getPurchaseBatches(),
+          purchaseBatchItems: await dataProvider.getPurchaseBatchItems(),
+          privateOrders: await dataProvider.getPrivateOrders(),
+          privateOrderItems: await dataProvider.getPrivateOrderItems(),
+        };
+        const timestamp = new Date().toISOString();
+        await dataProvider.saveLastImportBackup({ data: JSON.stringify(backupData), timestamp });
+        setLastBackupTime(timestamp);
+        console.log('[Import Backup] Snapshotted successfully at', timestamp);
+      } catch (backupErr) {
+        console.error('[Import Backup ERROR] Backup failed, continuing import:', backupErr);
+      }
+
       const parsedItems = await parseMyAcgFile(file);
       const stats = await dataProvider.upsertInventory(parsedItems);
       
@@ -141,6 +172,34 @@ export default function Inventory() {
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRollbackBackup = async () => {
+    const backup = await dataProvider.getLastImportBackup();
+    if (!backup) {
+      alert('找不到任何可用備份！');
+      return;
+    }
+
+    const confirmRollback = window.confirm(
+      `【核心資料還原警告】\n\n您即將把商品主檔、訂購紀錄、商品群組、規格、採購批次、自訂訂單等核心資料，完全還原至上次匯入前的狀態（備份時間：${new Date(backup.timestamp).toLocaleString()}）。\n\n還原後將會完全覆蓋此備份時間點之後的所有修改與匯入。您確定要繼續嗎？`
+    );
+    if (!confirmRollback) return;
+
+    setIsRollbackPending(true);
+    try {
+      const backupData = JSON.parse(backup.data);
+      const success = await dataProvider.restoreBackup(backupData);
+      if (success) {
+        alert('核心資料庫還原成功！已回復至上次匯入前狀態。');
+        await loadItems();
+      }
+    } catch (err: any) {
+      console.error('[Rollback ERROR]:', err);
+      alert(`還原失敗：${err.message || err}`);
+    } finally {
+      setIsRollbackPending(false);
     }
   };
 
@@ -494,6 +553,36 @@ export default function Inventory() {
 
         .btn-import-xls:active {
           transform: scale(0.98);
+        }
+
+        .btn-rollback-backup {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 16px;
+          font-size: 14px;
+          font-weight: 600;
+          color: #d97706;
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .btn-rollback-backup:hover {
+          background-color: #fef3c7;
+          border-color: #fcd34d;
+        }
+
+        .btn-rollback-backup:active {
+          transform: scale(0.98);
+        }
+
+        .btn-rollback-backup:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
 
         .btn-add-product {
@@ -1018,6 +1107,17 @@ export default function Inventory() {
               <Upload size={14} />
               <span>{isImporting ? '匯入中...' : '匯入主檔 XLS'}</span>
             </button>
+            {lastBackupTime && (
+              <button 
+                className="btn-rollback-backup" 
+                onClick={handleRollbackBackup} 
+                disabled={isRollbackPending || isImporting}
+                title={`上次匯入前備份時間：${new Date(lastBackupTime).toLocaleString()}`}
+              >
+                <RotateCcw size={14} />
+                <span>{isRollbackPending ? '還原中...' : '還原上次狀態'}</span>
+              </button>
+            )}
             {selectedSkus.size > 0 && (
               <button className="btn btn-primary" onClick={handleCreatePurchaseRecords} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                 <span>建立訂購紀錄 ({selectedSkus.size} 筆)</span>

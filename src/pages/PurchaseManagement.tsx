@@ -121,7 +121,7 @@ export default function PurchaseManagement() {
       ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
       : null;
     const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-      ? v.effective_myacg_quantity
+      ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
       : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
     const myacgDemand = rawMyacg >= 0 ? rawMyacg : 0;
 
@@ -1725,8 +1725,20 @@ export default function PurchaseManagement() {
                             <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={catTitle}>
                               <HighlightText text={catTitle} highlight={searchTerm} />
                             </div>
-                            <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
-                              SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
+                            <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
+                              <span>SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} /></span>
+                              {v.catalog_missing && (
+                                <span style={{
+                                  backgroundColor: '#ffedd5',
+                                  color: '#ea580c',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  fontWeight: 600,
+                                  fontSize: '10px'
+                                }}>
+                                  [清單無此項]
+                                </span>
+                              )}
                             </div>
                           </td>
                           {isDaili ? (
@@ -2022,8 +2034,20 @@ export default function PurchaseManagement() {
                                     <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
                                       <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name || v.product_title || '單品')} highlight={searchTerm} />
                                     </div>
-                                    <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.myacg_item_code}>
-                                      SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} />
+                                    <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
+                                      <span>SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} /></span>
+                                      {v.catalog_missing && (
+                                        <span style={{
+                                          backgroundColor: '#ffedd5',
+                                          color: '#ea580c',
+                                          padding: '1px 6px',
+                                          borderRadius: '4px',
+                                          fontWeight: 600,
+                                          fontSize: '10px'
+                                        }}>
+                                          [清單無此項]
+                                        </span>
+                                      )}
                                     </div>
                                   </td>
                                   {isDaili ? (

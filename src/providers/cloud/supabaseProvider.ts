@@ -1859,6 +1859,162 @@ export class SupabaseProvider implements IDataProvider {
       throw err;
     }
   }
+
+  async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {
+    return db.getLastImportBackup();
+  }
+
+  async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
+    return db.saveLastImportBackup(backup);
+  }
+
+  async restoreBackup(backupData: any): Promise<boolean> {
+    if (!(await this.canWriteCloud())) {
+      alert('您目前是唯讀/小幫手帳號，不支援還原資料至雲端資料庫！');
+      return false;
+    }
+
+    try {
+      console.log('[Restore Backup] Starting cloud rollback process...');
+
+      // 1. Helper to fetch all column values from a table
+      const fetchCloudKeys = async (tableName: string, colName: string): Promise<any[]> => {
+        const { data, error } = await supabase.from(tableName).select(colName);
+        if (error) {
+          console.error(`[Restore Backup] Fetching ${tableName} keys failed:`, error.message);
+          throw error;
+        }
+        return (data || []).map(r => (r as any)[colName]);
+      };
+
+      // 2. Fetch existing keys from cloud
+      const cloudPbiIds = await fetchCloudKeys('purchase_batch_items', 'id');
+      const cloudPbIds = await fetchCloudKeys('purchase_batches', 'id');
+      const cloudPoiIds = await fetchCloudKeys('private_order_items', 'id');
+      const cloudPoIds = await fetchCloudKeys('private_orders', 'id');
+      
+      const { data: cloudSoiData, error: soiErr } = await supabase.from('sales_order_items').select('id, local_id');
+      if (soiErr) throw soiErr;
+      const cloudSoi = cloudSoiData || [];
+
+      const { data: cloudSoData, error: soErr } = await supabase.from('sales_orders').select('id, local_id');
+      if (soErr) throw soErr;
+      const cloudSo = cloudSoData || [];
+
+      const cloudPvIds = await fetchCloudKeys('product_variants', 'id');
+      const cloudPcIds = await fetchCloudKeys('product_categories', 'id');
+      const cloudPgIds = await fetchCloudKeys('product_groups', 'id');
+      const cloudInvKeys = await fetchCloudKeys('inventory_items', 'inventory_key');
+
+      // 3. Match against backup data and filter out orphans/extras to delete
+      const backupPbi = new Set((backupData.purchaseBatchItems || []).map((x: any) => x.id));
+      const backupPb = new Set((backupData.purchaseBatches || []).map((x: any) => x.id));
+      const backupPoi = new Set((backupData.privateOrderItems || []).map((x: any) => x.id));
+      const backupPo = new Set((backupData.privateOrders || []).map((x: any) => x.id));
+      const backupSoi = new Set((backupData.salesOrderItems || []).map((x: any) => x.id));
+      const backupSo = new Set((backupData.salesOrders || []).map((x: any) => x.id));
+      const backupPv = new Set((backupData.productVariants || []).map((x: any) => x.id));
+      const backupPc = new Set((backupData.productCategories || []).map((x: any) => x.id));
+      const backupPg = new Set((backupData.productGroups || []).map((x: any) => x.id));
+      const backupInv = new Set((backupData.inventory || []).map((x: any) => 
+        x.inventory_key || `${normalizeProductTitle(x.product_title)}::${x.myacg_item_code}::${x.raw_variant_name || ''}`
+      ));
+
+      const pbiToDelete = cloudPbiIds.filter(id => !backupPbi.has(id));
+      const pbToDelete = cloudPbIds.filter(id => !backupPb.has(id));
+      const poiToDelete = cloudPoiIds.filter(id => !backupPoi.has(id));
+      const poToDelete = cloudPoIds.filter(id => !backupPo.has(id));
+      
+      const soiToDelete = cloudSoi.filter(r => !backupSoi.has(r.local_id || r.id)).map(r => r.id);
+      const soToDelete = cloudSo.filter(r => !backupSo.has(r.local_id || r.id)).map(r => r.id);
+
+      const pvToDelete = cloudPvIds.filter(id => !backupPv.has(id));
+      const pcToDelete = cloudPcIds.filter(id => !backupPc.has(id));
+      const pgToDelete = cloudPgIds.filter(id => !backupPg.has(id));
+      const invToDelete = cloudInvKeys.filter(k => !backupInv.has(k));
+
+      console.log(`[Restore Backup] Orphan rows to delete:
+        purchase_batch_items: ${pbiToDelete.length}
+        purchase_batches: ${pbToDelete.length}
+        private_order_items: ${poiToDelete.length}
+        private_orders: ${poToDelete.length}
+        sales_order_items: ${soiToDelete.length}
+        sales_orders: ${soToDelete.length}
+        product_variants: ${pvToDelete.length}
+        product_categories: ${pcToDelete.length}
+        product_groups: ${pgToDelete.length}
+        inventory_items: ${invToDelete.length}`);
+
+      // 4. Perform deletes in proper dependency order
+      const deleteChunks = async (tableName: string, colName: string, items: any[]) => {
+        if (items.length === 0) return;
+        for (let i = 0; i < items.length; i += 100) {
+          const chunk = items.slice(i, i + 100);
+          const { error } = await supabase.from(tableName).delete().in(colName, chunk);
+          if (error) {
+            console.error(`[Restore Backup] Deleting from ${tableName} failed:`, error.message);
+            throw error;
+          }
+        }
+      };
+
+      await deleteChunks('purchase_batch_items', 'id', pbiToDelete);
+      await deleteChunks('purchase_batches', 'id', pbToDelete);
+      await deleteChunks('private_order_items', 'id', poiToDelete);
+      await deleteChunks('private_orders', 'id', poToDelete);
+      await deleteChunks('sales_order_items', 'id', soiToDelete);
+      await deleteChunks('sales_orders', 'id', soToDelete);
+      await deleteChunks('product_variants', 'id', pvToDelete);
+      await deleteChunks('product_categories', 'id', pcToDelete);
+      await deleteChunks('product_groups', 'id', pgToDelete);
+      await deleteChunks('inventory_items', 'inventory_key', invToDelete);
+
+      // 5. Restore local IndexedDB cache
+      const imported = await db.importData(JSON.stringify(backupData));
+      if (!imported) {
+        throw new Error('Failed to import backup data to IndexedDB');
+      }
+
+      // 6. Push local restored tables to cloud
+      if (backupData.productGroups && backupData.productGroups.length > 0) {
+        await this.saveProductGroups(backupData.productGroups);
+      }
+      if (backupData.productCategories && backupData.productCategories.length > 0) {
+        await this.saveProductCategories(backupData.productCategories);
+      }
+      if (backupData.productVariants && backupData.productVariants.length > 0) {
+        await this.saveProductVariants(backupData.productVariants);
+      }
+      if (backupData.purchaseBatches && backupData.purchaseBatches.length > 0) {
+        await this.savePurchaseBatches(backupData.purchaseBatches);
+      }
+      if (backupData.purchaseBatchItems && backupData.purchaseBatchItems.length > 0) {
+        await this.savePurchaseBatchItems(backupData.purchaseBatchItems);
+      }
+      if (backupData.privateOrders && backupData.privateOrders.length > 0) {
+        await this.savePrivateOrders(backupData.privateOrders);
+      }
+      if (backupData.privateOrderItems && backupData.privateOrderItems.length > 0) {
+        await this.savePrivateOrderItems(backupData.privateOrderItems);
+      }
+      if (backupData.salesOrders && backupData.salesOrders.length > 0) {
+        await this.saveSalesOrders(backupData.salesOrders);
+      }
+      if (backupData.salesOrderItems && backupData.salesOrderItems.length > 0) {
+        await this.saveSalesOrderItems(backupData.salesOrderItems);
+      }
+      if (backupData.inventory && backupData.inventory.length > 0) {
+        await this.upsertInventory(backupData.inventory);
+      }
+
+      console.log('[Restore Backup] Database rollback completed successfully!');
+      return true;
+    } catch (e: any) {
+      console.error('[Restore Backup] Rollback failed:', e.message || e);
+      alert(`還原備份失敗：${e.message || e}`);
+      return false;
+    }
+  }
 }
 
 export const supabaseProvider = new SupabaseProvider();

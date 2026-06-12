@@ -136,6 +136,15 @@ class DynamicDataProvider implements IDataProvider {
   async canWriteCloud(): Promise<boolean> {
     return this.getActiveProvider().canWriteCloud();
   }
+  async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {
+    return this.getActiveProvider().getLastImportBackup();
+  }
+  async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
+    return this.getActiveProvider().saveLastImportBackup(backup);
+  }
+  async restoreBackup(backupData: any): Promise<boolean> {
+    return this.getActiveProvider().restoreBackup(backupData);
+  }
 }
 
 

@@ -371,6 +371,8 @@ export interface DatabaseAdapter {
   reparseProductVariants(): Promise<void>;
   reparseProductTitles(): Promise<void>;
   syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }>;
+  getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
+  saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
 }
 
 // Helper for local storage
@@ -1203,7 +1205,9 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       const invItem = findMatchingInventoryItem(v, inventory);
 
       
-      const effectiveMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
+      const rawMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
+      const effectiveMyacg = rawMyacg >= 0 ? rawMyacg : (v.effective_myacg_quantity ?? 0);
+      const autoMyacg = rawMyacg >= 0 ? rawMyacg : (v.myacg_auto_quantity ?? 0);
 
       if (invItem) {
         const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;
@@ -1214,17 +1218,15 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         console.warn(`找不到 InventoryItem 對應 SKU: ${v.myacg_item_code}`);
       }
 
-
-
       const newWacaAuto = getOrderDemandForVariant(v.myacg_item_code, wacaOrderDemandMap);
 
       if (
         v.effective_myacg_quantity !== effectiveMyacg || 
-        v.myacg_auto_quantity !== effectiveMyacg || 
+        v.myacg_auto_quantity !== autoMyacg || 
         v.waca_auto_quantity !== newWacaAuto
       ) {
         v.effective_myacg_quantity = effectiveMyacg;
-        v.myacg_auto_quantity = effectiveMyacg;
+        v.myacg_auto_quantity = autoMyacg;
         v.waca_auto_quantity = newWacaAuto;
         changed = true;
       }
@@ -1411,6 +1413,14 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     localStorage.removeItem('erp_purchase_batch_items');
     localStorage.removeItem('erp_private_orders');
     localStorage.removeItem('erp_private_order_items');
+  }
+
+  async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {
+    return loadData<{ data: string; timestamp: string } | null>('erp_last_import_backup', null);
+  }
+
+  async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
+    saveData('erp_last_import_backup', backup);
   }
 }
 
@@ -2200,7 +2210,9 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       // Find matching inventory item using fuzzy matching helpers
       const invItem = findMatchingInventoryItem(v, inventory);
 
-      const effectiveMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
+      const rawMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
+      const effectiveMyacg = rawMyacg >= 0 ? rawMyacg : (v.effective_myacg_quantity ?? 0);
+      const autoMyacg = rawMyacg >= 0 ? rawMyacg : (v.myacg_auto_quantity ?? 0);
 
       if (invItem) {
         const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;
@@ -2215,11 +2227,11 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
       if (
         v.effective_myacg_quantity !== effectiveMyacg || 
-        v.myacg_auto_quantity !== effectiveMyacg || 
+        v.myacg_auto_quantity !== autoMyacg || 
         v.waca_auto_quantity !== newWacaAuto
       ) {
         v.effective_myacg_quantity = effectiveMyacg;
-        v.myacg_auto_quantity = effectiveMyacg;
+        v.myacg_auto_quantity = autoMyacg;
         v.waca_auto_quantity = newWacaAuto;
         changed = true;
       }
@@ -2445,6 +2457,14 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       console.error('[IndexedDB clearPurchaseRecords Error]', e);
     }
     keysToRemove.forEach(key => localStorage.removeItem(key));
+  }
+
+  async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {
+    return this.get<{ data: string; timestamp: string } | null>('erp_last_import_backup', null);
+  }
+
+  async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
+    await this.set('erp_last_import_backup', backup);
   }
 }
 

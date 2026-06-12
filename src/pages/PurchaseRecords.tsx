@@ -247,7 +247,7 @@ export default function PurchaseRecords() {
         ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
         : null;
       const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-        ? v.effective_myacg_quantity
+        ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
         : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
       const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
 
@@ -289,7 +289,8 @@ export default function PurchaseRecords() {
       }
     });
     
-    return { myacg, waca, privateOrder, purchased, gap: totalGap, myacgManual, wacaManual };
+    const hasCatalogMissing = groupVars.some(v => v.catalog_missing === true);
+    return { myacg, waca, privateOrder, purchased, gap: totalGap, myacgManual, wacaManual, hasCatalogMissing };
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
@@ -299,6 +300,7 @@ export default function PurchaseRecords() {
     let totalDemand = 0;
     let totalPurchased = 0;
     let gap = 0;
+    const hasCatalogMissing = groupVars.some(v => v.catalog_missing === true);
     
     groupVars.forEach(v => {
       // 買動漫數量
@@ -308,7 +310,7 @@ export default function PurchaseRecords() {
         ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
         : null;
       const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-        ? v.effective_myacg_quantity
+        ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
         : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
       const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
 
@@ -337,7 +339,7 @@ export default function PurchaseRecords() {
       gap += Math.max(demand - vPurchased, 0);
     });
     
-    return { demand: totalDemand, purchased: totalPurchased, gap };
+    return { demand: totalDemand, purchased: totalPurchased, gap, hasCatalogMissing };
   };
 
 
@@ -1215,7 +1217,22 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
-                            <div>{g.normalized_title || g.title}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span>{g.normalized_title || g.title}</span>
+                              {details.hasCatalogMissing && (
+                                <span style={{
+                                  backgroundColor: '#ffedd5',
+                                  color: '#ea580c',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontWeight: 600,
+                                  fontSize: '11px',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  [清單無此項]
+                                </span>
+                              )}
+                            </div>
                             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                               {g.listing_type && (
                                 <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
@@ -1512,7 +1529,22 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
-                            <div>{g.normalized_title || g.title}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span>{g.normalized_title || g.title}</span>
+                              {demandAndPurchased.hasCatalogMissing && (
+                                <span style={{
+                                  backgroundColor: '#ffedd5',
+                                  color: '#ea580c',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontWeight: 600,
+                                  fontSize: '11px',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  [清單無此項]
+                                </span>
+                              )}
+                            </div>
                             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                               {g.listing_type && (
                                 <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
