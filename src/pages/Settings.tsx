@@ -43,6 +43,7 @@ export default function Settings() {
   };
 
   useEffect(() => {
+    (window as any).dataProvider = dataProvider;
     loadCounts();
   }, []);
 
@@ -75,25 +76,41 @@ export default function Settings() {
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (currentMode === 'cloud') {
-      alert('雲端模式下不支援匯入備份還原！');
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      return;
-    }
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (currentMode === 'cloud') {
+      const confirmImport = window.confirm('目前為雲端模式，匯入此 JSON 備份將覆蓋雲端資料。是否確定還原？');
+      if (!confirmImport) {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+    }
+
     try {
       const text = await file.text();
-      const success = await dataProvider.importData(text);
+      let success = false;
+
+      if (currentMode === 'cloud') {
+        let backupData;
+        try {
+          backupData = JSON.parse(text);
+        } catch (parseErr: any) {
+          throw new Error(`JSON 檔案解析失敗：${parseErr.message}`);
+        }
+        success = await dataProvider.restoreBackup(backupData);
+      } else {
+        success = await dataProvider.importData(text);
+      }
+
       if (success) {
         alert('資料還原成功！');
         await loadCounts();
       } else {
         alert('還原失敗，格式不正確。');
       }
-    } catch (err) {
-      alert('讀取檔案失敗。');
+    } catch (err: any) {
+      alert(`還原失敗：${err.message || err}`);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -192,7 +209,7 @@ export default function Settings() {
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
                 <div className="text-xs text-muted">從先前的備份檔案還原資料 (會覆蓋現有資料)。</div>
               </div>
-              <button className="btn btn-primary" onClick={handleImportClick} disabled={currentMode === 'cloud'}>
+              <button className="btn btn-primary" onClick={handleImportClick}>
                 <Upload size={16} /> 匯入還原
               </button>
               <input 

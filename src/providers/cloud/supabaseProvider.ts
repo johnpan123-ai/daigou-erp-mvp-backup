@@ -1879,7 +1879,11 @@ export class SupabaseProvider implements IDataProvider {
 
       // 1. Helper to fetch all column values from a table
       const fetchCloudKeys = async (tableName: string, colName: string): Promise<any[]> => {
-        const { data, error } = await supabase.from(tableName).select(colName);
+        let query = supabase.from(tableName).select(colName);
+        if (tableName !== 'sales_orders' && tableName !== 'sales_order_items') {
+          query = query.is('deleted_at', null);
+        }
+        const { data, error } = await query;
         if (error) {
           console.error(`[Restore Backup] Fetching ${tableName} keys failed:`, error.message);
           throw error;
