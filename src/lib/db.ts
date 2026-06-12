@@ -528,7 +528,18 @@ export const calculateFinalMyacgDemand = (
   void salesOrderItems;
   if (!variantOrCode) return -1;
   const invItem = findMatchingInventoryItem(variantOrCode, inventory);
-  return invItem ? (invItem.myacg_sold_quantity ?? 0) : -1;
+  if (invItem) {
+    return invItem.myacg_sold_quantity ?? 0;
+  }
+  // SKU is missing from inventory catalog
+  if (typeof variantOrCode === 'object' && variantOrCode !== null) {
+    // Attempt to return the variant's existing quantities
+    const existingVal = variantOrCode.effective_myacg_quantity ?? variantOrCode.myacg_auto_quantity;
+    if (existingVal !== undefined && existingVal !== null && existingVal >= 0) {
+      return existingVal;
+    }
+  }
+  return -1;
 };
 
 export class LocalStorageAdapter implements DatabaseAdapter {
@@ -1206,8 +1217,8 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
       
       const rawMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
-      const effectiveMyacg = rawMyacg >= 0 ? rawMyacg : (v.effective_myacg_quantity ?? 0);
-      const autoMyacg = rawMyacg >= 0 ? rawMyacg : (v.myacg_auto_quantity ?? 0);
+      const effectiveMyacg = rawMyacg >= 0 ? rawMyacg : (v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity !== null && v.effective_myacg_quantity >= 0 ? v.effective_myacg_quantity : 0);
+      const autoMyacg = rawMyacg >= 0 ? rawMyacg : (v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity !== null && v.myacg_auto_quantity >= 0 ? v.myacg_auto_quantity : 0);
 
       if (invItem) {
         const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;
@@ -2211,8 +2222,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       const invItem = findMatchingInventoryItem(v, inventory);
 
       const rawMyacg = calculateFinalMyacgDemand(v, inventory, salesOrderItems);
-      const effectiveMyacg = rawMyacg >= 0 ? rawMyacg : (v.effective_myacg_quantity ?? 0);
-      const autoMyacg = rawMyacg >= 0 ? rawMyacg : (v.myacg_auto_quantity ?? 0);
+      const effectiveMyacg = rawMyacg >= 0 ? rawMyacg : (v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity !== null && v.effective_myacg_quantity >= 0 ? v.effective_myacg_quantity : 0);
+      const autoMyacg = rawMyacg >= 0 ? rawMyacg : (v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity !== null && v.myacg_auto_quantity >= 0 ? v.myacg_auto_quantity : 0);
 
       if (invItem) {
         const inventoryDemand = invItem.myacg_sold_quantity ?? invItem.myacg_demand_quantity;

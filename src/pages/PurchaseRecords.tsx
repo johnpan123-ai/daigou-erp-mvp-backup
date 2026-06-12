@@ -1435,30 +1435,34 @@ export default function PurchaseRecords() {
                         <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('gap', e)} />
                       </div>
                     </th>
-                    <th style={{ width: `${colWidths.purchaseDate}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>購買結單日</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchaseDate', e)} />
-                      </div>
-                    </th>
-                    <th style={{ width: `${colWidths.closingDate}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>官方結單日</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('closingDate', e)} />
-                      </div>
-                    </th>
-                    <th style={{ width: `${colWidths.releaseMonth}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>發售月份</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('releaseMonth', e)} />
-                      </div>
-                    </th>
-                    <th style={{ width: `${colWidths.productUrl}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>官網</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('productUrl', e)} />
-                      </div>
-                    </th>
+                    {editMode && (
+                      <>
+                        <th style={{ width: `${colWidths.purchaseDate}px` }}>
+                          <div className="th-inner justify-center">
+                            <span>購買結單日</span>
+                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchaseDate', e)} />
+                          </div>
+                        </th>
+                        <th style={{ width: `${colWidths.closingDate}px` }}>
+                          <div className="th-inner justify-center">
+                            <span>官方結單日</span>
+                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('closingDate', e)} />
+                          </div>
+                        </th>
+                        <th style={{ width: `${colWidths.releaseMonth}px` }}>
+                          <div className="th-inner justify-center">
+                            <span>發售月份</span>
+                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('releaseMonth', e)} />
+                          </div>
+                        </th>
+                        <th style={{ width: `${colWidths.productUrl}px` }}>
+                          <div className="th-inner justify-center">
+                            <span>官網</span>
+                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('productUrl', e)} />
+                          </div>
+                        </th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -1525,13 +1529,32 @@ export default function PurchaseRecords() {
                           </td>
                         )}
                         <td style={{ textAlign: 'center', fontWeight: 600 }}>
-                          {status.text}
+                          {editMode ? (
+                            status.text
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
+                              <span>{status.text}</span>
+                              {g.listing_type && (
+                                <span style={{ 
+                                  backgroundColor: '#e2e8f0', 
+                                  color: '#475569', 
+                                  fontSize: '10px', 
+                                  padding: '1px 4px', 
+                                  borderRadius: '3px', 
+                                  fontWeight: 500,
+                                  marginTop: '2px'
+                                }}>
+                                  {g.listing_type}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span>{g.normalized_title || g.title}</span>
-                              {demandAndPurchased.hasCatalogMissing && (
+                              {editMode && demandAndPurchased.hasCatalogMissing && (
                                 <span style={{
                                   backgroundColor: '#ffedd5',
                                   color: '#ea580c',
@@ -1545,13 +1568,61 @@ export default function PurchaseRecords() {
                                 </span>
                               )}
                             </div>
-                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                              {g.listing_type && (
-                                <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
-                                  {g.listing_type}
-                                </span>
-                              )}
-                            </div>
+                            {editMode ? (
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                {g.listing_type && (
+                                  <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                    {g.listing_type}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (() => {
+                              const isClosed = closingDateStyle.color === '#ef4444';
+                              const isUrgent = closingDateStyle.color === '#f97316';
+                              const closingDateTagStyle = isClosed
+                                ? { background: '#fee2e2', color: '#ef4444', border: '1px solid #fca5a5' }
+                                : isUrgent
+                                ? { background: '#ffedd5', color: '#ea580c', border: '1px solid #fed7aa' }
+                                : { background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0' };
+
+                              const formatClosingDateSimplified = (dateStr: string | undefined | null) => {
+                                if (!dateStr) return '';
+                                const clean = dateStr.replace(/\//g, '-');
+                                const parts = clean.split('-');
+                                if (parts.length >= 3) {
+                                  return `結單 ${parts[1]}/${parts[2]}`;
+                                }
+                                return `結單 ${dateStr}`;
+                              };
+
+                              return (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', alignItems: 'center', fontSize: '11px', marginTop: '4px' }}>
+                                  {g.closing_date && (
+                                    <span style={{ ...closingDateTagStyle, borderRadius: '4px', padding: '2px 6px', display: 'inline-flex', alignItems: 'center', fontWeight: isClosed || isUrgent ? 600 : 500 }}>
+                                      {formatClosingDateSimplified(g.closing_date)}
+                                    </span>
+                                  )}
+                                  {g.release_month && (
+                                    <span style={{ background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '2px 6px', fontWeight: 500 }}>
+                                      發售：{formatReleaseMonth(g.release_month)}
+                                    </span>
+                                  )}
+                                  {g.product_url && (
+                                    <a 
+                                      href={g.product_url} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      onClick={e => e.stopPropagation()}
+                                      style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '2px' }}
+                                      onMouseEnter={e => { e.currentTarget.style.color = '#1d4ed8'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.color = '#2563eb'; }}
+                                    >
+                                      🔗 官網
+                                    </a>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
@@ -1590,120 +1661,124 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 700, color: demandAndPurchased.gap > 0 ? '#ef4444' : '#166534' }}>
                           缺 {demandAndPurchased.gap}
                         </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {editMode ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                              <input 
-                                className="input" 
-                                type="text" 
-                                placeholder="YYYY/MM/DD"
-                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                value={g.purchase_date || ''} 
-                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
-                                onClick={e => e.stopPropagation()}
-                                onKeyDown={e => handleKeyDown(e, idx, 'purchase_date')}
-                                onPaste={e => handlePaste(e, idx, 'purchase_date')}
-                                data-row={idx}
-                                data-field="purchase_date"
-                              />
-                              <Calendar 
-                                size={14} 
-                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  purchaseDatePickerRefs.current[g.id]?.showPicker();
-                                }}
-                              />
-                              <input 
-                                type="date"
-                                ref={el => { purchaseDatePickerRefs.current[g.id] = el; }}
-                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
-                                value={g.purchase_date ? g.purchase_date.replace(/\//g, '-') : ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)}
-                                onClick={e => e.stopPropagation()}
-                              />
-                            </div>
-                          ) : (
-                            <span style={{ color: '#475569', fontWeight: 500 }}>
-                              {g.purchase_date || '-'}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
-                          {editMode ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                              <input 
-                                className="input" 
-                                type="text" 
-                                placeholder="YYYY/MM/DD"
-                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                value={g.closing_date || ''} 
-                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
-                                onClick={e => e.stopPropagation()}
-                                onKeyDown={e => handleKeyDown(e, idx, 'closing_date')}
-                                onPaste={e => handlePaste(e, idx, 'closing_date')}
-                                data-row={idx}
-                                data-field="closing_date"
-                              />
-                              <Calendar 
-                                size={14} 
-                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  datePickerRefs.current[g.id]?.showPicker();
-                                }}
-                              />
-                              <input 
-                                type="date"
-                                ref={el => { datePickerRefs.current[g.id] = el; }}
-                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
-                                value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
-                                onClick={e => e.stopPropagation()}
-                              />
-                            </div>
-                          ) : closingDateStyle.text}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {editMode ? (
-                            <input 
-                              className="input" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.release_month || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => handleKeyDown(e, idx, 'release_month')}
-                              onPaste={e => handlePaste(e, idx, 'release_month')}
-                              data-row={idx}
-                              data-field="release_month"
-                              placeholder="例如：2026-11"
-                            />
-                          ) : formatReleaseMonth(g.release_month)}
-                        </td>
-                        <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                          {editMode ? (
-                            <input 
-                              className="input" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.product_url || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)} 
-                              onKeyDown={e => handleKeyDown(e, idx, 'product_url')}
-                              onPaste={e => handlePaste(e, idx, 'product_url')}
-                              data-row={idx}
-                              data-field="product_url"
-                              placeholder="官網網址"
-                            />
-                          ) : g.product_url ? (
-                            <a 
-                              href={g.product_url} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                            >
-                              🔗 官網
-                            </a>
-                          ) : '-'}
-                        </td>
+                        {editMode && (
+                          <>
+                            <td style={{ textAlign: 'center' }}>
+                              {editMode ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                                  <input 
+                                    className="input" 
+                                    type="text" 
+                                    placeholder="YYYY/MM/DD"
+                                    style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                    value={g.purchase_date || ''} 
+                                    onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
+                                    onClick={e => e.stopPropagation()}
+                                    onKeyDown={e => handleKeyDown(e, idx, 'purchase_date')}
+                                    onPaste={e => handlePaste(e, idx, 'purchase_date')}
+                                    data-row={idx}
+                                    data-field="purchase_date"
+                                  />
+                                  <Calendar 
+                                    size={14} 
+                                    style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      purchaseDatePickerRefs.current[g.id]?.showPicker();
+                                    }}
+                                  />
+                                  <input 
+                                    type="date"
+                                    ref={el => { purchaseDatePickerRefs.current[g.id] = el; }}
+                                    style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                    value={g.purchase_date ? g.purchase_date.replace(/\//g, '-') : ''}
+                                    onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)}
+                                    onClick={e => e.stopPropagation()}
+                                  />
+                                </div>
+                              ) : (
+                                <span style={{ color: '#475569', fontWeight: 500 }}>
+                                  {g.purchase_date || '-'}
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
+                              {editMode ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                                  <input 
+                                    className="input" 
+                                    type="text" 
+                                    placeholder="YYYY/MM/DD"
+                                    style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                    value={g.closing_date || ''} 
+                                    onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                                    onClick={e => e.stopPropagation()}
+                                    onKeyDown={e => handleKeyDown(e, idx, 'closing_date')}
+                                    onPaste={e => handlePaste(e, idx, 'closing_date')}
+                                    data-row={idx}
+                                    data-field="closing_date"
+                                  />
+                                  <Calendar 
+                                    size={14} 
+                                    style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      datePickerRefs.current[g.id]?.showPicker();
+                                    }}
+                                  />
+                                  <input 
+                                    type="date"
+                                    ref={el => { datePickerRefs.current[g.id] = el; }}
+                                    style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                    value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
+                                    onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
+                                    onClick={e => e.stopPropagation()}
+                                  />
+                                </div>
+                              ) : closingDateStyle.text}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {editMode ? (
+                                <input 
+                                  className="input" 
+                                  style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                                  value={g.release_month || ''} 
+                                  onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
+                                  onClick={e => e.stopPropagation()}
+                                  onKeyDown={e => handleKeyDown(e, idx, 'release_month')}
+                                  onPaste={e => handlePaste(e, idx, 'release_month')}
+                                  data-row={idx}
+                                  data-field="release_month"
+                                  placeholder="例如：2026-11"
+                                />
+                              ) : formatReleaseMonth(g.release_month)}
+                            </td>
+                            <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                              {editMode ? (
+                                <input 
+                                  className="input" 
+                                  style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                                  value={g.product_url || ''} 
+                                  onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)} 
+                                  onKeyDown={e => handleKeyDown(e, idx, 'product_url')}
+                                  onPaste={e => handlePaste(e, idx, 'product_url')}
+                                  data-row={idx}
+                                  data-field="product_url"
+                                  placeholder="官網網址"
+                                />
+                              ) : g.product_url ? (
+                                <a 
+                                  href={g.product_url} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '2px' }}
+                                >
+                                  🔗 官網
+                                </a>
+                              ) : '-'}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     );
                   })}
