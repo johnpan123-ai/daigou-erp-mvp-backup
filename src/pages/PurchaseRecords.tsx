@@ -15,11 +15,11 @@ const DEFAULT_COL_WIDTHS = {
   privateOrder: 90,
   purchased: 80,
   gap: 80,
-  purchaseDate: 120,
   closingDate: 120,
   releaseMonth: 100,
   productUrl: 120
 };
+
 
 const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) => {
   if (isMobile) {
@@ -98,7 +98,6 @@ export default function PurchaseRecords() {
   const [batchReleaseMonth, setBatchReleaseMonth] = useState('');
 
   const datePickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const purchaseDatePickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
@@ -441,8 +440,8 @@ export default function PurchaseRecords() {
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
         return dateA.localeCompare(dateB);
       } else {
-        const timeA = new Date(a.created_at || a.purchase_date || 0).getTime();
-        const timeB = new Date(b.created_at || b.purchase_date || 0).getTime();
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
         return timeB - timeA;
       }
     });
@@ -1130,12 +1129,7 @@ export default function PurchaseRecords() {
                         <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('gap', e)} />
                       </div>
                     </th>
-                    <th style={{ width: `${colWidths.purchaseDate}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>購買結單日</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchaseDate', e)} />
-                      </div>
-                    </th>
+
                     <th style={{ width: `${colWidths.closingDate}px` }}>
                       <div className="th-inner justify-center">
                         <span>官方結單日</span>
@@ -1281,45 +1275,7 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 700, color: details.gap > 0 ? '#ef4444' : '#166534' }}>
                           缺 {details.gap}
                         </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {editMode ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                              <input 
-                                className="input" 
-                                type="text" 
-                                placeholder="YYYY/MM/DD"
-                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                value={g.purchase_date || ''} 
-                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
-                                onClick={e => e.stopPropagation()}
-                                onKeyDown={e => handleKeyDown(e, idx, 'purchase_date')}
-                                onPaste={e => handlePaste(e, idx, 'purchase_date')}
-                                data-row={idx}
-                                data-field="purchase_date"
-                              />
-                              <Calendar 
-                                size={14} 
-                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  purchaseDatePickerRefs.current[g.id]?.showPicker();
-                                }}
-                              />
-                              <input 
-                                type="date"
-                                ref={el => { purchaseDatePickerRefs.current[g.id] = el; }}
-                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
-                                value={g.purchase_date ? g.purchase_date.replace(/\//g, '-') : ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)}
-                                onClick={e => e.stopPropagation()}
-                              />
-                            </div>
-                          ) : (
-                            <span style={{ color: '#475569', fontWeight: 500 }}>
-                              {g.purchase_date || '-'}
-                            </span>
-                          )}
-                        </td>
+
                         <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                           {editMode ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
@@ -1437,12 +1393,7 @@ export default function PurchaseRecords() {
                     </th>
                     {editMode && (
                       <>
-                        <th style={{ width: `${colWidths.purchaseDate}px` }}>
-                          <div className="th-inner justify-center">
-                            <span>購買結單日</span>
-                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('purchaseDate', e)} />
-                          </div>
-                        </th>
+
                         <th style={{ width: `${colWidths.closingDate}px` }}>
                           <div className="th-inner justify-center">
                             <span>官方結單日</span>
@@ -1663,45 +1614,7 @@ export default function PurchaseRecords() {
                         </td>
                         {editMode && (
                           <>
-                            <td style={{ textAlign: 'center' }}>
-                              {editMode ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                                  <input 
-                                    className="input" 
-                                    type="text" 
-                                    placeholder="YYYY/MM/DD"
-                                    style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                    value={g.purchase_date || ''} 
-                                    onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)} 
-                                    onClick={e => e.stopPropagation()}
-                                    onKeyDown={e => handleKeyDown(e, idx, 'purchase_date')}
-                                    onPaste={e => handlePaste(e, idx, 'purchase_date')}
-                                    data-row={idx}
-                                    data-field="purchase_date"
-                                  />
-                                  <Calendar 
-                                    size={14} 
-                                    style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      purchaseDatePickerRefs.current[g.id]?.showPicker();
-                                    }}
-                                  />
-                                  <input 
-                                    type="date"
-                                    ref={el => { purchaseDatePickerRefs.current[g.id] = el; }}
-                                    style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
-                                    value={g.purchase_date ? g.purchase_date.replace(/\//g, '-') : ''}
-                                    onChange={e => handleUpdateGroupField(g.id, 'purchase_date', e.target.value)}
-                                    onClick={e => e.stopPropagation()}
-                                  />
-                                </div>
-                              ) : (
-                                <span style={{ color: '#475569', fontWeight: 500 }}>
-                                  {g.purchase_date || '-'}
-                                </span>
-                              )}
-                            </td>
+
                             <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                               {editMode ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
