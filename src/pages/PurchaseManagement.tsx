@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
@@ -194,6 +194,23 @@ export default function PurchaseManagement() {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const originalValuesRef = useRef<Record<string, string>>({});
 
+  const catalogSortedIds = useMemo(() => {
+    const catalogVars = variants.filter(v => v.source !== 'manual');
+    catalogVars.sort((a, b) => {
+      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+    });
+    return catalogVars.map(v => v.id);
+  }, [variants]);
+
+  const getSortVal = useCallback((x: ProductVariant) => {
+    if (x.source === 'manual') {
+      return x.sort_order ?? 999999;
+    } else {
+      const catIdx = catalogSortedIds.indexOf(x.id);
+      return catIdx !== -1 ? catIdx * 10 : 999999;
+    }
+  }, [catalogSortedIds]);
+
   const handleManualFieldFocus = (id: string, field: 'variant_name' | 'myacg_item_code', currentVal: string) => {
     const key = `${id}_${field}`;
     if (originalValuesRef.current[key] === undefined) {
@@ -238,6 +255,10 @@ export default function PurchaseManagement() {
   const handleAddNewVariant = async () => {
     if (!id || !canWrite) return;
 
+    const existingSortOrders = variants.map(v => getSortVal(v));
+    const maxSortOrder = existingSortOrders.length > 0 ? Math.max(...existingSortOrders) : -1;
+    const newSortOrder = maxSortOrder + 1;
+
     const newVar: ProductVariant = {
       id: crypto.randomUUID(),
       product_group_id: id,
@@ -252,7 +273,7 @@ export default function PurchaseManagement() {
       private_manual_adjustment: null,
       purchased_manual_adjustment: null,
       note: '',
-      sort_order: variants.length,
+      sort_order: newSortOrder,
       catalog_missing: false,
       source: 'manual',
       source_type: 'manual',
@@ -270,6 +291,68 @@ export default function PurchaseManagement() {
       alert(`新增規格失敗：${err.message || err}`);
     }
   };
+
+  const handleMoveVariant = async (variantId: string, direction: 'up' | 'down') => {
+    if (!canWrite) return;
+    const idx = variants.findIndex(v => v.id === variantId);
+    if (idx === -1) return;
+
+    let newSortOrder = 0;
+    if (direction === 'up') {
+      if (idx === 0) return; // already at top
+      const prev = variants[idx - 1];
+      const wPrev = getSortVal(prev);
+      if (idx === 1) {
+        newSortOrder = wPrev - 1;
+      } else {
+        const prevPrev = variants[idx - 2];
+        const wPrevPrev = getSortVal(prevPrev);
+        newSortOrder = (wPrevPrev + wPrev) / 2;
+      }
+    } else {
+      if (idx === variants.length - 1) return; // already at bottom
+      const next = variants[idx + 1];
+      const wNext = getSortVal(next);
+      if (idx === variants.length - 2) {
+        newSortOrder = wNext + 1;
+      } else {
+        const nextNext = variants[idx + 2];
+        const wNextNext = getSortVal(nextNext);
+        newSortOrder = (wNext + wNextNext) / 2;
+      }
+    }
+
+    try {
+      const target = variants[idx];
+      await dataProvider.saveProductVariants([{ ...target, sort_order: newSortOrder }]);
+      await loadData();
+      setToastMessage('已成功移動規格位置');
+    } catch (err: any) {
+      console.error('Failed to move variant:', err);
+      alert(`移動規格失敗：${err.message || err}`);
+    }
+  };
+
+  const handleDeleteVariant = async (variantId: string) => {
+    if (!canWrite) return;
+    const target = variants.find(v => v.id === variantId);
+    if (!target || target.source !== 'manual') {
+      alert('只能刪除手動建立的規格！');
+      return;
+    }
+
+    if (window.confirm('確定刪除此手動規格？此操作不會刪除買動漫原始資料，但會移除此 ERP 手動建立規格。')) {
+      try {
+        await dataProvider.deleteProductVariant(variantId);
+        await loadData();
+        setToastMessage('已成功刪除手動規格');
+      } catch (err: any) {
+        console.error('Failed to delete variant:', err);
+        alert(`刪除規格失敗：${err.message || err}`);
+      }
+    }
+  };
+
   const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
   const [categoryMap, setCategoryMap] = useState<Map<string, ProductCategory>>(new Map());
 
@@ -472,8 +555,25 @@ export default function PurchaseManagement() {
     const groupCatIds = new Set(allCats.filter(c => c.product_group_id === id).map(c => c.id));
     const groupVars = allVars.filter(v => v.product_group_id === id || (v.product_category_id && groupCatIds.has(v.product_category_id)));
     
-    // Sort groupVars to match display order in worksheet (purely natural SKU order)
+    // Sort groupVars: Catalog variants sorted by SKU, manual variants placed by sort_order
+    const catalogVars = groupVars.filter(v => v.source !== 'manual');
+    catalogVars.sort((a, b) => {
+      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+    });
+    const tempCatalogIds = catalogVars.map(v => v.id);
+    
     groupVars.sort((a, b) => {
+      const getVal = (x: ProductVariant) => {
+        if (x.source === 'manual') {
+          return x.sort_order ?? 999999;
+        } else {
+          const catIdx = tempCatalogIds.indexOf(x.id);
+          return catIdx !== -1 ? catIdx * 10 : 999999;
+        }
+      };
+      const valA = getVal(a);
+      const valB = getVal(b);
+      if (valA !== valB) return valA - valB;
       return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
     });
 
@@ -1144,12 +1244,17 @@ export default function PurchaseManagement() {
   });
 
   Object.values(groupedVariants).forEach(groupItems => {
-    groupItems.sort((a, b) => compareNatural(a.myacg_item_code, b.myacg_item_code));
+    groupItems.sort((a, b) => {
+      const valA = getSortVal(a);
+      const valB = getSortVal(b);
+      if (valA !== valB) return valA - valB;
+      return compareNatural(a.myacg_item_code, b.myacg_item_code);
+    });
   });
 
   const getGroupSortOrder = (_key: string, items: ProductVariant[]) => {
     const itemSorts = items
-      .map(v => Number(v.sort_order ?? (v as any).import_sort_index ?? 9999))
+      .map(v => getSortVal(v))
       .filter(n => Number.isFinite(n));
 
     if (itemSorts.length > 0) {
@@ -1182,6 +1287,10 @@ export default function PurchaseManagement() {
   console.table(debugInfo);
 
   let sortedGroupEntries = Object.entries(groupedVariants).sort(([, itemsA], [, itemsB]) => {
+    const sortA = Math.min(...itemsA.map(x => getSortVal(x)));
+    const sortB = Math.min(...itemsB.map(x => getSortVal(x)));
+    if (sortA !== sortB) return sortA - sortB;
+
     const skuA = getGroupMinSku(itemsA);
     const skuB = getGroupMinSku(itemsB);
     return compareNatural(skuA, skuB);
@@ -1873,6 +1982,8 @@ export default function PurchaseManagement() {
                                     }}
                                     placeholder="可空白"
                                   />
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                                   <span style={{
                                     backgroundColor: '#f1f5f9',
                                     color: '#64748b',
@@ -1883,6 +1994,75 @@ export default function PurchaseManagement() {
                                   }}>
                                     [手動建立]
                                   </span>
+                                  {editMode && canWrite && (
+                                    <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleMoveVariant(v.id, 'up')} 
+                                        disabled={variants.indexOf(v) === 0}
+                                        style={{ 
+                                          padding: '2px 6px', 
+                                          fontSize: '11px', 
+                                          cursor: variants.indexOf(v) === 0 ? 'not-allowed' : 'pointer', 
+                                          border: '1px solid #cbd5e1', 
+                                          borderRadius: '4px', 
+                                          backgroundColor: '#f8fafc',
+                                          color: variants.indexOf(v) === 0 ? '#cbd5e1' : '#475569',
+                                          fontWeight: 500,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          height: '22px'
+                                        }}
+                                        title="上移"
+                                      >
+                                        ↑ 上移
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleMoveVariant(v.id, 'down')} 
+                                        disabled={variants.indexOf(v) === variants.length - 1}
+                                        style={{ 
+                                          padding: '2px 6px', 
+                                          fontSize: '11px', 
+                                          cursor: variants.indexOf(v) === variants.length - 1 ? 'not-allowed' : 'pointer', 
+                                          border: '1px solid #cbd5e1', 
+                                          borderRadius: '4px', 
+                                          backgroundColor: '#f8fafc',
+                                          color: variants.indexOf(v) === variants.length - 1 ? '#cbd5e1' : '#475569',
+                                          fontWeight: 500,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          height: '22px'
+                                        }}
+                                        title="下移"
+                                      >
+                                        ↓ 下移
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleDeleteVariant(v.id)} 
+                                        style={{ 
+                                          padding: '2px 6px', 
+                                          fontSize: '11px', 
+                                          cursor: 'pointer', 
+                                          border: '1px solid #fee2e2', 
+                                          borderRadius: '4px', 
+                                          backgroundColor: '#fef2f2', 
+                                          color: '#dc2626',
+                                          fontWeight: 500,
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          height: '22px'
+                                        }}
+                                        title="刪除"
+                                      >
+                                        刪除
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
@@ -2262,6 +2442,8 @@ export default function PurchaseManagement() {
                                             }}
                                             placeholder="可空白"
                                           />
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                                           <span style={{
                                             backgroundColor: '#f1f5f9',
                                             color: '#64748b',
@@ -2272,6 +2454,75 @@ export default function PurchaseManagement() {
                                           }}>
                                             [手動建立]
                                           </span>
+                                          {editMode && canWrite && (
+                                            <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                              <button 
+                                                type="button"
+                                                onClick={() => handleMoveVariant(v.id, 'up')} 
+                                                disabled={variants.indexOf(v) === 0}
+                                                style={{ 
+                                                  padding: '2px 6px', 
+                                                  fontSize: '11px', 
+                                                  cursor: variants.indexOf(v) === 0 ? 'not-allowed' : 'pointer', 
+                                                  border: '1px solid #cbd5e1', 
+                                                  borderRadius: '4px', 
+                                                  backgroundColor: '#f8fafc',
+                                                  color: variants.indexOf(v) === 0 ? '#cbd5e1' : '#475569',
+                                                  fontWeight: 500,
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  height: '22px'
+                                                }}
+                                                title="上移"
+                                              >
+                                                ↑ 上移
+                                              </button>
+                                              <button 
+                                                type="button"
+                                                onClick={() => handleMoveVariant(v.id, 'down')} 
+                                                disabled={variants.indexOf(v) === variants.length - 1}
+                                                style={{ 
+                                                  padding: '2px 6px', 
+                                                  fontSize: '11px', 
+                                                  cursor: variants.indexOf(v) === variants.length - 1 ? 'not-allowed' : 'pointer', 
+                                                  border: '1px solid #cbd5e1', 
+                                                  borderRadius: '4px', 
+                                                  backgroundColor: '#f8fafc',
+                                                  color: variants.indexOf(v) === variants.length - 1 ? '#cbd5e1' : '#475569',
+                                                  fontWeight: 500,
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  height: '22px'
+                                                }}
+                                                title="下移"
+                                              >
+                                                下移
+                                              </button>
+                                              <button 
+                                                type="button"
+                                                onClick={() => handleDeleteVariant(v.id)} 
+                                                style={{ 
+                                                  padding: '2px 6px', 
+                                                  fontSize: '11px', 
+                                                  cursor: 'pointer', 
+                                                  border: '1px solid #fee2e2', 
+                                                  borderRadius: '4px', 
+                                                  backgroundColor: '#fef2f2', 
+                                                  color: '#dc2626',
+                                                  fontWeight: 500,
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                  height: '22px'
+                                                }}
+                                                title="刪除"
+                                              >
+                                                刪除
+                                              </button>
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
                                     ) : (

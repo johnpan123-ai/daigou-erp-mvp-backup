@@ -378,6 +378,7 @@ export interface DatabaseAdapter {
   reparseProductVariants(): Promise<void>;
   reparseProductTitles(): Promise<void>;
   syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }>;
+  deleteProductVariant(id: string): Promise<void>;
   getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
   saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
 }
@@ -1294,6 +1295,12 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       variants[targetIdx] = { ...variants[targetIdx], ...patch };
       await this.saveProductVariants(variants);
     }
+  }
+
+  async deleteProductVariant(id: string): Promise<void> {
+    const variants = await this.getProductVariants();
+    const updated = variants.filter(v => v.id !== id);
+    await this.saveProductVariants(updated);
   }
 
   async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
@@ -2306,6 +2313,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       variants[targetIdx] = { ...variants[targetIdx], ...patch };
       await this.saveProductVariants(variants);
     }
+  }
+
+  async deleteProductVariant(id: string): Promise<void> {
+    const variants = await this.getProductVariants();
+    const updated = variants.filter(v => v.id !== id);
+    await this.saveProductVariants(updated);
   }
 
   async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {

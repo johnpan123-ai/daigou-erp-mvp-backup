@@ -1741,6 +1741,25 @@ export class SupabaseProvider implements IDataProvider {
     await db.saveProductVariants(updatedVariants);
   }
 
+  async deleteProductVariant(id: string): Promise<void> {
+    if (!(await this.canWriteCloud())) {
+      throw new Error("無權限，viewer 不可刪除商品規格");
+    }
+
+    const nowStr = new Date().toISOString();
+    const { error: varError } = await supabase
+      .from('product_variants')
+      .update({ deleted_at: nowStr })
+      .eq('id', id);
+
+    if (varError) {
+      console.error('[Supabase] Failed to soft delete variant:', varError);
+      throw varError;
+    }
+
+    await db.deleteProductVariant(id);
+  }
+
   async deleteProductGroups(groupIds: string[]): Promise<void> {
     if (!(await this.canWriteCloud())) {
       throw new Error("無權限，viewer 不可刪除商品群組");

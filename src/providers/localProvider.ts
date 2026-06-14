@@ -63,6 +63,9 @@ export class LocalProvider implements IDataProvider {
     const mergedVars = Array.from(allLocalVarsMap.values());
     return db.saveProductVariants(mergedVars);
   }
+  async deleteProductVariant(id: string): Promise<void> {
+    return db.deleteProductVariant(id);
+  }
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
     return db.updateProductVariantPatch(id, patch);
   }
