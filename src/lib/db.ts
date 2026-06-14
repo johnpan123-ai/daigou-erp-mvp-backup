@@ -113,15 +113,15 @@ export interface ProductVariant {
   myacg_manual_adjustment?: number;
   waca_auto_quantity?: number;
   waca_manual_adjustment?: number;
-  private_manual_adjustment?: number;
-  purchased_manual_adjustment?: number;
+  private_manual_adjustment?: number | null;
+  purchased_manual_adjustment?: number | null;
 
   note: string;
   sort_order: number;
 
   // Order Import specific flags
   catalog_missing?: boolean;
-  source?: "inventory_import" | "myacg_order_import";
+  source?: "inventory_import" | "myacg_order_import" | "manual";
 
   // Cost Sync fields
   default_jpy_cost?: number | null;
@@ -129,6 +129,13 @@ export interface ProductVariant {
 
   updated_at?: string;
   version?: number;
+
+  // Compatibility fields for manual variants
+  waca_sku?: string;
+  custom_sku?: string;
+  unit_price?: number;
+  source_type?: string;
+  group_id?: string;
 }
 
 export interface ImportBatch {
@@ -916,6 +923,9 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
+        if (v.source === 'manual') {
+          continue;
+        }
         const invItem = findMatchingInventoryItem(v, matchingItems);
         if (invItem) {
           let updated = false;
@@ -1268,7 +1278,9 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       'default_twd_cost',
       'note',
       'updated_at',
-      'version'
+      'version',
+      'variant_name',
+      'myacg_item_code'
     ]);
     for (const key of Object.keys(patch)) {
       if (!whitelist.has(key)) {
@@ -1294,7 +1306,9 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       'default_twd_cost',
       'note',
       'updated_at',
-      'version'
+      'version',
+      'variant_name',
+      'myacg_item_code'
     ]);
     for (const item of patches) {
       for (const key of Object.keys(item.patch)) {
@@ -1922,6 +1936,9 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
+        if (v.source === 'manual') {
+          continue;
+        }
         const invItem = findMatchingInventoryItem(v, matchingItems);
         if (invItem) {
           let updated = false;
@@ -2273,7 +2290,9 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       'default_twd_cost',
       'note',
       'updated_at',
-      'version'
+      'version',
+      'variant_name',
+      'myacg_item_code'
     ]);
     for (const key of Object.keys(patch)) {
       if (!whitelist.has(key)) {
@@ -2299,7 +2318,9 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       'default_twd_cost',
       'note',
       'updated_at',
-      'version'
+      'version',
+      'variant_name',
+      'myacg_item_code'
     ]);
     for (const item of patches) {
       for (const key of Object.keys(item.patch)) {

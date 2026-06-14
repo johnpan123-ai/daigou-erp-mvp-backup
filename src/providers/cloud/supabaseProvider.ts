@@ -795,7 +795,9 @@ export class SupabaseProvider implements IDataProvider {
       'default_twd_cost',
       'note',
       'updated_at',
-      'version'
+      'version',
+      'variant_name',
+      'myacg_item_code'
     ]);
     for (const key of Object.keys(patch)) {
       if (!whitelist.has(key)) {
@@ -851,7 +853,9 @@ export class SupabaseProvider implements IDataProvider {
       'default_twd_cost',
       'note',
       'updated_at',
-      'version'
+      'version',
+      'variant_name',
+      'myacg_item_code'
     ]);
     for (const item of patches) {
       for (const key of Object.keys(item.patch)) {

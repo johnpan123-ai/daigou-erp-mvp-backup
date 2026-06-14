@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
@@ -192,6 +192,84 @@ export default function PurchaseManagement() {
   const [group, setGroup] = useState<ProductGroup | null>(null);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const originalValuesRef = useRef<Record<string, string>>({});
+
+  const handleManualFieldFocus = (id: string, field: 'variant_name' | 'myacg_item_code', currentVal: string) => {
+    const key = `${id}_${field}`;
+    if (originalValuesRef.current[key] === undefined) {
+      originalValuesRef.current[key] = currentVal || '';
+    }
+  };
+
+  const handleManualFieldChange = (id: string, field: 'variant_name' | 'myacg_item_code', newVal: string) => {
+    setVariants(prev => prev.map(v => {
+      if (v.id === id) {
+        return { ...v, [field]: newVal };
+      }
+      return v;
+    }));
+  };
+
+  const handleManualFieldBlur = async (id: string, field: 'variant_name' | 'myacg_item_code', finalVal: string) => {
+    const key = `${id}_${field}`;
+    const origVal = originalValuesRef.current[key] ?? '';
+    const trimmedFinal = (finalVal || '').trim();
+    const trimmedOrig = (origVal || '').trim();
+
+    if (trimmedFinal !== trimmedOrig) {
+      console.log(`[Manual Variant Update] Save field ${field} for variant ${id}: "${trimmedOrig}" -> "${trimmedFinal}"`);
+      try {
+        await dataProvider.updateProductVariantPatch(id, { [field]: trimmedFinal });
+        originalValuesRef.current[key] = trimmedFinal;
+      } catch (err: any) {
+        console.error('Failed to update manual variant field:', err);
+        alert(`更新規格欄位失敗：${err.message || err}`);
+        setVariants(prev => prev.map(v => {
+          if (v.id === id) {
+            return { ...v, [field]: origVal };
+          }
+          return v;
+        }));
+      }
+    }
+    delete originalValuesRef.current[key];
+  };
+
+  const handleAddNewVariant = async () => {
+    if (!id || !canWrite) return;
+
+    const newVar: ProductVariant = {
+      id: crypto.randomUUID(),
+      product_group_id: id,
+      product_category_id: undefined,
+      variant_name: '',
+      myacg_item_code: '',
+      myacg_auto_quantity: 0,
+      effective_myacg_quantity: 0,
+      myacg_manual_adjustment: 0,
+      waca_auto_quantity: 0,
+      waca_manual_adjustment: 0,
+      private_manual_adjustment: null,
+      purchased_manual_adjustment: null,
+      note: '',
+      sort_order: variants.length,
+      catalog_missing: false,
+      source: 'manual',
+      source_type: 'manual',
+      product_title: group?.title || '',
+      default_jpy_cost: null,
+      default_twd_cost: null
+    };
+
+    try {
+      await dataProvider.saveProductVariants([newVar]);
+      await loadData();
+      setToastMessage('已成功手動新增規格');
+    } catch (err: any) {
+      console.error('Failed to save manual variant:', err);
+      alert(`新增規格失敗：${err.message || err}`);
+    }
+  };
   const [inventoryMap, setInventoryMap] = useState<Map<string, InventoryItem>>(new Map());
   const [categoryMap, setCategoryMap] = useState<Map<string, ProductCategory>>(new Map());
 
@@ -1530,6 +1608,27 @@ export default function PurchaseManagement() {
                 >
                   <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
                 </button>
+                {canWrite && (
+                  <button 
+                    className="btn btn-outline" 
+                    style={{ 
+                      flex: isMobile ? 1 : 'none',
+                      fontSize: '13px', 
+                      padding: '6px 12px', 
+                      height: '36px',
+                      backgroundColor: '#f8fafc', 
+                      color: '#475569', 
+                      borderColor: '#cbd5e1',
+                      opacity: editMode ? 1 : 0.6,
+                      cursor: editMode ? 'pointer' : 'not-allowed',
+                      whiteSpace: 'nowrap'
+                    }}
+                    disabled={!editMode}
+                    onClick={handleAddNewVariant}
+                  >
+                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增規格
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1721,25 +1820,105 @@ export default function PurchaseManagement() {
                       )}
                       <tbody>
                         <tr>
-                          <td style={{ padding: '10px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={catTitle}>
-                              <HighlightText text={catTitle} highlight={searchTerm} />
-                            </div>
-                            <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
-                              <span>SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} /></span>
-                              {v.catalog_missing && (
-                                <span style={{
-                                  backgroundColor: '#ffedd5',
-                                  color: '#ea580c',
-                                  padding: '1px 6px',
-                                  borderRadius: '4px',
-                                  fontWeight: 600,
-                                  fontSize: '10px'
-                                }}>
-                                  [清單無此項]
-                                </span>
-                              )}
-                            </div>
+                           <td style={{ padding: '10px 20px', textAlign: 'left' }}>
+                            {editMode && canWrite && v.source === 'manual' ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                                <input 
+                                  type="text" 
+                                  value={v.variant_name || ''} 
+                                  onChange={e => handleManualFieldChange(v.id, 'variant_name', e.target.value)}
+                                  onFocus={e => handleManualFieldFocus(v.id, 'variant_name', e.target.value)}
+                                  onBlur={e => handleManualFieldBlur(v.id, 'variant_name', e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                      (e.target as HTMLInputElement).blur();
+                                    }
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    height: '28px',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '4px',
+                                    fontSize: '14px',
+                                    fontWeight: 700,
+                                    color: '#1E293B',
+                                    backgroundColor: '#ffffff',
+                                    padding: '0 8px'
+                                  }}
+                                  placeholder="規格名稱"
+                                />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontSize: '11px', color: '#94A3B8' }}>SKU:</span>
+                                  <input 
+                                    type="text" 
+                                    value={v.myacg_item_code || ''} 
+                                    onChange={e => handleManualFieldChange(v.id, 'myacg_item_code', e.target.value)}
+                                    onFocus={e => handleManualFieldFocus(v.id, 'myacg_item_code', e.target.value)}
+                                    onBlur={e => handleManualFieldBlur(v.id, 'myacg_item_code', e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        (e.target as HTMLInputElement).blur();
+                                      }
+                                    }}
+                                    style={{
+                                      width: '150px',
+                                      height: '24px',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '4px',
+                                      fontSize: '11px',
+                                      fontWeight: 400,
+                                      color: '#1E293B',
+                                      backgroundColor: '#ffffff',
+                                      padding: '0 6px'
+                                    }}
+                                    placeholder="可空白"
+                                  />
+                                  <span style={{
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#64748b',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontWeight: 600,
+                                    fontSize: '10px'
+                                  }}>
+                                    [手動建立]
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={catTitle}>
+                                  <HighlightText text={catTitle} highlight={searchTerm} />
+                                </div>
+                                <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
+                                  <span>SKU: <HighlightText text={v.myacg_item_code || '(空白)'} highlight={searchTerm} /></span>
+                                  {v.catalog_missing && (
+                                    <span style={{
+                                      backgroundColor: '#ffedd5',
+                                      color: '#ea580c',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      fontWeight: 600,
+                                      fontSize: '10px'
+                                    }}>
+                                      [清單無此項]
+                                    </span>
+                                  )}
+                                  {v.source === 'manual' && (
+                                    <span style={{
+                                      backgroundColor: '#f1f5f9',
+                                      color: '#64748b',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      fontWeight: 600,
+                                      fontSize: '10px'
+                                    }}>
+                                      [手動建立]
+                                    </span>
+                                  )}
+                                </div>
+                              </>
+                            )}
                           </td>
                           {isDaili ? (
                             <>
@@ -2030,25 +2209,105 @@ export default function PurchaseManagement() {
 
                               return (
                                 <tr key={v.id} style={{ borderBottom: i === filteredList.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
-                                  <td style={{ padding: '12px 20px', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
-                                      <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name || v.product_title || '單品')} highlight={searchTerm} />
-                                    </div>
-                                    <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
-                                      <span>SKU: <HighlightText text={v.myacg_item_code} highlight={searchTerm} /></span>
-                                      {v.catalog_missing && (
-                                        <span style={{
-                                          backgroundColor: '#ffedd5',
-                                          color: '#ea580c',
-                                          padding: '1px 6px',
-                                          borderRadius: '4px',
-                                          fontWeight: 600,
-                                          fontSize: '10px'
-                                        }}>
-                                          [清單無此項]
-                                        </span>
-                                      )}
-                                    </div>
+                                  <td style={{ padding: '12px 20px', textAlign: 'left' }}>
+                                    {editMode && canWrite && v.source === 'manual' ? (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                                        <input 
+                                          type="text" 
+                                          value={v.variant_name || ''} 
+                                          onChange={e => handleManualFieldChange(v.id, 'variant_name', e.target.value)}
+                                          onFocus={e => handleManualFieldFocus(v.id, 'variant_name', e.target.value)}
+                                          onBlur={e => handleManualFieldBlur(v.id, 'variant_name', e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') {
+                                              (e.target as HTMLInputElement).blur();
+                                            }
+                                          }}
+                                          style={{
+                                            width: '100%',
+                                            height: '28px',
+                                            border: '1px solid #cbd5e1',
+                                            borderRadius: '4px',
+                                            fontSize: '14px',
+                                            fontWeight: 700,
+                                            color: '#1E293B',
+                                            backgroundColor: '#ffffff',
+                                            padding: '0 8px'
+                                          }}
+                                          placeholder="規格名稱"
+                                        />
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>SKU:</span>
+                                          <input 
+                                            type="text" 
+                                            value={v.myacg_item_code || ''} 
+                                            onChange={e => handleManualFieldChange(v.id, 'myacg_item_code', e.target.value)}
+                                            onFocus={e => handleManualFieldFocus(v.id, 'myacg_item_code', e.target.value)}
+                                            onBlur={e => handleManualFieldBlur(v.id, 'myacg_item_code', e.target.value)}
+                                            onKeyDown={e => {
+                                              if (e.key === 'Enter') {
+                                                (e.target as HTMLInputElement).blur();
+                                              }
+                                            }}
+                                            style={{
+                                              width: '150px',
+                                              height: '24px',
+                                              border: '1px solid #cbd5e1',
+                                              borderRadius: '4px',
+                                              fontSize: '11px',
+                                              fontWeight: 400,
+                                              color: '#1E293B',
+                                              backgroundColor: '#ffffff',
+                                              padding: '0 6px'
+                                            }}
+                                            placeholder="可空白"
+                                          />
+                                          <span style={{
+                                            backgroundColor: '#f1f5f9',
+                                            color: '#64748b',
+                                            padding: '1px 6px',
+                                            borderRadius: '4px',
+                                            fontWeight: 600,
+                                            fontSize: '10px'
+                                          }}>
+                                            [手動建立]
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
+                                          <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name || v.product_title || '單品')} highlight={searchTerm} />
+                                        </div>
+                                        <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
+                                          <span>SKU: <HighlightText text={v.myacg_item_code || '(空白)'} highlight={searchTerm} /></span>
+                                          {v.catalog_missing && (
+                                            <span style={{
+                                              backgroundColor: '#ffedd5',
+                                              color: '#ea580c',
+                                              padding: '1px 6px',
+                                              borderRadius: '4px',
+                                              fontWeight: 600,
+                                              fontSize: '10px'
+                                            }}>
+                                              [清單無此項]
+                                            </span>
+                                          )}
+                                          {v.source === 'manual' && (
+                                            <span style={{
+                                              backgroundColor: '#f1f5f9',
+                                              color: '#64748b',
+                                              padding: '1px 6px',
+                                              borderRadius: '4px',
+                                              fontWeight: 600,
+                                              fontSize: '10px'
+                                            }}>
+                                              [手動建立]
+                                            </span>
+                                          )}
+                                        </div>
+                                      </>
+                                    )}
                                   </td>
                                   {isDaili ? (
                                     <>
