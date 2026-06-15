@@ -448,7 +448,7 @@ export default function PurchaseManagement() {
 
   const getDisplayProductName = (v: ProductVariant): string => {
     const variantName = (v.variant_name || '').trim();
-    const productTitle = group?.title || '';
+    const productTitle = group?.normalized_title || group?.title || '';
     const isDaili = group?.listing_type === '代理版';
     
     if (isDaili) {
@@ -1228,6 +1228,20 @@ export default function PurchaseManagement() {
     }
   });
 
+  const getVariantDisplayLabel = (v: ProductVariant) => {
+    const dispName = (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name || '').trim();
+    if (dispName) return dispName;
+
+    const isSingleVariant = variants.length === 1;
+    const hasNoCategory = !v.product_category_id;
+
+    if (isSingleVariant || hasNoCategory) {
+      return group?.normalized_title || group?.title || '單品';
+    }
+
+    return '單品';
+  };
+
   const groupedVariants: Record<string, ProductVariant[]> = {};
   variants.forEach(v => {
     const parsed = parsedVariantsMap.get(v.id);
@@ -1326,7 +1340,7 @@ export default function PurchaseManagement() {
           </button>
           <span>團務與商品管理</span>
           <span>/</span>
-          <span className="text-primary font-medium">{isDaili ? cleanDailiTitle(group.title) : group.title}</span>
+          <span className="text-primary font-medium">{group.normalized_title || cleanDailiTitle(group.title) || group.title}</span>
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2528,7 +2542,7 @@ export default function PurchaseManagement() {
                                     ) : (
                                       <>
                                         <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
-                                          <HighlightText text={isDaili ? getDisplayProductName(v) : (parsedVariantsMap.get(v.id)?.variantDisplayName || v.variant_name || v.product_title || '單品')} highlight={searchTerm} />
+                                          <HighlightText text={isDaili ? getDisplayProductName(v) : getVariantDisplayLabel(v)} highlight={searchTerm} />
                                         </div>
                                         <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
                                           <span>SKU: <HighlightText text={v.myacg_item_code || '(空白)'} highlight={searchTerm} /></span>
@@ -2886,7 +2900,7 @@ export default function PurchaseManagement() {
                         <div key={item.variant.id} style={{ fontSize: '14px', color: '#475569', display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ color: '#94a3b8' }}>•</span>
                           <span>
-                            <HighlightText text={isDaili ? getDisplayProductName(item.variant) : (parsedVariantsMap.get(item.variant.id)?.variantDisplayName || item.variant.variant_name || item.variant.product_title || '單品')} highlight={searchTerm} />
+                            <HighlightText text={isDaili ? getDisplayProductName(item.variant) : getVariantDisplayLabel(item.variant)} highlight={searchTerm} />
                           </span>
                           <span style={{ fontWeight: 700, color: '#0F172A', marginLeft: '4px' }}>×{item.needToBuy}</span>
                         </div>
