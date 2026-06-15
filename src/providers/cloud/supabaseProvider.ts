@@ -83,7 +83,7 @@
 })();
 
 import { supabase } from './supabaseClient';
-import { db, calculateFinalMyacgDemand, normalizeProductTitle } from '../../lib/db';
+import { db, calculateFinalMyacgDemand, normalizeProductTitle, getBaseSku } from '../../lib/db';
 import { getProviderMode } from '../providerMode';
 import type { IDataProvider } from '../types';
 import type { 
@@ -946,6 +946,53 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     try {
+      // Clean up Supabase inventory_items residue before pushing new ones
+      const parentCodes = new Set<string>();
+      const normalizedTitles = new Set<string>();
+      for (const item of items) {
+        const pCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
+        if (pCode) {
+          parentCodes.add(pCode.trim().toUpperCase());
+        } else {
+          const normTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
+          if (normTitle) {
+            normalizedTitles.add(normTitle);
+          }
+        }
+      }
+
+      // 1. Delete by parentCode conditions
+      if (parentCodes.size > 0) {
+        const parentCodesArr = Array.from(parentCodes);
+        for (const pc of parentCodesArr) {
+          console.log(`[Inventory Sync] Deleting old residue in Supabase for parentCode: ${pc}`);
+          const { error: delErr1 } = await supabase
+            .from('inventory_items')
+            .delete()
+            .eq('myacg_item_code', pc);
+          const { error: delErr2 } = await supabase
+            .from('inventory_items')
+            .delete()
+            .like('myacg_item_code', `${pc}\\_%`);
+          if (delErr1 || delErr2) {
+            console.error(`[Inventory Sync WARNING] Failed to delete residue for parentCode ${pc}:`, delErr1, delErr2);
+          }
+        }
+      }
+
+      // 2. Delete by normalized_product_title fallback conditions
+      if (normalizedTitles.size > 0) {
+        const normalizedTitlesArr = Array.from(normalizedTitles);
+        console.log(`[Inventory Sync] Deleting old residue in Supabase for normalized titles:`, normalizedTitlesArr);
+        const { error: delErr } = await supabase
+          .from('inventory_items')
+          .delete()
+          .in('normalized_product_title', normalizedTitlesArr);
+        if (delErr) {
+          console.error(`[Inventory Sync WARNING] Failed to delete residue for normalized titles:`, delErr);
+        }
+      }
+
       const allInventory = await db.getInventory();
       if (allInventory.length === 0) {
         console.log('[Inventory Sync] push skipped: empty local array');

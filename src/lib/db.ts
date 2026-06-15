@@ -582,7 +582,44 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     const current = await this.getInventory();
-    const currentMap = new Map(current.map(i => [i.myacg_item_code, i]));
+    
+    // Collect parentCodes and normalizedTitles from incoming items to delete old residues
+    const parentCodes = new Set<string>();
+    const normalizedTitles = new Set<string>();
+    for (const item of items) {
+      const pCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
+      if (pCode) {
+        parentCodes.add(pCode.trim().toUpperCase());
+      } else {
+        const normTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
+        if (normTitle) {
+          normalizedTitles.add(normTitle);
+        }
+      }
+    }
+
+    const parentCodesArr = Array.from(parentCodes);
+    const normalizedTitlesArr = Array.from(normalizedTitles);
+
+    const filteredCurrent = current.filter(x => {
+      if (parentCodesArr.length > 0) {
+        const codeUpper = (x.myacg_item_code || '').trim().toUpperCase();
+        const parentUpper = (x.myacg_parent_code || '').trim().toUpperCase();
+        for (const pc of parentCodesArr) {
+          if (parentUpper === pc || codeUpper === pc || codeUpper.startsWith(pc + '_')) {
+            return false;
+          }
+        }
+      } else {
+        const normTitle = x.normalized_product_title || normalizeProductTitle(x.product_title);
+        if (normTitle && normalizedTitlesArr.includes(normTitle)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const currentMap = new Map(filteredCurrent.map(i => [i.myacg_item_code, i]));
     
     let newCount = 0;
     let updatedCount = 0;
@@ -1655,9 +1692,45 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     const current = await this.getInventory();
     
+    // Collect parentCodes and normalizedTitles from incoming items to delete old residues
+    const parentCodes = new Set<string>();
+    const normalizedTitles = new Set<string>();
+    for (const item of items) {
+      const pCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
+      if (pCode) {
+        parentCodes.add(pCode.trim().toUpperCase());
+      } else {
+        const normTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
+        if (normTitle) {
+          normalizedTitles.add(normTitle);
+        }
+      }
+    }
+
+    const parentCodesArr = Array.from(parentCodes);
+    const normalizedTitlesArr = Array.from(normalizedTitles);
+
+    const filteredCurrent = current.filter(x => {
+      if (parentCodesArr.length > 0) {
+        const codeUpper = (x.myacg_item_code || '').trim().toUpperCase();
+        const parentUpper = (x.myacg_parent_code || '').trim().toUpperCase();
+        for (const pc of parentCodesArr) {
+          if (parentUpper === pc || codeUpper === pc || codeUpper.startsWith(pc + '_')) {
+            return false;
+          }
+        }
+      } else {
+        const normTitle = x.normalized_product_title || normalizeProductTitle(x.product_title);
+        if (normTitle && normalizedTitlesArr.includes(normTitle)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
     // Map of existing inventory items, keyed by their inventory_key
     const currentMap = new Map<string, InventoryItem>();
-    for (const i of current) {
+    for (const i of filteredCurrent) {
       const key = i.inventory_key || `${normalizeProductTitle(i.product_title)}::${i.myacg_item_code}::${i.raw_variant_name || ''}`;
       i.inventory_key = key;
       currentMap.set(key, i);
