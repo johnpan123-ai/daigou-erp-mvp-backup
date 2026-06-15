@@ -71,6 +71,17 @@ export default function Settings() {
     await dataProvider.exportData();
   };
 
+  const handleExportExcel = async () => {
+    try {
+      const { exportToExcelBackup } = await import('../utils/excelExport');
+      await exportToExcelBackup(user?.email);
+      alert('Excel 備份匯出完成');
+    } catch (err: any) {
+      console.error('Excel export failed:', err);
+      alert('Excel 備份匯出失敗，請查看 Console');
+    }
+  };
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -201,6 +212,16 @@ export default function Settings() {
               </div>
               <button className="btn btn-outline" onClick={handleExport}>
                 <Download size={16} /> 匯出 JSON
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+              <div>
+                <div className="font-medium" style={{ marginBottom: '4px' }}>匯出 Excel 備份</div>
+                <div className="text-xs text-muted">下載多分頁格式的試算表備份（用於核對與手工修復）。</div>
+              </div>
+              <button className="btn btn-outline" onClick={handleExportExcel}>
+                <Download size={16} /> 匯出 Excel
               </button>
             </div>
 
