@@ -247,13 +247,32 @@ export default function Settings() {
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新解析商品規格</div>
                 <div className="text-xs text-muted">修正因為舊版匯入導致的規格未正確切分問題。</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={async () => {
-                if (confirm('確定要重新解析商品規格？不會刪除任何訂單與採購資料。')) {
-                  await dataProvider.reparseProductVariants();
-                  alert('解析完成');
-                  await loadCounts();
-                }
-              }}>
+              <button 
+                className="btn" 
+                style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} 
+                disabled={currentMode === 'cloud' && role !== 'owner'} 
+                onClick={async () => {
+                  const isCloud = currentMode === 'cloud';
+                  const confirmMsg = isCloud
+                    ? '你目前在雲端模式，重新解析會批次更新商品分類與規格名稱，但不會刪除訂單、採購批次、私下登記。請確認你已先匯出 JSON / Excel 備份。是否繼續？'
+                    : '確定要重新解析商品規格？不會刪除任何訂單與採購資料。';
+
+                  if (!window.confirm(confirmMsg)) return;
+
+                  try {
+                    await dataProvider.reparseProductVariants();
+                    if (isCloud) {
+                      alert('重新解析完成，請重新整理頁面確認結果。');
+                    } else {
+                      alert('解析完成');
+                    }
+                    await loadCounts();
+                  } catch (err) {
+                    console.error('Reparse failed:', err);
+                    alert('重新解析失敗，請查看 Console');
+                  }
+                }}
+              >
                 重新解析
               </button>
             </div>
