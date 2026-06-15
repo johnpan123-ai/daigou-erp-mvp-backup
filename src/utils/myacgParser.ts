@@ -76,7 +76,20 @@ const getValueByKeys = (rowData: any, keys: string[]): string => {
   return '';
 };
 
-const codeKeys = ['商品編號', '商品代碼', '商品序號', '商品代號', '商品ID', 'SKU'];
+const codeKeys = [
+  '子編號(商品編號)',
+  '子編號',
+  '商品編號',
+  '商品代碼',
+  '商品序號',
+  '商品代號',
+  '商品ID',
+  'SKU'
+];
+const parentCodeKeys = [
+  '主編號(多規格編號)',
+  '主編號'
+];
 const titleKeys = ['商品名稱', '名稱', '標題'];
 const specKeys = ['規格項目', '規格', '項目', '規格項目'];
 const typeKeys = ['商品種類', '種類', '商品類型', '類型'];
@@ -127,6 +140,7 @@ function parseHtmlTable(html: string): InventoryItem[] {
     if (code && title) {
       items.push({
         myacg_item_code: code,
+        myacg_parent_code: getValueByKeys(rowData, parentCodeKeys) || undefined,
         product_id: code,
         product_title: title,
         raw_variant_name: getValueByKeys(rowData, specKeys),
@@ -168,6 +182,7 @@ async function parseXlsxFile(file: File): Promise<InventoryItem[]> {
 
           return {
             myacg_item_code: code,
+            myacg_parent_code: getValueByKeys(rowData, parentCodeKeys) || undefined,
             product_id: code,
             product_title: title,
             raw_variant_name: getValueByKeys(rowData, specKeys),

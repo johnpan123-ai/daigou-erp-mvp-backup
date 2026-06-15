@@ -163,7 +163,11 @@ export default function Inventory() {
       const syncStats = await dataProvider.syncProductGroupsWithInventory();
       await loadItems();
       
-      const report = `本次匯入結果：\n- SKU 總筆數：${stats.total}\n- 新增 SKU：${stats.newCount}\n- 更新 SKU：${stats.updatedCount}\n- 補齊既有訂購紀錄 SKU：${syncStats.filledVariantsCount}\n- 受影響 ProductGroup：${syncStats.affectedGroupsCount}`;
+      let report = `本次匯入結果：\n- SKU 總筆數：${stats.total}\n- 新增 SKU：${stats.newCount}\n- 更新 SKU：${stats.updatedCount}\n- 補齊既有訂購紀錄 SKU：${syncStats.filledVariantsCount}\n- 受影響 ProductGroup：${syncStats.affectedGroupsCount}`;
+
+      if (syncStats.upgradedSkusCount && syncStats.upgradedSkusCount > 0) {
+        report += `\n\n已自動升級 ${syncStats.upgradedSkusCount} 筆舊 SKU 為新版子編號，UUID 與採購關聯維持不變。`;
+      }
 
       alert(report);
     } catch (err) {

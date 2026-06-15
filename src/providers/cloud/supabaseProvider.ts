@@ -1684,7 +1684,7 @@ export class SupabaseProvider implements IDataProvider {
     await this.saveProductGroups(groups);
   }
 
-  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
+  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount?: number }> {
     const result = await db.syncProductGroupsWithInventory();
     const categories = await db.getProductCategories();
     const variants = await db.getProductVariants({ recalc: true });

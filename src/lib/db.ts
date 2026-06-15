@@ -1,6 +1,7 @@
 export interface InventoryItem {
   import_sort_index?: number;
   myacg_item_code: string; // PK
+  myacg_parent_code?: string;
   product_id?: string;
   product_title: string;
   normalized_product_title?: string;
@@ -397,7 +398,7 @@ export interface DatabaseAdapter {
   createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void>;
   reparseProductVariants(): Promise<void>;
   reparseProductTitles(): Promise<void>;
-  syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }>;
+  syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount?: number }>;
   deleteProductVariant(id: string): Promise<void>;
   getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
   saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
@@ -910,7 +911,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
   }
 
   
-  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
+  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount: number }> {
     const allInventory = await this.getInventory();
     const groups = await this.getProductGroups();
     const variants = await this.getProductVariants();
@@ -919,6 +920,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     let filledVariantsCount = 0;
     let affectedGroupsCount = 0;
     let anyGroupChanged = false;
+    let upgradedSkusCount = 0;
 
     for (const group of groups) {
       const groupNormTitle = group.normalized_title || normalizeProductTitle(group.title);
@@ -935,13 +937,65 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       const existingVariants = variants.filter(v => v.product_group_id === group.id || 
          (v.product_category_id && categories.some(c => c.id === v.product_category_id && c.product_group_id === group.id)));
 
+      let groupChanged = false;
+      const ambiguousItemCodes = new Set<string>();
+
+      // SKU Auto-Upgrade Phase for new catalog format
+      for (const item of matchingItems) {
+        const hasExactMatch = existingVariants.some(v => v.myacg_item_code === item.myacg_item_code);
+        if (hasExactMatch) continue;
+
+        const parentCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
+        if (!parentCode) continue;
+
+        const cleanParent = parentCode.trim().toUpperCase();
+        const cleanRaw = item.raw_variant_name?.trim();
+
+        // 1. Find candidates matching strict raw_variant_name and parent code prefix, excluding manual source
+        const candidates = existingVariants.filter(v => {
+          if (v.source === 'manual') return false;
+          
+          const vCode = v.myacg_item_code.trim().toUpperCase();
+          const prefixMatch = vCode === cleanParent || vCode.startsWith(cleanParent + '_');
+          const nameMatch = v.raw_variant_name?.trim() === cleanRaw;
+          return prefixMatch && nameMatch;
+        });
+
+        if (candidates.length === 1) {
+          const matchVar = candidates[0];
+          const oldCode = matchVar.myacg_item_code;
+          matchVar.myacg_item_code = item.myacg_item_code;
+          groupChanged = true;
+          anyGroupChanged = true;
+          upgradedSkusCount++;
+          console.log(`[SKU Auto Upgrade] Variant ${matchVar.id} SKU upgraded: ${oldCode} -> ${item.myacg_item_code}`);
+        } else if (candidates.length > 1) {
+          ambiguousItemCodes.add(item.myacg_item_code);
+          console.warn(`[SKU Auto Upgrade WARNING] Ambiguous match: multiple candidates found for item ${item.myacg_item_code} and spec "${item.raw_variant_name}"`);
+        } else {
+          // candidates.length === 0: check if variant_name matches (but raw_variant_name does not)
+          const nameMatchCandidates = existingVariants.filter(v => {
+            if (v.source === 'manual') return false;
+            
+            const vCode = v.myacg_item_code.trim().toUpperCase();
+            const prefixMatch = vCode === cleanParent || vCode.startsWith(cleanParent + '_');
+            const nameMatch = v.variant_name?.trim() === cleanRaw;
+            return prefixMatch && nameMatch;
+          });
+
+          if (nameMatchCandidates.length > 0) {
+            ambiguousItemCodes.add(item.myacg_item_code);
+            console.warn(`[SKU Auto Upgrade WARNING] Ambiguous match: variant_name matched but raw_variant_name did not for item ${item.myacg_item_code} and spec "${item.raw_variant_name}"`);
+          }
+        }
+      }
+
       const missingItems = matchingItems.filter(item => {
+        if (ambiguousItemCodes.has(item.myacg_item_code)) return false;
         const matchingVar = findMatchingVariant(item, existingVariants, group.id);
         return !matchingVar;
       });
       
-      let groupChanged = false;
-
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
         if (v.source === 'manual') {
@@ -1103,7 +1157,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     // Recalculate auto quantities based on new inventory sold numbers
     await this.getProductVariants({ recalc: true });
 
-    return { filledVariantsCount, affectedGroupsCount };
+    return { filledVariantsCount, affectedGroupsCount, upgradedSkusCount };
   }
 
   async reparseProductTitles(): Promise<void> {
@@ -1929,7 +1983,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     if (variantsUpdated) await this.saveProductVariants(variants);
   }
 
-  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
+  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount: number }> {
     const allInventory = await this.getInventory();
     const groups = await this.getProductGroups();
     const variants = await this.getProductVariants();
@@ -1938,6 +1992,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     let filledVariantsCount = 0;
     let affectedGroupsCount = 0;
     let anyGroupChanged = false;
+    let upgradedSkusCount = 0;
 
     for (const group of groups) {
       const groupNormTitle = group.normalized_title || normalizeProductTitle(group.title);
@@ -1954,12 +2009,64 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       const existingVariants = variants.filter(v => v.product_group_id === group.id || 
          (v.product_category_id && categories.some(c => c.id === v.product_category_id && c.product_group_id === group.id)));
 
+      let groupChanged = false;
+      const ambiguousItemCodes = new Set<string>();
+
+      // SKU Auto-Upgrade Phase for new catalog format
+      for (const item of matchingItems) {
+        const hasExactMatch = existingVariants.some(v => v.myacg_item_code === item.myacg_item_code);
+        if (hasExactMatch) continue;
+
+        const parentCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
+        if (!parentCode) continue;
+
+        const cleanParent = parentCode.trim().toUpperCase();
+        const cleanRaw = item.raw_variant_name?.trim();
+
+        // 1. Find candidates matching strict raw_variant_name and parent code prefix, excluding manual source
+        const candidates = existingVariants.filter(v => {
+          if (v.source === 'manual') return false;
+          
+          const vCode = v.myacg_item_code.trim().toUpperCase();
+          const prefixMatch = vCode === cleanParent || vCode.startsWith(cleanParent + '_');
+          const nameMatch = v.raw_variant_name?.trim() === cleanRaw;
+          return prefixMatch && nameMatch;
+        });
+
+        if (candidates.length === 1) {
+          const matchVar = candidates[0];
+          const oldCode = matchVar.myacg_item_code;
+          matchVar.myacg_item_code = item.myacg_item_code;
+          groupChanged = true;
+          anyGroupChanged = true;
+          upgradedSkusCount++;
+          console.log(`[SKU Auto Upgrade] Variant ${matchVar.id} SKU upgraded: ${oldCode} -> ${item.myacg_item_code}`);
+        } else if (candidates.length > 1) {
+          ambiguousItemCodes.add(item.myacg_item_code);
+          console.warn(`[SKU Auto Upgrade WARNING] Ambiguous match: multiple candidates found for item ${item.myacg_item_code} and spec "${item.raw_variant_name}"`);
+        } else {
+          // candidates.length === 0: check if variant_name matches (but raw_variant_name does not)
+          const nameMatchCandidates = existingVariants.filter(v => {
+            if (v.source === 'manual') return false;
+            
+            const vCode = v.myacg_item_code.trim().toUpperCase();
+            const prefixMatch = vCode === cleanParent || vCode.startsWith(cleanParent + '_');
+            const nameMatch = v.variant_name?.trim() === cleanRaw;
+            return prefixMatch && nameMatch;
+          });
+
+          if (nameMatchCandidates.length > 0) {
+            ambiguousItemCodes.add(item.myacg_item_code);
+            console.warn(`[SKU Auto Upgrade WARNING] Ambiguous match: variant_name matched but raw_variant_name did not for item ${item.myacg_item_code} and spec "${item.raw_variant_name}"`);
+          }
+        }
+      }
+
       const missingItems = matchingItems.filter(item => {
+        if (ambiguousItemCodes.has(item.myacg_item_code)) return false;
         const matchingVar = findMatchingVariant(item, existingVariants, group.id);
         return !matchingVar;
       });
-      
-      let groupChanged = false;
 
       // 1. Process existing variants: check if they are missing from catalog and update sort_order
       for (const v of existingVariants) {
@@ -2122,7 +2229,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     // Recalculate auto quantities based on new inventory sold numbers
     await this.getProductVariants({ recalc: true });
 
-    return { filledVariantsCount, affectedGroupsCount };
+    return { filledVariantsCount, affectedGroupsCount, upgradedSkusCount };
   }
 
   async reparseProductTitles(): Promise<void> {

@@ -144,7 +144,7 @@ export class LocalProvider implements IDataProvider {
   async reparseProductTitles(): Promise<void> {
     return db.reparseProductTitles();
   }
-  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number }> {
+  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount?: number }> {
     return db.syncProductGroupsWithInventory();
   }
   async deleteProductGroup(groupId: string): Promise<void> {
