@@ -163,11 +163,25 @@ export default function Inventory() {
       const syncStats = await dataProvider.syncProductGroupsWithInventory();
       await loadItems();
       
-      let report = `本次匯入結果：\n- SKU 總筆數：${stats.total}\n- 新增 SKU：${stats.newCount}\n- 更新 SKU：${stats.updatedCount}\n- 補齊既有訂購紀錄 SKU：${syncStats.filledVariantsCount}\n- 受影響 ProductGroup：${syncStats.affectedGroupsCount}`;
+      const report = `📊【買動漫 Catalog 匯入結果】
 
-      if (syncStats.upgradedSkusCount && syncStats.upgradedSkusCount > 0) {
-        report += `\n\n已自動升級 ${syncStats.upgradedSkusCount} 筆舊 SKU 為新版子編號，UUID 與採購關聯維持不變。`;
-      }
+一、Catalog 暫存主檔
+
+* 檔案原始列數：${stats.total} 筆
+* 本次新增到暫存主檔：${stats.newCount} 筆
+* 本次更新暫存主檔：${stats.updatedCount} 筆
+  註：這裡只是買動漫商品主檔快取，不代表訂購紀錄表新增規格。
+
+二、訂購紀錄表同步
+
+* 受影響商品群組：${syncStats.affectedGroupsCount} 組
+* 實際新增規格：${syncStats.filledVariantsCount} 筆
+* 舊 SKU 自動升級為新子編號：${syncStats.upgradedSkusCount || 0} 筆
+
+三、檢查提醒
+
+* 若「實際新增規格」不是預期數字，請先不要繼續匯入其他資料
+* 若「舊 SKU 自動升級」有數字，代表 UUID 與採購關聯維持不變`;
 
       alert(report);
     } catch (err) {
