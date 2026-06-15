@@ -206,35 +206,55 @@ export function determineListingType(title: string): string {
 export function resolveMyacgSpecs(rawNames: string[]): Record<string, { category_label: string | null, variant_label: string }> {
   const result: Record<string, { category_label: string | null, variant_label: string }> = {};
   
-  // Step 1: Count prefix frequencies
+  // 1. Filter and clean names
+  const cleanNames = rawNames.map(n => (n || '').trim()).filter(Boolean);
+  
+  // 2. Count prefix frequencies (by word combinations)
   const prefixCounts: Record<string, number> = {};
-  rawNames.forEach(name => {
-    if (!name) return;
-    const parts = name.trim().split(/\s+/);
-    if (parts.length > 1) {
-      prefixCounts[parts[0]] = (prefixCounts[parts[0]] || 0) + 1;
+  cleanNames.forEach(name => {
+    const parts = name.split(/\s+/);
+    // Generate prefixes from 1 word up to N-1 words
+    for (let i = 1; i < parts.length; i++) {
+      const prefix = parts.slice(0, i).join(' ');
+      prefixCounts[prefix] = (prefixCounts[prefix] || 0) + 1;
     }
   });
 
-  // Step 2: Resolve
+  // 3. Find the longest prefix with count > 1 for each name
+  cleanNames.forEach(name => {
+    const parts = name.split(/\s+/);
+    let bestPrefix: string | null = null;
+    let maxWords = 0;
+
+    for (let i = 1; i < parts.length; i++) {
+      const prefix = parts.slice(0, i).join(' ');
+      if (prefixCounts[prefix] > 1) {
+        if (i > maxWords) {
+          maxWords = i;
+          bestPrefix = prefix;
+        }
+      }
+    }
+
+    if (bestPrefix) {
+      result[name] = {
+        category_label: bestPrefix,
+        variant_label: parts.slice(maxWords).join(' ')
+      };
+    } else {
+      result[name] = {
+        category_label: null,
+        variant_label: name
+      };
+    }
+  });
+
+  // Fallback for empty or unmatched names
   rawNames.forEach(name => {
     if (!name) {
       result[''] = { category_label: null, variant_label: '' };
-      return;
-    }
-    const parts = name.trim().split(/\s+/);
-    if (parts.length > 1 && prefixCounts[parts[0]] > 1) {
-      // Multiple items share this prefix -> category
-      result[name] = {
-        category_label: parts[0],
-        variant_label: parts.slice(1).join(' ')
-      };
-    } else {
-      // Unique or no prefix -> single item
-      result[name] = {
-        category_label: null,
-        variant_label: name.trim()
-      };
+    } else if (!result[name]) {
+      result[name] = { category_label: null, variant_label: name.trim() };
     }
   });
 
