@@ -961,22 +961,17 @@ export class SupabaseProvider implements IDataProvider {
         }
       }
 
-      // 1. Delete by parentCode conditions
+      // 1. Delete by parentCode conditions using a single regex match query for optimal performance
       if (parentCodes.size > 0) {
         const parentCodesArr = Array.from(parentCodes);
-        for (const pc of parentCodesArr) {
-          console.log(`[Inventory Sync] Deleting old residue in Supabase for parentCode: ${pc}`);
-          const { error: delErr1 } = await supabase
-            .from('inventory_items')
-            .delete()
-            .eq('myacg_item_code', pc);
-          const { error: delErr2 } = await supabase
-            .from('inventory_items')
-            .delete()
-            .like('myacg_item_code', `${pc}\\_%`);
-          if (delErr1 || delErr2) {
-            console.error(`[Inventory Sync WARNING] Failed to delete residue for parentCode ${pc}:`, delErr1, delErr2);
-          }
+        const regexPattern = `^(${parentCodesArr.join('|')})(_.*)?$`;
+        console.log(`[Inventory Sync] Deleting old residue in Supabase using regex pattern: ${regexPattern}`);
+        const { error: delErr } = await supabase
+          .from('inventory_items')
+          .delete()
+          .filter('myacg_item_code', 'match', regexPattern);
+        if (delErr) {
+          console.error(`[Inventory Sync WARNING] Failed to delete residue for parentCodes:`, delErr);
         }
       }
 
