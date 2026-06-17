@@ -456,14 +456,16 @@ export default function PurchaseManagement() {
       if (variantName && variantName !== '單品' && variantName !== '一箱') {
         return variantName;
       }
-      // 2. cleanDailiTitle(product_title)
-      const cleaned = cleanDailiTitle(productTitle);
+      // Use variant specific product_title first for proxy version fallback
+      const targetTitle = v.product_title || productTitle;
+      // 2. cleanDailiTitle(targetTitle)
+      const cleaned = cleanDailiTitle(targetTitle);
       if (cleaned) {
         return cleaned;
       }
-      // 3. product_title
-      if (productTitle) {
-        return productTitle;
+      // 3. targetTitle
+      if (targetTitle) {
+        return targetTitle;
       }
       // 4. group.title
       if (group?.title) {
