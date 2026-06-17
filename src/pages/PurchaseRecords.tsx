@@ -109,7 +109,6 @@ export default function PurchaseRecords() {
   });
 
   const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'all'>('progress');
-  const [onlyShowShortage, setOnlyShowShortage] = useState<boolean>(true);
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
 
   const checkIsGroupClosed = (g: ProductGroup): boolean => {
@@ -122,6 +121,21 @@ export default function PurchaseRecords() {
       return isClosedVal === true;
     }
     return false;
+  };
+
+  const getTodayStr = (): string => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const checkIsGroupOverdue = (g: ProductGroup): boolean => {
+    if (!g.closing_date) return false;
+    const todayStr = getTodayStr();
+    const cleanDate = g.closing_date.replace(/\//g, '-');
+    return cleanDate < todayStr;
   };
 
   useEffect(() => {
@@ -372,7 +386,7 @@ export default function PurchaseRecords() {
   const getClosingDateStyle = (closingDate: string | undefined | null) => {
     if (!closingDate) return { text: '-', color: '#64748b', fontWeight: 400 };
     
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayStr();
     const cleanDate = closingDate.replace(/\//g, '-');
     if (cleanDate < todayStr) {
       return { text: closingDate, color: '#ef4444', fontWeight: 700 };
@@ -453,8 +467,7 @@ export default function PurchaseRecords() {
 
     let result = baseGroups.filter(g => {
       if (checkIsGroupClosed(g)) return false; // Must be in-progress
-      const stats = getGroupDemandAndPurchased(g.id);
-      return stats.gap <= 0;
+      return checkIsGroupOverdue(g);
     });
 
     // Sort: 1st gap desc, 2nd closing_date asc
@@ -480,15 +493,10 @@ export default function PurchaseRecords() {
       result = result.filter(g => {
         if (checkIsGroupClosed(g)) return false;
         
-        const stats = getGroupDemandAndPurchased(g.id);
-        const isCompleted = stats.gap <= 0;
-        
-        if (isCompleted) {
-          return false; // Collapsed/收納
-        }
-        
-        if (onlyShowShortage) {
-          return stats.gap > 0;
+        // Overdue items go to the bottom section
+        const isOverdue = checkIsGroupOverdue(g);
+        if (isOverdue) {
+          return false;
         }
         
         return true;
@@ -502,12 +510,26 @@ export default function PurchaseRecords() {
       result.sort((a, b) => {
         const statsA = getGroupDemandAndPurchased(a.id);
         const statsB = getGroupDemandAndPurchased(b.id);
-        if (statsB.gap !== statsA.gap) {
-          return statsB.gap - statsA.gap; // 缺貨數由大到小
+        
+        const hasGapA = statsA.gap > 0;
+        const hasGapB = statsB.gap > 0;
+        
+        // 1. gap > 0 comes first
+        if (hasGapA !== hasGapB) {
+          return hasGapA ? -1 : 1;
         }
+        
+        // 2. if both have gap > 0, sort by gap descending
+        if (hasGapA) {
+          if (statsB.gap !== statsA.gap) {
+            return statsB.gap - statsA.gap;
+          }
+        }
+        
+        // 3. sort by closing date ascending
         const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB); // 結單日由近到遠
+        return dateA.localeCompare(dateB);
       });
     } else {
       result.sort((a, b) => {
@@ -535,8 +557,17 @@ export default function PurchaseRecords() {
     }
 
     return result;
-  }, [baseGroups, secondaryTab, onlyShowShortage, sortMode, variants, categories, batchItems, privateOrderItems, inventory]);
+  }, [baseGroups, secondaryTab, sortMode, variants, categories, batchItems, privateOrderItems, inventory]);
 
+  useEffect(() => {
+    if (searchTerm.trim().length > 0) {
+      if (completedGroups.length > 0) {
+        setCompletedExpanded(true);
+      }
+    } else {
+      setCompletedExpanded(false);
+    }
+  }, [searchTerm, completedGroups.length]);
 
   useEffect(() => {
     loadData();
@@ -965,30 +996,7 @@ export default function PurchaseRecords() {
           </button>
         </div>
 
-        {secondaryTab === 'progress' && (
-          <label style={{ 
-            display: 'inline-flex', 
-            alignItems: 'center', 
-            gap: '6px', 
-            fontSize: '13px', 
-            fontWeight: 600, 
-            color: '#475569',
-            cursor: 'pointer',
-            userSelect: 'none'
-          }}>
-            <input
-              type="checkbox"
-              checked={onlyShowShortage}
-              onChange={e => setOnlyShowShortage(e.target.checked)}
-              style={{
-                width: '16px',
-                height: '16px',
-                cursor: 'pointer'
-              }}
-            />
-            只顯示缺貨商品
-          </label>
-        )}
+
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
@@ -1075,7 +1083,7 @@ export default function PurchaseRecords() {
           <span>筆商品符合條件</span>
           {secondaryTab === 'progress' && (
             <span style={{ color: '#64748b', fontSize: '12px' }}>
-              (待採購: {filteredAndSortedGroups.length} 筆 / 已完成: {completedGroups.length} 筆)
+              (進行中: {filteredAndSortedGroups.length} 筆 / 已過結單日: {completedGroups.length} 筆)
             </span>
           )}
         </div>
@@ -1922,7 +1930,7 @@ export default function PurchaseRecords() {
     
       return (
         <div className="flex-col gap-md">
-          {(filteredAndSortedGroups.length === 0 && (secondaryTab !== 'progress' || onlyShowShortage || completedGroups.length === 0)) ? (
+          {(filteredAndSortedGroups.length === 0 && completedGroups.length === 0) ? (
             <EmptyState
               icon={Receipt}
               title={groups.length === 0 ? "尚未有訂購紀錄" : "找不到符合的紀錄"}
@@ -1938,7 +1946,7 @@ export default function PurchaseRecords() {
                 </div>
               )}
     
-              {secondaryTab === 'progress' && !onlyShowShortage && completedGroups.length > 0 && (
+              {secondaryTab === 'progress' && completedGroups.length > 0 && (
                 <div style={{ marginTop: '8px' }}>
                   <button
                     onClick={() => setCompletedExpanded(!completedExpanded)}
@@ -1962,7 +1970,7 @@ export default function PurchaseRecords() {
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>{completedExpanded ? '▼' : '▶'}</span>
-                      <span>已完成商品 ({completedGroups.length})</span>
+                      <span>已過結單日商品 ({completedGroups.length})</span>
                     </span>
                     <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>
                       {completedExpanded ? '點擊收合' : '點擊展開'}
