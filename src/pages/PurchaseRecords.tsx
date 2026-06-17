@@ -3,7 +3,7 @@ import { calculateFinalMyacgDemand } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Search, Trash2, Calendar } from 'lucide-react';
+import { Receipt, Search, Trash2, Calendar, Copy, Check } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
@@ -137,6 +137,19 @@ export default function PurchaseRecords() {
     }
   }, [location.search, setActiveTab]);
 
+
+  const [copiedGroupId, setCopiedGroupId] = useState<string | null>(null);
+  const handleCopyTitle = async (groupId: string, title: string) => {
+    try {
+      await navigator.clipboard.writeText(title);
+      setCopiedGroupId(groupId);
+      setTimeout(() => {
+        setCopiedGroupId(current => current === groupId ? null : current);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
 
   const getGroupStatus = (g: ProductGroup) => {
     const today = new Date().toISOString().split('T')[0];
@@ -1211,8 +1224,37 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span>{g.normalized_title || g.title}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCopyTitle(g.id, g.normalized_title || g.title);
+                                }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: '4px',
+                                  cursor: 'pointer',
+                                  color: copiedGroupId === g.id ? '#10b981' : '#94a3b8',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  borderRadius: '4px',
+                                  transition: 'all 0.2s',
+                                  flexShrink: 0
+                                }}
+                                title="複製商品名稱"
+                              >
+                                {copiedGroupId === g.id ? (
+                                  <>
+                                    <Check size={14} style={{ color: '#10b981' }} />
+                                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#10b981' }}>已複製</span>
+                                  </>
+                                ) : (
+                                  <Copy size={14} />
+                                )}
+                              </button>
                               {details.hasCatalogMissing && (
                                 <span style={{
                                   backgroundColor: '#ffedd5',
@@ -1503,8 +1545,37 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span>{g.normalized_title || g.title}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleCopyTitle(g.id, g.normalized_title || g.title);
+                                }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: '4px',
+                                  cursor: 'pointer',
+                                  color: copiedGroupId === g.id ? '#10b981' : '#94a3b8',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  borderRadius: '4px',
+                                  transition: 'all 0.2s',
+                                  flexShrink: 0
+                                }}
+                                title="複製商品名稱"
+                              >
+                                {copiedGroupId === g.id ? (
+                                  <>
+                                    <Check size={14} style={{ color: '#10b981' }} />
+                                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#10b981' }}>已複製</span>
+                                  </>
+                                ) : (
+                                  <Copy size={14} />
+                                )}
+                              </button>
                               {editMode && demandAndPurchased.hasCatalogMissing && (
                                 <span style={{
                                   backgroundColor: '#ffedd5',

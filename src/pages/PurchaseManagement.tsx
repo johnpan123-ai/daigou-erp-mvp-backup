@@ -3078,37 +3078,55 @@ export default function PurchaseManagement() {
                             </div>
                           </td>
                           <td style={{ padding: '8px', textAlign: 'center' }}>
-                            {shortage > 0 && (
-                              <span style={{
-                                backgroundColor: '#FEE2E2',
-                                color: '#DC2626',
-                                border: '1px solid #fecaca',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap'
-                              }}>
-                                缺 {shortage}
-                              </span>
-                            )}
-                            {shortage < 0 && (
-                              <span style={{
-                                backgroundColor: '#EFF6FF',
-                                color: '#2563EB',
-                                border: '1px solid #bfdbfe',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap'
-                              }}>
-                                多買 {Math.abs(shortage)}
-                              </span>
-                            )}
-                            {shortage === 0 && (
-                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>-</span>
-                            )}
+                            {(() => {
+                              const remainingGap = shortage - (batchLines[idx]?.quantity || 0);
+                              if (remainingGap > 0) {
+                                return (
+                                  <span style={{
+                                    backgroundColor: '#FEE2E2',
+                                    color: '#DC2626',
+                                    border: '1px solid #fecaca',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    缺 {remainingGap}
+                                  </span>
+                                );
+                              } else if (remainingGap === 0) {
+                                return (
+                                  <span style={{
+                                    backgroundColor: '#DCFCE7',
+                                    color: '#16a34a',
+                                    border: '1px solid #bbf7d0',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    已補齊
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span style={{
+                                    backgroundColor: '#FFEDD5',
+                                    color: '#EA580C',
+                                    border: '1px solid #fed7aa',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    多買 {Math.abs(remainingGap)}
+                                  </span>
+                                );
+                              }
+                            })()}
                           </td>
                           <td style={{ padding: '8px', textAlign: 'center' }}>
                             <input className="input" type="number" min="0" value={batchLines[idx]?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
@@ -3138,14 +3156,54 @@ export default function PurchaseManagement() {
                 </tbody>
               </table>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
-                  本批次合計：<span style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
+                    本批次合計：<span style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={() => setShowBatchModal(false)}>取消</button>
+                    <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={!batchForm.name.trim()}>儲存</button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={() => setShowBatchModal(false)}>取消</button>
-                  <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={!batchForm.name.trim()}>儲存</button>
-                </div>
+                {(() => {
+                  let completedItemsCount = 0;
+                  let remainingShortageItemsCount = 0;
+                  let excessItemsCount = 0;
+
+                  variants.forEach((v, idx) => {
+                    const originalShortage = getVariantShortageForModal(v);
+                    const inputQty = batchLines[idx]?.quantity || 0;
+                    const remainingGap = originalShortage - inputQty;
+
+                    if (originalShortage > 0 && remainingGap <= 0) {
+                      completedItemsCount++;
+                    }
+                    if (remainingGap > 0) {
+                      remainingShortageItemsCount++;
+                    }
+                    if (remainingGap < 0) {
+                      excessItemsCount++;
+                    }
+                  });
+
+                  return (
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#475569', marginTop: '4px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16a34a' }}></span>
+                        已補足商品：<strong>{completedItemsCount}</strong> 項
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#dc2626' }}></span>
+                        仍缺商品：<strong>{remainingShortageItemsCount}</strong> 項
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ea580c' }}></span>
+                        多買商品：<strong>{excessItemsCount}</strong> 項
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
