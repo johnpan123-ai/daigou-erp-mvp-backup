@@ -102,20 +102,34 @@ export default function PurchaseRecords() {
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
   const [filterSource, setFilterSource] = useState(() => localStorage.getItem('erp_filter_source') || 'all');
-  const [filterStatus, setFilterStatus] = useState(() => localStorage.getItem('erp_filter_status') || 'all');
   const [filterType, setFilterType] = useState(() => localStorage.getItem('erp_filter_type') || 'all');
   const [sortMode, setSortMode] = useState(() => localStorage.getItem('erp_sort_mode') || 'closing_urgent');
   const [activeTab, setActiveTab] = useState<'all' | 'hololive' | 'vspo' | 'proxy' | 'other'>(() => {
     return (localStorage.getItem('erp_active_tab') as 'all' | 'hololive' | 'vspo' | 'proxy' | 'other') || 'all';
   });
 
+  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'all'>('progress');
+  const [onlyShowShortage, setOnlyShowShortage] = useState<boolean>(true);
+  const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
+
+  const checkIsGroupClosed = (g: ProductGroup): boolean => {
+    const statusVal = (g as any).status;
+    const isClosedVal = (g as any).is_closed;
+    if (statusVal !== undefined && statusVal !== null) {
+      return statusVal === '已結單';
+    }
+    if (isClosedVal !== undefined && isClosedVal !== null) {
+      return isClosedVal === true;
+    }
+    return false;
+  };
+
   useEffect(() => {
     localStorage.setItem('erp_search_term', searchTerm);
     localStorage.setItem('erp_filter_source', filterSource);
-    localStorage.setItem('erp_filter_status', filterStatus);
     localStorage.setItem('erp_filter_type', filterType);
     localStorage.setItem('erp_sort_mode', sortMode);
-  }, [searchTerm, filterSource, filterStatus, filterType, sortMode]);
+  }, [searchTerm, filterSource, filterType, sortMode]);
 
   useEffect(() => {
     localStorage.setItem('erp_active_tab', activeTab);
@@ -152,11 +166,11 @@ export default function PurchaseRecords() {
   };
 
   const getGroupStatus = (g: ProductGroup) => {
-    const today = new Date().toISOString().split('T')[0];
-    if (!g.closing_date || g.closing_date.replace(/\//g, '-') >= today) {
-      return { text: '🟢 開單中', active: true };
+    const isClosed = checkIsGroupClosed(g);
+    if (isClosed) {
+      return { text: '⚫ 已結單', active: false };
     }
-    return { text: '⚫ 已結單', active: false };
+    return { text: '🟢 開單中', active: true };
   };
 
   const checkIsProxyProduct = (g: ProductGroup) => {
@@ -375,7 +389,7 @@ export default function PurchaseRecords() {
     return { text: closingDate, color: '#334155', fontWeight: 500 };
   };
 
-  const filteredAndSortedGroups = useMemo(() => {
+  const baseGroups = useMemo(() => {
     let result = [...groups];
 
     // Filter by activeTab
@@ -389,8 +403,6 @@ export default function PurchaseRecords() {
       result = result.filter(g => isOtherProduct(g));
     }
 
-    const today = new Date().toISOString().split('T')[0];
-
     // 1. Filter Source
     if (filterSource !== 'all') {
       result = result.filter(g => {
@@ -401,16 +413,7 @@ export default function PurchaseRecords() {
       });
     }
 
-    // 2. Filter Status
-    if (filterStatus !== 'all') {
-      if (filterStatus === '開單中') {
-        result = result.filter(g => !g.closing_date || g.closing_date.replace(/\//g, '-') >= today);
-      } else if (filterStatus === '已結單') {
-        result = result.filter(g => g.closing_date && g.closing_date.replace(/\//g, '-') < today);
-      }
-    }
-
-    // 3. Filter Type
+    // 2. Filter Type
     if (filterType !== 'all') {
       result = result.filter(g => {
         if (filterType === '代理版') return checkIsProxyProduct(g);
@@ -418,7 +421,7 @@ export default function PurchaseRecords() {
       });
     }
 
-    // 4. Search
+    // 3. Search
     if (searchTerm.trim()) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(g => {
@@ -435,32 +438,104 @@ export default function PurchaseRecords() {
       });
     }
 
-    // 5. Sort
+    return result;
+  }, [groups, searchTerm, filterSource, filterType, activeTab, variants, categories, inventory]);
+
+  const { progressCount, closedCount, allCount } = useMemo(() => {
+    const progress = baseGroups.filter(g => !checkIsGroupClosed(g)).length;
+    const closed = baseGroups.filter(g => checkIsGroupClosed(g)).length;
+    const total = baseGroups.length;
+    return { progressCount: progress, closedCount: closed, allCount: total };
+  }, [baseGroups]);
+
+  const completedGroups = useMemo(() => {
+    if (secondaryTab !== 'progress') return [];
+
+    let result = baseGroups.filter(g => {
+      if (checkIsGroupClosed(g)) return false; // Must be in-progress
+      const stats = getGroupDemandAndPurchased(g.id);
+      return stats.gap <= 0;
+    });
+
+    // Sort: 1st gap desc, 2nd closing_date asc
     result.sort((a, b) => {
-      if (sortMode === 'closing_urgent') {
-        const activeA = !a.closing_date || a.closing_date.replace(/\//g, '-') >= today;
-        const activeB = !b.closing_date || b.closing_date.replace(/\//g, '-') >= today;
-        
-        if (activeA !== activeB) {
-          return activeA ? -1 : 1;
-        }
-        
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB);
-      } else if (sortMode === 'closing_asc') {
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB);
-      } else {
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        return timeB - timeA;
+      const statsA = getGroupDemandAndPurchased(a.id);
+      const statsB = getGroupDemandAndPurchased(b.id);
+      if (statsB.gap !== statsA.gap) {
+        return statsB.gap - statsA.gap;
       }
+      const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+      const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+      return dateA.localeCompare(dateB);
     });
 
     return result;
-  }, [groups, searchTerm, filterSource, filterStatus, filterType, sortMode, variants, categories, batchItems, privateOrderItems, activeTab, inventory]);
+  }, [baseGroups, secondaryTab, variants, categories, batchItems, privateOrderItems, inventory]);
+
+  const filteredAndSortedGroups = useMemo(() => {
+    let result = [...baseGroups];
+
+    // Filter by progress/closed tab
+    if (secondaryTab === 'progress') {
+      result = result.filter(g => {
+        if (checkIsGroupClosed(g)) return false;
+        
+        const stats = getGroupDemandAndPurchased(g.id);
+        const isCompleted = stats.gap <= 0;
+        
+        if (isCompleted) {
+          return false; // Collapsed/收納
+        }
+        
+        if (onlyShowShortage) {
+          return stats.gap > 0;
+        }
+        
+        return true;
+      });
+    } else if (secondaryTab === 'closed') {
+      result = result.filter(g => checkIsGroupClosed(g));
+    }
+
+    // Sort
+    if (secondaryTab === 'progress') {
+      result.sort((a, b) => {
+        const statsA = getGroupDemandAndPurchased(a.id);
+        const statsB = getGroupDemandAndPurchased(b.id);
+        if (statsB.gap !== statsA.gap) {
+          return statsB.gap - statsA.gap; // 缺貨數由大到小
+        }
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        return dateA.localeCompare(dateB); // 結單日由近到遠
+      });
+    } else {
+      result.sort((a, b) => {
+        if (sortMode === 'closing_urgent') {
+          const activeA = !checkIsGroupClosed(a);
+          const activeB = !checkIsGroupClosed(b);
+          
+          if (activeA !== activeB) {
+            return activeA ? -1 : 1;
+          }
+          
+          const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+          const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+          return dateA.localeCompare(dateB);
+        } else if (sortMode === 'closing_asc') {
+          const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+          const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+          return dateA.localeCompare(dateB);
+        } else {
+          const timeA = new Date(a.created_at || 0).getTime();
+          const timeB = new Date(b.created_at || 0).getTime();
+          return timeB - timeA;
+        }
+      });
+    }
+
+    return result;
+  }, [baseGroups, secondaryTab, onlyShowShortage, sortMode, variants, categories, batchItems, privateOrderItems, inventory]);
 
 
   useEffect(() => {
@@ -546,14 +621,15 @@ export default function PurchaseRecords() {
   const handlePaste = async (
     e: React.ClipboardEvent<HTMLInputElement>,
     startRowIndex: number,
-    field: 'closing_date' | 'release_month' | 'purchase_date' | 'product_url'
+    field: 'closing_date' | 'release_month' | 'purchase_date' | 'product_url',
+    sourceList: ProductGroup[] = filteredAndSortedGroups
   ) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text');
     const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     if (lines.length === 0) return;
 
-    const listToUpdate = filteredAndSortedGroups.slice(startRowIndex, startRowIndex + lines.length);
+    const listToUpdate = sourceList.slice(startRowIndex, startRowIndex + lines.length);
     if (listToUpdate.length === 0) return;
 
     const groupMap = new Map(groups.map(g => [g.id, g]));
@@ -576,12 +652,13 @@ export default function PurchaseRecords() {
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement>,
     rowIndex: number,
-    field: string
+    field: string,
+    tableId: string
   ) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       const nextInput = document.querySelector(
-        `input[data-row="${rowIndex + 1}"][data-field="${field}"]`
+        `input[data-table="${tableId}"][data-row="${rowIndex + 1}"][data-field="${field}"]`
       ) as HTMLInputElement;
       if (nextInput) {
         nextInput.focus();
@@ -829,6 +906,91 @@ export default function PurchaseRecords() {
         </button>
       </div>
 
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '16px',
+        flexWrap: 'wrap',
+        gap: '12px'
+      }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => setSecondaryTab('progress')}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (secondaryTab === 'progress' ? '#2563eb' : '#cbd5e1'),
+              backgroundColor: secondaryTab === 'progress' ? '#eff6ff' : '#ffffff',
+              color: secondaryTab === 'progress' ? '#2563eb' : '#475569',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            進行中 ({progressCount})
+          </button>
+          <button
+            onClick={() => setSecondaryTab('closed')}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (secondaryTab === 'closed' ? '#2563eb' : '#cbd5e1'),
+              backgroundColor: secondaryTab === 'closed' ? '#eff6ff' : '#ffffff',
+              color: secondaryTab === 'closed' ? '#2563eb' : '#475569',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            已結單 ({closedCount})
+          </button>
+          <button
+            onClick={() => setSecondaryTab('all')}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (secondaryTab === 'all' ? '#2563eb' : '#cbd5e1'),
+              backgroundColor: secondaryTab === 'all' ? '#eff6ff' : '#ffffff',
+              color: secondaryTab === 'all' ? '#2563eb' : '#475569',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            全部 ({allCount})
+          </button>
+        </div>
+
+        {secondaryTab === 'progress' && (
+          <label style={{ 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            gap: '6px', 
+            fontSize: '13px', 
+            fontWeight: 600, 
+            color: '#475569',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}>
+            <input
+              type="checkbox"
+              checked={onlyShowShortage}
+              onChange={e => setOnlyShowShortage(e.target.checked)}
+              style={{
+                width: '16px',
+                height: '16px',
+                cursor: 'pointer'
+              }}
+            />
+            只顯示缺貨商品
+          </label>
+        )}
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
         
         <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '8px', padding: '0 12px', height: '40px' }}>
@@ -851,15 +1013,6 @@ export default function PurchaseRecords() {
               <option value="Hololive">Hololive</option>
               <option value="VSPO">VSPO</option>
               <option value="代理商品">代理商品</option>
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品狀態</span>
-            <select className="input" style={{ width: '120px', height: '36px', fontSize: '13px' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-              <option value="all">全部</option>
-              <option value="開單中">開單中</option>
-              <option value="已結單">已結單</option>
             </select>
           </div>
 
@@ -912,11 +1065,19 @@ export default function PurchaseRecords() {
             </button>
           </div>
 
-
         </div>
 
-        <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
-          共 <span style={{ color: '#2563eb', fontWeight: 700, fontSize: '15px' }}>{filteredAndSortedGroups.length}</span> 筆商品符合條件
+        <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <span>共</span>
+          <span style={{ color: '#2563eb', fontWeight: 700, fontSize: '15px' }}>
+            {secondaryTab === 'progress' ? filteredAndSortedGroups.length + completedGroups.length : filteredAndSortedGroups.length}
+          </span>
+          <span>筆商品符合條件</span>
+          {secondaryTab === 'progress' && (
+            <span style={{ color: '#64748b', fontSize: '12px' }}>
+              (待採購: {filteredAndSortedGroups.length} 筆 / 已完成: {completedGroups.length} 筆)
+            </span>
+          )}
         </div>
         
 
@@ -1065,20 +1226,12 @@ export default function PurchaseRecords() {
         </div>
       )}
 
-      <div className="flex-col gap-md">
-
-        {filteredAndSortedGroups.length === 0 ? (
-          <EmptyState
-            icon={Receipt}
-            title={groups.length === 0 ? "尚未有訂購紀錄" : "找不到符合的紀錄"}
-            description={groups.length === 0 ? "您可以透過匯入商品清單來自動產生母體，或手動建立。" : "請嘗試調整搜尋關鍵字或篩選條件。"}
-            actionLabel={groups.length === 0 ? "前往商品清單匯入" : ""}
-            onAction={() => groups.length === 0 ? navigate('/inventory') : undefined}
-          />
-
-        ) : (
-          <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%' }}>
-            {activeTab === 'proxy' ? (
+      {/* Table section */}
+      {(() => {
+        const renderGroupsTable = (list: ProductGroup[], tableId: string) => {
+          return (
+            <>
+              {activeTab === 'proxy' ? (
               <ScrollWrapper isMobile={isMobile}>
                 <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: isMobile ? '1200px' : undefined }}>
                 <thead>
@@ -1086,14 +1239,14 @@ export default function PurchaseRecords() {
                     <th style={{ width: '40px', textAlign: 'center' }}>
                       <input 
                         type="checkbox"
-                        checked={filteredAndSortedGroups.length > 0 && filteredAndSortedGroups.every(g => selectedGroupIds.has(g.id))}
+                        checked={list.length > 0 && list.every(g => selectedGroupIds.has(g.id))}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            if (filteredAndSortedGroups.length > 50) {
-                              const confirmSelect = window.confirm(`您即將選取 ${filteredAndSortedGroups.length} 筆商品進行批次編輯，是否確定？`);
+                            if (list.length > 50) {
+                              const confirmSelect = window.confirm(`您即將選取 ${list.length} 筆商品進行批次編輯，是否確定？`);
                               if (!confirmSelect) return;
                             }
-                            setSelectedGroupIds(new Set(filteredAndSortedGroups.map(g => g.id)));
+                            setSelectedGroupIds(new Set(list.map(g => g.id)));
                           } else {
                             setSelectedGroupIds(new Set());
                           }
@@ -1142,7 +1295,7 @@ export default function PurchaseRecords() {
                         <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('gap', e)} />
                       </div>
                     </th>
-
+    
                     <th style={{ width: `${colWidths.closingDate}px` }}>
                       <div className="th-inner justify-center">
                         <span>官方結單日</span>
@@ -1158,16 +1311,11 @@ export default function PurchaseRecords() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAndSortedGroups.map((g, idx) => {
+                  {list.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
-                    console.log('[UI Details Before Render]', {
-                      groupId: g.id,
-                      title: g.title,
-                      details
-                    });
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
-
+    
                     return (
                       <tr 
                         key={g.id} 
@@ -1317,7 +1465,7 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 700, color: details.gap > 0 ? '#ef4444' : '#166534' }}>
                           缺 {details.gap}
                         </td>
-
+    
                         <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                           {editMode ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
@@ -1329,8 +1477,9 @@ export default function PurchaseRecords() {
                                 value={g.closing_date || ''} 
                                 onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
                                 onClick={e => e.stopPropagation()}
-                                onKeyDown={e => handleKeyDown(e, idx, 'closing_date')}
-                                onPaste={e => handlePaste(e, idx, 'closing_date')}
+                                onKeyDown={e => handleKeyDown(e, idx, 'closing_date', tableId)}
+                                onPaste={e => handlePaste(e, idx, 'closing_date', list)}
+                                data-table={tableId}
                                 data-row={idx}
                                 data-field="closing_date"
                               />
@@ -1361,8 +1510,9 @@ export default function PurchaseRecords() {
                               value={g.release_month || ''} 
                               onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
                               onClick={e => e.stopPropagation()}
-                              onKeyDown={e => handleKeyDown(e, idx, 'release_month')}
-                              onPaste={e => handlePaste(e, idx, 'release_month')}
+                              onKeyDown={e => handleKeyDown(e, idx, 'release_month', tableId)}
+                              onPaste={e => handlePaste(e, idx, 'release_month', list)}
+                              data-table={tableId}
                               data-row={idx}
                               data-field="release_month"
                               placeholder="例如：2026-11"
@@ -1383,14 +1533,14 @@ export default function PurchaseRecords() {
                     <th style={{ width: '40px', textAlign: 'center' }}>
                       <input 
                         type="checkbox"
-                        checked={filteredAndSortedGroups.length > 0 && filteredAndSortedGroups.every(g => selectedGroupIds.has(g.id))}
+                        checked={list.length > 0 && list.every(g => selectedGroupIds.has(g.id))}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            if (filteredAndSortedGroups.length > 50) {
-                              const confirmSelect = window.confirm(`您即將選取 ${filteredAndSortedGroups.length} 筆商品進行批次編輯，是否確定？`);
+                            if (list.length > 50) {
+                              const confirmSelect = window.confirm(`您即將選取 ${list.length} 筆商品進行批次編輯，是否確定？`);
                               if (!confirmSelect) return;
                             }
-                            setSelectedGroupIds(new Set(filteredAndSortedGroups.map(g => g.id)));
+                            setSelectedGroupIds(new Set(list.map(g => g.id)));
                           } else {
                             setSelectedGroupIds(new Set());
                           }
@@ -1435,7 +1585,6 @@ export default function PurchaseRecords() {
                     </th>
                     {editMode && (
                       <>
-
                         <th style={{ width: `${colWidths.closingDate}px` }}>
                           <div className="th-inner justify-center">
                             <span>官方結單日</span>
@@ -1459,17 +1608,12 @@ export default function PurchaseRecords() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredAndSortedGroups.map((g, idx) => {
+                  {list.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
-                    console.log('[UI Details Before Render]', {
-                      groupId: g.id,
-                      title: g.title,
-                      details
-                    });
                     const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
-
+    
                     return (
                       <tr 
                         key={g.id} 
@@ -1606,7 +1750,7 @@ export default function PurchaseRecords() {
                                 : isUrgent
                                 ? { background: '#ffedd5', color: '#ea580c', border: '1px solid #fed7aa' }
                                 : { background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0' };
-
+    
                               const formatClosingDateSimplified = (dateStr: string | undefined | null) => {
                                 if (!dateStr) return '';
                                 const clean = dateStr.replace(/\//g, '-');
@@ -1616,7 +1760,7 @@ export default function PurchaseRecords() {
                                 }
                                 return `結單 ${dateStr}`;
                               };
-
+    
                               return (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', alignItems: 'center', fontSize: '11px', marginTop: '4px' }}>
                                   {g.closing_date && (
@@ -1685,7 +1829,6 @@ export default function PurchaseRecords() {
                         </td>
                         {editMode && (
                           <>
-
                             <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                               {editMode ? (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
@@ -1697,8 +1840,9 @@ export default function PurchaseRecords() {
                                     value={g.closing_date || ''} 
                                     onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
                                     onClick={e => e.stopPropagation()}
-                                    onKeyDown={e => handleKeyDown(e, idx, 'closing_date')}
-                                    onPaste={e => handlePaste(e, idx, 'closing_date')}
+                                    onKeyDown={e => handleKeyDown(e, idx, 'closing_date', tableId)}
+                                    onPaste={e => handlePaste(e, idx, 'closing_date', list)}
+                                    data-table={tableId}
                                     data-row={idx}
                                     data-field="closing_date"
                                   />
@@ -1729,8 +1873,9 @@ export default function PurchaseRecords() {
                                   value={g.release_month || ''} 
                                   onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
                                   onClick={e => e.stopPropagation()}
-                                  onKeyDown={e => handleKeyDown(e, idx, 'release_month')}
-                                  onPaste={e => handlePaste(e, idx, 'release_month')}
+                                  onKeyDown={e => handleKeyDown(e, idx, 'release_month', tableId)}
+                                  onPaste={e => handlePaste(e, idx, 'release_month', list)}
+                                  data-table={tableId}
                                   data-row={idx}
                                   data-field="release_month"
                                   placeholder="例如：2026-11"
@@ -1744,8 +1889,9 @@ export default function PurchaseRecords() {
                                   style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
                                   value={g.product_url || ''} 
                                   onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)} 
-                                  onKeyDown={e => handleKeyDown(e, idx, 'product_url')}
-                                  onPaste={e => handlePaste(e, idx, 'product_url')}
+                                  onKeyDown={e => handleKeyDown(e, idx, 'product_url', tableId)}
+                                  onPaste={e => handlePaste(e, idx, 'product_url', list)}
+                                  data-table={tableId}
                                   data-row={idx}
                                   data-field="product_url"
                                   placeholder="官網網址"
@@ -1770,9 +1916,70 @@ export default function PurchaseRecords() {
               </table>
               </ScrollWrapper>
             )}
-          </div>
-        )}
-      </div>
+          </>
+        );
+      };
+    
+      return (
+        <div className="flex-col gap-md">
+          {(filteredAndSortedGroups.length === 0 && (secondaryTab !== 'progress' || onlyShowShortage || completedGroups.length === 0)) ? (
+            <EmptyState
+              icon={Receipt}
+              title={groups.length === 0 ? "尚未有訂購紀錄" : "找不到符合的紀錄"}
+              description={groups.length === 0 ? "您可以透過匯入商品清單來自動產生母體，或手動建立。" : "請嘗試調整搜尋關鍵字或篩選條件。"}
+              actionLabel={groups.length === 0 ? "前往商品清單匯入" : ""}
+              onAction={() => groups.length === 0 ? navigate('/inventory') : undefined}
+            />
+          ) : (
+            <div className="flex-col gap-md">
+              {filteredAndSortedGroups.length > 0 && (
+                <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%' }}>
+                  {renderGroupsTable(filteredAndSortedGroups, 'main')}
+                </div>
+              )}
+    
+              {secondaryTab === 'progress' && !onlyShowShortage && completedGroups.length > 0 && (
+                <div style={{ marginTop: '8px' }}>
+                  <button
+                    onClick={() => setCompletedExpanded(!completedExpanded)}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '12px 16px',
+                      backgroundColor: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      color: '#475569',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>{completedExpanded ? '▼' : '▶'}</span>
+                      <span>已完成商品 ({completedGroups.length})</span>
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>
+                      {completedExpanded ? '點擊收合' : '點擊展開'}
+                    </span>
+                  </button>
+                  {completedExpanded && (
+                    <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%', marginTop: '8px' }}>
+                      {renderGroupsTable(completedGroups, 'completed')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    })()}
       
       {/* Floating Action Button (FAB) */}
       <button

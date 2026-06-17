@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PackageSearch, ListOrdered, Settings, Box, BarChart3, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
-import { getProviderMode } from '../../providers/providerMode';
+import { getProviderMode, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
 import { useRole } from '../../auth/useRole';
 import '../../styles/layout.css'; // Ensure layout classes are applied
@@ -472,8 +472,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Page Content */}
         <div className="page-content">
-          {/* Local Mode Warning Banner */}
-          {!user && getProviderMode() === 'local' && location.pathname !== '/login' && (
+          {getProviderMode() === 'local' && location.pathname !== '/login' && (
             <div style={{
               backgroundColor: '#fffbeb',
               border: '1px solid #fef3c7',
@@ -488,13 +487,34 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               fontWeight: 500,
               boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
             }}>
-              <div className="flex items-center gap-sm">
-                <span style={{ fontSize: '16px' }}>💡</span>
-                <span>目前為本地模式，資料只存在此瀏覽器。登入後可啟用雲端同步。</span>
-              </div>
-              <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', backgroundColor: '#d97706', borderColor: '#d97706', color: '#fff', fontWeight: 600 }}>
-                登入雲端
-              </Link>
+              {!user ? (
+                <>
+                  <div className="flex items-center gap-sm">
+                    <span style={{ fontSize: '16px' }}>💡</span>
+                    <span>目前為本地模式，資料只存在此瀏覽器。登入後可啟用雲端同步。</span>
+                  </div>
+                  <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', backgroundColor: '#d97706', borderColor: '#d97706', color: '#fff', fontWeight: 600 }}>
+                    登入雲端
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-sm">
+                    <span style={{ fontSize: '16px' }}>⚠️</span>
+                    <span>目前使用本地模式，資料不會同步至雲端。</span>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setProviderMode('cloud');
+                      window.location.reload();
+                    }}
+                    className="btn btn-primary" 
+                    style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', backgroundColor: '#d97706', borderColor: '#d97706', color: '#fff', fontWeight: 600 }}
+                  >
+                    切換回雲端模式
+                  </button>
+                </>
+              )}
             </div>
           )}
           <div className={(mode === 'mobile' && !isMobile) ? 'mobile-preview-frame' : ''}>
