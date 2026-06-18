@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
-import { dataProvider } from '../providers/dataProvider';
+import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { 
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
@@ -167,6 +167,18 @@ export default function PurchaseManagement() {
       ? v.default_twd_cost 
       : variantDefaultTwdCosts[v.id];
   };
+  const [isStale, setIsStale] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubscribe = dataProvider.onStaleChange(setIsStale);
+    setIsStale(dataProvider.checkIsStaleLive());
+    return unsubscribe;
+  }, []);
+
+  const handleReloadData = async () => {
+    await loadData();
+  };
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [exchangeRate, setExchangeRate] = useState<number>(() => {
     const val = localStorage.getItem('erp_exchange_rate');
@@ -287,6 +299,12 @@ export default function PurchaseManagement() {
       await loadData();
       setToastMessage('已成功手動新增規格');
     } catch (err: any) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
       console.error('Failed to save manual variant:', err);
       alert(`新增規格失敗：${err.message || err}`);
     }
@@ -328,6 +346,12 @@ export default function PurchaseManagement() {
       await loadData();
       setToastMessage('已成功移動規格位置');
     } catch (err: any) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
       console.error('Failed to move variant:', err);
       alert(`移動規格失敗：${err.message || err}`);
     }
@@ -644,7 +668,16 @@ export default function PurchaseManagement() {
           }
           return av;
         });
-        await dataProvider.saveProductVariants(updatedAllVars);
+        try {
+          await dataProvider.saveProductVariants(updatedAllVars);
+        } catch (err) {
+          if (err instanceof StaleDataError) {
+            console.warn('[Cost Sync] Stale data detected during load cost sync.');
+            setIsStale(true);
+          } else {
+            throw err;
+          }
+        }
       }
     }
 
@@ -685,6 +718,7 @@ export default function PurchaseManagement() {
     });
 
     setSalesOrderItems(groupSOI);
+    dataProvider.registerFreshLoad();
   };
 
 
@@ -999,51 +1033,62 @@ export default function PurchaseManagement() {
     const validLines = batchLines.filter(l => l.quantity > 0);
     if (!group || !batchForm.name.trim() || validLines.length === 0) return;
     
-    const allBatches = await dataProvider.getPurchaseBatches();
-    const allBatchItems = await dataProvider.getPurchaseBatchItems();
+    try {
+      const allBatches = await dataProvider.getPurchaseBatches();
+      const allBatchItems = await dataProvider.getPurchaseBatchItems();
 
-    if (editingBatchId) {
-      const idx = allBatches.findIndex(b => b.id === editingBatchId);
-      if (idx !== -1) {
-        allBatches[idx] = { ...allBatches[idx], name: batchForm.name, date: batchForm.date, note: batchForm.note };
+      if (editingBatchId) {
+        const idx = allBatches.findIndex(b => b.id === editingBatchId);
+        if (idx !== -1) {
+          allBatches[idx] = { ...allBatches[idx], name: batchForm.name, date: batchForm.date, note: batchForm.note };
+        }
+        const newItems = allBatchItems.filter(i => i.purchase_batch_id !== editingBatchId);
+        const updatedItems: PurchaseBatchItem[] = validLines.map(line => ({
+          id: crypto.randomUUID(),
+          purchase_batch_id: editingBatchId,
+          product_variant_id: line.variant_id,
+          quantity: line.quantity,
+          cost: line.cost,
+          note: line.note
+        }));
+        await dataProvider.savePurchaseBatches(allBatches);
+        await dataProvider.savePurchaseBatchItems([...newItems, ...updatedItems]);
+      } else {
+        const newBatchId = crypto.randomUUID();
+        const newBatch: PurchaseBatch = {
+          id: newBatchId,
+          product_group_id: group.id,
+          name: batchForm.name,
+          date: batchForm.date,
+          note: batchForm.note,
+          created_at: new Date().toISOString()
+        };
+
+        const newItems: PurchaseBatchItem[] = validLines.map(line => ({
+          id: crypto.randomUUID(),
+          purchase_batch_id: newBatchId,
+          product_variant_id: line.variant_id,
+          quantity: line.quantity,
+          cost: line.cost,
+          note: line.note
+        }));
+
+        await dataProvider.savePurchaseBatches([...allBatches, newBatch]);
+        await dataProvider.savePurchaseBatchItems([...allBatchItems, ...newItems]);
       }
-      const newItems = allBatchItems.filter(i => i.purchase_batch_id !== editingBatchId);
-      const updatedItems: PurchaseBatchItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        purchase_batch_id: editingBatchId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        cost: line.cost,
-        note: line.note
-      }));
-      await dataProvider.savePurchaseBatches(allBatches);
-      await dataProvider.savePurchaseBatchItems([...newItems, ...updatedItems]);
-    } else {
-      const newBatchId = crypto.randomUUID();
-      const newBatch: PurchaseBatch = {
-        id: newBatchId,
-        product_group_id: group.id,
-        name: batchForm.name,
-        date: batchForm.date,
-        note: batchForm.note,
-        created_at: new Date().toISOString()
-      };
-
-      const newItems: PurchaseBatchItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        purchase_batch_id: newBatchId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        cost: line.cost,
-        note: line.note
-      }));
-
-      await dataProvider.savePurchaseBatches([...allBatches, newBatch]);
-      await dataProvider.savePurchaseBatchItems([...allBatchItems, ...newItems]);
+      
+      setShowBatchModal(false);
+      await loadData();
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        setShowBatchModal(false);
+        await loadData();
+        return;
+      }
+      throw err;
     }
-    
-    setShowBatchModal(false);
-    await loadData();
   };
 
 
@@ -1359,6 +1404,44 @@ export default function PurchaseManagement() {
 
       <div style={{ padding: '24px', paddingBottom: isMobile ? '80px' : '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
         
+        {isStale && (
+          <div style={{
+            backgroundColor: '#fef3c7',
+            borderLeft: '4px solid #d97706',
+            padding: '16px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            borderRadius: '4px',
+            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '18px' }}>⚠️</span>
+              <span style={{ color: '#92400e', fontWeight: 500 }}>資料已在其他分頁更新，請重新整理後再編輯。</span>
+            </div>
+            <button
+              onClick={handleReloadData}
+              style={{
+                backgroundColor: '#d97706',
+                color: '#ffffff',
+                border: 'none',
+                padding: '6px 12px',
+                borderRadius: '4px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                marginLeft: 'auto',
+                transition: 'background-color 0.2s'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#b45309'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#d97706'}
+            >
+              重新載入最新資料
+            </button>
+          </div>
+        )}
+
         {/* Top Summary Cards */}
         {activeTab === 'worksheet' && (
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>

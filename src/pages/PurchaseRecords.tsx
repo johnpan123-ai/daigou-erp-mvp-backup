@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateFinalMyacgDemand } from '../lib/db';
-import { dataProvider } from '../providers/dataProvider';
+import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2, Calendar, Copy, Check } from 'lucide-react';
@@ -46,8 +46,6 @@ export default function PurchaseRecords() {
   const [editMode, setEditMode] = useState<boolean>(false);
   let sampleLogged = false;
 
-  const tabId = useMemo(() => Math.random().toString(36).substring(2, 9), []);
-  const lastLoadedTime = useRef<number>(Date.now());
   const [isStale, setIsStale] = useState<boolean>(false);
 
   console.log(`[UI Render] UI groups count: ${groups.length}`);
@@ -578,27 +576,11 @@ export default function PurchaseRecords() {
     setPrivateOrderItems(fetchedPrivateItems);
     setInventory(fetchedInventory);
     setSalesOrderItems(fetchedOrderItems);
-    lastLoadedTime.current = Date.now();
-  };
-
-  const checkIsStaleLive = (): boolean => {
-    const stored = localStorage.getItem('erp_last_write_info');
-    if (stored) {
-      try {
-        const info = JSON.parse(stored);
-        if (info.timestamp > lastLoadedTime.current && info.tabId !== tabId) {
-          setIsStale(true);
-          return true;
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-    return false;
+    dataProvider.registerFreshLoad();
   };
 
   const guardAgainstStaleWrite = (): boolean => {
-    const liveStale = checkIsStaleLive();
+    const liveStale = dataProvider.checkIsStaleLive();
     if (isStale || liveStale) {
       alert('資料已在其他分頁更新，請重新載入最新資料後再編輯。');
       return true; // blocked
@@ -606,36 +588,15 @@ export default function PurchaseRecords() {
     return false; // allowed
   };
 
-  const registerWrite = () => {
-    const now = Date.now();
-    lastLoadedTime.current = now;
-    localStorage.setItem('erp_last_write_info', JSON.stringify({ timestamp: now, tabId }));
-  };
-
   const handleReloadData = async () => {
     await loadData();
-    lastLoadedTime.current = Date.now();
-    setIsStale(false);
   };
 
   useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'erp_last_write_info' && e.newValue) {
-        try {
-          const info = JSON.parse(e.newValue);
-          if (info.tabId !== tabId) {
-            setIsStale(true);
-          }
-        } catch (err) {
-          // ignore
-        }
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, [tabId]);
+    const unsubscribe = dataProvider.onStaleChange(setIsStale);
+    setIsStale(dataProvider.checkIsStaleLive());
+    return unsubscribe;
+  }, []);
 
   const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
     if (guardAgainstStaleWrite()) return;
@@ -653,8 +614,17 @@ export default function PurchaseRecords() {
       return g;
     });
     setGroups(updatedGroups);
-    await dataProvider.saveProductGroups(updatedGroups);
-    registerWrite();
+    try {
+      await dataProvider.saveProductGroups(updatedGroups);
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
+      throw err;
+    }
   };
 
   const handleBatchApply = async () => {
@@ -686,13 +656,21 @@ export default function PurchaseRecords() {
     });
 
     setGroups(updatedGroups);
-    await dataProvider.saveProductGroups(updatedGroups);
-    registerWrite();
-    
-    setSelectedGroupIds(new Set());
-    setBatchClosingDate('');
-    setBatchReleaseMonth('');
-    alert('批次更新完成！');
+    try {
+      await dataProvider.saveProductGroups(updatedGroups);
+      setSelectedGroupIds(new Set());
+      setBatchClosingDate('');
+      setBatchReleaseMonth('');
+      alert('批次更新完成！');
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
+      throw err;
+    }
   };
 
   const handlePaste = async (
@@ -727,8 +705,17 @@ export default function PurchaseRecords() {
 
     const nextGroups = Array.from(groupMap.values());
     setGroups(nextGroups);
-    await dataProvider.saveProductGroups(nextGroups);
-    registerWrite();
+    try {
+      await dataProvider.saveProductGroups(nextGroups);
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
+      throw err;
+    }
   };
 
   const handleKeyDown = (
@@ -786,7 +773,6 @@ export default function PurchaseRecords() {
       }
       patch.updated_at = new Date().toISOString();
       await dataProvider.updateProductVariantPatch(targetVar.id, patch);
-      registerWrite();
       setVariants(variants.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
     }
   };
@@ -798,7 +784,6 @@ export default function PurchaseRecords() {
 
     try {
       await dataProvider.deleteProductGroup(groupId);
-      registerWrite();
       alert(`已成功刪除商品群組「${groupTitle}」。`);
       await loadData();
     } catch (e) {
@@ -816,7 +801,6 @@ export default function PurchaseRecords() {
     try {
       const idsToDelete = Array.from(selectedGroupIds);
       await dataProvider.deleteProductGroups(idsToDelete);
-      registerWrite();
       alert(`已成功刪除 ${idsToDelete.length} 筆商品群組。`);
       setSelectedGroupIds(new Set());
       await loadData();

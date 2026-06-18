@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory, ProductGroup } from '../lib/db';
-import { dataProvider } from '../providers/dataProvider';
+import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2, Copy } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
 
@@ -33,13 +33,22 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, groups
   const handleDeleteBatch = async (batch: PurchaseBatch) => {
     if (!window.confirm(`確定刪除此採購批次？底下明細也會一起刪除。`)) return;
     
-    const allBatches = await dataProvider.getPurchaseBatches();
-    const allItems = await dataProvider.getPurchaseBatchItems();
-    
-    await dataProvider.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
-    await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
-    
-    onRefresh();
+    try {
+      const allBatches = await dataProvider.getPurchaseBatches();
+      const allItems = await dataProvider.getPurchaseBatchItems();
+      
+      await dataProvider.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
+      await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
+      
+      onRefresh();
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        onRefresh();
+        return;
+      }
+      throw err;
+    }
   };
 
   const handleCopyBatchLedger = async (batch: PurchaseBatch) => {

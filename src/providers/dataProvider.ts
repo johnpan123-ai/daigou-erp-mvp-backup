@@ -17,25 +17,99 @@ import type {
   ImportStats
 } from '../lib/db';
 
+export class StaleDataError extends Error {
+  constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
+    super(message);
+    this.name = 'StaleDataError';
+  }
+}
+
 class DynamicDataProvider implements IDataProvider {
   private localProvider = new LocalProvider();
   private supabaseProvider = supabaseProvider;
 
-  private getActiveProvider(): IDataProvider {
-    const mode = getProviderMode();
-    if (mode === 'cloud') {
-      return this.supabaseProvider;
-    } else if (mode === 'fallback') {
-      return this.supabaseProvider;
+  private tabId = Math.random().toString(36).substring(2, 9);
+  private lastLoadedTime = Date.now();
+  private isStale = false;
+  private staleCallbacks: ((isStale: boolean) => void)[] = [];
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (e) => {
+        if (e.key === 'erp_last_write_info' && e.newValue) {
+          try {
+            const info = JSON.parse(e.newValue);
+            if (info.tabId !== this.tabId) {
+              this.isStale = true;
+              this.notifySubscribers(true);
+            }
+          } catch (err) {}
+        }
+      });
     }
-    return this.localProvider;
+  }
+
+  private notifySubscribers(stale: boolean) {
+    this.staleCallbacks.forEach(callback => {
+      try {
+        callback(stale);
+      } catch (err) {
+        console.error('Error in stale callback', err);
+      }
+    });
+  }
+
+  onStaleChange(callback: (isStale: boolean) => void): () => void {
+    this.staleCallbacks.push(callback);
+    return () => {
+      this.staleCallbacks = this.staleCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  registerFreshLoad(): void {
+    this.lastLoadedTime = Date.now();
+    this.isStale = false;
+    this.notifySubscribers(false);
+  }
+
+  checkIsStaleLive(): boolean {
+    if (typeof window === 'undefined') return false;
+    const stored = localStorage.getItem('erp_last_write_info');
+    if (stored) {
+      try {
+        const info = JSON.parse(stored);
+        if (info.timestamp > this.lastLoadedTime && info.tabId !== this.tabId) {
+          this.isStale = true;
+          this.notifySubscribers(true);
+          return true;
+        }
+      } catch (err) {}
+    }
+    return this.isStale;
+  }
+
+  private guardStale() {
+    if (this.checkIsStaleLive()) {
+      throw new StaleDataError();
+    }
+  }
+
+  private registerWrite() {
+    const now = Date.now();
+    this.lastLoadedTime = now;
+    this.isStale = false;
+    this.notifySubscribers(false);
+    localStorage.setItem('erp_last_write_info', JSON.stringify({ timestamp: now, tabId: this.tabId }));
   }
 
   async getInventory(): Promise<InventoryItem[]> {
     return this.getActiveProvider().getInventory();
   }
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
-    return this.getActiveProvider().upsertInventory(items);
+    this.guardStale();
+    const result = await this.getActiveProvider().upsertInventory(items);
+    this.registerWrite();
+    return result;
   }
   async getSalesOrders(): Promise<SalesOrder[]> {
     return this.getActiveProvider().getSalesOrders();
@@ -53,7 +127,9 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getProductGroups();
   }
   async saveProductGroups(groups: ProductGroup[]): Promise<void> {
-    return this.getActiveProvider().saveProductGroups(groups);
+    this.guardStale();
+    await this.getActiveProvider().saveProductGroups(groups);
+    this.registerWrite();
   }
   async getProductCategories(): Promise<ProductCategory[]> {
     return this.getActiveProvider().getProductCategories();
@@ -65,7 +141,9 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getProductVariants(options);
   }
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
-    return this.getActiveProvider().saveProductVariants(variants);
+    this.guardStale();
+    await this.getActiveProvider().saveProductVariants(variants);
+    this.registerWrite();
   }
   async deleteProductVariant(id: string): Promise<void> {
     return this.getActiveProvider().deleteProductVariant(id);
@@ -80,13 +158,17 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getPurchaseBatches();
   }
   async savePurchaseBatches(batches: PurchaseBatch[]): Promise<void> {
-    return this.getActiveProvider().savePurchaseBatches(batches);
+    this.guardStale();
+    await this.getActiveProvider().savePurchaseBatches(batches);
+    this.registerWrite();
   }
   async getPurchaseBatchItems(): Promise<PurchaseBatchItem[]> {
     return this.getActiveProvider().getPurchaseBatchItems();
   }
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
-    return this.getActiveProvider().savePurchaseBatchItems(items);
+    this.guardStale();
+    await this.getActiveProvider().savePurchaseBatchItems(items);
+    this.registerWrite();
   }
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return this.getActiveProvider().getPrivateOrders();
@@ -110,7 +192,10 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().exportData();
   }
   async importData(jsonString: string): Promise<boolean> {
-    return this.getActiveProvider().importData(jsonString);
+    this.guardStale();
+    const result = await this.getActiveProvider().importData(jsonString);
+    this.registerWrite();
+    return result;
   }
   async clearData(): Promise<void> {
     return this.getActiveProvider().clearData();
@@ -146,11 +231,27 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().saveLastImportBackup(backup);
   }
   async restoreBackup(backupData: any): Promise<boolean> {
-    return this.getActiveProvider().restoreBackup(backupData);
+    this.guardStale();
+    const result = await this.getActiveProvider().restoreBackup(backupData);
+    this.registerWrite();
+    return result;
+  }
+
+  private getActiveProvider(): IDataProvider {
+    const mode = getProviderMode();
+    if (mode === 'cloud') {
+      return this.supabaseProvider;
+    } else if (mode === 'fallback') {
+      return this.supabaseProvider;
+    }
+    return this.localProvider;
   }
 }
 
-
-export const dataProvider: IDataProvider = new DynamicDataProvider();
+export const dataProvider = new DynamicDataProvider();
+if (typeof window !== 'undefined') {
+  (window as any).dataProvider = dataProvider;
+  (window as any).StaleDataError = StaleDataError;
+}
 export type { IDataProvider };
 export * from './types';
