@@ -470,20 +470,28 @@ export default function PurchaseRecords() {
       return checkIsGroupOverdue(g);
     });
 
-    // Sort: 1st gap desc, 2nd closing_date asc
     result.sort((a, b) => {
-      const statsA = getGroupDemandAndPurchased(a.id);
-      const statsB = getGroupDemandAndPurchased(b.id);
-      if (statsB.gap !== statsA.gap) {
-        return statsB.gap - statsA.gap;
+      if (sortMode === 'closing_urgent') {
+        const activeA = !checkIsGroupClosed(a);
+        const activeB = !checkIsGroupClosed(b);
+        if (activeA !== activeB) return activeA ? -1 : 1;
+        
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        return dateA.localeCompare(dateB);
+      } else if (sortMode === 'closing_asc') {
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        return dateA.localeCompare(dateB);
+      } else {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        return timeB - timeA;
       }
-      const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-      const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-      return dateA.localeCompare(dateB);
     });
 
     return result;
-  }, [baseGroups, secondaryTab, variants, categories, batchItems, privateOrderItems, inventory]);
+  }, [baseGroups, secondaryTab, sortMode]);
 
   const filteredAndSortedGroups = useMemo(() => {
     let result = [...baseGroups];
@@ -506,58 +514,31 @@ export default function PurchaseRecords() {
     }
 
     // Sort
-    if (secondaryTab === 'progress') {
-      result.sort((a, b) => {
-        const statsA = getGroupDemandAndPurchased(a.id);
-        const statsB = getGroupDemandAndPurchased(b.id);
+    result.sort((a, b) => {
+      if (sortMode === 'closing_urgent') {
+        const activeA = !checkIsGroupClosed(a);
+        const activeB = !checkIsGroupClosed(b);
         
-        const hasGapA = statsA.gap > 0;
-        const hasGapB = statsB.gap > 0;
-        
-        // 1. gap > 0 comes first
-        if (hasGapA !== hasGapB) {
-          return hasGapA ? -1 : 1;
+        if (activeA !== activeB) {
+          return activeA ? -1 : 1;
         }
         
-        // 2. if both have gap > 0, sort by gap descending
-        if (hasGapA) {
-          if (statsB.gap !== statsA.gap) {
-            return statsB.gap - statsA.gap;
-          }
-        }
-        
-        // 3. sort by closing date ascending
         const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
         return dateA.localeCompare(dateB);
-      });
-    } else {
-      result.sort((a, b) => {
-        if (sortMode === 'closing_urgent') {
-          const activeA = !checkIsGroupClosed(a);
-          const activeB = !checkIsGroupClosed(b);
-          
-          if (activeA !== activeB) {
-            return activeA ? -1 : 1;
-          }
-          
-          const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-          const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-          return dateA.localeCompare(dateB);
-        } else if (sortMode === 'closing_asc') {
-          const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-          const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-          return dateA.localeCompare(dateB);
-        } else {
-          const timeA = new Date(a.created_at || 0).getTime();
-          const timeB = new Date(b.created_at || 0).getTime();
-          return timeB - timeA;
-        }
-      });
-    }
+      } else if (sortMode === 'closing_asc') {
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        return dateA.localeCompare(dateB);
+      } else {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        return timeB - timeA;
+      }
+    });
 
     return result;
-  }, [baseGroups, secondaryTab, sortMode, variants, categories, batchItems, privateOrderItems, inventory]);
+  }, [baseGroups, secondaryTab, sortMode]);
 
   useEffect(() => {
     if (searchTerm.trim().length > 0) {
