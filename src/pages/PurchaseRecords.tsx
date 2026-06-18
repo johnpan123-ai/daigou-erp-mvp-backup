@@ -46,6 +46,10 @@ export default function PurchaseRecords() {
   const [editMode, setEditMode] = useState<boolean>(false);
   let sampleLogged = false;
 
+  const tabId = useMemo(() => Math.random().toString(36).substring(2, 9), []);
+  const lastLoadedTime = useRef<number>(Date.now());
+  const [isStale, setIsStale] = useState<boolean>(false);
+
   console.log(`[UI Render] UI groups count: ${groups.length}`);
   console.log(`[UI Render] UI variants count: ${variants.length}`);
 
@@ -574,9 +578,67 @@ export default function PurchaseRecords() {
     setPrivateOrderItems(fetchedPrivateItems);
     setInventory(fetchedInventory);
     setSalesOrderItems(fetchedOrderItems);
+    lastLoadedTime.current = Date.now();
   };
 
+  const checkIsStaleLive = (): boolean => {
+    const stored = localStorage.getItem('erp_last_write_info');
+    if (stored) {
+      try {
+        const info = JSON.parse(stored);
+        if (info.timestamp > lastLoadedTime.current && info.tabId !== tabId) {
+          setIsStale(true);
+          return true;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    return false;
+  };
+
+  const guardAgainstStaleWrite = (): boolean => {
+    const liveStale = checkIsStaleLive();
+    if (isStale || liveStale) {
+      alert('資料已在其他分頁更新，請重新載入最新資料後再編輯。');
+      return true; // blocked
+    }
+    return false; // allowed
+  };
+
+  const registerWrite = () => {
+    const now = Date.now();
+    lastLoadedTime.current = now;
+    localStorage.setItem('erp_last_write_info', JSON.stringify({ timestamp: now, tabId }));
+  };
+
+  const handleReloadData = async () => {
+    await loadData();
+    lastLoadedTime.current = Date.now();
+    setIsStale(false);
+  };
+
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'erp_last_write_info' && e.newValue) {
+        try {
+          const info = JSON.parse(e.newValue);
+          if (info.tabId !== tabId) {
+            setIsStale(true);
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [tabId]);
+
   const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
+    if (guardAgainstStaleWrite()) return;
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
       return;
     }
@@ -592,9 +654,11 @@ export default function PurchaseRecords() {
     });
     setGroups(updatedGroups);
     await dataProvider.saveProductGroups(updatedGroups);
+    registerWrite();
   };
 
   const handleBatchApply = async () => {
+    if (guardAgainstStaleWrite()) return;
     if (selectedGroupIds.size === 0) {
       alert('請先選取商品項目！');
       return;
@@ -623,6 +687,7 @@ export default function PurchaseRecords() {
 
     setGroups(updatedGroups);
     await dataProvider.saveProductGroups(updatedGroups);
+    registerWrite();
     
     setSelectedGroupIds(new Set());
     setBatchClosingDate('');
@@ -636,6 +701,10 @@ export default function PurchaseRecords() {
     field: 'closing_date' | 'release_month' | 'purchase_date' | 'product_url',
     sourceList: ProductGroup[] = filteredAndSortedGroups
   ) => {
+    if (guardAgainstStaleWrite()) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     const text = e.clipboardData.getData('text');
     const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -659,6 +728,7 @@ export default function PurchaseRecords() {
     const nextGroups = Array.from(groupMap.values());
     setGroups(nextGroups);
     await dataProvider.saveProductGroups(nextGroups);
+    registerWrite();
   };
 
   const handleKeyDown = (
@@ -689,6 +759,7 @@ export default function PurchaseRecords() {
   };
 
   const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca', totalValue: number) => {
+    if (guardAgainstStaleWrite()) return;
     if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
     
     const g = groups.find(x => x.id === groupId);
@@ -715,16 +786,19 @@ export default function PurchaseRecords() {
       }
       patch.updated_at = new Date().toISOString();
       await dataProvider.updateProductVariantPatch(targetVar.id, patch);
+      registerWrite();
       setVariants(variants.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
     }
   };
 
   const handleDeleteGroup = async (groupId: string, groupTitle: string) => {
+    if (guardAgainstStaleWrite()) return;
     const confirmDelete = window.confirm(`確定要刪除「${groupTitle}」嗎？`);
     if (!confirmDelete) return;
 
     try {
       await dataProvider.deleteProductGroup(groupId);
+      registerWrite();
       alert(`已成功刪除商品群組「${groupTitle}」。`);
       await loadData();
     } catch (e) {
@@ -734,6 +808,7 @@ export default function PurchaseRecords() {
   };
 
   const handleBatchDelete = async () => {
+    if (guardAgainstStaleWrite()) return;
     if (selectedGroupIds.size === 0) return;
     const confirmDelete = window.confirm(`確定刪除已選取的 ${selectedGroupIds.size} 筆商品？`);
     if (!confirmDelete) return;
@@ -741,6 +816,7 @@ export default function PurchaseRecords() {
     try {
       const idsToDelete = Array.from(selectedGroupIds);
       await dataProvider.deleteProductGroups(idsToDelete);
+      registerWrite();
       alert(`已成功刪除 ${idsToDelete.length} 筆商品群組。`);
       setSelectedGroupIds(new Set());
       await loadData();
@@ -819,6 +895,44 @@ export default function PurchaseRecords() {
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
         </div>
       </div>
+
+      {isStale && (
+        <div style={{
+          backgroundColor: '#fef3c7',
+          borderLeft: '4px solid #d97706',
+          padding: '16px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          borderRadius: '4px',
+          boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '18px' }}>⚠️</span>
+            <span style={{ color: '#92400e', fontWeight: 500 }}>資料已在其他分頁更新，請重新整理後再編輯。</span>
+          </div>
+          <button
+            onClick={handleReloadData}
+            style={{
+              backgroundColor: '#d97706',
+              color: '#ffffff',
+              border: 'none',
+              padding: '6px 12px',
+              borderRadius: '4px',
+              fontWeight: 600,
+              fontSize: '13px',
+              cursor: 'pointer',
+              marginLeft: 'auto',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#b45309'}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#d97706'}
+          >
+            重新載入最新資料
+          </button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: isMobile ? '4px' : '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', width: '100%', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
         <button 
