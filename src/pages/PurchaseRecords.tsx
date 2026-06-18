@@ -46,6 +46,128 @@ export default function PurchaseRecords() {
   const [editMode, setEditMode] = useState<boolean>(false);
   let sampleLogged = false;
 
+  const [proxyAgentMap, setProxyAgentMap] = useState<Record<string, string>>(() => {
+    try {
+      const stored = localStorage.getItem('erp_proxy_agent_map');
+      return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const handleUpdateAgent = (groupId: string, agent: string) => {
+    const nextMap = { ...proxyAgentMap, [groupId]: agent };
+    if (!agent) {
+      delete nextMap[groupId];
+    }
+    setProxyAgentMap(nextMap);
+    localStorage.setItem('erp_proxy_agent_map', JSON.stringify(nextMap));
+  };
+
+  const [draftDemands, setDraftDemands] = useState<Record<string, string>>({});
+
+  const handleUpdateDraft = (groupId: string, platform: 'myacg' | 'waca' | 'purchased', value: string) => {
+    setDraftDemands(prev => ({
+      ...prev,
+      [`${groupId}_${platform}`]: value
+    }));
+  };
+
+  const handleCommitDraft = async (groupId: string, platform: 'myacg' | 'waca' | 'purchased') => {
+    const key = `${groupId}_${platform}`;
+    const valStr = draftDemands[key];
+    if (valStr !== undefined) {
+      const val = parseInt(valStr, 10) || 0;
+      setDraftDemands(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      await handleUpdateGroupPlatformDemand(groupId, platform, val);
+    }
+  };
+
+  const handleCancelDraft = (groupId: string, platform: 'myacg' | 'waca' | 'purchased') => {
+    setDraftDemands(prev => {
+      const next = { ...prev };
+      delete next[`${groupId}_${platform}`];
+      return next;
+    });
+  };
+
+  const getDynamicGap = (groupId: string, originalGap: number) => {
+    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
+    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
+    if (groupVars.length === 0) return originalGap;
+
+    const v0 = groupVars[0];
+    
+    // Calculate original computed values for v0
+    // MyACG
+    const rawMyacgQty = calculateFinalMyacgDemand(v0.myacg_item_code, inventory, salesOrderItems);
+    const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v0.myacg_manual_adjustment ?? 0);
+    const autoMyacg = (v0.myacg_auto_quantity !== null && v0.myacg_auto_quantity !== undefined && v0.myacg_auto_quantity >= 0)
+      ? v0.myacg_auto_quantity + (v0.myacg_manual_adjustment ?? 0)
+      : null;
+    const rawMyacg = (v0.effective_myacg_quantity !== null && v0.effective_myacg_quantity !== undefined && v0.effective_myacg_quantity >= 0)
+      ? v0.effective_myacg_quantity + (v0.myacg_manual_adjustment ?? 0)
+      : (autoMyacg ?? (v0 as any).myacg_quantity ?? localMyacg);
+    const v0_Myacg = rawMyacg >= 0 ? rawMyacg : 0;
+
+    // WACA
+    const localWaca = (v0.waca_auto_quantity ?? 0) + (v0.waca_manual_adjustment ?? 0);
+    const autoWaca = (v0.waca_auto_quantity !== null && v0.waca_auto_quantity !== undefined && v0.waca_auto_quantity >= 0)
+      ? v0.waca_auto_quantity + (v0.waca_manual_adjustment ?? 0)
+      : null;
+    const rawWaca = autoWaca ?? (v0 as any).waca_quantity ?? localWaca;
+    const v0_Waca = rawWaca >= 0 ? rawWaca : 0;
+
+    // Private
+    const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v0.id).reduce((sum, item) => sum + item.quantity, 0);
+    const rawPrivate = v0.private_manual_adjustment ?? (v0 as any).private_quantity ?? localPrivate;
+    const v0_Private = rawPrivate >= 0 ? rawPrivate : 0;
+
+    // Purchased
+    const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v0.id).reduce((sum, item) => sum + item.quantity, 0);
+    const rawPurchased = v0.purchased_manual_adjustment ?? (v0 as any).ordered_quantity ?? (v0 as any).ordered_qty ?? localPurchased;
+    const v0_Purchased = rawPurchased >= 0 ? rawPurchased : 0;
+
+    const v0_OriginalDemand = v0_Myacg + v0_Waca + v0_Private;
+    const v0_OriginalGap = Math.max(v0_OriginalDemand - v0_Purchased, 0);
+
+    // Apply draft overrides to v0
+    const draftMyacgKey = `${groupId}_myacg`;
+    const draftWacaKey = `${groupId}_waca`;
+    const draftPurchasedKey = `${groupId}_purchased`;
+
+    // For myacg: draft value overrides v0.myacg_manual_adjustment
+    let new_v0_Myacg = v0_Myacg;
+    if (draftDemands[draftMyacgKey] !== undefined) {
+      const draftMyacgVal = parseInt(draftDemands[draftMyacgKey], 10) || 0;
+      const myacgWithoutManual = v0_Myacg - (v0.myacg_manual_adjustment ?? 0);
+      new_v0_Myacg = Math.max(myacgWithoutManual + draftMyacgVal, 0);
+    }
+
+    // For waca: draft value overrides v0.waca_manual_adjustment
+    let new_v0_Waca = v0_Waca;
+    if (draftDemands[draftWacaKey] !== undefined) {
+      const draftWacaManual = parseInt(draftDemands[draftWacaKey], 10) || 0;
+      const wacaWithoutManual = v0_Waca - (v0.waca_manual_adjustment ?? 0);
+      new_v0_Waca = Math.max(wacaWithoutManual + draftWacaManual, 0);
+    }
+
+    // For purchased: draft value overrides v0.purchased_manual_adjustment
+    let new_v0_Purchased = v0_Purchased;
+    if (draftDemands[draftPurchasedKey] !== undefined) {
+      new_v0_Purchased = parseInt(draftDemands[draftPurchasedKey], 10) || 0;
+    }
+
+    const new_v0_Demand = new_v0_Myacg + new_v0_Waca + v0_Private;
+    const new_v0_Gap = Math.max(new_v0_Demand - new_v0_Purchased, 0);
+
+    return Math.max(originalGap - v0_OriginalGap + new_v0_Gap, 0);
+  };
+
   const [isStale, setIsStale] = useState<boolean>(false);
 
   console.log(`[UI Render] UI groups count: ${groups.length}`);
@@ -542,6 +664,46 @@ export default function PurchaseRecords() {
     return result;
   }, [baseGroups, secondaryTab, sortMode]);
 
+  const [stableEditOrder, setStableEditOrder] = useState<string[] | null>(null);
+  const [stableCompletedOrder, setStableCompletedOrder] = useState<string[] | null>(null);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (editMode) {
+      setStableEditOrder(filteredAndSortedGroups.map(g => g.id));
+      setStableCompletedOrder(completedGroups.map(g => g.id));
+    } else {
+      setStableEditOrder(null);
+      setStableCompletedOrder(null);
+    }
+  }, [editMode, searchTerm, filterSource, filterType, activeTab, secondaryTab, sortMode]);
+
+
+
+  const displayedMainGroups = useMemo(() => {
+    if (editMode && stableEditOrder) {
+      const mapped = stableEditOrder
+        .map(id => groups.find(g => g.id === id))
+        .filter((g): g is ProductGroup => !!g);
+      const existingIds = new Set(stableEditOrder);
+      const newGroups = filteredAndSortedGroups.filter(g => !existingIds.has(g.id));
+      return [...mapped, ...newGroups];
+    }
+    return filteredAndSortedGroups;
+  }, [editMode, stableEditOrder, filteredAndSortedGroups, groups]);
+
+  const displayedCompletedGroups = useMemo(() => {
+    if (editMode && stableCompletedOrder) {
+      const mapped = stableCompletedOrder
+        .map(id => groups.find(g => g.id === id))
+        .filter((g): g is ProductGroup => !!g);
+      const existingIds = new Set(stableCompletedOrder);
+      const newGroups = completedGroups.filter(g => !existingIds.has(g.id));
+      return [...mapped, ...newGroups];
+    }
+    return completedGroups;
+  }, [editMode, stableCompletedOrder, completedGroups, groups]);
+
   useEffect(() => {
     if (searchTerm.trim().length > 0) {
       if (completedGroups.length > 0) {
@@ -745,7 +907,7 @@ export default function PurchaseRecords() {
     return val;
   };
 
-  const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca', totalValue: number) => {
+  const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca' | 'purchased', totalValue: number) => {
     if (guardAgainstStaleWrite()) return;
     if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
     
@@ -768,8 +930,10 @@ export default function PurchaseRecords() {
       let patch: Partial<ProductVariant> = {};
       if (platform === 'myacg') {
         patch = { myacg_manual_adjustment: totalValue };
-      } else {
+      } else if (platform === 'waca') {
         patch = { waca_manual_adjustment: totalValue };
+      } else if (platform === 'purchased') {
+        patch = { purchased_manual_adjustment: totalValue };
       }
       patch.updated_at = new Date().toISOString();
       await dataProvider.updateProductVariantPatch(targetVar.id, patch);
@@ -1352,6 +1516,11 @@ export default function PurchaseRecords() {
                         <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('title', e)} />
                       </div>
                     </th>
+                    <th style={{ width: '100px' }}>
+                      <div className="th-inner justify-center">
+                        <span>代理商</span>
+                      </div>
+                    </th>
                     <th style={{ width: `${colWidths.myacg}px` }}>
                       <div className="th-inner justify-center">
                         <span>買動漫</span>
@@ -1402,6 +1571,8 @@ export default function PurchaseRecords() {
                     const details = getGroupPlatformDetails(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
+
+                    const dynamicGap = getDynamicGap(g.id, details.gap);
     
                     return (
                       <tr 
@@ -1513,14 +1684,45 @@ export default function PurchaseRecords() {
                             </div>
                           </div>
                         </td>
+                        <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <select
+                            value={proxyAgentMap[g.id] || ''}
+                            onChange={(e) => handleUpdateAgent(g.id, e.target.value)}
+                            className="select"
+                            style={{ 
+                              width: '100%', 
+                              height: '32px', 
+                              padding: '0 4px', 
+                              fontSize: '13px', 
+                              borderRadius: '4px',
+                              border: '1px solid #d1d5db',
+                              backgroundColor: '#fff',
+                              color: proxyAgentMap[g.id] ? '#1e293b' : '#94a3b8',
+                              fontWeight: proxyAgentMap[g.id] ? 600 : 400
+                            }}
+                          >
+                            <option value="">(無)</option>
+                            <option value="鉅霖">鉅霖</option>
+                            <option value="萬榮">萬榮</option>
+                          </select>
+                        </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
                               type="number"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
-                              value={details.myacg} 
-                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'myacg', parseInt(e.target.value) || 0)} 
+                              value={draftDemands[`${g.id}_myacg`] !== undefined ? draftDemands[`${g.id}_myacg`] : String(details.myacg)} 
+                              onChange={e => handleUpdateDraft(g.id, 'myacg', e.target.value)} 
+                              onBlur={() => handleCommitDraft(g.id, 'myacg')}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.currentTarget.blur();
+                                } else if (e.key === 'Escape') {
+                                  handleCancelDraft(g.id, 'myacg');
+                                  e.currentTarget.blur();
+                                }
+                              }}
                               onClick={e => e.stopPropagation()}
                               min={0}
                             />
@@ -1534,8 +1736,17 @@ export default function PurchaseRecords() {
                               type="number"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
-                              value={details.wacaManual} 
-                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value) || 0)} 
+                              value={draftDemands[`${g.id}_waca`] !== undefined ? draftDemands[`${g.id}_waca`] : String(details.wacaManual)} 
+                              onChange={e => handleUpdateDraft(g.id, 'waca', e.target.value)} 
+                              onBlur={() => handleCommitDraft(g.id, 'waca')}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.currentTarget.blur();
+                                } else if (e.key === 'Escape') {
+                                  handleCancelDraft(g.id, 'waca');
+                                  e.currentTarget.blur();
+                                }
+                              }}
                               onClick={e => e.stopPropagation()}
                               min={0}
                             />
@@ -1547,10 +1758,31 @@ export default function PurchaseRecords() {
                           {details.privateOrder}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
-                          {details.purchased}
+                          {editMode && isProxyProduct(g) ? (
+                            <input 
+                              type="number"
+                              className="input" 
+                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
+                              value={draftDemands[`${g.id}_purchased`] !== undefined ? draftDemands[`${g.id}_purchased`] : String(details.purchased)} 
+                              onChange={e => handleUpdateDraft(g.id, 'purchased', e.target.value)} 
+                              onBlur={() => handleCommitDraft(g.id, 'purchased')}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.currentTarget.blur();
+                                } else if (e.key === 'Escape') {
+                                  handleCancelDraft(g.id, 'purchased');
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              onClick={e => e.stopPropagation()}
+                              min={0}
+                            />
+                          ) : (
+                            details.purchased
+                          )}
                         </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: details.gap > 0 ? '#ef4444' : '#166534' }}>
-                          缺 {details.gap}
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: dynamicGap > 0 ? '#ef4444' : '#166534' }}>
+                          缺 {dynamicGap}
                         </td>
     
                         <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
@@ -2019,9 +2251,9 @@ export default function PurchaseRecords() {
             />
           ) : (
             <div className="flex-col gap-md">
-              {filteredAndSortedGroups.length > 0 && (
+              {displayedMainGroups.length > 0 && (
                 <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%' }}>
-                  {renderGroupsTable(filteredAndSortedGroups, 'main')}
+                  {renderGroupsTable(displayedMainGroups, 'main')}
                 </div>
               )}
     
@@ -2057,7 +2289,7 @@ export default function PurchaseRecords() {
                   </button>
                   {completedExpanded && (
                     <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%', marginTop: '8px' }}>
-                      {renderGroupsTable(completedGroups, 'completed')}
+                      {renderGroupsTable(displayedCompletedGroups, 'completed')}
                     </div>
                   )}
                 </div>
