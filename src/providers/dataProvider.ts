@@ -182,6 +182,9 @@ class DynamicDataProvider implements IDataProvider {
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
     return this.getActiveProvider().savePrivateOrderItems(items);
   }
+  async deletePrivateOrderItems(ids: string[]): Promise<void> {
+    return this.getActiveProvider().deletePrivateOrderItems(ids);
+  }
   async getImportBatches(): Promise<ImportBatch[]> {
     return this.getActiveProvider().getImportBatches();
   }

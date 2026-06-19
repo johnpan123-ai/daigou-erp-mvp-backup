@@ -387,6 +387,7 @@ export interface DatabaseAdapter {
   savePrivateOrders(orders: PrivateOrder[]): Promise<void>;
   getPrivateOrderItems(): Promise<PrivateOrderItem[]>;
   savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void>;
+  deletePrivateOrderItems(ids: string[]): Promise<void>;
 
   getImportBatches(): Promise<ImportBatch[]>;
   saveImportBatches(batches: ImportBatch[]): Promise<void>;
@@ -1480,6 +1481,12 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
     saveData('erp_private_order_items', items);
+  }
+
+  async deletePrivateOrderItems(ids: string[]): Promise<void> {
+    const allItems = await this.getPrivateOrderItems();
+    const updated = allItems.filter(i => !ids.includes(i.id));
+    await this.savePrivateOrderItems(updated);
   }
 
   async getImportBatches(): Promise<ImportBatch[]> {
@@ -2587,6 +2594,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
     await this.set('erp_private_order_items', items);
+  }
+
+  async deletePrivateOrderItems(ids: string[]): Promise<void> {
+    const allItems = await this.getPrivateOrderItems();
+    const updated = allItems.filter(i => !ids.includes(i.id));
+    await this.savePrivateOrderItems(updated);
   }
 
   async getImportBatches(): Promise<ImportBatch[]> {

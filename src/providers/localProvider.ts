@@ -96,6 +96,9 @@ export class LocalProvider implements IDataProvider {
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
     return db.savePrivateOrderItems(items);
   }
+  async deletePrivateOrderItems(ids: string[]): Promise<void> {
+    return db.deletePrivateOrderItems(ids);
+  }
   async getImportBatches(): Promise<ImportBatch[]> {
     return db.getImportBatches();
   }

@@ -814,8 +814,35 @@ export default function PurchaseManagement() {
   const handleEditOrder = (order: PrivateOrder) => {
     setEditingPoId(order.id);
     setPoForm({ customer_name: order.customer_name, contact: order.contact || '', note: order.note || '' });
+    
+    // Group existing items in this order by variant_id to detect duplicates
+    const orderItemsByVariant: Record<string, PrivateOrderItem[]> = {};
+    privateOrderItems.forEach(item => {
+      if (item.private_order_id === order.id) {
+        if (!orderItemsByVariant[item.product_variant_id]) {
+          orderItemsByVariant[item.product_variant_id] = [];
+        }
+        orderItemsByVariant[item.product_variant_id].push(item);
+      }
+    });
+
+    // Detect duplicates and print warning if any exist
+    const duplicatesList: string[] = [];
+    Object.entries(orderItemsByVariant).forEach(([variantId, items]) => {
+      if (items.length > 1) {
+        const variant = variants.find(v => v.id === variantId);
+        const name = variant ? `${variant.product_title} - ${variant.variant_name} (${variant.myacg_item_code || '無條碼/代碼'})` : variantId;
+        duplicatesList.push(`${name}: 重複 ${items.length} 筆`);
+      }
+    });
+
+    if (duplicatesList.length > 0) {
+      console.warn(`[Private Order Duplicate Warning] 偵測到重複私下登記項目：\n` + duplicatesList.join('\n'));
+    }
+
     setPoLines(variants.map(v => {
-      const existing = privateOrderItems.find(i => i.product_variant_id === v.id && i.private_order_id === order.id);
+      const items = orderItemsByVariant[v.id] || [];
+      const existing = items[0];
       return {
         variant_id: v.id,
         quantity: existing ? existing.quantity : 0,
@@ -844,17 +871,65 @@ export default function PurchaseManagement() {
       if (idx !== -1) {
         allPOs[idx] = { ...allPOs[idx], customer_name: poForm.customer_name, contact: poForm.contact, note: poForm.note };
       }
-      const newPOItems = allPOItems.filter(i => i.private_order_id !== editingPoId);
-      const updatedItems: PrivateOrderItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        private_order_id: editingPoId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        amount: line.amount,
-        note: line.note
-      }));
+      
+      const originalPoItems = allPOItems.filter(i => i.private_order_id === editingPoId);
+      const idsToDelete: string[] = [];
+      const updatedItems: PrivateOrderItem[] = [];
+      
+      // Group originalPoItems by variant_id
+      const originalPoItemsByVariant: Record<string, PrivateOrderItem[]> = {};
+      originalPoItems.forEach(item => {
+        if (!originalPoItemsByVariant[item.product_variant_id]) {
+          originalPoItemsByVariant[item.product_variant_id] = [];
+        }
+        originalPoItemsByVariant[item.product_variant_id].push(item);
+      });
+      
+      validLines.forEach(line => {
+        const existingItems = originalPoItemsByVariant[line.variant_id] || [];
+        if (existingItems.length > 0) {
+          const keptId = existingItems[0].id;
+          updatedItems.push({
+            id: keptId,
+            private_order_id: editingPoId,
+            product_variant_id: line.variant_id,
+            quantity: line.quantity,
+            amount: line.amount,
+            note: line.note
+          });
+          if (existingItems.length > 1) {
+            for (let i = 1; i < existingItems.length; i++) {
+              idsToDelete.push(existingItems[i].id);
+            }
+          }
+        } else {
+          updatedItems.push({
+            id: crypto.randomUUID(),
+            private_order_id: editingPoId,
+            product_variant_id: line.variant_id,
+            quantity: line.quantity,
+            amount: line.amount,
+            note: line.note
+          });
+        }
+      });
+      
+      const validVariantIds = new Set(validLines.map(l => l.variant_id));
+      originalPoItems.forEach(item => {
+        if (!validVariantIds.has(item.product_variant_id)) {
+          idsToDelete.push(item.id);
+        }
+      });
+      
+      if (idsToDelete.length > 0) {
+        await dataProvider.deletePrivateOrderItems(idsToDelete);
+      }
+      
+      const freshAllPOItems = await dataProvider.getPrivateOrderItems();
+      const otherPOItems = freshAllPOItems.filter(i => i.private_order_id !== editingPoId);
+      
       await dataProvider.savePrivateOrders(allPOs);
-      await dataProvider.savePrivateOrderItems([...newPOItems, ...updatedItems]);
+      await dataProvider.savePrivateOrderItems([...otherPOItems, ...updatedItems]);
     } else {
       const newPoId = crypto.randomUUID();
       const newPo: PrivateOrder = {

@@ -41,6 +41,7 @@ export interface IDataProvider {
   savePrivateOrders(orders: PrivateOrder[]): Promise<void>;
   getPrivateOrderItems(): Promise<PrivateOrderItem[]>;
   savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void>;
+  deletePrivateOrderItems(ids: string[]): Promise<void>;
 
   getImportBatches(): Promise<ImportBatch[]>;
   saveImportBatches(batches: ImportBatch[]): Promise<void>;

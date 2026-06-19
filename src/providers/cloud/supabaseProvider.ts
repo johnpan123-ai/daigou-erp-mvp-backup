@@ -1589,6 +1589,56 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
+  async deletePrivateOrderItems(ids: string[]): Promise<void> {
+    // 1. 本地刪除
+    await db.deletePrivateOrderItems(ids);
+
+    // 2. 判斷是否為唯讀 Viewer/Helper
+    if (!(await this.canWriteCloud())) {
+      const mode = getProviderMode();
+      const role = await this.getRole();
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email || 'unknown';
+      const msg = `[Sync Push WARNING] Cannot delete private_order_items from cloud. User: ${email}, Role: ${role}, Provider Mode: ${mode}`;
+      console.warn(msg);
+      alert(`刪除失敗：您目前在雲端模式下是唯讀權限 (${role || '未登入'})，無法從雲端刪除私下登記項目。`);
+      throw new Error(msg);
+    }
+
+    // 3. 防呆與空陣列檢查
+    if (!ids || ids.length === 0) {
+      console.log('[Private Order Sync] skip empty cloud delete for private_order_items');
+      return;
+    }
+
+    try {
+      // 4. 僅過濾出合法 UUID 的 ids
+      const validIds = ids.filter(id => isValidUuid(id));
+      if (validIds.length === 0) {
+        console.log('[Private Order Sync] skip empty active cloud delete for private_order_items');
+        return;
+      }
+
+      console.log(`[Private Order Sync] delete items count: ${validIds.length}`);
+      const { error: deleteError } = await supabase
+        .from('private_order_items')
+        .delete()
+        .in('id', validIds);
+
+      if (deleteError) {
+        console.error('[Cloud Push ERROR] Supabase delete error message:', deleteError.message);
+        await this.pullCoreProductData(true);
+        alert(`雲端刪除私下訂單項目失敗：${deleteError.message}。已回復本地快取資料！`);
+        throw deleteError;
+      }
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase delete error message:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端刪除私下訂單項目發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
   async getImportBatches(): Promise<ImportBatch[]> {
     return db.getImportBatches();
   }

@@ -13,6 +13,7 @@ const DEFAULT_COL_WIDTHS = {
   myacg: 80,
   waca: 80,
   privateOrder: 90,
+  totalDemand: 90,
   purchased: 80,
   gap: 80,
   closingDate: 120,
@@ -1539,6 +1540,12 @@ export default function PurchaseRecords() {
                         <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('privateOrder', e)} />
                       </div>
                     </th>
+                    <th style={{ width: `${colWidths.totalDemand || 90}px` }}>
+                      <div className="th-inner justify-center">
+                        <span>總需求</span>
+                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('totalDemand', e)} />
+                      </div>
+                    </th>
                     <th style={{ width: `${colWidths.purchased}px` }}>
                       <div className="th-inner justify-center">
                         <span>已採購</span>
@@ -1756,6 +1763,18 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
                           {details.privateOrder}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#1e293b' }}>
+                          {(() => {
+                            const myacgVal = (editMode && isProxyProduct(g) && draftDemands[`${g.id}_myacg`] !== undefined)
+                              ? (parseInt(draftDemands[`${g.id}_myacg`], 10) || 0)
+                              : details.myacg;
+                            const wacaVal = (editMode && isProxyProduct(g) && draftDemands[`${g.id}_waca`] !== undefined)
+                              ? (parseInt(draftDemands[`${g.id}_waca`], 10) || 0)
+                              : details.wacaManual;
+                            const privateVal = details.privateOrder;
+                            return myacgVal + wacaVal + privateVal;
+                          })()}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
