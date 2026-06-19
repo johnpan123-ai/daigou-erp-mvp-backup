@@ -867,15 +867,12 @@ export default function PurchaseManagement() {
     const allPOItems = await dataProvider.getPrivateOrderItems();
 
     if (editingPoId) {
-      console.log('DEBUG handleAddPrivateOrderSubmit - editingPoId:', editingPoId);
-      console.log('DEBUG handleAddPrivateOrderSubmit - allPOItems count:', allPOItems.length);
       const idx = allPOs.findIndex(o => o.id === editingPoId);
       if (idx !== -1) {
         allPOs[idx] = { ...allPOs[idx], customer_name: poForm.customer_name, contact: poForm.contact, note: poForm.note };
       }
       
       const originalPoItems = allPOItems.filter(i => i.private_order_id === editingPoId);
-      console.log('DEBUG handleAddPrivateOrderSubmit - originalPoItems count:', originalPoItems.length);
       const idsToDelete: string[] = [];
       const updatedItems: PrivateOrderItem[] = [];
       
@@ -924,7 +921,6 @@ export default function PurchaseManagement() {
         }
       });
       
-      console.log('DEBUG handleAddPrivateOrderSubmit - idsToDelete:', idsToDelete);
       if (idsToDelete.length > 0) {
         await dataProvider.deletePrivateOrderItems(idsToDelete);
       }
