@@ -47,22 +47,29 @@ export default function PurchaseRecords() {
   const [editMode, setEditMode] = useState<boolean>(false);
   let sampleLogged = false;
 
-  const [proxyAgentMap, setProxyAgentMap] = useState<Record<string, string>>(() => {
-    try {
-      const stored = localStorage.getItem('erp_proxy_agent_map');
-      return stored ? JSON.parse(stored) : {};
-    } catch (e) {
-      return {};
-    }
-  });
+  const handleUpdateAgent = async (groupId: string, agent: string) => {
+    if (guardAgainstStaleWrite()) return;
 
-  const handleUpdateAgent = (groupId: string, agent: string) => {
-    const nextMap = { ...proxyAgentMap, [groupId]: agent };
-    if (!agent) {
-      delete nextMap[groupId];
+    const updatedGroups = groups.map(g => {
+      if (g.id === groupId) {
+        return { ...g, proxy_agent: agent || undefined } as ProductGroup;
+      }
+      return g;
+    });
+
+    setGroups(updatedGroups);
+
+    try {
+      await dataProvider.saveProductGroups(updatedGroups);
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
+      throw err;
     }
-    setProxyAgentMap(nextMap);
-    localStorage.setItem('erp_proxy_agent_map', JSON.stringify(nextMap));
   };
 
   const [draftDemands, setDraftDemands] = useState<Record<string, string>>({});
@@ -732,7 +739,53 @@ export default function PurchaseRecords() {
     console.log(`[UI Load] UI groups count: ${fetchedGroups.length}`);
     console.log(`[UI Load] UI variants count: ${fetchedVars.length}`);
     console.log('[UI Load] variants sample:', fetchedVars.length > 0 ? JSON.stringify(fetchedVars[0]) : 'empty');
-    setGroups(fetchedGroups);
+    
+    let finalGroups = fetchedGroups;
+
+    // localStorage migration logic
+    const storedMap = localStorage.getItem('erp_proxy_agent_map');
+    if (storedMap) {
+      try {
+        const localMap = JSON.parse(storedMap);
+        let migrated = false;
+        
+        const nextGroups = fetchedGroups.map(g => {
+          const localAgent = localMap[g.id];
+          if (localAgent && g.proxy_agent !== localAgent) {
+            migrated = true;
+            return { ...g, proxy_agent: localAgent };
+          }
+          return g;
+        });
+
+        if (!migrated) {
+          // Condition 1: storedMap exists, but no migratable data
+          localStorage.removeItem('erp_proxy_agent_map');
+          console.log("[Migration] No migratable data found. Deleted erp_proxy_agent_map.");
+        } else {
+          // Condition 2 & 3: migrated === true
+          // 1. Check stale status first
+          if (dataProvider.checkIsStaleLive && dataProvider.checkIsStaleLive()) {
+            console.warn("[Migration Warning] Local data is stale. Aborting migration to prevent overwriting cloud. LocalStorage preserved.");
+            alert("偵測到雲端資料已有新變更。請重新載入網頁以取得最新狀態，系統將在重新載入後自動完成代理商舊資料搬移與同步。");
+          } else {
+            console.log("[Migration] Attempting to save migrated proxy agents to database...");
+            await dataProvider.saveProductGroups(nextGroups);
+            finalGroups = nextGroups;
+            console.log("[Migration] Database write successful.");
+            
+            // Condition 2: save succeeded -> safely delete localStorage
+            localStorage.removeItem('erp_proxy_agent_map');
+            console.log("[Migration] Local storage 'erp_proxy_agent_map' successfully deleted.");
+          }
+        }
+      } catch (e) {
+        // Condition 3: migrated === true, but save fails / StaleDataError / network error
+        console.error("[Migration ERROR] Failed to complete database migration. LocalStorage preserved. Error:", e);
+      }
+    }
+
+    setGroups(finalGroups);
     setVariants(fetchedVars);
     setCategories(fetchedCats);
     setBatchItems(fetchedBatchItems);
@@ -1693,7 +1746,7 @@ export default function PurchaseRecords() {
                         </td>
                         <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                           <select
-                            value={proxyAgentMap[g.id] || ''}
+                            value={g.proxy_agent || ''}
                             onChange={(e) => handleUpdateAgent(g.id, e.target.value)}
                             className="select"
                             style={{ 
@@ -1704,8 +1757,8 @@ export default function PurchaseRecords() {
                               borderRadius: '4px',
                               border: '1px solid #d1d5db',
                               backgroundColor: '#fff',
-                              color: proxyAgentMap[g.id] ? '#1e293b' : '#94a3b8',
-                              fontWeight: proxyAgentMap[g.id] ? 600 : 400
+                              color: g.proxy_agent ? '#1e293b' : '#94a3b8',
+                              fontWeight: g.proxy_agent ? 600 : 400
                             }}
                           >
                             <option value="">(無)</option>

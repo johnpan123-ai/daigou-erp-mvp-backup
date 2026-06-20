@@ -36,6 +36,7 @@ export async function exportToExcelBackup(currentUserEmail?: string): Promise<st
     '官方結單日 (closing_date)': g.closing_date || '',
     '發售月份 (release_month)': g.release_month || '',
     '官網連結 (product_url)': g.product_url || '',
+    '代理商 (proxy_agent)': g.proxy_agent || '',
     '建立時間 (created_at)': g.created_at || ''
   }));
 

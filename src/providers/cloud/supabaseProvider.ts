@@ -503,7 +503,8 @@ export class SupabaseProvider implements IDataProvider {
         product_url: g.product_url || null,
         priority: g.priority || 'Medium',
         normalized_title: g.normalized_title || null,
-        has_official_site: g.has_official_site || false
+        has_official_site: g.has_official_site || false,
+        proxy_agent: g.proxy_agent || null
       }));
 
       const { error } = await supabase
