@@ -181,8 +181,7 @@ export function normalizeProductTitle(title: string): string {
     /預約/g,
     /日版/g,
     /代理/g, 
-    /\d{2}年\d{2}月/g,
-    /\d{4}年\d{2}月/g,
+    /\d{2,4}年\d{1,2}月/g,
   ];
 
   for (const p of patterns) {
