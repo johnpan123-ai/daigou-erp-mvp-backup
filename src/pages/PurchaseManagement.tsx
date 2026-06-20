@@ -10,6 +10,7 @@ import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, P
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
+import PurchaseBatchModal from '../components/PurchaseBatchModal';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -548,10 +549,7 @@ export default function PurchaseManagement() {
 
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
-  const [onlyShowShortage, setOnlyShowShortage] = useState(false);
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
-  const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
-  const [batchLines, setBatchLines] = useState<{ variant_id: string, quantity: number, cost: number, note: string }[]>([]);
   // Bulk master cost setting state
   const [bulkMasterPrice, setBulkMasterPrice] = useState<string>('');
   const [bulkMasterCategory, setBulkMasterCategory] = useState<string>('');
@@ -961,39 +959,12 @@ export default function PurchaseManagement() {
   // --- Modal Logic: Purchase Batch ---
   const openBatchModal = () => {
     setEditingBatchId(null);
-    setOnlyShowShortage(false);
-    setBatchForm({ name: '', date: new Date().toISOString().slice(0, 10), note: '' });
-    
-    const isDaili = group?.listing_type === '代理版';
-    setBatchLines(variants.map(v => {
-      const defCost = isDaili ? getVariantDefaultTwdCost(v) : getVariantDefaultJpyCost(v);
-      const latCost = getLatestBatchCost(v.id);
-      const initialCost = (defCost !== undefined && defCost !== null) ? defCost : (latCost || 0);
-      return { variant_id: v.id, quantity: 0, cost: initialCost, note: '' };
-    }));
     setShowBatchModal(true);
   };
 
   const handleEditBatch = (batch: PurchaseBatch) => {
     setEditingBatchId(batch.id);
-    setOnlyShowShortage(false);
-    setBatchForm({ name: batch.name, date: batch.date, note: batch.note || '' });
-    setBatchLines(variants.map(v => {
-      const existing = purchaseBatchItems.find(i => i.product_variant_id === v.id && i.purchase_batch_id === batch.id);
-      return {
-        variant_id: v.id,
-        quantity: existing ? existing.quantity : 0,
-        cost: existing ? existing.cost : 0,
-        note: existing?.note || ''
-      };
-    }));
     setShowBatchModal(true);
-  };
-
-  const updateBatchLine = (index: number, field: string, value: any) => {
-    const newLines = [...batchLines];
-    newLines[index] = { ...newLines[index], [field]: value };
-    setBatchLines(newLines);
   };
 
   const handleApplyMasterCostToAll = async () => {
@@ -1102,83 +1073,6 @@ export default function PurchaseManagement() {
     } finally {
       setIsApplyingMasterCost(false);
     }
-  };
-
-  const handleAddBatchSubmit = async () => {
-    const validLines = batchLines.filter(l => l.quantity > 0);
-    if (!group || !batchForm.name.trim() || validLines.length === 0) return;
-    
-    try {
-      const allBatches = await dataProvider.getPurchaseBatches();
-      const allBatchItems = await dataProvider.getPurchaseBatchItems();
-
-      if (editingBatchId) {
-        const idx = allBatches.findIndex(b => b.id === editingBatchId);
-        if (idx !== -1) {
-          allBatches[idx] = { ...allBatches[idx], name: batchForm.name, date: batchForm.date, note: batchForm.note };
-        }
-        const newItems = allBatchItems.filter(i => i.purchase_batch_id !== editingBatchId);
-        const updatedItems: PurchaseBatchItem[] = validLines.map(line => ({
-          id: crypto.randomUUID(),
-          purchase_batch_id: editingBatchId,
-          product_variant_id: line.variant_id,
-          quantity: line.quantity,
-          cost: line.cost,
-          note: line.note
-        }));
-        await dataProvider.savePurchaseBatches(allBatches);
-        await dataProvider.savePurchaseBatchItems([...newItems, ...updatedItems]);
-      } else {
-        const newBatchId = crypto.randomUUID();
-        const newBatch: PurchaseBatch = {
-          id: newBatchId,
-          product_group_id: group.id,
-          name: batchForm.name,
-          date: batchForm.date,
-          note: batchForm.note,
-          created_at: new Date().toISOString()
-        };
-
-        const newItems: PurchaseBatchItem[] = validLines.map(line => ({
-          id: crypto.randomUUID(),
-          purchase_batch_id: newBatchId,
-          product_variant_id: line.variant_id,
-          quantity: line.quantity,
-          cost: line.cost,
-          note: line.note
-        }));
-
-        await dataProvider.savePurchaseBatches([...allBatches, newBatch]);
-        await dataProvider.savePurchaseBatchItems([...allBatchItems, ...newItems]);
-      }
-      
-      setShowBatchModal(false);
-      await loadData();
-    } catch (err) {
-      if (err instanceof StaleDataError) {
-        alert(err.message);
-        setIsStale(true);
-        setShowBatchModal(false);
-        await loadData();
-        return;
-      }
-      throw err;
-    }
-  };
-
-
-
-
-
-
-
-  const getVariantShortageForModal = (v: ProductVariant) => {
-    const { totalDemand } = getVariantDemands(v);
-    const purchased = purchaseBatchItems
-      .filter(pbi => pbi.product_variant_id === v.id && pbi.purchase_batch_id !== editingBatchId)
-      .reduce((sum, item) => sum + item.quantity, 0);
-
-    return totalDemand - purchased;
   };
 
   if (!group) return <div className="p-xl text-center text-muted">載入中...</div>;
@@ -1445,11 +1339,7 @@ export default function PurchaseManagement() {
   const costSample = variants.find(v => (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) || (v.default_twd_cost !== undefined && v.default_twd_cost !== null)) || variants[0];
   console.log('[Default Cost Sync] UI render sample:', costSample ? { id: costSample.id, default_jpy_cost: costSample.default_jpy_cost, default_twd_cost: costSample.default_twd_cost } : 'empty');
 
-  const batchTotal = batchLines.reduce((sum, line) => {
-    const q = line?.quantity || 0;
-    const c = line?.cost || 0;
-    return sum + (q * c);
-  }, 0);
+
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f4f5f7', display: 'flex', flexDirection: 'column' }}>
@@ -3170,204 +3060,25 @@ export default function PurchaseManagement() {
       )}
 
       {showBatchModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="card" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#fff' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{editingBatchId ? '編輯採購批次' : '新增採購批次'}</h2>
-              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowBatchModal(false)}><X size={20} /></button>
-            </div>
-            
-            <div style={{ padding: '16px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>批次名稱 *</label>
-                  <input className="input" type="text" value={batchForm.name} onChange={e => setBatchForm({...batchForm, name: e.target.value})} placeholder="例如：2023-11-20 安利美特採購" style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>採購日期</label>
-                  <input className="input" type="date" value={batchForm.date} onChange={e => setBatchForm({...batchForm, date: e.target.value})} style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>備註</label>
-                  <input className="input" type="text" value={batchForm.note} onChange={e => setBatchForm({...batchForm, note: e.target.value})} style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px' }} />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>採購明細</div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={onlyShowShortage} 
-                    onChange={e => setOnlyShowShortage(e.target.checked)} 
-                    style={{ cursor: 'pointer' }}
-                  />
-                  <span>只顯示有缺口商品</span>
-                </label>
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
-                    <th style={{ padding: '8px', textAlign: 'left', fontWeight: 500 }}>商品規格</th>
-                    <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>缺口</th>
-                    <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>數量</th>
-                    <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '120px' }}>{isDaili ? '成本（台幣）' : '實支單價（日幣）'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const rows: React.ReactNode[] = [];
-                    let hasAnyVisible = false;
-                    
-                    variants.forEach((v, idx) => {
-                      const shortage = getVariantShortageForModal(v);
-                      const isHidden = onlyShowShortage && shortage <= 0;
-                      if (isHidden) return;
-                      
-                      hasAnyVisible = true;
-                      rows.push(
-                        <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '8px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                              <div style={{ fontWeight: 600, color: '#1e293b' }}>
-                                {getDisplayProductName(v)}
-                              </div>
-                              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                                SKU: {v.myacg_item_code}
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            {(() => {
-                              const remainingGap = shortage - (batchLines[idx]?.quantity || 0);
-                              if (remainingGap > 0) {
-                                return (
-                                  <span style={{
-                                    backgroundColor: '#FEE2E2',
-                                    color: '#DC2626',
-                                    border: '1px solid #fecaca',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    whiteSpace: 'nowrap'
-                                  }}>
-                                    缺 {remainingGap}
-                                  </span>
-                                );
-                              } else if (remainingGap === 0) {
-                                return (
-                                  <span style={{
-                                    backgroundColor: '#DCFCE7',
-                                    color: '#16a34a',
-                                    border: '1px solid #bbf7d0',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    whiteSpace: 'nowrap'
-                                  }}>
-                                    已補齊
-                                  </span>
-                                );
-                              } else {
-                                return (
-                                  <span style={{
-                                    backgroundColor: '#FFEDD5',
-                                    color: '#EA580C',
-                                    border: '1px solid #fed7aa',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    whiteSpace: 'nowrap'
-                                  }}>
-                                    多買 {Math.abs(remainingGap)}
-                                  </span>
-                                );
-                              }
-                            })()}
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'center' }}>
-                            <input className="input" type="number" min="0" value={batchLines[idx]?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
-                          </td>
-                          <td style={{ padding: '8px', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
-                              {!isDaili && <span style={{ color: '#64748b' }}>¥</span>}
-                              <input className="input" type="number" min="0" value={batchLines[idx]?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '80px', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    });
-                    
-                    if (!hasAnyVisible) {
-                      return (
-                        <tr>
-                          <td colSpan={4} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
-                            目前無任何缺口商品
-                          </td>
-                        </tr>
-                      );
-                    }
-                    
-                    return rows;
-                  })()}
-                </tbody>
-              </table>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
-                    本批次合計：<span style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={() => setShowBatchModal(false)}>取消</button>
-                    <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={!batchForm.name.trim()}>儲存</button>
-                  </div>
-                </div>
-                {(() => {
-                  let completedItemsCount = 0;
-                  let remainingShortageItemsCount = 0;
-                  let excessItemsCount = 0;
-
-                  variants.forEach((v, idx) => {
-                    const originalShortage = getVariantShortageForModal(v);
-                    const inputQty = batchLines[idx]?.quantity || 0;
-                    const remainingGap = originalShortage - inputQty;
-
-                    if (originalShortage > 0 && remainingGap <= 0) {
-                      completedItemsCount++;
-                    }
-                    if (remainingGap > 0) {
-                      remainingShortageItemsCount++;
-                    }
-                    if (remainingGap < 0) {
-                      excessItemsCount++;
-                    }
-                  });
-
-                  return (
-                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#475569', marginTop: '4px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16a34a' }}></span>
-                        已補足商品：<strong>{completedItemsCount}</strong> 項
-                      </span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#dc2626' }}></span>
-                        仍缺商品：<strong>{remainingShortageItemsCount}</strong> 項
-                      </span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ea580c' }}></span>
-                        多買商品：<strong>{excessItemsCount}</strong> 項
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
-        </div>
+        <PurchaseBatchModal
+          show={showBatchModal}
+          onClose={() => setShowBatchModal(false)}
+          group={group}
+          variants={variants}
+          inventory={Array.from(inventoryMap.values())}
+          salesOrderItems={salesOrderItems}
+          privateOrderItems={privateOrderItems}
+          purchaseBatchItems={purchaseBatchItems}
+          purchaseBatches={purchaseBatches}
+          editingBatchId={editingBatchId}
+          onSaveSuccess={async () => {
+            await loadData();
+          }}
+          onStale={() => {
+            setIsStale(true);
+            loadData();
+          }}
+        />
       )}
 
       {/* Toast Notification */}

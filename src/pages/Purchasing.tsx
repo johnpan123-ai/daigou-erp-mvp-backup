@@ -1,815 +1,823 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { dataProvider } from '../providers/dataProvider';
-import type { ProductVariant } from '../lib/db';
-import { FileText, Plus, Trash2, Save, Printer, Gift } from 'lucide-react';
+import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem } from '../lib/db';
+import { calculateFinalMyacgDemand } from '../lib/db';
+import { ArrowLeft, ChevronRight, Search, ClipboardList } from 'lucide-react';
 
-interface OverviewItem extends ProductVariant {
-  group_title: string;
-  group_id: string;
+interface VariantDetail {
+  id: string;
+  displayName: string;
+  demand: number;
+  amount: number;
 }
 
-interface POItem {
-  id: string;
-  brand: string;
-  barcode: string;
-  description: string;
-  price: number;
-  qty: number;
-  stock: number;
+interface CategoryGroup {
+  title: string;
+  variants: VariantDetail[];
 }
 
-interface SpecialOrderLog {
+interface GroupSummary {
   id: string;
-  customer: string;
-  item: string;
-  status: string;
-  checked: boolean;
+  title: string;
+  demand: number;
+  amount: number;
+  categories: CategoryGroup[];
+}
+
+interface ParsedVariant {
+  categoryTitle: string | null;
+  variantDisplayName: string;
+}
+
+function cleanVariantName(variantName: string, categoryTitle: string): string {
+  let name = variantName.trim();
+  const catTitle = categoryTitle.trim();
+  if (!catTitle) return name;
+
+  if (name.startsWith(catTitle)) {
+    let rest = name.slice(catTitle.length).trim();
+    // Remove leading dashes/separators
+    if (rest.startsWith('-') || rest.startsWith('_') || rest.startsWith('—')) {
+      rest = rest.slice(1).trim();
+    }
+    if (rest) return rest;
+  }
+  return name;
+}
+
+function parseVariantFallback(v: ProductVariant, categoryMap: Map<string, ProductCategory>): ParsedVariant {
+  // Rule 1: product_category_id exists
+  if (v.product_category_id) {
+    const cat = categoryMap.get(v.product_category_id);
+    if (cat) {
+      const catTitle = cat.title || (cat as any).name || '';
+      const varName = (v.variant_name || v.raw_variant_name || '').trim();
+      const displayName = cleanVariantName(varName, catTitle);
+      return {
+        categoryTitle: catTitle || null,
+        variantDisplayName: displayName
+      };
+    }
+  }
+
+  // Rule 2: parse from variant_name or raw_variant_name
+  const name = (v.variant_name || v.raw_variant_name || '').trim();
+  
+  // Check pattern "分類名稱 - 分類名稱 角色名" or "分類名稱 - 角色名"
+  if (name.includes(' - ')) {
+    const parts = name.split(' - ');
+    const prefix = parts[0].trim();
+    let rest = parts.slice(1).join(' - ').trim();
+    if (rest.startsWith(prefix)) {
+      let sub = rest.slice(prefix.length).trim();
+      // Remove any leading dash/separator
+      if (sub.startsWith('-') || sub.startsWith('_') || sub.startsWith('—')) {
+        sub = sub.slice(1).trim();
+      }
+      return {
+        categoryTitle: prefix,
+        variantDisplayName: sub || rest
+      };
+    }
+    return {
+      categoryTitle: prefix,
+      variantDisplayName: rest
+    };
+  }
+
+  // Check pattern with whitespace: "分類名稱 角色名"
+  const whitespaceRegex = /\s+/;
+  if (whitespaceRegex.test(name)) {
+    const parts = name.split(whitespaceRegex);
+    const prefix = parts[0].trim();
+    const rest = parts.slice(1).join(' ').trim();
+    if (prefix && rest) {
+      return {
+        categoryTitle: prefix,
+        variantDisplayName: rest
+      };
+    }
+  }
+
+  // Fallback: no category parsed
+  return {
+    categoryTitle: null,
+    variantDisplayName: name
+  };
 }
 
 export default function Purchasing() {
-  const [poItems, setPoItems] = useState<POItem[]>([]);
-  const [specialOrders, setSpecialOrders] = useState<SpecialOrderLog[]>([
-    { id: 'so-1', customer: '林小明', item: '梅田店限定特典明信片', status: '已備妥', checked: true },
-    { id: 'so-2', customer: '陳美玲', item: '大阪店1週年貼紙套組', status: '待備貨', checked: false },
-    { id: 'so-3', customer: '張大同', item: 'VSPO! 壓克力吊飾', status: '已送出', checked: true },
-    { id: 'so-4', customer: '李建國', item: 'Hololive 紀念徽章', status: '待備貨', checked: false }
-  ]);
-
-  // States for new items
-  const [newCustomer, setNewCustomer] = useState('');
-  const [newItemName, setNewItemName] = useState('');
+  const [groups, setGroups] = useState<ProductGroup[]>([]);
+  const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  
+  const [loading, setLoading] = useState(true);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    loadData();
+    setExpandedCats(new Set());
+  }, [selectedGroupId]);
+
+  useEffect(() => {
+    async function loadAllData() {
+      try {
+        const [
+          fetchedGroups,
+          fetchedVars,
+          fetchedCats,
+          fetchedPrivateItems,
+          fetchedInventory
+        ] = await Promise.all([
+          dataProvider.getProductGroups().catch(() => []),
+          dataProvider.getProductVariants().catch(() => []),
+          dataProvider.getProductCategories().catch(() => []),
+          dataProvider.getPrivateOrderItems().catch(() => []),
+          dataProvider.getInventory().catch(() => [])
+        ]);
+
+        setGroups(fetchedGroups);
+        setVariants(fetchedVars);
+        setCategories(fetchedCats);
+        setPrivateOrderItems(fetchedPrivateItems);
+        setInventory(fetchedInventory);
+      } catch (err) {
+        console.error("Failed to load data for mobile purchase summary:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAllData();
   }, []);
 
-  const loadData = async () => {
-    try {
-      const allGroups = await dataProvider.getProductGroups().catch(() => []);
-      const groupMap = new Map(allGroups.map(g => [g.id, g]));
+  // Compute summary for each group
+  const groupSummaries: GroupSummary[] = useMemo(() => {
+    if (groups.length === 0) return [];
 
-      const allCategories = await dataProvider.getProductCategories().catch(() => []);
-      const catToGroupMap = new Map(allCategories.map(c => [c.id, c.product_group_id]));
+    const categoryMap = new Map(categories.map(c => [c.id, c]));
+    const inventoryMap = new Map(inventory.map(inv => [inv.myacg_item_code, inv]));
 
-      const allVariants = await dataProvider.getProductVariants().catch(() => []);
-      const allPrivateOrderItems = await dataProvider.getPrivateOrderItems().catch(() => []);
-      const allPurchaseBatchItems = await dataProvider.getPurchaseBatchItems().catch(() => []);
-      const inventory = await dataProvider.getInventory().catch(() => []);
-      
-      const items: (OverviewItem & { diff: number })[] = allVariants.map(v => {
-        const groupId = v.product_group_id || catToGroupMap.get(v.product_category_id || '');
-        const group = groupId ? groupMap.get(groupId) : null;
-        
-        const manual = allPrivateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-        const myacg = (v.myacg_auto_quantity || 0) + (v.myacg_manual_adjustment || 0);
-        const waca = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-        const totalDemand = manual + myacg + waca;
-        
-        const totalPurchased = allPurchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+    return groups.map(g => {
+      // Find all variants of this group
+      const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
+      const groupVars = variants.filter(v => v.product_group_id === g.id || (v.product_category_id && catIds.has(v.product_category_id)));
 
+      // Sort Catalog variants of this group by SKU
+      const catalogVars = groupVars.filter(v => v.source !== 'manual');
+      catalogVars.sort((a, b) => {
+        return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+      });
+      const tempCatalogIds = catalogVars.map(v => v.id);
+
+      // Define getSortVal for this group
+      const getSortVal = (x: ProductVariant) => {
+        if (x.source === 'manual') {
+          return x.sort_order ?? 999999;
+        } else {
+          const catIdx = tempCatalogIds.indexOf(x.id);
+          return catIdx !== -1 ? catIdx * 10 : 999999;
+        }
+      };
+
+      // Sort groupVars using the exact comparator from PurchaseManagement.tsx
+      groupVars.sort((a, b) => {
+        const valA = getSortVal(a);
+        const valB = getSortVal(b);
+        if (valA !== valB) return valA - valB;
+        return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+      });
+
+      // Group variants by categoryTitle
+      const categoryGroupsMap = new Map<string, VariantDetail[]>();
+
+      groupVars.forEach(v => {
+        // Calculate MyACG demand
+        const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()));
+        const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+        const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
+          ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+          : null;
+        const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+          ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
+          : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+        const myacgDemand = rawMyacg >= 0 ? rawMyacg : 0;
+
+        // Calculate WACA demand
+        const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+        const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
+          ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+          : null;
+        const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+        const wacaDemand = rawWaca >= 0 ? rawWaca : 0;
+
+        // Calculate Private demand
+        const localPrivate = privateOrderItems
+          .filter(poi => poi.product_variant_id === v.id)
+          .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+        const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+        const privateDemand = rawPrivate >= 0 ? rawPrivate : 0;
+
+        const totalDemand = myacgDemand + wacaDemand + privateDemand;
+
+        // Get selling price
+        const invItem = inventoryMap.get(v.myacg_item_code);
+        const price = invItem?.final_price ?? 0;
+        const amount = totalDemand * price;
+
+        // Parse category and variant name
+        const parsed = parseVariantFallback(v, categoryMap);
+        const catTitle = parsed.categoryTitle || '單品';
+        const displayName = parsed.variantDisplayName;
+
+        if (totalDemand > 0) {
+          if (!categoryGroupsMap.has(catTitle)) {
+            categoryGroupsMap.set(catTitle, []);
+          }
+          categoryGroupsMap.get(catTitle)!.push({
+            id: v.id,
+            displayName,
+            demand: totalDemand,
+            amount
+          });
+        }
+      });
+
+      // Convert category groups map to list
+      const categoryGroups: CategoryGroup[] = Array.from(categoryGroupsMap.entries()).map(([title, vars]) => {
         return {
-          ...v,
-          group_id: groupId || '',
-          group_title: group?.title || '未知群組',
-          diff: totalPurchased - totalDemand
+          title,
+          variants: vars
         };
       });
 
-      const activeShortages = items.filter(i => i.diff < 0);
-      
-      const mappedPOItems: POItem[] = activeShortages.map(item => {
-        const invItem = inventory.find(inv => inv.myacg_item_code === item.myacg_item_code);
-        const price = invItem?.final_price || 1200; 
-        const stock = invItem ? Math.max(0, invItem.myacg_sold_quantity - Math.abs(item.diff)) : 0; 
-        
-        let brand = 'Other';
-        const titleLower = item.group_title.toLowerCase();
-        if (titleLower.includes('gsc') || titleLower.includes('good smile')) {
-          brand = 'GSC';
-        } else if (titleLower.includes('max factory')) {
-          brand = 'Max Factory';
-        } else if (titleLower.includes('furyu')) {
-          brand = 'FuRyu';
-        } else if (titleLower.includes('hololive')) {
-          brand = 'Cover';
-        } else if (titleLower.includes('vspo')) {
-          brand = 'VSPO';
-        }
-        
-        return {
-          id: item.id || Math.random().toString(36).substring(2, 9),
-          brand,
-          barcode: item.myacg_item_code || '',
-          description: `${item.group_title} - ${item.variant_name || '單品'}`,
-          price,
-          qty: Math.abs(item.diff),
-          stock
-        };
+      // Sort variants within each category using the exact same variant order
+      categoryGroups.forEach(cg => {
+        cg.variants.sort((a, b) => {
+          const origA = groupVars.find(x => x.id === a.id);
+          const origB = groupVars.find(x => x.id === b.id);
+          const valA = origA ? getSortVal(origA) : 999999;
+          const valB = origB ? getSortVal(origB) : 999999;
+          if (valA !== valB) return valA - valB;
+          return (origA?.myacg_item_code || '').localeCompare(origB?.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+        });
       });
 
-      if (mappedPOItems.length > 0) {
-        setPoItems(mappedPOItems);
-      } else {
-        // Fallback Premium mock items to visualize the form layout
-        setPoItems([
-          { id: '1', brand: 'GSC', barcode: 'GP0714483', description: '代購版 GSC 藝術誌主人 公 藍檔案集 Blue Archive 一中盒6入 驚喜零件隨機收錄', price: 1770, qty: 5, stock: 2 },
-          { id: '2', brand: 'Max Factory', barcode: 'GP0714465', description: '代購版 GSC 黏土人 初音未來未來音樂 10th Anniversary Ver.', price: 1645, qty: 3, stock: 1 },
-          { id: '3', brand: 'FuRyu', barcode: 'GP0714459', description: '代購版 GSC 初音未來 變裝看Ver.', price: 1470, qty: 8, stock: 4 },
-          { id: '4', brand: 'Bandai', barcode: 'GP0714450', description: '代購版 GSC 星音 Teto 偶像裝Ver.', price: 1470, qty: 12, stock: 0 },
-          { id: '5', brand: 'GSC', barcode: 'GP0714440', description: '代購版 GSC 防護機構 黏土人 小鳥遊 暖暖', price: 1400, qty: 4, stock: 2 }
-        ]);
-      }
-    } catch (e) {
-      console.error('Failed to load PO Data', e);
-    }
-  };
+      // Sort categoryGroups by minSortVal and min SKU of their variants
+      const getGroupSortOrder = (cgVariants: VariantDetail[]) => {
+        const itemSorts = cgVariants
+          .map(v => {
+            const orig = groupVars.find(x => x.id === v.id);
+            return orig ? getSortVal(orig) : 999999;
+          })
+          .filter(n => Number.isFinite(n));
+        return itemSorts.length > 0 ? Math.min(...itemSorts) : 999999;
+      };
 
-  // Handlers for PO Items
-  const handleUpdateItem = (id: string, field: keyof POItem, value: any) => {
-    setPoItems(prev => prev.map(item => {
-      if (item.id === id) {
-        let parsed = value;
-        if (field === 'price' || field === 'qty' || field === 'stock') {
-          parsed = parseFloat(value) || 0;
-        }
-        return { ...item, [field]: parsed };
-      }
-      return item;
-    }));
-  };
+      const getGroupMinSku = (cgVariants: VariantDetail[]) => {
+        return cgVariants
+          .map(v => {
+            const orig = groupVars.find(x => x.id === v.id);
+            return orig ? orig.myacg_item_code || '' : '';
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))[0] || '';
+      };
 
-  const handleAddNewItem = () => {
-    const newItem: POItem = {
-      id: Math.random().toString(36).substring(2, 9),
-      brand: 'Other',
-      barcode: `GP0${Math.floor(100000 + Math.random() * 900000)}`,
-      description: '新採購商品 - 請輸入規格名稱',
-      price: 1000,
-      qty: 1,
-      stock: 0
-    };
-    setPoItems(prev => [...prev, newItem]);
-  };
+      categoryGroups.sort((a, b) => {
+        const sortA = getGroupSortOrder(a.variants);
+        const sortB = getGroupSortOrder(b.variants);
+        if (sortA !== sortB) return sortA - sortB;
 
-  const handleDeleteItem = (id: string) => {
-    setPoItems(prev => prev.filter(item => item.id !== id));
-  };
+        const skuA = getGroupMinSku(a.variants);
+        const skuB = getGroupMinSku(b.variants);
+        return skuA.localeCompare(skuB, undefined, { numeric: true, sensitivity: 'base' });
+      });
 
-  // Handlers for Special Orders & Gift Log
-  const toggleSpecialOrderChecked = (id: string) => {
-    setSpecialOrders(prev => prev.map(so => 
-      so.id === id ? { ...so, checked: !so.checked } : so
-    ));
-  };
+      // Calculate total demand and amount for the group
+      let groupDemand = 0;
+      let groupAmount = 0;
+      categoryGroups.forEach(cg => {
+        cg.variants.forEach(v => {
+          groupDemand += v.demand;
+          groupAmount += v.amount;
+        });
+      });
 
-  const updateSpecialOrderStatus = (id: string, newStatus: string) => {
-    setSpecialOrders(prev => prev.map(so => 
-      so.id === id ? { ...so, status: newStatus } : so
-    ));
-  };
+      return {
+        id: g.id,
+        title: g.normalized_title || g.title,
+        demand: groupDemand,
+        amount: groupAmount,
+        categories: categoryGroups
+      };
+    })
+    .filter(g => g.demand > 0) // Only show items with actual demand
+    .sort((a, b) => b.demand - a.demand); // Sort by demand quantity descending
+  }, [groups, variants, categories, privateOrderItems, inventory]);
 
-  const handleAddSpecialOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCustomer.trim() || !newItemName.trim()) return;
+  // Filtered summaries for search
+  const filteredSummaries = useMemo(() => {
+    if (!searchTerm.trim()) return groupSummaries;
+    const cleanSearch = searchTerm.toLowerCase().trim();
+    return groupSummaries.filter(g => g.title.toLowerCase().includes(cleanSearch));
+  }, [groupSummaries, searchTerm]);
 
-    const newLog: SpecialOrderLog = {
-      id: Math.random().toString(36).substring(2, 9),
-      customer: newCustomer.trim(),
-      item: newItemName.trim(),
-      status: '待備貨',
-      checked: false
-    };
+  // Selected group details
+  const selectedGroup = useMemo(() => {
+    if (!selectedGroupId) return null;
+    return groupSummaries.find(g => g.id === selectedGroupId) || null;
+  }, [groupSummaries, selectedGroupId]);
 
-    setSpecialOrders(prev => [...prev, newLog]);
-    setNewCustomer('');
-    setNewItemName('');
-  };
-
-  const handleDeleteSpecialOrder = (id: string) => {
-    setSpecialOrders(prev => prev.filter(so => so.id !== id));
-  };
-
-  // PO Calculations
-  const subtotal = poItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  const tax = Math.round(subtotal * 0.05);
-  const total = subtotal + tax;
-
-  const handleSavePurchaseOrder = () => {
-    alert('💾 採購單已存檔，正在同步至雲端庫存與出貨批次數據。');
-  };
+  if (loading) {
+    return (
+      <div className="mobile-summary-loading">
+        <div className="spinner"></div>
+        <p>載入採購數據中...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="po-container">
+    <div className="mobile-summary-container">
       <style>{`
-        .po-container {
+        .mobile-summary-container {
           width: 100%;
-          max-width: none;
-          margin: 0;
-          padding: 8px;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 16px;
           box-sizing: border-box;
-          font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          color: #1e293b;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
+          font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          color: #0f172a;
+          background-color: #f8fafc;
+          min-height: calc(100vh - 64px);
         }
 
-        /* 1. Header with Navy background */
-        .po-header {
-          background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-          color: #f8fafc;
-          padding: 24px;
+        .mobile-summary-loading {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-height: 300px;
+          color: #64748b;
+          gap: 12px;
+          font-size: 14px;
+        }
+
+        .spinner {
+          width: 32px;
+          height: 32px;
+          border: 3px solid #e2e8f0;
+          border-top-color: #2563eb;
+          border-radius: 50%;
+          animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        /* Header Style */
+        .summary-header {
+          background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+          color: #ffffff !important;
+          padding: 20px;
           border-radius: 12px;
-          display: flex;
-          justify-content: space-between;
-          gap: 24px;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-          border: 1px solid #1e293b;
-          flex-wrap: wrap;
+          margin-bottom: 16px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
         }
 
-        .po-header-left {
-          flex: 1 1 45%;
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-          min-width: 320px;
-        }
-
-        .po-header-title {
-          font-size: 24px;
+        .summary-title, .summary-title span {
+          font-size: 20px;
           font-weight: 800;
-          letter-spacing: 0.5px;
-          color: #ffffff;
-          margin: 0;
+          margin: 0 0 6px 0;
           display: flex;
           align-items: center;
           gap: 8px;
+          color: #ffffff !important;
         }
 
-        .po-header-info {
-          display: grid;
-          grid-template-columns: auto 1fr;
-          gap: 6px 16px;
-          font-size: 13px;
+        .summary-subtitle {
+          font-size: 12px;
+          color: #94a3b8 !important;
+          margin: 0;
+          font-weight: 400;
+        }
+
+        /* Search input */
+        .search-wrapper {
+          position: relative;
+          margin-bottom: 16px;
+        }
+
+        .search-input {
+          width: 100%;
+          height: 44px;
+          padding: 0 16px 0 40px;
+          font-size: 14px;
+          border-radius: 8px;
+          border: 1px solid #cbd5e1;
+          background-color: #ffffff;
+          box-sizing: border-box;
+          color: #0f172a;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+          border-color: #2563eb;
+        }
+
+        .search-icon {
+          position: absolute;
+          left: 14px;
+          top: 13px;
           color: #94a3b8;
         }
 
-        .po-header-info-label {
-          font-weight: 700;
-          color: #cbd5e1;
-        }
-
-        .po-header-info-value {
-          color: #f1f5f9;
-        }
-
-        .po-header-right {
-          flex: 1 1 45%;
-          background-color: rgba(255, 255, 255, 0.04);
-          border-radius: 8px;
-          padding: 16px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          display: flex;
-          gap: 20px;
-          min-width: 320px;
-        }
-
-        .po-header-right-col {
-          flex: 1;
-        }
-
-        .po-header-right-col h4 {
-          margin: 0 0 8px 0;
-          font-size: 13px;
-          font-weight: 700;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .po-header-right-col ul {
-          margin: 0;
-          padding-left: 14px;
-          font-size: 11px;
-          color: #cbd5e1;
-          line-height: 1.6;
-        }
-
-        /* 2. Side-by-side flex container */
-        .po-layout-split {
-          display: flex;
-          gap: 24px;
-          width: 100%;
-          align-items: flex-start;
-          flex-wrap: wrap;
-        }
-
-        /* 3. Left Table style (Excel like) */
-        .po-main-section {
-          flex: 1 1 65%;
-          min-width: 600px;
+        /* Card List */
+        .summary-list {
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 10px;
         }
 
-        .po-table-wrapper {
+        .summary-card {
           background-color: #ffffff;
-          border: 1px solid #cbd5e1;
           border-radius: 8px;
-          overflow: hidden;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+          padding: 16px;
+          border: 1px solid #e2e8f0;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          transition: transform 0.1s, box-shadow 0.1s;
         }
 
-        .po-table {
-          width: 100%;
-          border-collapse: collapse;
-          text-align: left;
-          font-size: 13px;
-          background-color: #ffffff;
+        .summary-card:active {
+          transform: scale(0.98);
+          background-color: #f1f5f9;
         }
 
-        .po-table th {
-          background-color: #f8fafc;
-          color: #334155;
-          font-weight: 700;
-          padding: 10px 12px;
-          border: 1px solid #cbd5e1;
+        .card-content {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .card-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #1e293b;
+          margin: 0;
+          line-height: 1.35;
+        }
+
+        .card-variant-summary {
           font-size: 12px;
+          color: #64748b;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          margin-top: -4px;
+          margin-bottom: 2px;
         }
 
-        .po-table td {
-          padding: 6px 12px;
-          border: 1px solid #cbd5e1;
-          color: #334155;
-          vertical-align: middle;
-          box-sizing: border-box;
-        }
-
-        .po-table tr:hover {
-          background-color: #f8fafc;
-        }
-
-        .po-cell-input {
-          width: 100%;
-          border: 1px transparent;
-          background: transparent;
+        .card-stats {
+          display: flex;
+          align-items: center;
+          gap: 12px;
           font-size: 13px;
-          color: #334155;
-          padding: 2px 4px;
-          outline: none;
-          box-sizing: border-box;
         }
 
-        .po-cell-input:focus {
-          border-color: #3b82f6;
-          background-color: #ffffff;
-          box-shadow: inset 0 0 0 1px #3b82f6;
+        .stat-demand {
+          background-color: #fef2f2;
+          color: #dc2626;
+          font-weight: 700;
+          padding: 2px 8px;
           border-radius: 4px;
         }
 
-        .po-cell-input-number {
-          text-align: center;
+        .stat-amount {
+          color: #475569;
+          font-weight: 500;
         }
 
-        .po-summary-box-wrapper {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          width: 100%;
+        .card-arrow {
+          color: #94a3b8;
+          flex-shrink: 0;
         }
 
-        .po-summary-box {
-          width: 280px;
-          background-color: #f8fafc;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          padding: 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-        }
-
-        .po-summary-row {
-          display: flex;
-          justify-content: space-between;
-          font-size: 13px;
-        }
-
-        .po-summary-row-label {
-          color: #64748b;
-          font-weight: 600;
-        }
-
-        .po-summary-row-val {
-          font-weight: 700;
-          color: #334155;
-        }
-
-        .po-summary-total {
-          border-top: 1px solid #cbd5e1;
-          padding-top: 8px;
-          margin-top: 4px;
-          display: flex;
-          justify-content: space-between;
-          font-size: 15px;
-        }
-
-        .po-summary-total-label {
-          color: #0f172a;
-          font-weight: 800;
-        }
-
-        .po-summary-total-val {
-          font-weight: 800;
-          color: #1e3a8a;
-        }
-
-        /* 4. Right Special Orders & Gift Log */
-        .po-side-section {
-          flex: 1 1 30%;
-          min-width: 320px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .gift-log-card {
-          background: #ffffff;
-          border: 1px solid #cbd5e1;
+        /* Detail View */
+        .detail-view {
+          background-color: #ffffff;
           border-radius: 12px;
           padding: 20px;
+          border: 1px solid #e2e8f0;
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
         }
 
-        .gift-log-title {
-          font-size: 16px;
-          font-weight: 800;
-          color: #0f172a;
-          margin: 0;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .gift-log-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 12px;
-        }
-
-        .gift-log-table th {
-          background-color: #f8fafc;
-          border-bottom: 2px solid #cbd5e1;
-          padding: 8px;
-          color: #475569;
-          font-weight: 700;
-        }
-
-        .gift-log-table td {
-          padding: 8px;
-          border-bottom: 1px solid #e2e8f0;
-          vertical-align: middle;
-        }
-
-        .gift-log-check-circle {
-          cursor: pointer;
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: bold;
-          font-size: 12px;
-          transition: all 0.2s;
-        }
-
-        .gift-log-status-select {
-          font-size: 12px;
-          padding: 4px 6px;
-          border-radius: 6px;
-          border: 1px solid #cbd5e1;
+        .btn-back {
+          background: none;
+          border: none;
+          color: #2563eb;
+          font-size: 14px;
           font-weight: 600;
-          outline: none;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-
-        .btn-action-po {
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 8px 16px;
-          font-size: 13px;
-          font-weight: 600;
-          border-radius: 6px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          padding: 0;
+          margin-bottom: 20px;
         }
 
-        .btn-action-po-primary {
-          background-color: #2563eb;
-          color: #ffffff;
-          border: none;
-          box-shadow: 0 1px 2px rgba(37,99,235,0.05);
+        .detail-title {
+          font-size: 20px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0 0 16px 0;
+          line-height: 1.3;
+          border-bottom: 1px solid #f1f5f9;
+          padding-bottom: 12px;
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
         }
 
-        .btn-action-po-primary:hover {
-          background-color: #1d4ed8;
+        .detail-summary-cards {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-bottom: 24px;
         }
 
-        .btn-action-po-secondary {
-          background-color: #ffffff;
-          color: #475569;
-          border: 1px solid #cbd5e1;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-        }
-
-        .btn-action-po-secondary:hover {
+        .detail-stat-card {
           background-color: #f8fafc;
-          border-color: #94a3b8;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          padding: 14px;
+          text-align: center;
+        }
+
+        .stat-label {
+          font-size: 12px;
+          color: #64748b;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .stat-value {
+          font-size: 18px;
+          font-weight: 800;
+          color: #0f172a;
+        }
+
+        .stat-value.primary {
+          color: #dc2626;
+        }
+
+        .stat-value.success {
+          color: #0f766e;
+        }
+
+        .variant-section-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #475569;
+          margin-bottom: 12px;
+          border-left: 3px solid #2563eb;
+          padding-left: 8px;
+        }
+
+        .variant-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .variant-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 10px 12px;
+          background-color: #f8fafc;
+          border-radius: 6px;
+          border: 1px solid #f1f5f9;
+        }
+
+        .variant-name {
+          font-size: 14px;
+          color: #334155;
+          font-weight: 500;
+        }
+
+        .variant-amount {
+          font-size: 13px;
+          color: #64748b;
+          font-weight: 500;
+        }
+
+        .variant-qty {
+          font-size: 14px;
+          font-weight: 700;
+          color: #0f172a;
+          background-color: #e2e8f0;
+          padding: 2px 8px;
+          border-radius: 4px;
+          min-width: 24px;
+          text-align: center;
+        }
+
+        .empty-state {
+          text-align: center;
+          padding: 40px 20px;
+          color: #64748b;
+          font-size: 14px;
         }
       `}</style>
 
-      {/* Header Info Block */}
-      <div className="po-header">
-        <div className="po-header-left">
-          <div className="po-header-title">
-            <FileText size={24} style={{ color: '#60a5fa' }} />
-            <span>採購單 / PURCHASE ORDER</span>
+      {!selectedGroup ? (
+        // List View
+        <>
+          <div className="summary-header">
+            <h1 className="summary-title">
+              <ClipboardList size={22} />
+              <span>採購總表</span>
+            </h1>
+            <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
           </div>
-          <div className="po-header-info">
-            <span className="po-header-info-label">供應商名稱：</span>
-            <span className="po-header-info-value">GSC 日本官方 / 代理商總合部</span>
-            <span className="po-header-info-label">聯絡電話：</span>
-            <span className="po-header-info-value">+81-3-1234-5678 (日) / 02-2345-6789 (台)</span>
-            <span className="po-header-info-label">電子信箱：</span>
-            <span className="po-header-info-value">order-support@goodsmile.jp</span>
-          </div>
-        </div>
-        <div className="po-header-right">
-          <div className="po-header-right-col">
-            <h4 style={{ color: '#60a5fa' }}>💡 訂購須知</h4>
-            <ul>
-              <li>請於結單前完成規格確認與數量核對。</li>
-              <li>空運商品約 7-14 天到貨，海運約 21-30 天。</li>
-              <li>特規商品一經訂購即無法取消或退換。</li>
-            </ul>
-          </div>
-          <div className="po-header-right-col" style={{ borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '16px' }}>
-            <h4 style={{ color: '#f87171' }}>⚠️ 注意事項</h4>
-            <ul>
-              <li>未加入採購母體之品項請先於主檔確認。</li>
-              <li>價格若有變動以日本出貨當日匯率為準。</li>
-              <li>贈品紀錄需與特別訂單同步核對無誤。</li>
-            </ul>
-          </div>
-        </div>
-      </div>
 
-      {/* Main split view */}
-      <div className="po-layout-split">
-        
-        {/* Left Side: PO Items list */}
-        <div className="po-main-section">
+          <div className="search-wrapper">
+            <Search className="search-icon" size={18} />
+            <input 
+              type="text"
+              placeholder="搜尋商品名稱..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="search-input"
+            />
+          </div>
+
+          {filteredSummaries.length > 0 ? (
+            <div className="summary-list">
+              {filteredSummaries.map(item => {
+                const categoryTitles = item.categories.map(c => c.title).filter(Boolean);
+                const variantSummaryText = categoryTitles.length > 0 ? categoryTitles.join(', ') : '無分類';
+                return (
+                  <div 
+                    key={item.id} 
+                    className="summary-card"
+                    onClick={() => setSelectedGroupId(item.id)}
+                  >
+                    <div className="card-content">
+                      <h2 className="card-title">{item.title}</h2>
+                      <div className="card-variant-summary">{variantSummaryText}</div>
+                      <div className="card-stats">
+                        <span className="stat-demand">需求 {item.demand}</span>
+                        <span className="stat-amount">總金額 ¥{item.amount.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <ChevronRight className="card-arrow" size={18} />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <p>沒有符合條件或有需求的商品。</p>
+            </div>
+          )}
+        </>
+      ) : (
+        // Detail View
+        <div className="detail-view">
+          <button className="btn-back" onClick={() => setSelectedGroupId(null)}>
+            <ArrowLeft size={16} />
+            <span>返回清單</span>
+          </button>
           
-          <div style={{ display: 'flex', justifySelf: 'stretch', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '14px', fontWeight: 700, color: '#334155' }}>
-              待採購項目清單 ({poItems.length} 筆)
-            </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn-action-po btn-action-po-secondary" onClick={handleSavePurchaseOrder}>
-                <Save size={14} />
-                <span>儲存採購單</span>
-              </button>
-              <button className="btn-action-po btn-action-po-secondary" onClick={() => window.print()}>
-                <Printer size={14} />
-                <span>列印單據</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="po-table-wrapper">
-            <table className="po-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '10%' }}>品牌</th>
-                  <th style={{ width: '15%' }}>條碼 (SKU)</th>
-                  <th style={{ width: '40%' }}>品名規格</th>
-                  <th style={{ width: '10%', textAlign: 'right' }}>單價 (NT$)</th>
-                  <th style={{ width: '10%', textAlign: 'center' }}>訂購量</th>
-                  <th style={{ width: '7%', textAlign: 'center' }}>庫存</th>
-                  <th style={{ width: '13%', textAlign: 'right' }}>金額 (NT$)</th>
-                  <th style={{ width: '5%', textAlign: 'center' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {poItems.map(item => (
-                  <tr key={item.id}>
-                    <td>
-                      <input 
-                        type="text" 
-                        className="po-cell-input" 
-                        value={item.brand} 
-                        onChange={(e) => handleUpdateItem(item.id, 'brand', e.target.value)} 
-                      />
-                    </td>
-                    <td style={{ fontWeight: 600, color: '#475569' }}>
-                      <input 
-                        type="text" 
-                        className="po-cell-input" 
-                        value={item.barcode} 
-                        onChange={(e) => handleUpdateItem(item.id, 'barcode', e.target.value)} 
-                      />
-                    </td>
-                    <td>
-                      <input 
-                        type="text" 
-                        className="po-cell-input" 
-                        value={item.description} 
-                        onChange={(e) => handleUpdateItem(item.id, 'description', e.target.value)} 
-                      />
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <input 
-                        type="number" 
-                        className="po-cell-input po-cell-input-number" 
-                        style={{ textAlign: 'right' }}
-                        value={item.price} 
-                        onChange={(e) => handleUpdateItem(item.id, 'price', e.target.value)} 
-                      />
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <input 
-                        type="number" 
-                        className="po-cell-input po-cell-input-number" 
-                        value={item.qty} 
-                        onChange={(e) => handleUpdateItem(item.id, 'qty', e.target.value)} 
-                      />
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <input 
-                        type="number" 
-                        className="po-cell-input po-cell-input-number" 
-                        value={item.stock} 
-                        onChange={(e) => handleUpdateItem(item.id, 'stock', e.target.value)} 
-                      />
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
-                      {(item.price * item.qty).toLocaleString()}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button 
-                        onClick={() => handleDeleteItem(item.id)}
-                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Action Row and Summary block */}
-          <div className="po-summary-box-wrapper">
-            <button className="btn-action-po btn-action-po-secondary" onClick={handleAddNewItem}>
-              <Plus size={14} />
-              <span>新增商品品項</span>
-            </button>
-
-            <div className="po-summary-box">
-              <div className="po-summary-row">
-                <span className="po-summary-row-label">小計 (Subtotal)</span>
-                <span className="po-summary-row-val">NT$ {subtotal.toLocaleString()}</span>
-              </div>
-              <div className="po-summary-row">
-                <span className="po-summary-row-label">營業稅 (VAT 5%)</span>
-                <span className="po-summary-row-val">NT$ {tax.toLocaleString()}</span>
-              </div>
-              <div className="po-summary-total">
-                <span className="po-summary-total-label">總金額 (Total)</span>
-                <span className="po-summary-total-val">NT$ {total.toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Right Side: Special Orders & Gift Log */}
-        <div className="po-side-section">
+          <h2 className="detail-title">{selectedGroup.title}</h2>
           
-          <div className="gift-log-card">
-            <div className="gift-log-title">
-              <Gift size={18} style={{ color: '#16a34a' }} />
-              <span>Special Orders & Gift Log</span>
+          <div className="detail-summary-cards">
+            <div className="detail-stat-card">
+              <span className="stat-label">總需求數量</span>
+              <span className="stat-value primary">{selectedGroup.demand}</span>
             </div>
-            
-            <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 4px 0', lineHeight: 1.4 }}>
-              特別訂單與贈品紀錄表，用於追蹤熟客贈品與特定加單狀態。
-            </p>
+            <div className="detail-stat-card">
+              <span className="stat-label">預估總金額</span>
+              <span className="stat-value success">¥{selectedGroup.amount.toLocaleString()}</span>
+            </div>
+          </div>
 
-            <table className="gift-log-table">
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', width: '25%' }}>對象</th>
-                  <th style={{ textAlign: 'left', width: '35%' }}>品項/贈品</th>
-                  <th style={{ width: '25%', textAlign: 'center' }}>狀態</th>
-                  <th style={{ width: '15%', textAlign: 'center' }}>紀錄</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {specialOrders.map(so => (
-                  <tr key={so.id}>
-                    <td style={{ fontWeight: 600, color: '#334155' }}>{so.customer}</td>
-                    <td style={{ color: '#475569' }}>{so.item}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <select
-                        className="gift-log-status-select"
-                        value={so.status}
-                        onChange={(e) => updateSpecialOrderStatus(so.id, e.target.value)}
-                        style={{
-                          backgroundColor: so.status === '已送出' ? '#f0fdf4' : so.status === '已備妥' ? '#eff6ff' : '#fff7ed',
-                          color: so.status === '已送出' ? '#16a34a' : so.status === '已備妥' ? '#2563eb' : '#d97706',
-                          borderColor: so.status === '已送出' ? '#bbf7d0' : so.status === '已備妥' ? '#bfdbfe' : '#fed7d7'
+          {selectedGroup.categories.length > 0 && (
+            <div style={{ marginTop: '20px' }}>
+              <h3 className="variant-section-title">規格明細需求</h3>
+              {selectedGroup.categories.map((cat, catIdx) => {
+                const catDemand = cat.variants.reduce((sum, v) => sum + v.demand, 0);
+                const hasMultiple = cat.variants.length > 1;
+                const isExpanded = !hasMultiple || expandedCats.has(cat.title);
+
+                return (
+                  <div key={catIdx} className="category-group" style={{ marginBottom: '12px' }}>
+                    {hasMultiple ? (
+                      // Collapsible Header (for 2 or more variants)
+                      <div 
+                        className="category-title" 
+                        onClick={() => {
+                          setExpandedCats(prev => {
+                            const next = new Set(prev);
+                            if (next.has(cat.title)) {
+                              next.delete(cat.title);
+                            } else {
+                              next.add(cat.title);
+                            }
+                            return next;
+                          });
+                        }}
+                        style={{ 
+                          fontSize: '15px', 
+                          fontWeight: 700, 
+                          color: '#1e293b', 
+                          marginTop: '12px', 
+                          marginBottom: '6px', 
+                          borderBottom: '1px solid #e2e8f0', 
+                          paddingBottom: '6px', 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center', 
+                          cursor: 'pointer',
+                          userSelect: 'none'
                         }}
                       >
-                        <option value="待備貨">待備貨</option>
-                        <option value="已備妥">已備妥</option>
-                        <option value="已送出">已送出</option>
-                      </select>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span 
-                        onClick={() => toggleSpecialOrderChecked(so.id)}
-                        className="gift-log-check-circle"
-                        style={{
-                          border: '2px solid ' + (so.checked ? '#22c55e' : '#cbd5e1'),
-                          backgroundColor: so.checked ? '#e8f5e9' : 'transparent',
-                          color: '#22c55e'
+                        <span>{cat.title}（{catDemand}）</span>
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          {isExpanded ? '▼' : '▶'}
+                        </span>
+                      </div>
+                    ) : (
+                      // Static Header (for exactly 1 variant)
+                      <div 
+                        className="category-title" 
+                        style={{ 
+                          fontSize: '15px', 
+                          fontWeight: 700, 
+                          color: '#1e293b', 
+                          marginTop: '12px', 
+                          marginBottom: '6px', 
+                          borderBottom: '1px solid #e2e8f0', 
+                          paddingBottom: '6px',
+                          userSelect: 'none'
                         }}
                       >
-                        {so.checked && '✓'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button 
-                        onClick={() => handleDeleteSpecialOrder(so.id)}
-                        style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Quick Add Special Order */}
-            <form onSubmit={handleAddSpecialOrder} style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid #cbd5e1', paddingTop: '12px', marginTop: '4px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#475569' }}>💡 快速新增紀錄</span>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <input 
-                  type="text" 
-                  className="input" 
-                  placeholder="客戶名稱" 
-                  value={newCustomer}
-                  onChange={e => setNewCustomer(e.target.value)}
-                  style={{ flex: 1, height: '30px', padding: '0 8px', fontSize: '11px' }}
-                />
-                <input 
-                  type="text" 
-                  className="input" 
-                  placeholder="品項 / 贈品" 
-                  value={newItemName}
-                  onChange={e => setNewItemName(e.target.value)}
-                  style={{ flex: 2, height: '30px', padding: '0 8px', fontSize: '11px' }}
-                />
-              </div>
-              <button 
-                type="submit" 
-                className="btn-action-po btn-action-po-primary" 
-                style={{ height: '30px', padding: '0 12px', fontSize: '11px', display: 'flex', justifyContent: 'center', width: '100%' }}
-              >
-                <Plus size={12} />
-                <span>加入紀錄表</span>
-              </button>
-            </form>
-
-          </div>
-
+                        {cat.title}
+                      </div>
+                    )}
+                    
+                    {isExpanded && (
+                      <div className="variant-list" style={{ paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                        {cat.variants.map((v, vIdx) => (
+                          <div 
+                            key={vIdx} 
+                            className="variant-row" 
+                            style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between',
+                              alignItems: 'center', 
+                              padding: '8px 12px', 
+                              borderBottom: '1px solid #f1f5f9', 
+                              backgroundColor: '#f8fafc',
+                              borderRadius: '6px'
+                            }}
+                          >
+                            {/* Left Side: Variant Display Name */}
+                            <div style={{ fontSize: '14px', fontWeight: 600, color: '#334155', flex: 1, paddingRight: '8px' }}>
+                              {v.displayName}
+                            </div>
+                            {/* Right Side: Demand and Price stacked vertically */}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: '4px', flexShrink: 0 }}>
+                              <span style={{ color: '#dc2626', fontSize: '15px', fontWeight: 700 }}>
+                                需求 {v.demand}
+                              </span>
+                              <span style={{ fontWeight: 600, color: '#475569', fontSize: '13px' }}>
+                                ¥{v.amount.toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
-
-      </div>
-
+      )}
     </div>
   );
 }
