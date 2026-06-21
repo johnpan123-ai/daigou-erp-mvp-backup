@@ -666,8 +666,6 @@ export default function Purchasing() {
           {filteredSummaries.length > 0 ? (
             <div className="summary-list">
               {filteredSummaries.map(item => {
-                const categoryTitles = item.categories.map(c => c.title).filter(Boolean);
-                const variantSummaryText = categoryTitles.length > 0 ? categoryTitles.join(', ') : '無分類';
                 return (
                   <div 
                     key={item.id} 
@@ -676,7 +674,6 @@ export default function Purchasing() {
                   >
                     <div className="card-content">
                       <h2 className="card-title">{item.title}</h2>
-                      <div className="card-variant-summary">{variantSummaryText}</div>
                       <div className="card-stats">
                         <span className="stat-demand">需求 {item.demand}</span>
                         <span className="stat-amount">總金額 ¥{item.amount.toLocaleString()}</span>

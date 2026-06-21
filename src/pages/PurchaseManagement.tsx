@@ -6,7 +6,7 @@ import type {
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
 } from '../lib/db';
-import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy, Trash2, Edit2 } from 'lucide-react';
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
@@ -105,6 +105,237 @@ const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMo
   }
   return <>{children}</>;
 };
+
+interface MobilePurchaseBatchTabProps {
+  batches: PurchaseBatch[];
+  batchItems: PurchaseBatchItem[];
+  variants: ProductVariant[];
+  groups?: ProductGroup[];
+  onRefresh: () => void;
+  onEditBatch: (batch: PurchaseBatch) => void;
+  getDisplayProductName: (v: ProductVariant) => string;
+  canWrite?: boolean;
+  isDaili?: boolean;
+}
+
+function MobilePurchaseBatchTab({
+  batches,
+  batchItems,
+  variants,
+  groups = [],
+  onRefresh,
+  onEditBatch,
+  getDisplayProductName,
+  canWrite = false,
+  isDaili = false
+}: MobilePurchaseBatchTabProps) {
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
+  const currencySymbol = isDaili ? 'NT$ ' : '¥ ';
+
+  const toggleExpand = (id: string) => {
+    const next = new Set(expandedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpandedIds(next);
+  };
+
+  const handleDeleteBatch = async (batch: PurchaseBatch) => {
+    if (!window.confirm(`確定刪除此採購批次？底下明細也會一起刪除。`)) return;
+    try {
+      const allBatches = await dataProvider.getPurchaseBatches();
+      const allItems = await dataProvider.getPurchaseBatchItems();
+      await dataProvider.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
+      await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
+      onRefresh();
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        onRefresh();
+        return;
+      }
+      throw err;
+    }
+  };
+
+  const handleCopyBatchLedger = async (batch: PurchaseBatch) => {
+    const items = batchItems.filter(i => i.purchase_batch_id === batch.id);
+    if (items.length === 0) {
+      alert('此批次無任何採購商品！');
+      return;
+    }
+    const ledgerMap = new Map<string, { name: string; quantity: number; cost: number }>();
+    const groupMap = new Map((groups || []).map(g => [g.id, g]));
+    const variantMap = new Map(variants.map(v => [v.id, v]));
+    
+    for (const item of items) {
+      const variant = variantMap.get(item.product_variant_id);
+      if (!variant) continue;
+
+      const g = variant.product_group_id ? groupMap.get(variant.product_group_id) : null;
+      const groupTitle = g?.normalized_title
+        || g?.title
+        || variant.product_title
+        || '未命名商品';
+      const varName = variant.variant_name || '';
+      const displayName = varName ? `${groupTitle}-${varName}` : groupTitle;
+
+      const costVal = item.cost ?? 0;
+      const key = `${displayName}_${costVal}`;
+      const existing = ledgerMap.get(key);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        ledgerMap.set(key, {
+          name: displayName,
+          quantity: item.quantity,
+          cost: costVal
+        });
+      }
+    }
+
+    const tsvRows = Array.from(ledgerMap.values()).map(row => {
+      return `${row.name}\t${row.quantity}\t\t${row.cost}`;
+    });
+    const tsvString = tsvRows.join('\n');
+
+    try {
+      await navigator.clipboard.writeText(tsvString);
+      alert('已複製本批次帳目（TSV 格式）至剪貼簿！');
+    } catch (err) {
+      console.error('Failed to copy ledger:', err);
+      alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
+    }
+  };
+
+  const variantMap = new Map(variants.map(v => [v.id, v]));
+
+  const sortedBatches = [...batches].sort((a, b) => {
+    const itemsA = batchItems.filter(i => i.purchase_batch_id === a.id);
+    const itemsB = batchItems.filter(i => i.purchase_batch_id === b.id);
+    const costA = itemsA.reduce((sum, i) => sum + (i.quantity * i.cost), 0);
+    const costB = itemsB.reduce((sum, i) => sum + (i.quantity * i.cost), 0);
+
+    if (sortBy === 'date_desc') {
+      return b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at);
+    } else if (sortBy === 'date_asc') {
+      return a.date.localeCompare(b.date) || a.created_at.localeCompare(b.created_at);
+    } else if (sortBy === 'amount_desc') {
+      return costB - costA;
+    } else if (sortBy === 'amount_asc') {
+      return costA - costB;
+    }
+    return 0;
+  });
+
+  if (batches.length === 0) {
+    return <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>目前沒有採購批次紀錄。</div>;
+  }
+
+  return (
+    <div style={{ padding: '12px', backgroundColor: '#f8fafc', flex: 1, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b' }}>排序:</span>
+          <select 
+            className="input" 
+            style={{ width: '150px', height: '28px', fontSize: '12px', padding: '0 8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as any)}
+          >
+            <option value="date_desc">日期（新 → 舊）</option>
+            <option value="date_asc">日期（舊 → 新）</option>
+            <option value="amount_desc">金額（高 → 低）</option>
+            <option value="amount_asc">金額（低 → 高）</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {sortedBatches.map(batch => {
+          const items = batchItems.filter(i => i.purchase_batch_id === batch.id);
+          const totalQty = items.reduce((sum, i) => sum + i.quantity, 0);
+          const totalCost = items.reduce((sum, i) => sum + (i.quantity * i.cost), 0);
+          const isExpanded = expandedIds.has(batch.id);
+
+          return (
+            <div key={batch.id} style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              
+              {/* Line 1: Name and Date */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '14px' }}>
+                  {batch.name}
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>
+                  {batch.date}
+                </div>
+              </div>
+
+              {/* Line 2: Items count and Total Cost */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '2px 0' }}>
+                <div style={{ fontSize: '13px', color: '#334155', fontWeight: 500 }}>
+                  {totalQty}件商品
+                </div>
+                <div style={{ fontSize: '14px', color: '#0f172a', fontWeight: 600 }}>
+                  {currencySymbol}{totalCost.toLocaleString()}
+                </div>
+              </div>
+
+              {/* Line 3: Actions row */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '6px', marginTop: '2px' }}>
+                <div 
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#2563eb', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}
+                  onClick={() => toggleExpand(batch.id)}
+                >
+                  {isExpanded ? '▼ 收合明細' : '▶ 查看明細'}
+                </div>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  {canWrite && (
+                    <button className="btn btn-ghost" style={{ padding: '2px', color: '#2563eb' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
+                      <Copy size={15} />
+                    </button>
+                  )}
+                  <button className="btn btn-ghost" style={{ padding: '2px', color: '#64748b' }} onClick={() => onEditBatch(batch)} title="編輯批次與明細">
+                    <Edit2 size={15} />
+                  </button>
+                  <button className="btn btn-ghost" style={{ padding: '2px', color: '#ef4444' }} onClick={() => handleDeleteBatch(batch)} title="刪除批次">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Expanded details */}
+              {isExpanded && (
+                <div style={{ borderTop: '1px dashed #e2e8f0', marginTop: '6px', paddingTop: '6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {items.sort((a, b) => {
+                    const idxA = variants.findIndex(v => v.id === a.product_variant_id);
+                    const idxB = variants.findIndex(v => v.id === b.product_variant_id);
+                    return idxA - idxB;
+                  }).map(item => {
+                    const variant = variantMap.get(item.product_variant_id);
+                    return (
+                      <div key={item.id} style={{ display: 'flex', flexDirection: 'column', gap: '1px', borderBottom: '1px solid #f8fafc', paddingBottom: '4px' }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '13px' }}>
+                          {variant ? getDisplayProductName(variant) : '未知商品'}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b' }}>
+                          數量 {item.quantity}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {items.length === 0 && (
+                    <div style={{ fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '4px' }}>無明細</div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function PurchaseManagement() {
   const { isMobile } = useViewport();
@@ -1269,6 +1500,72 @@ export default function PurchaseManagement() {
     return '單品';
   };
 
+  const renderMobileVariantCard = (v: ProductVariant) => {
+    const { myacgDemand, wacaDemand, privateDemand } = getVariantDemands(v);
+    const vBatchItems = purchaseBatchItems.filter(pbi => pbi.product_variant_id === v.id);
+
+    const title = isDaili ? getDisplayProductName(v) : getVariantDisplayLabel(v);
+
+    return (
+      <div 
+        key={v.id} 
+        style={{ 
+          padding: '10px 12px', 
+          backgroundColor: '#fff',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          boxSizing: 'border-box'
+        }}
+      >
+        {/* Title */}
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+          <HighlightText text={title} highlight={searchTerm} />
+        </div>
+
+        {/* Sources */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>來源：</span>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <span style={{ fontSize: '12px', color: '#334155' }}>
+              買動漫 <span style={{ fontWeight: 700, color: myacgDemand > 0 ? '#2563eb' : '#64748b' }}>{myacgDemand}</span>
+            </span>
+            <span style={{ fontSize: '12px', color: '#334155' }}>
+              WACA <span style={{ fontWeight: 700, color: wacaDemand > 0 ? '#2563eb' : '#64748b' }}>{wacaDemand}</span>
+            </span>
+            <span style={{ fontSize: '12px', color: '#334155' }}>
+              私下 <span style={{ fontWeight: 700, color: privateDemand > 0 ? '#2563eb' : '#64748b' }}>{privateDemand}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Batches */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>批次：</span>
+          {vBatchItems.length === 0 ? (
+            <span style={{ fontSize: '12px', color: '#94a3b8' }}>無</span>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              {vBatchItems.map(pbi => {
+                const batch = batchMap.get(pbi.purchase_batch_id);
+                let displayDate = batch?.date || batch?.name || '未知';
+                if (batch?.date && batch.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                  const parts = batch.date.split('-');
+                  displayDate = `${parts[1]}/${parts[2]}`;
+                }
+                return (
+                  <span key={pbi.id} style={{ fontSize: '12px', color: '#334155' }}>
+                    {displayDate} <span style={{ fontWeight: 700, color: '#0f172a' }}>×{pbi.quantity}</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const groupedVariants: Record<string, ProductVariant[]> = {};
   variants.forEach(v => {
     const parsed = parsedVariantsMap.get(v.id);
@@ -1699,80 +1996,33 @@ export default function PurchaseManagement() {
 
         {/* Toolbar */}
         {activeTab === 'worksheet' && (
-          <div style={{ 
-            display: 'flex', 
-            flexDirection: 'column',
-            gap: '12px',
-            overflow: 'visible',
-            marginBottom: '16px', 
-            padding: '16px', 
-            backgroundColor: '#fff', 
-            borderRadius: '12px', 
-            border: '1px solid #e5e7eb', 
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)' 
-          }}>
-            {/* Row 1: Controls (Sort / Rate / Search / Actions) */}
-            <div style={{
-              display: 'flex',
-              flexDirection: isMobile ? 'column' : 'row',
-              alignItems: isMobile ? 'stretch' : 'center',
-              gap: '12px',
-              flexWrap: isMobile ? 'wrap' : 'nowrap',
-              width: '100%',
-              flexShrink: 0
+          isMobile ? (
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              gap: '8px',
+              marginBottom: '12px', 
+              padding: '12px', 
+              backgroundColor: '#fff', 
+              borderRadius: '8px', 
+              border: '1px solid #e5e7eb', 
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)' 
             }}>
-              {/* Mode Toggle Buttons */}
-              <div style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-start', flexShrink: 0 }}>
-                <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px', width: isMobile ? '100%' : 'auto' }}>
-                  <div 
-                    style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
-                    onClick={() => setFilterMode('all')}
-                  >顯示全部商品</div>
-                  <div 
-                    style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
-                    onClick={() => setFilterMode('abnormal')}
-                  >缺貨採購模式</div>
-                </div>
+              {/* Row 1: Mode Toggle Buttons */}
+              <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '3px', borderRadius: '6px', width: '100%', boxSizing: 'border-box' }}>
+                <div 
+                  style={{ flex: 1, textAlign: 'center', padding: '6px 0', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '4px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                  onClick={() => setFilterMode('all')}
+                >顯示全部商品</div>
+                <div 
+                  style={{ flex: 1, textAlign: 'center', padding: '6px 0', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '4px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                  onClick={() => setFilterMode('abnormal')}
+                >缺貨採購模式</div>
               </div>
 
-              {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-              {/* Sort select */}
-              <select 
-                className="input" 
-                style={{ width: isMobile ? '100%' : '200px', height: '36px', fontSize: '13px', padding: '0 12px', flexShrink: 0 }}
-                value={sortMode}
-                onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
-              >
-                <option value="catalog">依商品主檔順序排序</option>
-                <option value="shortage">依缺貨多寡排序</option>
-              </select>
-
-              {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-              {/* Exchange rate input */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>設定匯率:</span>
-                <input 
-                  type="number" 
-                  step="0.0001"
-                  min="0"
-                  className="input" 
-                  style={{ flex: isMobile ? 1 : 'none', width: isMobile ? 'auto' : '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
-                  value={exchangeRate || ''}
-                  onChange={e => {
-                    const val = parseFloat(e.target.value) || 0;
-                    setExchangeRate(val);
-                    localStorage.setItem('erp_exchange_rate', String(val));
-                  }}
-                />
-              </div>
-
-              {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-              {/* Search bar */}
-              <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: isMobile ? '100%' : '200px', flexShrink: 0 }}>
-                <Search size={16} style={{ color: '#64748b', marginRight: '8px' }} />
+              {/* Row 2: Search bar */}
+              <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 10px', height: '36px', width: '100%', boxSizing: 'border-box' }}>
+                <Search size={14} style={{ color: '#64748b', marginRight: '6px' }} />
                 <input 
                   type="text" 
                   placeholder="搜尋商品..." 
@@ -1782,36 +2032,18 @@ export default function PurchaseManagement() {
                 />
               </div>
 
-              {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', flexWrap: isMobile ? 'wrap' : 'nowrap', flexShrink: 0 }}>
-                {canWrite && (
-                  <button 
-                    className="btn btn-outline" 
-                    style={{ 
-                      flex: isMobile ? 1 : 'none',
-                      fontSize: '13px', 
-                      padding: '6px 12px', 
-                      height: '36px',
-                      backgroundColor: '#f0fdf4', 
-                      color: '#16a34a', 
-                      borderColor: '#bbf7d0',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap'
-                    }}
-                    onClick={handleCopyAllGroupPurchasedLedger}
-                  >
-                    <Copy size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 複製已採購帳目
-                  </button>
-                )}
+              {/* Row 3: Action Buttons */}
+              <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
                 <button 
                   className="btn btn-outline" 
                   style={{ 
-                    flex: isMobile ? 1 : 'none',
-                    fontSize: '13px', 
-                    padding: '6px 12px', 
-                    height: '36px',
+                    flex: 1,
+                    fontSize: '12px', 
+                    padding: '0', 
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     backgroundColor: '#fdf2f8', 
                     color: '#db2777', 
                     borderColor: '#fbcfe8',
@@ -1822,15 +2054,18 @@ export default function PurchaseManagement() {
                   disabled={!editMode}
                   onClick={openPrivateOrderModal}
                 >
-                  <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 私下登記
+                  <Plus size={12} style={{ marginRight: '4px' }} /> 私下登記
                 </button>
                 <button 
                   className="btn btn-outline" 
                   style={{ 
-                    flex: isMobile ? 1 : 'none',
-                    fontSize: '13px', 
-                    padding: '6px 12px', 
-                    height: '36px',
+                    flex: 1,
+                    fontSize: '12px', 
+                    padding: '0', 
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     backgroundColor: '#eff6ff', 
                     color: '#2563eb', 
                     borderColor: '#bfdbfe',
@@ -1841,9 +2076,117 @@ export default function PurchaseManagement() {
                   disabled={!editMode}
                   onClick={openBatchModal}
                 >
-                  <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
+                  <Plus size={12} style={{ marginRight: '4px' }} /> 新增採購批次
                 </button>
-                {canWrite && (
+              </div>
+            </div>
+          ) : (
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              gap: '12px',
+              overflow: 'visible',
+              marginBottom: '16px', 
+              padding: '16px', 
+              backgroundColor: '#fff', 
+              borderRadius: '12px', 
+              border: '1px solid #e5e7eb', 
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)' 
+            }}>
+              {/* Row 1: Controls (Sort / Rate / Search / Actions) */}
+              <div style={{
+                display: 'flex',
+                flexDirection: isMobile ? 'column' : 'row',
+                alignItems: isMobile ? 'stretch' : 'center',
+                gap: '12px',
+                flexWrap: isMobile ? 'wrap' : 'nowrap',
+                width: '100%',
+                flexShrink: 0
+              }}>
+                {/* Mode Toggle Buttons */}
+                <div style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-start', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px', width: isMobile ? '100%' : 'auto' }}>
+                    <div 
+                      style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                      onClick={() => setFilterMode('all')}
+                    >顯示全部商品</div>
+                    <div 
+                      style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                      onClick={() => setFilterMode('abnormal')}
+                    >缺貨採購模式</div>
+                  </div>
+                </div>
+
+                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                {/* Sort select */}
+                <select 
+                  className="input" 
+                  style={{ width: isMobile ? '100%' : '200px', height: '36px', fontSize: '13px', padding: '0 12px', flexShrink: 0 }}
+                  value={sortMode}
+                  onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
+                >
+                  <option value="catalog">依商品主檔順序排序</option>
+                  <option value="shortage">依缺貨多寡排序</option>
+                </select>
+
+                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                {/* Exchange rate input */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>設定匯率:</span>
+                  <input 
+                    type="number" 
+                    step="0.0001"
+                    min="0"
+                    className="input" 
+                    style={{ flex: isMobile ? 1 : 'none', width: isMobile ? 'auto' : '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                    value={exchangeRate || ''}
+                    onChange={e => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setExchangeRate(val);
+                      localStorage.setItem('erp_exchange_rate', String(val));
+                    }}
+                  />
+                </div>
+
+                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                {/* Search bar */}
+                <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: isMobile ? '100%' : '200px', flexShrink: 0 }}>
+                  <Search size={16} style={{ color: '#64748b', marginRight: '8px' }} />
+                  <input 
+                    type="text" 
+                    placeholder="搜尋商品..." 
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '13px', color: '#334155' }}
+                  />
+                </div>
+
+                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                {/* Action Buttons */}
+                <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', flexWrap: isMobile ? 'wrap' : 'nowrap', flexShrink: 0 }}>
+                  {canWrite && (
+                    <button 
+                      className="btn btn-outline" 
+                      style={{ 
+                        flex: isMobile ? 1 : 'none',
+                        fontSize: '13px', 
+                        padding: '6px 12px', 
+                        height: '36px',
+                        backgroundColor: '#f0fdf4', 
+                        color: '#16a34a', 
+                        borderColor: '#bbf7d0',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                      }}
+                      onClick={handleCopyAllGroupPurchasedLedger}
+                    >
+                      <Copy size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 複製已採購帳目
+                    </button>
+                  )}
                   <button 
                     className="btn btn-outline" 
                     style={{ 
@@ -1851,89 +2194,129 @@ export default function PurchaseManagement() {
                       fontSize: '13px', 
                       padding: '6px 12px', 
                       height: '36px',
-                      backgroundColor: '#f8fafc', 
-                      color: '#475569', 
-                      borderColor: '#cbd5e1',
+                      backgroundColor: '#fdf2f8', 
+                      color: '#db2777', 
+                      borderColor: '#fbcfe8',
                       opacity: editMode ? 1 : 0.6,
                       cursor: editMode ? 'pointer' : 'not-allowed',
                       whiteSpace: 'nowrap'
                     }}
                     disabled={!editMode}
-                    onClick={handleAddNewVariant}
+                    onClick={openPrivateOrderModal}
                   >
-                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增規格
+                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 私下登記
                   </button>
-                )}
-              </div>
-            </div>
-
-            {/* Divider & Row 2: Bulk Master Cost Settings */}
-            {editMode && canWrite && (
-              <>
-                <div style={{ height: '1px', backgroundColor: '#e2e8f0', margin: '4px 0', flexShrink: 0 }} />
-                <div style={{ 
-                  display: 'flex', 
-                  flexDirection: isMobile ? 'column' : 'row', 
-                  alignItems: isMobile ? 'stretch' : 'center', 
-                  gap: '12px', 
-                  flexWrap: isMobile ? 'wrap' : 'nowrap',
-                  flexShrink: 0,
-                  width: '100%'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>批量價格設定:</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '13px', color: '#64748b' }}>單價:</span>
-                    <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>{isDaili ? 'NT$' : '¥'}</span>
-                    <input 
-                      type="number" 
-                      placeholder="輸入金額" 
-                      className="input"
-                      value={bulkMasterPrice}
-                      onChange={e => setBulkMasterPrice(e.target.value)}
-                      disabled={isApplyingMasterCost}
-                      style={{ width: '100px', height: '32px', padding: '0 8px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px', backgroundColor: isApplyingMasterCost ? '#f1f5f9' : '#fff', cursor: isApplyingMasterCost ? 'not-allowed' : 'text' }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                    <span style={{ fontSize: '13px', color: '#64748b' }}>分類:</span>
-                    <select
-                      id="bulk-master-category-select"
-                      className="input"
-                      value={bulkMasterCategory}
-                      onChange={e => setBulkMasterCategory(e.target.value)}
-                      disabled={isApplyingMasterCost}
-                      style={{ width: '150px', height: '32px', padding: '0 4px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px', backgroundColor: isApplyingMasterCost ? '#f1f5f9' : '#fff', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer' }}
+                  <button 
+                    className="btn btn-outline" 
+                    style={{ 
+                      flex: isMobile ? 1 : 'none',
+                      fontSize: '13px', 
+                      padding: '6px 12px', 
+                      height: '36px',
+                      backgroundColor: '#eff6ff', 
+                      color: '#2563eb', 
+                      borderColor: '#bfdbfe',
+                      opacity: editMode ? 1 : 0.6,
+                      cursor: editMode ? 'pointer' : 'not-allowed',
+                      whiteSpace: 'nowrap'
+                    }}
+                    disabled={!editMode}
+                    onClick={openBatchModal}
+                  >
+                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
+                  </button>
+                  {canWrite && (
+                    <button 
+                      className="btn btn-outline" 
+                      style={{ 
+                        flex: isMobile ? 1 : 'none',
+                        fontSize: '13px', 
+                        padding: '6px 12px', 
+                        height: '36px',
+                        backgroundColor: '#f8fafc', 
+                        color: '#475569', 
+                        borderColor: '#cbd5e1',
+                        opacity: editMode ? 1 : 0.6,
+                        cursor: editMode ? 'pointer' : 'not-allowed',
+                        whiteSpace: 'nowrap'
+                      }}
+                      disabled={!editMode}
+                      onClick={handleAddNewVariant}
                     >
-                      <option value="">-- 選擇分類 --</option>
-                      {(Array.from(new Set(variants.map(v => parsedVariantsMap.get(v.id)?.categoryTitle).filter(Boolean))) as string[]).map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button 
-                    type="button" 
-                    className="btn btn-outline" 
-                    onClick={handleApplyMasterCostToCategory}
-                    disabled={isApplyingMasterCost}
-                    style={{ padding: '0 12px', height: '32px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer', backgroundColor: '#fff', opacity: isApplyingMasterCost ? 0.6 : 1, flexShrink: 0 }}
-                  >
-                    {isApplyingMasterCost ? '套用中...' : '套用單價至選取分類'}
-                  </button>
-                  <button 
-                    type="button" 
-                    className="btn btn-outline" 
-                    onClick={handleApplyMasterCostToAll}
-                    disabled={isApplyingMasterCost}
-                    style={{ padding: '0 12px', height: '32px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer', backgroundColor: '#fff', opacity: isApplyingMasterCost ? 0.6 : 1, flexShrink: 0 }}
-                  >
-                    {isApplyingMasterCost ? '套用中...' : '套用單價至全部品項'}
-                  </button>
+                      <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增規格
+                    </button>
+                  )}
                 </div>
-              </>
-            )}
-          </div>
+              </div>
+
+              {/* Divider & Row 2: Bulk Master Cost Settings */}
+              {editMode && canWrite && (
+                <>
+                  <div style={{ height: '1px', backgroundColor: '#e2e8f0', margin: '4px 0', flexShrink: 0 }} />
+                  <div style={{ 
+                    display: 'flex', 
+                    flexDirection: isMobile ? 'column' : 'row', 
+                    alignItems: isMobile ? 'stretch' : 'center', 
+                    gap: '12px', 
+                    flexWrap: isMobile ? 'wrap' : 'nowrap',
+                    flexShrink: 0,
+                    width: '100%'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>批量價格設定:</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      <span style={{ fontSize: '13px', color: '#64748b' }}>單價:</span>
+                      <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>{isDaili ? 'NT$' : '¥'}</span>
+                      <input 
+                        type="number" 
+                        placeholder="輸入金額" 
+                        className="input"
+                        value={bulkMasterPrice}
+                        onChange={e => setBulkMasterPrice(e.target.value)}
+                        disabled={isApplyingMasterCost}
+                        style={{ width: '100px', height: '32px', padding: '0 8px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px', backgroundColor: isApplyingMasterCost ? '#f1f5f9' : '#fff', cursor: isApplyingMasterCost ? 'not-allowed' : 'text' }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      <span style={{ fontSize: '13px', color: '#64748b' }}>分類:</span>
+                      <select
+                        id="bulk-master-category-select"
+                        className="input"
+                        value={bulkMasterCategory}
+                        onChange={e => setBulkMasterCategory(e.target.value)}
+                        disabled={isApplyingMasterCost}
+                        style={{ width: '150px', height: '32px', padding: '0 4px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px', backgroundColor: isApplyingMasterCost ? '#f1f5f9' : '#fff', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer' }}
+                      >
+                        <option value="">-- 選擇分類 --</option>
+                        {(Array.from(new Set(variants.map(v => parsedVariantsMap.get(v.id)?.categoryTitle).filter(Boolean))) as string[]).map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline" 
+                      onClick={handleApplyMasterCostToCategory}
+                      disabled={isApplyingMasterCost}
+                      style={{ padding: '0 12px', height: '32px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer', backgroundColor: '#fff', opacity: isApplyingMasterCost ? 0.6 : 1, flexShrink: 0 }}
+                    >
+                      {isApplyingMasterCost ? '套用中...' : '套用單價至選取分類'}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline" 
+                      onClick={handleApplyMasterCostToAll}
+                      disabled={isApplyingMasterCost}
+                      style={{ padding: '0 12px', height: '32px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer', backgroundColor: '#fff', opacity: isApplyingMasterCost ? 0.6 : 1, flexShrink: 0 }}
+                    >
+                      {isApplyingMasterCost ? '套用中...' : '套用單價至全部品項'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )
         )}
 
         {/* Card List Area (Standard Mode) */}
@@ -1998,7 +2381,23 @@ export default function PurchaseManagement() {
               if (groupKey.startsWith('__single__')) {
                 const v = groupItems[0];
                 
-                
+                if (isMobile) {
+                  return (
+                    <div 
+                      key={v.id} 
+                      style={{ 
+                        border: '1px solid #cbd5e1', 
+                        borderRadius: '8px', 
+                        overflow: 'hidden', 
+                        backgroundColor: '#fff', 
+                        marginBottom: '8px',
+                        borderLeft: `4px solid ${borderColor}`
+                      }}
+                    >
+                      {renderMobileVariantCard(v)}
+                    </div>
+                  );
+                }
                 
                 return (
                   <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden', borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
@@ -2381,49 +2780,60 @@ export default function PurchaseManagement() {
                   
                   {/* Category Header Row */}
                   <div 
-                    style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                    style={{ padding: isMobile ? '10px 12px' : '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', gap: '8px', overflow: 'hidden' }}
                     onClick={() => toggleManualGroup(groupKey)}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
-                        <HighlightText text={catTitle} highlight={searchTerm} />
+                    {isMobile ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <HighlightText text={catTitle} highlight={searchTerm} />
+                        </div>
+                        <div style={{ color: '#64748b', fontSize: '12px', fontWeight: 400 }}>
+                          共 {groupItems.length} 款
+                        </div>
                       </div>
-                      <span style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 500 }}>
-                        共 {groupItems.length} 款
-                      </span>
-                      {pNeed > 0 && (
-                        <span style={{
-                          backgroundColor: '#FEE2E2',
-                          color: '#DC2626',
-                          border: '1px solid #fecaca',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          marginLeft: '8px',
-                          display: 'inline-block'
-                        }}>
-                          待採購 {pNeed}
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', overflow: 'hidden', flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '15px' }}>
+                          <HighlightText text={catTitle} highlight={searchTerm} />
+                        </div>
+                        <span style={{ backgroundColor: '#f1f5f9', color: '#64748b', padding: '2px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 500 }}>
+                          共 {groupItems.length} 款
                         </span>
-                      )}
-                      {pNeed === 0 && pExcess > 0 && (
-                        <span style={{
-                          backgroundColor: '#fff7ed',
-                          color: '#c2410c',
-                          border: '1px solid #ffedd5',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          marginLeft: '8px',
-                          display: 'inline-block'
-                        }}>
-                          多買 {pExcess}
-                        </span>
-                      )}
-                    </div>
+                        {pNeed > 0 && (
+                          <span style={{
+                            backgroundColor: '#FEE2E2',
+                            color: '#DC2626',
+                            border: '1px solid #fecaca',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            marginLeft: '8px',
+                            display: 'inline-block'
+                          }}>
+                            待採購 {pNeed}
+                          </span>
+                        )}
+                        {pNeed === 0 && pExcess > 0 && (
+                          <span style={{
+                            backgroundColor: '#fff7ed',
+                            color: '#c2410c',
+                            border: '1px solid #ffedd5',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            marginLeft: '8px',
+                            display: 'inline-block'
+                          }}>
+                            多買 {pExcess}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '16px', fontSize: '13px', color: '#64748b' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '6px' : '16px', fontSize: '13px', color: '#64748b', flexShrink: 0 }}>
                       {!isMobile && (
                         <>
                           <span>總需求 {pDemand}</span>
@@ -2433,11 +2843,8 @@ export default function PurchaseManagement() {
                           <span>私下 {pManual}</span>
                         </>
                       )}
-                      {isMobile && pNeed > 0 && (
-                        <span style={{ color: '#ef4444', fontWeight: 600 }}>缺 {pNeed}</span>
-                      )}
                       <div style={{ color: '#94a3b8', display: 'flex', alignItems: 'center' }}>
-                        {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                        {isExpanded ? <ChevronDown size={isMobile ? 16 : 20} /> : <ChevronRight size={isMobile ? 16 : 20} />}
                       </div>
                     </div>
                   </div>
@@ -2445,8 +2852,23 @@ export default function PurchaseManagement() {
                   {/* Expanded SKU Table */}
                   {isExpanded && (
                     <div style={{ borderTop: '1px solid #f1f5f9' }}>
-                      <ScrollWrapper isMobile={isMobile}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
+                      {isMobile ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#fff' }}>
+                          {(() => {
+                            const filteredList = groupItems.filter(v => {
+                              if (!searchTerm.trim()) return true;
+                              const lowerSearch = searchTerm.toLowerCase();
+                              return (
+                                (v.variant_name && v.variant_name.toLowerCase().includes(lowerSearch)) ||
+                                (v.myacg_item_code && v.myacg_item_code.toLowerCase().includes(lowerSearch))
+                              );
+                            });
+                            return filteredList.map(v => renderMobileVariantCard(v));
+                          })()}
+                        </div>
+                      ) : (
+                        <ScrollWrapper isMobile={isMobile}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
                         {isDaili ? (
                           <>
                             <colgroup>
@@ -2838,8 +3260,9 @@ export default function PurchaseManagement() {
                         </tbody>
                       </table>
                     </ScrollWrapper>
-                  </div>
                   )}
+                </div>
+              )}
                 </div>
               );
             })}
@@ -3027,18 +3450,32 @@ export default function PurchaseManagement() {
 
         {/* Render Purchase Batch Tab */}
         {activeTab === 'purchase_batches' && (
-          <PurchaseBatchTab 
-            batches={purchaseBatches} 
-            batchItems={purchaseBatchItems} 
-            variants={variants} 
-            categoryMap={categoryMap}
-            groups={groups}
-            onRefresh={loadData} 
-            onEditBatch={handleEditBatch}
-            getDisplayProductName={getDisplayProductName}
-            canWrite={canWrite}
-            isDaili={isDaili}
-          />
+          isMobile ? (
+            <MobilePurchaseBatchTab
+              batches={purchaseBatches}
+              batchItems={purchaseBatchItems}
+              variants={variants}
+              groups={groups}
+              onRefresh={loadData}
+              onEditBatch={handleEditBatch}
+              getDisplayProductName={getDisplayProductName}
+              canWrite={canWrite}
+              isDaili={isDaili}
+            />
+          ) : (
+            <PurchaseBatchTab 
+              batches={purchaseBatches} 
+              batchItems={purchaseBatchItems} 
+              variants={variants} 
+              categoryMap={categoryMap}
+              groups={groups}
+              onRefresh={loadData} 
+              onEditBatch={handleEditBatch}
+              getDisplayProductName={getDisplayProductName}
+              canWrite={canWrite}
+              isDaili={isDaili}
+            />
+          )
         )}
 
         {/* Render Private Order Tab */}

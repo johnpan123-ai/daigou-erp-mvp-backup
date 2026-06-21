@@ -1118,7 +1118,7 @@ export default function PurchaseRecords() {
 
 
   return (
-    <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '80px' : '0px' }}>
+    <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '180px' : '0px' }}>
       <style>{`
         .erp-table th {
           padding: 0 !important;
@@ -1502,68 +1502,123 @@ export default function PurchaseRecords() {
           />
         </div>
         
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品來源</span>
-            <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterSource} onChange={e => setFilterSource(e.target.value)}>
-              <option value="all">全部</option>
-              <option value="Hololive">Hololive</option>
-              <option value="VSPO">VSPO</option>
-              <option value="代理商品">代理商品</option>
-            </select>
+        {isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {/* Row 1: Source and Type filters side-by-side */}
+            <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              {/* Column 1: Source */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>商品來源</span>
+                <select 
+                  className="select" 
+                  style={{ width: '100%', height: '36px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', backgroundColor: '#fff' }} 
+                  value={filterSource} 
+                  onChange={e => setFilterSource(e.target.value)}
+                >
+                  <option value="all">全部</option>
+                  <option value="Hololive">Hololive</option>
+                  <option value="VSPO">VSPO</option>
+                  <option value="代理商品">代理商品</option>
+                </select>
+              </div>
+              {/* Column 2: Type */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>商品種類</span>
+                <select 
+                  className="select" 
+                  style={{ width: '100%', height: '36px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', backgroundColor: '#fff' }} 
+                  value={filterType} 
+                  onChange={e => setFilterType(e.target.value)}
+                >
+                  <option value="all">全部</option>
+                  <option value="一般預購">一般預購</option>
+                  <option value="現貨">現貨</option>
+                  <option value="現地代購">現地代購</option>
+                  <option value="日本代購">日本代購</option>
+                  <option value="代理版">代理版</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Row 2: Sort select */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>排序</span>
+              <select 
+                className="select" 
+                style={{ width: '100%', height: '36px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', backgroundColor: '#fff' }} 
+                value={sortMode} 
+                onChange={e => setSortMode(e.target.value)}
+              >
+                <option value="closing_urgent">開單中優先 + 結單日近優先</option>
+                <option value="created_desc">建立時間 (新到舊)</option>
+                <option value="closing_asc">結單日 (近到遠)</option>
+              </select>
+            </div>
           </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品來源</span>
+              <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterSource} onChange={e => setFilterSource(e.target.value)}>
+                <option value="all">全部</option>
+                <option value="Hololive">Hololive</option>
+                <option value="VSPO">VSPO</option>
+                <option value="代理商品">代理商品</option>
+              </select>
+            </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品類型</span>
-            <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterType} onChange={e => setFilterType(e.target.value)}>
-              <option value="all">全部</option>
-              <option value="一般預購">一般預購</option>
-              <option value="現貨">現貨</option>
-              <option value="現地代購">現地代購</option>
-              <option value="日本代購">日本代購</option>
-              <option value="代理版">代理版</option>
-            </select>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品類型</span>
+              <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterType} onChange={e => setFilterType(e.target.value)}>
+                <option value="all">全部</option>
+                <option value="一般預購">一般預購</option>
+                <option value="現貨">現貨</option>
+                <option value="現地代購">現地代購</option>
+                <option value="日本代購">日本代購</option>
+                <option value="代理版">代理版</option>
+              </select>
+            </div>
+
+            <div style={{ flex: 1 }}></div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>排序</span>
+              <select className="input" style={{ width: '220px', height: '36px', fontSize: '13px' }} value={sortMode} onChange={e => setSortMode(e.target.value)}>
+                <option value="closing_urgent">開單中優先 + 結單日近優先</option>
+                <option value="created_desc">建立時間 (新到舊)</option>
+                <option value="closing_asc">結單日 (近到遠)</option>
+              </select>
+              <button
+                onClick={() => {
+                  setColWidths(DEFAULT_COL_WIDTHS);
+                  localStorage.removeItem('erp_purchase_records_col_widths');
+                  alert('欄位寬度已重設為預設值！');
+                }}
+                style={{
+                  height: '36px',
+                  padding: '0 12px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#475569',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}
+              >
+                重置欄位寬度
+              </button>
+            </div>
+
           </div>
-
-          <div style={{ flex: 1 }}></div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>排序</span>
-            <select className="input" style={{ width: '220px', height: '36px', fontSize: '13px' }} value={sortMode} onChange={e => setSortMode(e.target.value)}>
-              <option value="closing_urgent">開單中優先 + 結單日近優先</option>
-              <option value="created_desc">建立時間 (新到舊)</option>
-              <option value="closing_asc">結單日 (近到遠)</option>
-            </select>
-            <button
-              onClick={() => {
-                setColWidths(DEFAULT_COL_WIDTHS);
-                localStorage.removeItem('erp_purchase_records_col_widths');
-                alert('欄位寬度已重設為預設值！');
-              }}
-              style={{
-                height: '36px',
-                padding: '0 12px',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#475569',
-                backgroundColor: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                display: 'inline-flex',
-                alignItems: 'center',
-                whiteSpace: 'nowrap'
-              }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
-              onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}
-            >
-              重置欄位寬度
-            </button>
-          </div>
-
-        </div>
+        )}
 
         <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           <span>共</span>
@@ -1749,9 +1804,19 @@ export default function PurchaseRecords() {
                       key={g.id}
                       className={`mobile-product-card ${isChecked ? 'selected' : ''}`}
                       onClick={(e) => handleRowClick(g.id, e)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        padding: '12px',
+                        backgroundColor: isChecked ? '#f0fdf4' : '#ffffff',
+                        border: isChecked ? '1px solid #86efac' : '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                        gap: '10px'
+                      }}
                     >
                       {/* Left: checkbox */}
-                      <div className="card-checkbox-wrapper" onClick={e => e.stopPropagation()}>
+                      <div className="card-checkbox-wrapper" onClick={e => e.stopPropagation()} style={{ marginTop: '2px', flexShrink: 0 }}>
                         <input 
                           type="checkbox"
                           checked={isChecked}
@@ -1768,36 +1833,95 @@ export default function PurchaseRecords() {
                         />
                       </div>
 
-                      {/* Right content */}
-                      <div className="card-content-wrapper">
-                        {/* Line 1: Name */}
-                        <div className="card-title-row">
-                          <span className="card-title">{g.normalized_title || g.title}</span>
+                      {/* Right: details stacked */}
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        
+                        {/* Line 1: Product Name (max 2 lines) */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '4px', minWidth: 0 }}>
+                          <span style={{ 
+                            fontSize: '14px', 
+                            fontWeight: 600, 
+                            color: '#1e293b', 
+                            lineHeight: '1.4',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            wordBreak: 'break-word',
+                            flex: 1
+                          }}>
+                            {g.normalized_title || g.title}
+                          </span>
                           {details.hasCatalogMissing && (
-                            <span className="badge-missing">[型錄無此規格]</span>
+                            <span style={{
+                              backgroundColor: '#ffedd5',
+                              color: '#ea580c',
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              fontWeight: 600,
+                              fontSize: '9px',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0
+                            }}>
+                              [型錄無此規格]
+                            </span>
                           )}
                         </div>
 
-                        {/* Line 2: SKU / Price */}
-                        <div className="card-sku-row">
-                          <span className="card-sku">SKU: {skuDisplay}</span>
-                          <span className="card-price">{priceDisplay}</span>
+                        {/* Line 2: SKU */}
+                        <div style={{ fontSize: '12px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          SKU: {skuDisplay}
                         </div>
 
-                        {/* Line 3: Badges + Stats */}
-                        <div className="card-badges-row">
-                          <span className={`badge-purchase ${(g as any).show_in_purchase_list ? 'added' : 'not-added'}`}>
-                            {(g as any).show_in_purchase_list ? '已入採購單' : '未入採購單'}
+                        {/* Line 3: Status badge / Variant count / Is in purchase list */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+                          <span style={{ 
+                            fontSize: '11px', 
+                            fontWeight: 600,
+                            color: getGroupStatus(g).active ? '#15803d' : '#475569',
+                            backgroundColor: getGroupStatus(g).active ? '#dcfce7' : '#f1f5f9',
+                            padding: '2px 6px',
+                            borderRadius: '4px'
+                          }}>
+                            {getGroupStatus(g).text}
                           </span>
-                          <span className="badge-count">
+                          <span style={{ 
+                            backgroundColor: '#f1f5f9', 
+                            color: '#475569', 
+                            fontSize: '11px', 
+                            padding: '2px 6px', 
+                            borderRadius: '4px', 
+                            fontWeight: 500 
+                          }}>
                             {count} 規格
                           </span>
-                          <span style={{ marginLeft: '4px', color: '#64748b' }}>
-                            需求 <strong style={{ color: '#1e293b' }}>{totalDemand}</strong> | 
-                            已採購 <strong style={{ color: '#1e293b' }}>{purchased}</strong> | 
-                            <span style={{ color: gap > 0 ? '#ef4444' : '#166534', fontWeight: 600 }}> 缺 {gap}</span>
+                          <span style={{ 
+                            fontSize: '11px', 
+                            padding: '2px 6px', 
+                            borderRadius: '4px', 
+                            fontWeight: 600,
+                            backgroundColor: (g as any).show_in_purchase_list ? '#dbeafe' : '#f1f5f9',
+                            color: (g as any).show_in_purchase_list ? '#1d4ed8' : '#64748b'
+                          }}>
+                            {(g as any).show_in_purchase_list ? '已入採購單' : '未入採購單'}
                           </span>
                         </div>
+
+                        {/* Line 4: Demands */}
+                        <div style={{ fontSize: '13px', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span>需求 <strong>{totalDemand}</strong></span>
+                          <span style={{ color: '#cbd5e1' }}>|</span>
+                          <span>已採購 <strong>{purchased}</strong></span>
+                          <span style={{ color: '#cbd5e1' }}>|</span>
+                          <span>缺 <strong style={{ color: gap > 0 ? '#ef4444' : '#166534' }}>{gap}</strong></span>
+                        </div>
+
+                        {/* Line 5: Price range */}
+                        <div style={{ fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
+                          價格範圍 {priceDisplay}
+                        </div>
+
                       </div>
                     </div>
                   );
@@ -2653,13 +2777,13 @@ export default function PurchaseRecords() {
         onClick={() => setEditMode(!editMode)}
         style={{
           position: 'fixed',
-          bottom: '24px',
-          right: '24px',
+          bottom: isMobile ? 'calc(env(safe-area-inset-bottom) + 72px)' : '24px',
+          right: isMobile ? '16px' : '24px',
           zIndex: 9999,
-          height: '46px',
-          padding: '0 24px',
+          height: isMobile ? '40px' : '46px',
+          padding: isMobile ? '10px 16px' : '0 24px',
           fontWeight: 700,
-          fontSize: '14px',
+          fontSize: isMobile ? '13px' : '14px',
           borderRadius: '9999px',
           border: 'none',
           cursor: 'pointer',
