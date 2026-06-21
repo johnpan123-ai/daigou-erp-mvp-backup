@@ -413,7 +413,18 @@ export default function PurchaseBatchModal({
                         })()}
                       </td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>
-                        <input className="input" type="number" min="0" value={lineData?.quantity || ''} onChange={e => updateBatchLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                        <input 
+                          className="input" 
+                          type="text" 
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={lineData?.quantity === 0 ? '' : (lineData?.quantity || '')} 
+                          onChange={e => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            updateBatchLine(idx, 'quantity', val === '' ? 0 : parseInt(val));
+                          }} 
+                          style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                        />
                       </td>
                       <td style={{ padding: '8px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>

@@ -1155,7 +1155,6 @@ export default function PurchaseManagement() {
   });
 
   const jpyTotalDemand = jpyNeedToBuy + jpyPurchased;
-  const estimatedTwd = jpyTotalDemand * exchangeRate;
 
   const dailiTotalCost = dailiNeedToBuyCost + dailiPurchasedCost;
   const dailiGrossProfit = dailiTotalOrderAmount - dailiTotalCost;
@@ -1563,16 +1562,16 @@ export default function PurchaseManagement() {
                   <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>整批商品總成本(日幣)</div>
                 </div>
 
-                {/* 4. 預估台幣 */}
+                {/* 4. 已購買數量 */}
                 <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>預估台幣</div>
-                    <DollarSign size={20} color="#ca8a04" />
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已購買數量</div>
+                    <CheckSquare size={20} color="#ca8a04" />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>NTD {Math.round(estimatedTwd).toLocaleString()}</span>
+                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>{totalPurchased} 件</span>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>總需求日幣 × 匯率 {exchangeRate}</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有規格已採購件數加總</div>
                 </div>
               </>
             )}
@@ -3052,7 +3051,18 @@ export default function PurchaseManagement() {
                         </div>
                       </td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>
-                        <input className="input" type="number" min="0" value={poLines[idx]?.quantity || ''} onChange={e => updatePoLine(idx, 'quantity', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                        <input 
+                          className="input" 
+                          type="text" 
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={poLines[idx]?.quantity === 0 ? '' : (poLines[idx]?.quantity || '')} 
+                          onChange={e => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            updatePoLine(idx, 'quantity', val === '' ? 0 : parseInt(val));
+                          }} 
+                          style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                        />
                       </td>
                       <td style={{ padding: '8px', textAlign: 'right' }}>
                         <input className="input" type="number" min="0" value={poLines[idx]?.amount || ''} onChange={e => updatePoLine(idx, 'amount', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
