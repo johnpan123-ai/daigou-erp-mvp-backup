@@ -137,7 +137,19 @@ export default function PurchaseRecords() {
 
     // Purchased
     const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v0.id).reduce((sum, item) => sum + item.quantity, 0);
-    const rawPurchased = v0.purchased_manual_adjustment ?? (v0 as any).ordered_quantity ?? (v0 as any).ordered_qty ?? localPurchased;
+
+    const manualPurchased = v0.purchased_manual_adjustment;
+    const legacyPurchased = (v0 as any).ordered_quantity ?? (v0 as any).ordered_qty;
+
+    let rawPurchased;
+    if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
+      rawPurchased = manualPurchased;
+    } else if (localPurchased > 0) {
+      rawPurchased = localPurchased;
+    } else {
+      rawPurchased = legacyPurchased ?? 0;
+    }
+
     const v0_Purchased = rawPurchased >= 0 ? rawPurchased : 0;
 
     const v0_OriginalDemand = v0_Myacg + v0_Waca + v0_Private;
@@ -243,16 +255,22 @@ export default function PurchaseRecords() {
   const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'all'>('progress');
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
 
+  const normalizeDate = (dateStr: string | undefined | null): string | null => {
+    if (!dateStr) return null;
+    const clean = dateStr.trim().replace(/\//g, '-');
+    const match = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (!match) return null;
+    const year = match[1];
+    const month = match[2].padStart(2, '0');
+    const day = match[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const checkIsGroupClosed = (g: ProductGroup): boolean => {
-    const statusVal = (g as any).status;
-    const isClosedVal = (g as any).is_closed;
-    if (statusVal !== undefined && statusVal !== null) {
-      return statusVal === '已結單';
-    }
-    if (isClosedVal !== undefined && isClosedVal !== null) {
-      return isClosedVal === true;
-    }
-    return false;
+    const closing = normalizeDate(g.closing_date);
+    if (!closing) return false;
+    const todayStr = getTodayStr();
+    return todayStr > closing;
   };
 
   const getTodayStr = (): string => {
@@ -264,10 +282,10 @@ export default function PurchaseRecords() {
   };
 
   const checkIsGroupOverdue = (g: ProductGroup): boolean => {
-    if (!g.closing_date) return false;
+    const closing = normalizeDate(g.closing_date);
+    if (!closing) return false;
     const todayStr = getTodayStr();
-    const cleanDate = g.closing_date.replace(/\//g, '-');
-    return cleanDate < todayStr;
+    return closing < todayStr;
   };
 
   useEffect(() => {
@@ -313,6 +331,13 @@ export default function PurchaseRecords() {
 
   const getGroupStatus = (g: ProductGroup) => {
     const isClosed = checkIsGroupClosed(g);
+    console.log({
+      title: g.normalized_title || g.title,
+      status: (g as any).status,
+      closing_date: g.closing_date,
+      today: getTodayStr(),
+      computedStatus: isClosed ? '已結單' : '開單中'
+    });
     if (isClosed) {
       return { text: '⚫ 已結單', active: false };
     }
@@ -438,7 +463,19 @@ export default function PurchaseRecords() {
 
       // 已採購 / 已下單數量
       const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+
+      const manualPurchased = v.purchased_manual_adjustment;
+      const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
+
+      let rawPurchased;
+      if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
+        rawPurchased = manualPurchased;
+      } else if (localPurchased > 0) {
+        rawPurchased = localPurchased;
+      } else {
+        rawPurchased = legacyPurchased ?? 0;
+      }
+
       const vPurchased = rawPurchased >= 0 ? rawPurchased : 0;
 
       myacg += vMyacg;
@@ -501,7 +538,19 @@ export default function PurchaseRecords() {
 
       // 已採購 / 已下單數量
       const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+
+      const manualPurchased = v.purchased_manual_adjustment;
+      const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
+
+      let rawPurchased;
+      if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
+        rawPurchased = manualPurchased;
+      } else if (localPurchased > 0) {
+        rawPurchased = localPurchased;
+      } else {
+        rawPurchased = legacyPurchased ?? 0;
+      }
+
       const vPurchased = rawPurchased >= 0 ? rawPurchased : 0;
 
       const demand = vMyacg + vWaca + vPrivate;
@@ -519,13 +568,16 @@ export default function PurchaseRecords() {
     if (!closingDate) return { text: '-', color: '#64748b', fontWeight: 400 };
     
     const todayStr = getTodayStr();
-    const cleanDate = closingDate.replace(/\//g, '-');
-    if (cleanDate < todayStr) {
+    const closing = normalizeDate(closingDate);
+    if (!closing) {
+      return { text: closingDate, color: '#334155', fontWeight: 500 };
+    }
+    if (closing < todayStr) {
       return { text: closingDate, color: '#ef4444', fontWeight: 700 };
     }
     
     const todayTime = new Date(todayStr).getTime();
-    const closingTime = new Date(cleanDate).getTime();
+    const closingTime = new Date(closing).getTime();
     const diffDays = Math.ceil((closingTime - todayTime) / (1000 * 60 * 60 * 24));
     
     if (diffDays >= 0 && diffDays <= 3) {
@@ -1769,11 +1821,13 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={draftDemands[`${g.id}_myacg`] !== undefined ? draftDemands[`${g.id}_myacg`] : String(details.myacg)} 
-                              onChange={e => handleUpdateDraft(g.id, 'myacg', e.target.value)} 
+                              onChange={e => handleUpdateDraft(g.id, 'myacg', e.target.value.replace(/[^0-9]/g, ''))} 
                               onBlur={() => handleCommitDraft(g.id, 'myacg')}
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
@@ -1784,7 +1838,6 @@ export default function PurchaseRecords() {
                                 }
                               }}
                               onClick={e => e.stopPropagation()}
-                              min={0}
                             />
                           ) : (
                             details.myacg
@@ -1793,11 +1846,13 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={draftDemands[`${g.id}_waca`] !== undefined ? draftDemands[`${g.id}_waca`] : String(details.wacaManual)} 
-                              onChange={e => handleUpdateDraft(g.id, 'waca', e.target.value)} 
+                              onChange={e => handleUpdateDraft(g.id, 'waca', e.target.value.replace(/[^0-9]/g, ''))} 
                               onBlur={() => handleCommitDraft(g.id, 'waca')}
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
@@ -1808,7 +1863,6 @@ export default function PurchaseRecords() {
                                 }
                               }}
                               onClick={e => e.stopPropagation()}
-                              min={0}
                             />
                           ) : (
                             details.wacaManual
@@ -1832,11 +1886,13 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={draftDemands[`${g.id}_purchased`] !== undefined ? draftDemands[`${g.id}_purchased`] : String(details.purchased)} 
-                              onChange={e => handleUpdateDraft(g.id, 'purchased', e.target.value)} 
+                              onChange={e => handleUpdateDraft(g.id, 'purchased', e.target.value.replace(/[^0-9]/g, ''))} 
                               onBlur={() => handleCommitDraft(g.id, 'purchased')}
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
@@ -1847,12 +1903,10 @@ export default function PurchaseRecords() {
                                 }
                               }}
                               onClick={e => e.stopPropagation()}
-                              min={0}
                             />
                           ) : (
                             details.purchased
-                          )}
-                        </td>
+                          )}</td>
                         <td style={{ textAlign: 'center', fontWeight: 700, color: dynamicGap > 0 ? '#ef4444' : '#166534' }}>
                           缺 {dynamicGap}
                         </td>
@@ -2185,13 +2239,14 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={details.myacg} 
-                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'myacg', parseInt(e.target.value) || 0)} 
+                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'myacg', parseInt(e.target.value.replace(/[^0-9]/g, '')) || 0)} 
                               onClick={e => e.stopPropagation()}
-                              min={0}
                             />
                           ) : (
                             details.myacg
@@ -2200,13 +2255,14 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               className="input" 
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={details.wacaManual} 
-                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value) || 0)} 
+                              onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value.replace(/[^0-9]/g, '')) || 0)} 
                               onClick={e => e.stopPropagation()}
-                              min={0}
                             />
                           ) : (
                             details.wacaManual

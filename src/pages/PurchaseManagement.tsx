@@ -143,7 +143,19 @@ export default function PurchaseManagement() {
     const localPurchased = purchaseBatchItems
       .filter(pbi => pbi.product_variant_id === v.id)
       .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
+
+    const manualPurchased = v.purchased_manual_adjustment;
+    const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
+
+    let rawPurchased;
+    if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
+      rawPurchased = manualPurchased;
+    } else if (localPurchased > 0) {
+      rawPurchased = localPurchased;
+    } else {
+      rawPurchased = legacyPurchased ?? 0;
+    }
+
     const purchased = rawPurchased >= 0 ? rawPurchased : 0;
 
     const totalDemand = myacgDemand + wacaDemand + privateDemand;
