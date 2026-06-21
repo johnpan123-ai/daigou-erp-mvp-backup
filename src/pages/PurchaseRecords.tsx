@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { calculateFinalMyacgDemand } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -563,6 +563,28 @@ export default function PurchaseRecords() {
     return { demand: totalDemand, purchased: totalPurchased, gap, hasCatalogMissing };
   };
 
+  const getGroupSkuAndPriceRange = (groupId: string) => {
+    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
+    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
+    
+    const skus = Array.from(new Set(groupVars.map(v => v.myacg_item_code).filter(Boolean)));
+    const baseSkus = Array.from(new Set(skus.map(code => getBaseSku(code))));
+    const skuDisplay = baseSkus.length > 0 ? baseSkus.slice(0, 2).join(', ') + (baseSkus.length > 2 ? '...' : '') : '無SKU';
+
+    const itemCodes = groupVars.map(v => v.myacg_item_code);
+    const matchedInventoryItems = inventory.filter(item => itemCodes.includes(item.myacg_item_code));
+    const prices = matchedInventoryItems.map(item => item.final_price).filter(p => p !== undefined && p !== null);
+    let priceDisplay = '';
+    if (prices.length > 0) {
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+      priceDisplay = minPrice === maxPrice ? `¥${minPrice.toLocaleString()}` : `¥${minPrice.toLocaleString()} - ¥${maxPrice.toLocaleString()}`;
+    } else {
+      priceDisplay = '無價格';
+    }
+
+    return { skuDisplay, priceDisplay, count: groupVars.length };
+  };
 
   const getClosingDateStyle = (closingDate: string | undefined | null) => {
     if (!closingDate) return { text: '-', color: '#64748b', fontWeight: 400 };
@@ -1140,6 +1162,125 @@ export default function PurchaseRecords() {
           opacity: 1;
           border-right: 2px solid #2563eb;
         }
+
+        @media (max-width: 767px) {
+          .mobile-card-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 8px;
+            background-color: #f8fafc;
+          }
+          .mobile-product-card {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            background-color: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            transition: all 0.2s ease;
+          }
+          .mobile-product-card.selected {
+            background-color: #f0fdf4;
+            border-color: #86efac;
+          }
+          .card-checkbox-wrapper {
+            margin-right: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+          }
+          .card-content-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+          }
+          .card-title-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 4px;
+            min-width: 0;
+          }
+          .card-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1e293b;
+            line-height: 1.35;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: break-all;
+            flex: 1;
+          }
+          .badge-missing {
+            background-color: #ffedd5;
+            color: #ea580c;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 600;
+            font-size: 9px;
+            white-space: nowrap;
+            flex-shrink: 0;
+          }
+          .card-sku-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: #64748b;
+            gap: 8px;
+          }
+          .card-sku {
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+            min-width: 0;
+            flex: 1;
+          }
+          .card-price {
+            font-weight: 600;
+            color: #0f172a;
+            white-space: nowrap;
+            flex-shrink: 0;
+          }
+          .card-badges-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 6px;
+            align-items: center;
+            margin-top: 1px;
+            font-size: 11px;
+            color: #64748b;
+          }
+          .badge-purchase {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 600;
+          }
+          .badge-purchase.added {
+            background-color: #dbeafe;
+            color: #1d4ed8;
+          }
+          .badge-purchase.not-added {
+            background-color: #f1f5f9;
+            color: #64748b;
+          }
+          .badge-count {
+            background-color: #f1f5f9;
+            color: #475569;
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 600;
+          }
+        }
       `}</style>
 
 
@@ -1586,6 +1727,85 @@ export default function PurchaseRecords() {
       {/* Table section */}
       {(() => {
         const renderGroupsTable = (list: ProductGroup[], tableId: string) => {
+          if (isMobile) {
+            return (
+              <div className="mobile-card-list">
+                {list.map((g) => {
+                  const details = getGroupPlatformDetails(g.id);
+                  const demandAndPurchased = getGroupDemandAndPurchased(g.id);
+                  const { skuDisplay, priceDisplay, count } = getGroupSkuAndPriceRange(g.id);
+
+                  const isProxy = activeTab === 'proxy';
+                  const totalDemand = isProxy 
+                    ? (details.myacg + details.wacaManual + details.privateOrder) 
+                    : demandAndPurchased.demand;
+                  const purchased = isProxy ? details.purchased : demandAndPurchased.purchased;
+                  const gap = isProxy ? getDynamicGap(g.id, details.gap) : demandAndPurchased.gap;
+
+                  const isChecked = selectedGroupIds.has(g.id);
+
+                  return (
+                    <div 
+                      key={g.id}
+                      className={`mobile-product-card ${isChecked ? 'selected' : ''}`}
+                      onClick={(e) => handleRowClick(g.id, e)}
+                    >
+                      {/* Left: checkbox */}
+                      <div className="card-checkbox-wrapper" onClick={e => e.stopPropagation()}>
+                        <input 
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const next = new Set(selectedGroupIds);
+                            if (e.target.checked) {
+                              next.add(g.id);
+                            } else {
+                              next.delete(g.id);
+                            }
+                            setSelectedGroupIds(next);
+                          }}
+                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                        />
+                      </div>
+
+                      {/* Right content */}
+                      <div className="card-content-wrapper">
+                        {/* Line 1: Name */}
+                        <div className="card-title-row">
+                          <span className="card-title">{g.normalized_title || g.title}</span>
+                          {details.hasCatalogMissing && (
+                            <span className="badge-missing">[型錄無此規格]</span>
+                          )}
+                        </div>
+
+                        {/* Line 2: SKU / Price */}
+                        <div className="card-sku-row">
+                          <span className="card-sku">SKU: {skuDisplay}</span>
+                          <span className="card-price">{priceDisplay}</span>
+                        </div>
+
+                        {/* Line 3: Badges + Stats */}
+                        <div className="card-badges-row">
+                          <span className={`badge-purchase ${(g as any).show_in_purchase_list ? 'added' : 'not-added'}`}>
+                            {(g as any).show_in_purchase_list ? '已入採購單' : '未入採購單'}
+                          </span>
+                          <span className="badge-count">
+                            {count} 規格
+                          </span>
+                          <span style={{ marginLeft: '4px', color: '#64748b' }}>
+                            需求 <strong style={{ color: '#1e293b' }}>{totalDemand}</strong> | 
+                            已採購 <strong style={{ color: '#1e293b' }}>{purchased}</strong> | 
+                            <span style={{ color: gap > 0 ? '#ef4444' : '#166534', fontWeight: 600 }}> 缺 {gap}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          }
+
           return (
             <>
               {activeTab === 'proxy' ? (
