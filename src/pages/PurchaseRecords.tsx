@@ -1100,6 +1100,33 @@ export default function PurchaseRecords() {
       alert('批次刪除失敗，請重試。');
       console.error(e);
     }
+  };  const handleBatchUpdateShowInPurchaseList = async (show: boolean) => {
+    if (guardAgainstStaleWrite()) return;
+    if (selectedGroupIds.size === 0) return;
+    const actionName = show ? '加入採購總表' : '移出採購總表';
+
+    try {
+      const nextGroups = groups.map(g => {
+        if (selectedGroupIds.has(g.id)) {
+          return { ...g, show_in_purchase_list: show } as ProductGroup;
+        }
+        return g;
+      });
+
+      setGroups(nextGroups);
+      await dataProvider.saveProductGroups(nextGroups);
+      alert(`已成功將 ${selectedGroupIds.size} 筆商品${actionName}。`);
+      setSelectedGroupIds(new Set());
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
+      alert(`批次${actionName}失敗，請重試。`);
+      console.error(err);
+    }
   };
 
 
@@ -1736,7 +1763,47 @@ export default function PurchaseRecords() {
               已選取 {selectedGroupIds.size} 筆商品
             </span>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => handleBatchUpdateShowInPurchaseList(true)}
+              style={{
+                padding: '0 16px',
+                height: '36px',
+                backgroundColor: '#2563eb',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>加入採購總表</span>
+            </button>
+            <button
+              onClick={() => handleBatchUpdateShowInPurchaseList(false)}
+              style={{
+                padding: '0 16px',
+                height: '36px',
+                backgroundColor: '#ea580c',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <span>移出採購總表</span>
+            </button>
             <button
               onClick={handleBatchDelete}
               style={{

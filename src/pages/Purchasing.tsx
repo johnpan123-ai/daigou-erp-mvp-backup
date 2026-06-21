@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { dataProvider } from '../providers/dataProvider';
+import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem } from '../lib/db';
 import { calculateFinalMyacgDemand } from '../lib/db';
-import { ArrowLeft, ChevronRight, Search, ClipboardList } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2 } from 'lucide-react';
 
 interface VariantDetail {
   id: string;
@@ -118,49 +118,131 @@ export default function Purchasing() {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
 
+  // New states for selection mode and stale protection
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [isStale, setIsStale] = useState(false);
+
   useEffect(() => {
     setExpandedCats(new Set());
   }, [selectedGroupId]);
 
   useEffect(() => {
-    async function loadAllData() {
-      try {
-        const [
-          fetchedGroups,
-          fetchedVars,
-          fetchedCats,
-          fetchedPrivateItems,
-          fetchedInventory
-        ] = await Promise.all([
-          dataProvider.getProductGroups().catch(() => []),
-          dataProvider.getProductVariants().catch(() => []),
-          dataProvider.getProductCategories().catch(() => []),
-          dataProvider.getPrivateOrderItems().catch(() => []),
-          dataProvider.getInventory().catch(() => [])
-        ]);
+    const unsubscribe = dataProvider.onStaleChange(setIsStale);
+    setIsStale(dataProvider.checkIsStaleLive());
+    return unsubscribe;
+  }, []);
 
-        setGroups(fetchedGroups);
-        setVariants(fetchedVars);
-        setCategories(fetchedCats);
-        setPrivateOrderItems(fetchedPrivateItems);
-        setInventory(fetchedInventory);
-      } catch (err) {
-        console.error("Failed to load data for mobile purchase summary:", err);
-      } finally {
-        setLoading(false);
-      }
+  const loadAllData = async () => {
+    setLoading(true);
+    try {
+      const [
+        fetchedGroups,
+        fetchedVars,
+        fetchedCats,
+        fetchedPrivateItems,
+        fetchedInventory
+      ] = await Promise.all([
+        dataProvider.getProductGroups().catch(() => []),
+        dataProvider.getProductVariants().catch(() => []),
+        dataProvider.getProductCategories().catch(() => []),
+        dataProvider.getPrivateOrderItems().catch(() => []),
+        dataProvider.getInventory().catch(() => [])
+      ]);
+
+      setGroups(fetchedGroups);
+      setVariants(fetchedVars);
+      setCategories(fetchedCats);
+      setPrivateOrderItems(fetchedPrivateItems);
+      setInventory(fetchedInventory);
+      dataProvider.registerFreshLoad();
+    } catch (err) {
+      console.error("Failed to load data for mobile purchase summary:", err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
     loadAllData();
   }, []);
 
+  const guardAgainstStaleWrite = (): boolean => {
+    const liveStale = dataProvider.checkIsStaleLive();
+    if (isStale || liveStale) {
+      alert('資料已在其他分頁更新，請重新載入最新資料後再編輯。');
+      return true;
+    }
+    return false;
+  };
+
+  const handleSingleRemove = async (id: string) => {
+    if (guardAgainstStaleWrite()) return;
+    const confirmRemove = window.confirm('確定將此商品移出採購總表？');
+    if (!confirmRemove) return;
+
+    try {
+      const nextGroups = groups.map(g => {
+        if (g.id === id) {
+          return { ...g, show_in_purchase_list: false } as ProductGroup;
+        }
+        return g;
+      });
+
+      setGroups(nextGroups);
+      await dataProvider.saveProductGroups(nextGroups);
+      alert('已成功移出採購總表。');
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadAllData();
+        return;
+      }
+      alert('移出採購總表失敗，請重試。');
+      console.error(err);
+    }
+  };
+
+  const handleBatchRemove = async () => {
+    if (guardAgainstStaleWrite()) return;
+    if (selectedGroupIds.size === 0) return;
+    const confirmRemove = window.confirm(`確定將已選取的 ${selectedGroupIds.size} 筆商品移出採購總表？`);
+    if (!confirmRemove) return;
+
+    try {
+      const nextGroups = groups.map(g => {
+        if (selectedGroupIds.has(g.id)) {
+          return { ...g, show_in_purchase_list: false } as ProductGroup;
+        }
+        return g;
+      });
+
+      setGroups(nextGroups);
+      await dataProvider.saveProductGroups(nextGroups);
+      alert(`已成功將 ${selectedGroupIds.size} 筆商品移出採購總表。`);
+      setSelectedGroupIds(new Set());
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadAllData();
+        return;
+      }
+      alert('批次移出採購總表失敗，請重試。');
+      console.error(err);
+    }
+  };
+
   // Compute summary for each group
   const groupSummaries: GroupSummary[] = useMemo(() => {
-    if (groups.length === 0) return [];
+    const purchaseGroups = groups.filter(g => g.show_in_purchase_list === true);
+    if (purchaseGroups.length === 0) return [];
 
     const categoryMap = new Map(categories.map(c => [c.id, c]));
     const inventoryMap = new Map(inventory.map(inv => [inv.myacg_item_code, inv]));
 
-    return groups.map(g => {
+    return purchaseGroups.map(g => {
       // Find all variants of this group
       const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
       const groupVars = variants.filter(v => v.product_group_id === g.id || (v.product_category_id && catIds.has(v.product_category_id)));
@@ -652,34 +734,176 @@ export default function Purchasing() {
             <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
           </div>
 
-          <div className="search-wrapper">
-            <Search className="search-icon" size={18} />
-            <input 
-              type="text"
-              placeholder="搜尋商品名稱..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="search-input"
-            />
+          <div className="search-wrapper" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search className="search-icon" size={18} />
+              <input 
+                type="text"
+                placeholder="搜尋商品名稱..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="search-input"
+              />
+            </div>
+            <button
+              onClick={() => {
+                setIsSelectMode(!isSelectMode);
+                setSelectedGroupIds(new Set());
+              }}
+              style={{
+                height: '44px',
+                padding: '0 12px',
+                backgroundColor: isSelectMode ? '#2563eb' : '#ffffff',
+                color: isSelectMode ? '#ffffff' : '#475569',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {isSelectMode ? '退出選取' : '選取模式'}
+            </button>
           </div>
+
+          {isSelectMode && selectedGroupIds.size > 0 && (
+            <div style={{
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '12px',
+              padding: '16px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px'
+            }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#1e40af' }}>
+                已選取 {selectedGroupIds.size} 筆商品
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={handleBatchRemove}
+                  style={{
+                    padding: '0 16px',
+                    height: '36px',
+                    backgroundColor: '#ef4444',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Trash2 size={14} />
+                  <span>批次移出</span>
+                </button>
+                <button
+                  onClick={() => setSelectedGroupIds(new Set())}
+                  style={{
+                    padding: '0 16px',
+                    height: '36px',
+                    backgroundColor: '#ffffff',
+                    color: '#4b5563',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
 
           {filteredSummaries.length > 0 ? (
             <div className="summary-list">
               {filteredSummaries.map(item => {
+                const isChecked = selectedGroupIds.has(item.id);
                 return (
                   <div 
                     key={item.id} 
                     className="summary-card"
-                    onClick={() => setSelectedGroupId(item.id)}
+                    onClick={() => {
+                      if (isSelectMode) {
+                        const next = new Set(selectedGroupIds);
+                        if (next.has(item.id)) {
+                          next.delete(item.id);
+                        } else {
+                          next.add(item.id);
+                        }
+                        setSelectedGroupIds(next);
+                      } else {
+                        setSelectedGroupId(item.id);
+                      }
+                    }}
+                    style={{
+                      borderColor: isChecked ? '#2563eb' : '#e2e8f0',
+                      backgroundColor: isChecked ? '#eff6ff' : '#ffffff'
+                    }}
                   >
-                    <div className="card-content">
+                    {isSelectMode && (
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {}} // handled by card onClick
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          marginRight: '4px',
+                          cursor: 'pointer',
+                          accentColor: '#2563eb'
+                        }}
+                      />
+                    )}
+                    <div className="card-content" style={{ cursor: 'pointer' }}>
                       <h2 className="card-title">{item.title}</h2>
                       <div className="card-stats">
                         <span className="stat-demand">需求 {item.demand}</span>
                         <span className="stat-amount">總金額 ¥{item.amount.toLocaleString()}</span>
                       </div>
                     </div>
-                    <ChevronRight className="card-arrow" size={18} />
+
+                    {!isSelectMode && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSingleRemove(item.id);
+                          }}
+                          title="移出採購總表"
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            color: '#64748b',
+                            padding: '6px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '4px',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        <ChevronRight className="card-arrow" size={18} />
+                      </div>
+                    )}
+                    {isSelectMode && <ChevronRight className="card-arrow" size={18} />}
                   </div>
                 );
               })}
@@ -693,10 +917,35 @@ export default function Purchasing() {
       ) : (
         // Detail View
         <div className="detail-view">
-          <button className="btn-back" onClick={() => setSelectedGroupId(null)}>
-            <ArrowLeft size={16} />
-            <span>返回清單</span>
-          </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <button className="btn-back" onClick={() => setSelectedGroupId(null)} style={{ marginBottom: 0 }}>
+              <ArrowLeft size={16} />
+              <span>返回清單</span>
+            </button>
+            <button
+              onClick={() => {
+                handleSingleRemove(selectedGroup.id);
+                setSelectedGroupId(null);
+              }}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: '#ffffff',
+                color: '#ef4444',
+                border: '1px solid #fee2e2',
+                borderRadius: '6px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                transition: 'all 0.2s'
+              }}
+            >
+              <Trash2 size={14} />
+              <span>移出採購總表</span>
+            </button>
+          </div>
           
           <h2 className="detail-title">{selectedGroup.title}</h2>
           

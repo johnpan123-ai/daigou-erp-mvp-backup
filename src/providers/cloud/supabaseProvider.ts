@@ -504,7 +504,8 @@ export class SupabaseProvider implements IDataProvider {
         priority: g.priority || 'Medium',
         normalized_title: g.normalized_title || null,
         has_official_site: g.has_official_site || false,
-        proxy_agent: g.proxy_agent || null
+        proxy_agent: g.proxy_agent || null,
+        show_in_purchase_list: g.show_in_purchase_list ?? false
       }));
 
       const { error } = await supabase

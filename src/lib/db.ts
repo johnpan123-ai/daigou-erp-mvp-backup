@@ -89,6 +89,7 @@ export interface ProductGroup {
   has_official_site: boolean;
   product_url: string;
   proxy_agent?: string;
+  show_in_purchase_list?: boolean;
   created_at: string;
   updated_at: string;
 }
