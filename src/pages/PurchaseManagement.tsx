@@ -1420,163 +1420,214 @@ export default function PurchaseManagement() {
 
         {/* Top Summary Cards */}
         {activeTab === 'worksheet' && (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
-            
-            {/* Total Shortage */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總缺貨數</div>
-                <AlertTriangle size={20} color="#ef4444" />
+          isMobile ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '16px' }}>
+              {/* Total Demand */}
+              <div className="card" style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>總需求</div>
+                  <Package size={16} color="#64748b" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                  <span style={{ fontSize: '18px', fontWeight: 700, color: '#1e293b' }}>{totalDemand}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '2px' }}>件</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#ef4444' }}>{totalShortage}</span>
-                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+
+              {/* Total Purchased */}
+              <div className="card" style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>已採購</div>
+                  <CheckSquare size={16} color="#2563eb" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                  <span style={{ fontSize: '18px', fontWeight: 700, color: '#2563eb' }}>{totalPurchased}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '2px' }}>件</span>
+                </div>
               </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>需採購補齊</div>
+
+              {/* Total Shortage */}
+              <div className="card" style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>待採購</div>
+                  <AlertTriangle size={16} color="#ef4444" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                  <span style={{ fontSize: '18px', fontWeight: 700, color: '#ef4444' }}>{totalShortage}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '2px' }}>件</span>
+                </div>
+              </div>
+
+              {/* Total Excess */}
+              <div className="card" style={{ padding: '12px 14px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>多買</div>
+                  <RefreshCw size={16} color="#f97316" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                  <span style={{ fontSize: '18px', fontWeight: 700, color: '#f97316' }}>{totalExcess}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '2px' }}>件</span>
+                </div>
+              </div>
             </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+              
+              {/* Total Shortage */}
+              <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總缺貨數</div>
+                  <AlertTriangle size={20} color="#ef4444" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                  <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#ef4444' }}>{totalShortage}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>需採購補齊</div>
+              </div>
 
-            {/* Total Excess */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總多買數</div>
-                <RefreshCw size={20} color="#f97316" />
+              {/* Total Excess */}
+              <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總多買數</div>
+                  <RefreshCw size={20} color="#f97316" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                  <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#f97316' }}>{totalExcess}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>數量過多</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#f97316' }}>{totalExcess}</span>
-                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+
+              {/* Total Demand */}
+              <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求數</div>
+                  <Package size={20} color="#64748b" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                  <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#1e293b' }}>{totalDemand}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有需求加總</div>
               </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>數量過多</div>
+
+              {/* Total Amount (Orders NTD) */}
+              <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>訂單總金額</div>
+                  <DollarSign size={20} color="#10b981" />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                  <span style={{ fontSize: isMobile ? '20px' : '28px', fontWeight: 700, color: '#1e293b' }}>{(isDaili ? dailiTotalOrderAmount : totalOrdersAmount).toLocaleString()}</span>
+                  <span style={{ fontSize: '13px', color: '#64748b' }}>NT$</span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>{isDaili ? '總需求數量 × 買動漫售價' : '訂單商品總額'}</div>
+              </div>
+
+              {isDaili ? (
+                <>
+                  {/* 待採購成本 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購成本</div>
+                      <DollarSign size={20} color="#ef4444" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#ef4444' }}>NT$ {dailiNeedToBuyCost.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>缺少數量 × 台幣成本</div>
+                  </div>
+
+                  {/* 已採購成本 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購成本</div>
+                      <CheckSquare size={20} color="#2563eb" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#2563eb' }}>NT$ {dailiPurchasedCost.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>採購批次已付台幣成本</div>
+                  </div>
+
+                  {/* 總成本 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總成本</div>
+                      <Package size={20} color="#16a34a" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#16a34a' }}>NT$ {dailiTotalCost.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>待採購成本 + 已採購成本</div>
+                  </div>
+
+                  {/* 預估毛利 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>預估毛利</div>
+                      <DollarSign size={20} color="#ca8a04" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#ca8a04' }}>NT$ {dailiGrossProfit.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>訂單總金額 - 總成本</div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* 1. 待採購日幣 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購日幣</div>
+                      <DollarSign size={20} color="#ef4444" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>¥ {jpyNeedToBuy.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前還要花多少日幣</div>
+                  </div>
+
+                  {/* 2. 已採購日幣 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購日幣</div>
+                      <CheckSquare size={20} color="#2563eb" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>¥ {jpyPurchased.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前已花掉多少日幣</div>
+                  </div>
+
+                  {/* 3. 總需求日幣 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求日幣</div>
+                      <Package size={20} color="#16a34a" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>¥ {jpyTotalDemand.toLocaleString()}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>整批商品總成本(日幣)</div>
+                  </div>
+
+                  {/* 4. 已購買數量 */}
+                  <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已購買數量</div>
+                      <CheckSquare size={20} color="#ca8a04" />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                      <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>{totalPurchased} 件</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有規格已採購件數加總</div>
+                  </div>
+                </>
+              )}
             </div>
-
-            {/* Total Demand */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求數</div>
-                <Package size={20} color="#64748b" />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: isMobile ? '22px' : '28px', fontWeight: 700, color: '#1e293b' }}>{totalDemand}</span>
-                <span style={{ fontSize: '13px', color: '#64748b' }}>件</span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有需求加總</div>
-            </div>
-
-            {/* Total Amount (Orders NTD) */}
-            <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>訂單總金額</div>
-                <DollarSign size={20} color="#10b981" />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                <span style={{ fontSize: isMobile ? '20px' : '28px', fontWeight: 700, color: '#1e293b' }}>{(isDaili ? dailiTotalOrderAmount : totalOrdersAmount).toLocaleString()}</span>
-                <span style={{ fontSize: '13px', color: '#64748b' }}>NT$</span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>{isDaili ? '總需求數量 × 買動漫售價' : '訂單商品總額'}</div>
-            </div>
-
-            {isDaili ? (
-              <>
-                {/* 待採購成本 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購成本</div>
-                    <DollarSign size={20} color="#ef4444" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#ef4444' }}>NT$ {dailiNeedToBuyCost.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>缺少數量 × 台幣成本</div>
-                </div>
-
-                {/* 已採購成本 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購成本</div>
-                    <CheckSquare size={20} color="#2563eb" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#2563eb' }}>NT$ {dailiPurchasedCost.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>採購批次已付台幣成本</div>
-                </div>
-
-                {/* 總成本 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總成本</div>
-                    <Package size={20} color="#16a34a" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#16a34a' }}>NT$ {dailiTotalCost.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>待採購成本 + 已採購成本</div>
-                </div>
-
-                {/* 預估毛利 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>預估毛利</div>
-                    <DollarSign size={20} color="#ca8a04" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: isMobile ? '18px' : '28px', fontWeight: 700, color: '#ca8a04' }}>NT$ {dailiGrossProfit.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>訂單總金額 - 總成本</div>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* 1. 待採購日幣 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>待採購日幣</div>
-                    <DollarSign size={20} color="#ef4444" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ef4444' }}>¥ {jpyNeedToBuy.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前還要花多少日幣</div>
-                </div>
-
-                {/* 2. 已採購日幣 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已採購日幣</div>
-                    <CheckSquare size={20} color="#2563eb" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#2563eb' }}>¥ {jpyPurchased.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>目前已花掉多少日幣</div>
-                </div>
-
-                {/* 3. 總需求日幣 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>總需求日幣</div>
-                    <Package size={20} color="#16a34a" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#16a34a' }}>¥ {jpyTotalDemand.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>整批商品總成本(日幣)</div>
-                </div>
-
-                {/* 4. 已購買數量 */}
-                <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', backgroundColor: '#fff' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#475569' }}>已購買數量</div>
-                    <CheckSquare size={20} color="#ca8a04" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    <span style={{ fontSize: '28px', fontWeight: 700, color: '#ca8a04' }}>{totalPurchased} 件</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>所有規格已採購件數加總</div>
-                </div>
-              </>
-            )}
-
-          </div>
+          )
         )}
 
         {/* Tab Header */}
