@@ -61,7 +61,7 @@ export default function PurchaseBatchModal({
 }: PurchaseBatchModalProps) {
   const [onlyShowShortage, setOnlyShowShortage] = useState<boolean>(false);
   const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
-  const [batchLines, setBatchLines] = useState<{ variant_id: string; quantity: number; cost: number; note: string }[]>([]);
+  const [batchLines, setBatchLines] = useState<{ variant_id: string; quantity: number; cost: number | string; note: string }[]>([]);
   const initializedRef = useRef<string | null>(null);
 
   const isDaili = group?.listing_type === '代理版';
@@ -241,7 +241,7 @@ export default function PurchaseBatchModal({
           purchase_batch_id: editingBatchId,
           product_variant_id: line.variant_id,
           quantity: line.quantity,
-          cost: line.cost,
+          cost: typeof line.cost === 'string' ? (parseFloat(line.cost) || 0) : (line.cost || 0),
           note: line.note
         }));
         await dataProvider.savePurchaseBatches(allBatches);
@@ -262,7 +262,7 @@ export default function PurchaseBatchModal({
           purchase_batch_id: newBatchId,
           product_variant_id: line.variant_id,
           quantity: line.quantity,
-          cost: line.cost,
+          cost: typeof line.cost === 'string' ? (parseFloat(line.cost) || 0) : (line.cost || 0),
           note: line.note
         }));
 
@@ -285,7 +285,7 @@ export default function PurchaseBatchModal({
 
   const batchTotal = batchLines.reduce((sum, line) => {
     const q = line?.quantity || 0;
-    const c = line?.cost || 0;
+    const c = typeof line?.cost === 'string' ? (parseFloat(line?.cost) || 0) : (line?.cost || 0);
     return sum + (q * c);
   }, 0);
 
@@ -429,7 +429,20 @@ export default function PurchaseBatchModal({
                       <td style={{ padding: '8px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
                           {!isDaili && <span style={{ color: '#64748b' }}>¥</span>}
-                          <input className="input" type="number" min="0" value={lineData?.cost || ''} onChange={e => updateBatchLine(idx, 'cost', parseInt(e.target.value) || 0)} style={{ width: '80px', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                          <input 
+                            className="input" 
+                            type="text" 
+                            inputMode="decimal"
+                            pattern="[0-9]*\.?[0-9]*" 
+                            value={lineData?.cost === 0 ? '' : (lineData?.cost ?? '')} 
+                            onChange={e => {
+                              const valStr = e.target.value.replace(/[^0-9.]/g, '');
+                              const parts = valStr.split('.');
+                              const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
+                              updateBatchLine(idx, 'cost', cleanVal);
+                            }} 
+                            style={{ width: '80px', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                          />
                         </div>
                       </td>
                     </tr>

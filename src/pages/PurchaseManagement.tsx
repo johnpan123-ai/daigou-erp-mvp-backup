@@ -428,6 +428,14 @@ export default function PurchaseManagement() {
     const val = localStorage.getItem('erp_exchange_rate');
     return val ? parseFloat(val) : 0.23;
   });
+  const [exchangeRateInput, setExchangeRateInput] = useState<string>(() => {
+    const val = localStorage.getItem('erp_exchange_rate');
+    return val || '0.23';
+  });
+
+  useEffect(() => {
+    setExchangeRateInput(exchangeRate ? String(exchangeRate) : '');
+  }, [exchangeRate]);
 
   useEffect(() => {
     if (toastMessage) {
@@ -788,7 +796,7 @@ export default function PurchaseManagement() {
   const [showPrivateOrderModal, setShowPrivateOrderModal] = useState(false);
   const [editingPoId, setEditingPoId] = useState<string | null>(null);
   const [poForm, setPoForm] = useState({ customer_name: '', contact: '', note: '' });
-  const [poLines, setPoLines] = useState<{ variant_id: string, quantity: number, amount: number, note: string }[]>([]);
+  const [poLines, setPoLines] = useState<{ variant_id: string, quantity: number, amount: number | string, note: string }[]>([]);
 
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
@@ -1135,7 +1143,7 @@ export default function PurchaseManagement() {
             private_order_id: editingPoId,
             product_variant_id: line.variant_id,
             quantity: line.quantity,
-            amount: line.amount,
+            amount: typeof line.amount === 'string' ? (parseFloat(line.amount) || 0) : (line.amount || 0),
             note: line.note
           });
           if (existingItems.length > 1) {
@@ -1149,7 +1157,7 @@ export default function PurchaseManagement() {
             private_order_id: editingPoId,
             product_variant_id: line.variant_id,
             quantity: line.quantity,
-            amount: line.amount,
+            amount: typeof line.amount === 'string' ? (parseFloat(line.amount) || 0) : (line.amount || 0),
             note: line.note
           });
         }
@@ -1187,7 +1195,7 @@ export default function PurchaseManagement() {
         private_order_id: newPoId,
         product_variant_id: line.variant_id,
         quantity: line.quantity,
-        amount: line.amount,
+        amount: typeof line.amount === 'string' ? (parseFloat(line.amount) || 0) : (line.amount || 0),
         note: line.note
       }));
       
@@ -2136,16 +2144,22 @@ export default function PurchaseManagement() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
                   <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>設定匯率:</span>
                   <input 
-                    type="number" 
-                    step="0.0001"
-                    min="0"
+                    type="text" 
+                    inputMode="decimal"
+                    pattern="[0-9.]*"
                     className="input" 
                     style={{ flex: isMobile ? 1 : 'none', width: isMobile ? 'auto' : '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
-                    value={exchangeRate || ''}
+                    value={exchangeRateInput}
                     onChange={e => {
-                      const val = parseFloat(e.target.value) || 0;
-                      setExchangeRate(val);
-                      localStorage.setItem('erp_exchange_rate', String(val));
+                      const valStr = e.target.value.replace(/[^0-9.]/g, '');
+                      const parts = valStr.split('.');
+                      const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
+                      setExchangeRateInput(cleanVal);
+                      if (cleanVal && !cleanVal.endsWith('.')) {
+                        const val = parseFloat(cleanVal) || 0;
+                        setExchangeRate(val);
+                        localStorage.setItem('erp_exchange_rate', String(val));
+                      }
                     }}
                   />
                 </div>
@@ -2269,11 +2283,16 @@ export default function PurchaseManagement() {
                       <span style={{ fontSize: '13px', color: '#64748b' }}>單價:</span>
                       <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>{isDaili ? 'NT$' : '¥'}</span>
                       <input 
-                        type="number" 
+                        type="text" 
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         placeholder="輸入金額" 
                         className="input"
                         value={bulkMasterPrice}
-                        onChange={e => setBulkMasterPrice(e.target.value)}
+                        onChange={e => {
+                          const val = e.target.value.replace(/[^0-9]/g, '');
+                          setBulkMasterPrice(val);
+                        }}
                         disabled={isApplyingMasterCost}
                         style={{ width: '100px', height: '32px', padding: '0 8px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px', backgroundColor: isApplyingMasterCost ? '#f1f5f9' : '#fff', cursor: isApplyingMasterCost ? 'not-allowed' : 'text' }}
                       />
@@ -2633,8 +2652,9 @@ export default function PurchaseManagement() {
                               <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
                                 {editMode && canWrite ? (
                                   <input
-                                    type="number"
-                                    min="0"
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
                                     placeholder="-"
                                     style={{
                                       width: '80px',
@@ -2651,7 +2671,10 @@ export default function PurchaseManagement() {
                                       display: 'block'
                                     }}
                                     value={getVariantDefaultTwdCost(v) ?? ''}
-                                    onChange={e => handleUpdateDefaultTwdCost(v.id, e.target.value)}
+                                    onChange={e => {
+                                      const val = e.target.value.replace(/[^0-9]/g, '');
+                                      handleUpdateDefaultTwdCost(v.id, val);
+                                    }}
                                   />
                                 ) : (
                                   (() => {
@@ -2672,8 +2695,9 @@ export default function PurchaseManagement() {
                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
                               {editMode && canWrite ? (
                                 <input
-                                  type="number"
-                                  min="0"
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
                                   placeholder="-"
                                   style={{
                                     width: '80px',
@@ -2690,7 +2714,10 @@ export default function PurchaseManagement() {
                                     display: 'block'
                                   }}
                                   value={getVariantDefaultJpyCost(v) ?? ''}
-                                  onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
+                                  onChange={e => {
+                                    const val = e.target.value.replace(/[^0-9]/g, '');
+                                    handleUpdateDefaultJpyCost(v.id, val);
+                                  }}
                                 />
                               ) : (
                                 (() => {
@@ -2712,7 +2739,9 @@ export default function PurchaseManagement() {
                           </td>
                           <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                             <input 
-                              type="number" 
+                              type="text" 
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               style={{ 
                                 width: '64px', 
                                 height: '28px', 
@@ -2729,13 +2758,18 @@ export default function PurchaseManagement() {
                               }} 
                               value={pMyacg || ''}
                               placeholder="0"
-                              onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
+                              onChange={e => {
+                                const val = e.target.value.replace(/[^0-9]/g, '');
+                                handleUpdatePlatformDemand(v.id, 'myacg', val === '' ? 0 : parseInt(val));
+                              }}
                               disabled={!editMode}
                             />
                           </td>
                           <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                             <input 
-                              type="number" 
+                              type="text" 
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               style={{ 
                                 width: '64px', 
                                 height: '28px', 
@@ -2752,7 +2786,10 @@ export default function PurchaseManagement() {
                               }} 
                               value={pWaca || ''}
                               placeholder="0"
-                              onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
+                              onChange={e => {
+                                const val = e.target.value.replace(/[^0-9]/g, '');
+                                handleUpdatePlatformDemand(v.id, 'waca', val === '' ? 0 : parseInt(val));
+                              }}
                               disabled={!editMode}
                             />
                           </td>
@@ -3116,8 +3153,9 @@ export default function PurchaseManagement() {
                                       <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
                                         {editMode && canWrite ? (
                                           <input
-                                            type="number"
-                                            min="0"
+                                            type="text"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
                                             placeholder="-"
                                             style={{
                                               width: '80px',
@@ -3134,7 +3172,10 @@ export default function PurchaseManagement() {
                                               display: 'block'
                                             }}
                                             value={getVariantDefaultTwdCost(v) ?? ''}
-                                            onChange={e => handleUpdateDefaultTwdCost(v.id, e.target.value)}
+                                            onChange={e => {
+                                              const val = e.target.value.replace(/[^0-9]/g, '');
+                                              handleUpdateDefaultTwdCost(v.id, val);
+                                            }}
                                           />
                                         ) : (
                                           (() => {
@@ -3155,8 +3196,9 @@ export default function PurchaseManagement() {
                                     <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
                                       {editMode && canWrite ? (
                                         <input
-                                          type="number"
-                                          min="0"
+                                          type="text"
+                                          inputMode="numeric"
+                                          pattern="[0-9]*"
                                           placeholder="-"
                                           style={{
                                             width: '80px',
@@ -3173,7 +3215,10 @@ export default function PurchaseManagement() {
                                             display: 'block'
                                           }}
                                           value={getVariantDefaultJpyCost(v) ?? ''}
-                                          onChange={e => handleUpdateDefaultJpyCost(v.id, e.target.value)}
+                                          onChange={e => {
+                                            const val = e.target.value.replace(/[^0-9]/g, '');
+                                            handleUpdateDefaultJpyCost(v.id, val);
+                                          }}
                                         />
                                       ) : (
                                         (() => {
@@ -3197,7 +3242,9 @@ export default function PurchaseManagement() {
 
                                   <td style={{ padding: '12px', textAlign: 'center' }}>
                                     <input 
-                                      type="number" 
+                                      type="text" 
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
                                       style={{ 
                                         width: '64px', 
                                         height: '28px', 
@@ -3214,13 +3261,18 @@ export default function PurchaseManagement() {
                                       }} 
                                       value={myacgDemand || ''}
                                       placeholder="0"
-                                      onChange={e => handleUpdatePlatformDemand(v.id, 'myacg', parseInt(e.target.value))}
+                                      onChange={e => {
+                                        const val = e.target.value.replace(/[^0-9]/g, '');
+                                        handleUpdatePlatformDemand(v.id, 'myacg', val === '' ? 0 : parseInt(val));
+                                      }}
                                       disabled={!editMode}
                                     />
                                   </td>
                                   <td style={{ padding: '12px', textAlign: 'center' }}>
                                     <input 
-                                      type="number" 
+                                      type="text" 
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
                                       style={{ 
                                         width: '64px', 
                                         height: '28px', 
@@ -3237,7 +3289,10 @@ export default function PurchaseManagement() {
                                       }} 
                                       value={wacaDemand || ''}
                                       placeholder="0"
-                                      onChange={e => handleUpdatePlatformDemand(v.id, 'waca', parseInt(e.target.value))}
+                                      onChange={e => {
+                                        const val = e.target.value.replace(/[^0-9]/g, '');
+                                        handleUpdatePlatformDemand(v.id, 'waca', val === '' ? 0 : parseInt(val));
+                                      }}
                                       disabled={!editMode}
                                     />
                                   </td>
@@ -3553,7 +3608,20 @@ export default function PurchaseManagement() {
                         />
                       </td>
                       <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <input className="input" type="number" min="0" value={poLines[idx]?.amount || ''} onChange={e => updatePoLine(idx, 'amount', parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} />
+                        <input 
+                          className="input" 
+                          type="text" 
+                          inputMode="decimal"
+                          pattern="[0-9]*\.?[0-9]*" 
+                          value={poLines[idx]?.amount === 0 ? '' : (poLines[idx]?.amount ?? '')} 
+                          onChange={e => {
+                            const valStr = e.target.value.replace(/[^0-9.]/g, '');
+                            const parts = valStr.split('.');
+                            const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
+                            updatePoLine(idx, 'amount', cleanVal);
+                          }} 
+                          style={{ width: '100%', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                        />
                       </td>
                     </tr>
                   ))}
