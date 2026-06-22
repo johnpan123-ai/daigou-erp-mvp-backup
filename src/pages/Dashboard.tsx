@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { calculateFinalMyacgDemand } from '../lib/db';
+import { calculateGroupDemandAndPurchased } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { ClipboardList, AlertTriangle, Clock, CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react';
@@ -251,45 +251,15 @@ export default function Dashboard() {
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
-    const categoriesList = categories || [];
-    const variantsList = variants || [];
-    const privateOrderItemsList = privateOrderItems || [];
-    const batchItemsList = batchItems || [];
-    const inventoryList = inventory || [];
-    const salesOrderItemsList = salesOrderItems || [];
-
-    const catIds = new Set(categoriesList.filter(c => c && c.product_group_id === groupId).map(c => c.id));
-    const groupVars = variantsList.filter(v => v && (v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id))));
-    
-    let totalDemand = 0;
-    let totalPurchased = 0;
-    let gap = 0;
-    
-    groupVars.forEach(v => {
-      if (!v) return;
-      
-      let myacgDemand = 0;
-      try {
-        myacgDemand = (v.myacg_item_code && typeof v.myacg_item_code === 'string' && v.myacg_item_code.trim()) 
-          ? calculateFinalMyacgDemand(v.myacg_item_code, inventoryList, salesOrderItemsList) 
-          : 0;
-      } catch (err) {
-        console.error(`Failed to calculate myacg demand for SKU ${v.myacg_item_code}:`, err);
-      }
-      myacgDemand += (v.myacg_manual_adjustment || 0);
-
-      const wacaDemand = (v.waca_auto_quantity || 0) + (v.waca_manual_adjustment || 0);
-      const privateDemand = privateOrderItemsList.filter(poi => poi && poi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
-      
-      const demand = myacgDemand + wacaDemand + privateDemand;
-      const purchased = batchItemsList.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
-      
-      totalDemand += demand;
-      totalPurchased += purchased;
-      gap += Math.max(demand - purchased, 0);
-    });
-    
-    return { demand: totalDemand, purchased: totalPurchased, gap };
+    return calculateGroupDemandAndPurchased(
+      groupId,
+      categories || [],
+      variants || [],
+      privateOrderItems || [],
+      batchItems || [],
+      inventory || [],
+      salesOrderItems || []
+    );
   };
 
   // --- Date helpers ---
@@ -347,8 +317,8 @@ export default function Dashboard() {
           unorderedCount++;
         }
 
-        // 即將結單 (7天內)
-        if (target) {
+        // 即將結單 (7天內且有缺口)
+        if (target && details.gap > 0) {
           const { days } = getRemainingDays(target.date);
           if (days >= 0 && days <= 7) {
             urgent7Count++;
@@ -423,7 +393,7 @@ export default function Dashboard() {
       const { gap } = getGroupDemandAndPurchased(g.id);
       const { days } = getRemainingDays(target.date);
 
-      const isEligible = (days >= 0 && days <= 7) || (days < 0 && gap > 0);
+      const isEligible = gap > 0 && ((days >= 0 && days <= 7) || days < 0);
       if (isEligible) {
         eligibleList.push({
           group: g,

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getBaseSku, calculateFinalMyacgDemand } from '../lib/db';
+import { getBaseSku, calculateFinalMyacgDemand, calculateVariantDemandAndPurchased } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { 
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
@@ -345,54 +345,21 @@ export default function PurchaseManagement() {
 
   const getVariantDemands = (v: ProductVariant) => {
     const inventoryList = Array.from(inventoryMap.values());
-    
-    // 買動漫數量
-    const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventoryList, salesOrderItems);
-    const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
-    const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
-      ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
-      : null;
-    const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-      ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
-      : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
-    const myacgDemand = rawMyacg >= 0 ? rawMyacg : 0;
-
-    // WACA 數量
-    const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-    const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-      ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-      : null;
-    const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-    const wacaDemand = rawWaca >= 0 ? rawWaca : 0;
-
-    // 私下數量
-    const privateDemand = privateOrderItems
-      .filter(poi => poi.product_variant_id === v.id)
-      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-
-    // 已採購 / 已下單數量
-    const localPurchased = purchaseBatchItems
-      .filter(pbi => pbi.product_variant_id === v.id)
-      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-
-    const manualPurchased = v.purchased_manual_adjustment;
-    const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
-
-    let rawPurchased;
-    if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
-      rawPurchased = manualPurchased;
-    } else if (localPurchased > 0) {
-      rawPurchased = localPurchased;
-    } else {
-      rawPurchased = legacyPurchased ?? 0;
-    }
-
-    const purchased = rawPurchased >= 0 ? rawPurchased : 0;
-
-    const totalDemand = myacgDemand + wacaDemand + privateDemand;
-    const gap = totalDemand - purchased;
-
-    return { myacgDemand, wacaDemand, privateDemand, totalDemand, purchased, gap };
+    const res = calculateVariantDemandAndPurchased(
+      v,
+      privateOrderItems,
+      purchaseBatchItems,
+      inventoryList,
+      salesOrderItems
+    );
+    return {
+      myacgDemand: res.myacg,
+      wacaDemand: res.waca,
+      privateDemand: res.privateOrder,
+      totalDemand: res.myacg + res.waca + res.privateOrder,
+      purchased: res.purchased,
+      gap: res.gap
+    };
   };
 
   const [editMode, setEditMode] = useState<boolean>(() => {

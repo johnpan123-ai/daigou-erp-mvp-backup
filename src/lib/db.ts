@@ -573,6 +573,114 @@ export const calculateFinalMyacgDemand = (
   return -1;
 };
 
+export interface VariantDemandResult {
+  myacg: number;
+  waca: number;
+  privateOrder: number;
+  purchased: number;
+  gap: number;
+}
+
+export interface GroupDemandResult {
+  demand: number;
+  purchased: number;
+  gap: number;
+  hasCatalogMissing: boolean;
+}
+
+export const calculateVariantDemandAndPurchased = (
+  v: ProductVariant,
+  privateOrderItems: PrivateOrderItem[],
+  batchItems: PurchaseBatchItem[],
+  inventory: InventoryItem[],
+  salesOrderItems?: SalesOrderItem[]
+): VariantDemandResult => {
+  // 買動漫數量
+  const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code || '', inventory, salesOrderItems);
+  const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+  const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
+    ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+    : null;
+  const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+    ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
+    : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+  const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
+
+  // WACA 數量
+  const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+  const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
+    ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+    : null;
+  const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+  const vWaca = rawWaca >= 0 ? rawWaca : 0;
+
+  // 私下數量
+  const localPrivate = privateOrderItems.filter(poi => poi && poi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
+  const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+  const vPrivate = rawPrivate >= 0 ? rawPrivate : 0;
+
+  // 已採購 / 已下單數量
+  const localPurchased = batchItems.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
+
+  const manualPurchased = v.purchased_manual_adjustment;
+  const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
+
+  // Fallback checking order:
+  // manual > 0 -> manual
+  // else localPurchased > 0 -> localPurchased
+  // else legacyPurchased > 0 -> legacyPurchased
+  // else 0
+  let rawPurchased = 0;
+  if (typeof manualPurchased === 'number' && manualPurchased > 0) {
+    rawPurchased = manualPurchased;
+  } else if (localPurchased > 0) {
+    rawPurchased = localPurchased;
+  } else if (typeof legacyPurchased === 'number' && legacyPurchased > 0) {
+    rawPurchased = legacyPurchased;
+  }
+
+  const vPurchased = rawPurchased;
+
+  const demand = vMyacg + vWaca + vPrivate;
+  const gap = Math.max(demand - vPurchased, 0);
+
+  return {
+    myacg: vMyacg,
+    waca: vWaca,
+    privateOrder: vPrivate,
+    purchased: vPurchased,
+    gap
+  };
+};
+
+export const calculateGroupDemandAndPurchased = (
+  groupId: string,
+  categories: ProductCategory[],
+  variants: ProductVariant[],
+  privateOrderItems: PrivateOrderItem[],
+  batchItems: PurchaseBatchItem[],
+  inventory: InventoryItem[],
+  salesOrderItems?: SalesOrderItem[]
+): GroupDemandResult => {
+  const catIds = new Set(categories.filter(c => c && c.product_group_id === groupId).map(c => c.id));
+  const groupVars = variants.filter(v => v && (v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id))));
+  
+  let totalDemand = 0;
+  let totalPurchased = 0;
+  let gap = 0;
+  
+  groupVars.forEach(v => {
+    if (!v) return;
+    const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
+    totalDemand += (res.myacg + res.waca + res.privateOrder);
+    totalPurchased += res.purchased;
+    gap += res.gap;
+  });
+  
+  const hasCatalogMissing = groupVars.some(v => v && v.catalog_missing === true);
+  return { demand: totalDemand, purchased: totalPurchased, gap, hasCatalogMissing };
+};
+
 export class LocalStorageAdapter implements DatabaseAdapter {
   async getInventory(): Promise<InventoryItem[]> {
     return loadData<InventoryItem[]>('erp_inventory', []);

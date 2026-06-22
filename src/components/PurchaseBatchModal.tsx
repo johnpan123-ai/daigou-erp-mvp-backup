@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
-import { calculateFinalMyacgDemand } from '../lib/db';
+import { calculateVariantDemandAndPurchased } from '../lib/db';
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrderItem } from '../lib/db';
 
 interface PurchaseBatchModalProps {
@@ -114,37 +114,21 @@ export default function PurchaseBatchModal({
   };
 
   const getVariantDemands = (v: ProductVariant) => {
-    const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-    const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
-    const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
-      ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
-      : null;
-    const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-      ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
-      : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
-    const myacgDemand = rawMyacg >= 0 ? rawMyacg : 0;
-
-    const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-    const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-      ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-      : null;
-    const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-    const wacaDemand = rawWaca >= 0 ? rawWaca : 0;
-
-    const privateDemand = privateOrderItems
-      .filter(poi => poi.product_variant_id === v.id)
-      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-
-    const localPurchased = purchaseBatchItems
-      .filter(pbi => pbi.product_variant_id === v.id)
-      .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    const rawPurchased = v.purchased_manual_adjustment ?? (v as any).ordered_quantity ?? (v as any).ordered_qty ?? localPurchased;
-    const purchased = rawPurchased >= 0 ? rawPurchased : 0;
-
-    const totalDemand = myacgDemand + wacaDemand + privateDemand;
-    const gap = totalDemand - purchased;
-
-    return { myacgDemand, wacaDemand, privateDemand, totalDemand, purchased, gap };
+    const res = calculateVariantDemandAndPurchased(
+      v,
+      privateOrderItems,
+      purchaseBatchItems,
+      inventory,
+      salesOrderItems
+    );
+    return {
+      myacgDemand: res.myacg,
+      wacaDemand: res.waca,
+      privateDemand: res.privateOrder,
+      totalDemand: res.myacg + res.waca + res.privateOrder,
+      purchased: res.purchased,
+      gap: res.gap
+    };
   };
 
   const getVariantShortageForModal = (v: ProductVariant) => {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { calculateFinalMyacgDemand, getBaseSku } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, calculateGroupDemandAndPurchased } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -45,7 +45,6 @@ export default function PurchaseRecords() {
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
 
   const [editMode, setEditMode] = useState<boolean>(false);
-  let sampleLogged = false;
 
   const handleUpdateAgent = async (groupId: string, agent: string) => {
     if (guardAgainstStaleWrite()) return;
@@ -141,16 +140,16 @@ export default function PurchaseRecords() {
     const manualPurchased = v0.purchased_manual_adjustment;
     const legacyPurchased = (v0 as any).ordered_quantity ?? (v0 as any).ordered_qty;
 
-    let rawPurchased;
-    if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
+    let rawPurchased = 0;
+    if (typeof manualPurchased === 'number' && manualPurchased > 0) {
       rawPurchased = manualPurchased;
     } else if (localPurchased > 0) {
       rawPurchased = localPurchased;
-    } else {
-      rawPurchased = legacyPurchased ?? 0;
+    } else if (typeof legacyPurchased === 'number' && legacyPurchased > 0) {
+      rawPurchased = legacyPurchased;
     }
 
-    const v0_Purchased = rawPurchased >= 0 ? rawPurchased : 0;
+    const v0_Purchased = rawPurchased;
 
     const v0_OriginalDemand = v0_Myacg + v0_Waca + v0_Private;
     const v0_OriginalGap = Math.max(v0_OriginalDemand - v0_Purchased, 0);
@@ -437,65 +436,14 @@ export default function PurchaseRecords() {
     let totalGap = 0;
     
     groupVars.forEach(v => {
-      // 買動漫數量
-      const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-      const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
-      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
-        ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
-        : null;
-      const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-        ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
-        : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
-      const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
-
-      // WACA 數量
-      const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-        ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-        : null;
-      const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-      const vWaca = rawWaca >= 0 ? rawWaca : 0;
-
-      // 私下數量
-      const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-      const vPrivate = rawPrivate >= 0 ? rawPrivate : 0;
-
-      // 已採購 / 已下單數量
-      const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-
-      const manualPurchased = v.purchased_manual_adjustment;
-      const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
-
-      let rawPurchased;
-      if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
-        rawPurchased = manualPurchased;
-      } else if (localPurchased > 0) {
-        rawPurchased = localPurchased;
-      } else {
-        rawPurchased = legacyPurchased ?? 0;
-      }
-
-      const vPurchased = rawPurchased >= 0 ? rawPurchased : 0;
-
-      myacg += vMyacg;
-      waca += vWaca;
-      privateOrder += vPrivate;
-      purchased += vPurchased;
+      const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
+      myacg += res.myacg;
+      waca += res.waca;
+      privateOrder += res.privateOrder;
+      purchased += res.purchased;
       myacgManual += (v.myacg_manual_adjustment ?? 0);
       wacaManual += (v.waca_manual_adjustment ?? 0);
-
-      const vTotalDemand = vMyacg + vWaca + vPrivate;
-      totalGap += Math.max(vTotalDemand - vPurchased, 0);
-
-      if (!sampleLogged) {
-        console.log('[UI Quantity Calc] sample variant:', JSON.stringify(v));
-        console.log('[UI Quantity Calc] myacg computed:', vMyacg);
-        console.log('[UI Quantity Calc] waca computed:', vWaca);
-        console.log('[UI Quantity Calc] private computed:', vPrivate);
-        console.log('[UI Quantity Calc] purchased computed:', vPurchased);
-        sampleLogged = true;
-      }
+      totalGap += res.gap;
     });
     
     const hasCatalogMissing = groupVars.some(v => v.catalog_missing === true);
@@ -503,64 +451,15 @@ export default function PurchaseRecords() {
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
-    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
-    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
-    
-    let totalDemand = 0;
-    let totalPurchased = 0;
-    let gap = 0;
-    const hasCatalogMissing = groupVars.some(v => v.catalog_missing === true);
-    
-    groupVars.forEach(v => {
-      // 買動漫數量
-      const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-      const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
-      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
-        ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
-        : null;
-      const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-        ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
-        : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
-      const vMyacg = rawMyacg >= 0 ? rawMyacg : 0;
-
-      // WACA 數量
-      const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-        ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-        : null;
-      const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-      const vWaca = rawWaca >= 0 ? rawWaca : 0;
-
-      // 私下數量
-      const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-      const vPrivate = rawPrivate >= 0 ? rawPrivate : 0;
-
-      // 已採購 / 已下單數量
-      const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-
-      const manualPurchased = v.purchased_manual_adjustment;
-      const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
-
-      let rawPurchased;
-      if (manualPurchased !== null && manualPurchased !== undefined && manualPurchased !== 0) {
-        rawPurchased = manualPurchased;
-      } else if (localPurchased > 0) {
-        rawPurchased = localPurchased;
-      } else {
-        rawPurchased = legacyPurchased ?? 0;
-      }
-
-      const vPurchased = rawPurchased >= 0 ? rawPurchased : 0;
-
-      const demand = vMyacg + vWaca + vPrivate;
-      
-      totalDemand += demand;
-      totalPurchased += vPurchased;
-      gap += Math.max(demand - vPurchased, 0);
-    });
-    
-    return { demand: totalDemand, purchased: totalPurchased, gap, hasCatalogMissing };
+    return calculateGroupDemandAndPurchased(
+      groupId,
+      categories,
+      variants,
+      privateOrderItems,
+      batchItems,
+      inventory,
+      salesOrderItems
+    );
   };
 
   const getGroupSkuAndPriceRange = (groupId: string) => {
