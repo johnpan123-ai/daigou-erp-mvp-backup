@@ -1,14 +1,61 @@
 import { useState, useEffect, useRef } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode, setProviderMode } from '../providers/providerMode';
-import { Settings as SettingsIcon, Download, Upload, Trash2, Database } from 'lucide-react';
+import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
+import { supabase } from '../providers/cloud/supabaseClient';
 
 export default function Settings() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { role, displayName } = useRole();
   const currentMode = getProviderMode();
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+
+    if (!newPassword) {
+      setPasswordError('新密碼不可為空');
+      return;
+    }
+    if (newPassword.length < 12) {
+      setPasswordError('新密碼至少 12 碼');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('新密碼與確認密碼必須一致');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+
+      if (error) throw error;
+
+      setPasswordSuccess('密碼已更新，請使用新密碼重新登入');
+      setNewPassword('');
+      setConfirmPassword('');
+
+      setTimeout(async () => {
+        await signOut();
+      }, 2000);
+    } catch (err: any) {
+      setPasswordError(err.message || '更新密碼失敗，請稍後再試。');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   const [counts, setCounts] = useState({
     inventory: 0,
@@ -466,6 +513,100 @@ export default function Settings() {
             </div>
           );
         })()}
+
+        {/* 帳號安全 */}
+        {user && (
+          <div className="card flex-col" style={{ gridColumn: 'span 3', marginTop: '16px' }}>
+            <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Lock size={18} className="text-primary" /> 
+              帳號安全
+            </h3>
+            <p className="text-muted text-sm" style={{ marginBottom: '16px' }}>
+              在此直接修改您的登入密碼。新密碼不可為空且至少需 12 碼。成功更新密碼後將自動登出，請以新密碼重新登入。
+            </p>
+
+            {passwordError && (
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#FEF2F2',
+                border: '1px solid #FEE2E2',
+                color: 'var(--color-danger)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '13px',
+                marginBottom: '16px',
+                lineHeight: 1.5
+              }}>
+                {passwordError}
+              </div>
+            )}
+
+            {passwordSuccess && (
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                color: '#166534',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '13px',
+                marginBottom: '16px',
+                lineHeight: 1.5
+              }}>
+                {passwordSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdatePassword} className="flex-col gap-md" style={{ maxWidth: '400px' }}>
+              <div className="flex-col gap-xs">
+                <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>新密碼</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="請輸入新密碼"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border)',
+                    outline: 'none',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              <div className="flex-col gap-xs">
+                <label className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>確認新密碼</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="請確認新密碼"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--color-border)',
+                    outline: 'none',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  type="submit"
+                  disabled={isUpdatingPassword}
+                  className="btn btn-primary"
+                  style={{ minWidth: '120px' }}
+                >
+                  {isUpdatingPassword ? '正在更新...' : '更新密碼'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* 使用者身分與權限 */}
         <div className="card flex-col" style={{ gridColumn: 'span 3', marginTop: '16px' }}>
