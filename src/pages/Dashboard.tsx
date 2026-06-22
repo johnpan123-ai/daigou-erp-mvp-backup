@@ -898,6 +898,87 @@ export default function Dashboard() {
           word-break: break-all;
         }
 
+        /* Urgent cards for mobile */
+        .urgent-cards-container {
+          display: none;
+        }
+
+        .urgent-card {
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 16px;
+          box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          cursor: pointer;
+          transition: background-color 0.2s ease, transform 0.2s ease;
+          box-sizing: border-box;
+        }
+
+        .urgent-card:hover {
+          background-color: #f8fafc;
+        }
+
+        .urgent-card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
+        .urgent-card-title {
+          font-size: 14.2px;
+          font-weight: 700;
+          color: #0f172a;
+          line-height: 1.4;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          word-break: break-word;
+          flex: 1;
+          margin: 0;
+        }
+
+        .urgent-card-tags {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .urgent-card-tag {
+          background-color: #f1f5f9;
+          color: #475569;
+          font-size: 10px;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-weight: 500;
+        }
+
+        .urgent-card-info {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          border-top: 1px solid #f1f5f9;
+          padding-top: 10px;
+          font-size: 13.5px;
+          color: #64748b;
+        }
+
+        .urgent-card-info-row {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .urgent-card-info-row .text-red {
+          color: #ef4444;
+          font-weight: 700;
+        }
+
         @media (max-width: 1024px) {
           .kpi-grid {
             grid-template-columns: repeat(2, 1fr);
@@ -915,11 +996,12 @@ export default function Dashboard() {
             gap: 12px;
           }
           .urgent-table-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
+            display: none;
           }
-          .urgent-table {
-            min-width: 700px;
+          .urgent-cards-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
           }
         }
 
@@ -1247,108 +1329,172 @@ export default function Dashboard() {
             🎉 太棒了！目前沒有即將結單或需要處理的商品。
           </div>
         ) : (
-          <div className="urgent-table-container">
-            <table className="urgent-table">
-              <thead>
-                <tr>
-                  <th style={{ width: '15%', paddingLeft: '24px' }}>結單類型</th>
-                  <th style={{ width: '45%' }}>商品名稱</th>
-                  <th style={{ width: '13%', textAlign: 'center' }}>結單日期</th>
-                  <th style={{ width: '10%', textAlign: 'center' }}>剩餘天數</th>
-                  <th style={{ width: '10%', textAlign: 'center' }}>缺口數量</th>
-                  <th style={{ width: '10%', textAlign: 'center' }}>狀態</th>
-                  <th style={{ width: '2%', paddingRight: '24px' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {urgentGroups.map(item => {
-                  const g = item.group;
-                  if (!g) return null;
-                  const gap = item.gap;
-                  const targetDate = item.targetDate;
-                  const targetType = item.targetType;
-                  const diffDays = item.diffDays;
-                  const remainingText = diffDays < 0 ? '已過期' : `${diffDays} 天`;
+          <>
+            <div className="urgent-table-container">
+              <table className="urgent-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '15%', paddingLeft: '24px' }}>結單類型</th>
+                    <th style={{ width: '45%' }}>商品名稱</th>
+                    <th style={{ width: '13%', textAlign: 'center' }}>結單日期</th>
+                    <th style={{ width: '10%', textAlign: 'center' }}>剩餘天數</th>
+                    <th style={{ width: '10%', textAlign: 'center' }}>缺口數量</th>
+                    <th style={{ width: '10%', textAlign: 'center' }}>狀態</th>
+                    <th style={{ width: '2%', paddingRight: '24px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {urgentGroups.map(item => {
+                    const g = item.group;
+                    if (!g) return null;
+                    const gap = item.gap;
+                    const targetDate = item.targetDate;
+                    const targetType = item.targetType;
+                    const diffDays = item.diffDays;
+                    const remainingText = diffDays < 0 ? '已過期' : `${diffDays} 天`;
 
-                  // Determine tags
-                  const tags = [];
-                  if (g.listing_type) {
-                    tags.push(g.listing_type);
-                  } else {
-                    if (isProxyProduct(g)) {
-                      tags.push('代理版');
+                    // Determine tags
+                    const tags = [];
+                    if (g.listing_type) {
+                      tags.push(g.listing_type);
                     } else {
-                      tags.push('一般預購');
+                      if (isProxyProduct(g)) {
+                        tags.push('代理版');
+                      } else {
+                        tags.push('一般預購');
+                      }
                     }
-                  }
-                  if (isHololiveProduct(g)) {
-                    tags.push('Hololive');
-                  } else if (isVspoProduct(g)) {
-                    tags.push('VSPO');
-                  }
+                    if (isHololiveProduct(g)) {
+                      tags.push('Hololive');
+                    } else if (isVspoProduct(g)) {
+                      tags.push('VSPO');
+                    }
 
-                  return (
-                    <tr key={g.id} onClick={() => navigate(`/purchase-records/${g.id}`)} style={{ cursor: 'pointer' }}>
-                      <td style={{ paddingLeft: '24px' }}>
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '4px 12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          borderRadius: '9999px',
-                          backgroundColor: targetType === 'purchase' ? '#eff6ff' : '#f0fdf4',
-                          color: targetType === 'purchase' ? '#2563eb' : '#16a34a',
-                          border: targetType === 'purchase' ? '1px solid #bfdbfe' : '1px solid #bbf7d0'
-                        }}>
-                          {targetType === 'purchase' ? '購買結單' : '官方結單'}
-                        </span>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span className="urgent-table-title">{g.normalized_title || g.title}</span>
-                          <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                            {tags.map((tag, i) => (
-                              <span key={i} style={{ backgroundColor: '#f1f5f9', color: '#475569', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', fontWeight: 500 }}>
-                                {tag}
-                              </span>
-                            ))}
+                    return (
+                      <tr key={g.id} onClick={() => navigate(`/purchase-records/${g.id}`)} style={{ cursor: 'pointer' }}>
+                        <td style={{ paddingLeft: '24px' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '4px 12px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            borderRadius: '9999px',
+                            backgroundColor: targetType === 'purchase' ? '#eff6ff' : '#f0fdf4',
+                            color: targetType === 'purchase' ? '#2563eb' : '#16a34a',
+                            border: targetType === 'purchase' ? '1px solid #bfdbfe' : '1px solid #bbf7d0'
+                          }}>
+                            {targetType === 'purchase' ? '購買結單' : '官方結單'}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span className="urgent-table-title">{g.normalized_title || g.title}</span>
+                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                              {tags.map((tag, i) => (
+                                <span key={i} style={{ backgroundColor: '#f1f5f9', color: '#475569', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
-                        {targetDate}
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
-                        {remainingText}
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
-                        缺口 {gap}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <span style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '4px 10px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          borderRadius: '9999px',
-                          backgroundColor: '#fffbeb',
-                          color: '#d97706',
-                          border: '1px solid #fef3c7'
-                        }}>
-                          進行中
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
+                          {targetDate}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
+                          {remainingText}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
+                          缺口 {gap}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            borderRadius: '9999px',
+                            backgroundColor: '#fffbeb',
+                            color: '#d97706',
+                            border: '1px solid #fef3c7'
+                          }}>
+                            進行中
+                          </span>
+                        </td>
+                        <td style={{ paddingRight: '24px', textAlign: 'right' }}>
+                          <ChevronRight size={16} style={{ color: '#94a3b8' }} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="urgent-cards-container">
+              {urgentGroups.map(item => {
+                const g = item.group;
+                if (!g) return null;
+                const gap = item.gap;
+                const targetDate = item.targetDate;
+                const diffDays = item.diffDays;
+                const remainingText = diffDays < 0 ? '已過期' : `剩 ${diffDays} 天`;
+
+                // Determine tags
+                const tags = [];
+                if (g.listing_type) {
+                  tags.push(g.listing_type);
+                } else {
+                  if (isProxyProduct(g)) {
+                    tags.push('代理版');
+                  } else {
+                    tags.push('一般預購');
+                  }
+                }
+                if (isHololiveProduct(g)) {
+                  tags.push('Hololive');
+                } else if (isVspoProduct(g)) {
+                  tags.push('VSPO');
+                }
+
+                return (
+                  <div
+                    key={g.id}
+                    className="urgent-card"
+                    onClick={() => navigate(`/purchase-records/${g.id}`)}
+                  >
+                    <div className="urgent-card-header">
+                      <span className="urgent-card-title">{g.normalized_title || g.title}</span>
+                    </div>
+
+                    <div className="urgent-card-tags">
+                      {tags.map((tag, i) => (
+                        <span key={i} className="urgent-card-tag">
+                          {tag}
                         </span>
-                      </td>
-                      <td style={{ paddingRight: '24px', textAlign: 'right' }}>
-                        <ChevronRight size={16} style={{ color: '#94a3b8' }} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      ))}
+                    </div>
+
+                    <div className="urgent-card-info">
+                      <div className="urgent-card-info-row">
+                        <span>結單日：{targetDate}</span>
+                      </div>
+                      <div className="urgent-card-info-row">
+                        <span>狀態：</span>
+                        <span className={diffDays < 0 ? 'text-red' : ''}>{remainingText}</span>
+                      </div>
+                      <div className="urgent-card-info-row">
+                        <span>缺口：</span>
+                        <span className="text-red">{gap}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>

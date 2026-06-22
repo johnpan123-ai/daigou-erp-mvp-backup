@@ -1855,7 +1855,7 @@ export default function PurchaseRecords() {
                 {list.map((g) => {
                   const details = getGroupPlatformDetails(g.id);
                   const demandAndPurchased = getGroupDemandAndPurchased(g.id);
-                  const { skuDisplay, priceDisplay, count } = getGroupSkuAndPriceRange(g.id);
+                  const { skuDisplay, count } = getGroupSkuAndPriceRange(g.id);
 
                   const isProxy = activeTab === 'proxy';
                   const totalDemand = isProxy 
@@ -1984,9 +1984,18 @@ export default function PurchaseRecords() {
                           <span>缺 <strong style={{ color: gap > 0 ? '#ef4444' : '#166534' }}>{gap}</strong></span>
                         </div>
 
-                        {/* Line 5: Price range */}
-                        <div style={{ fontSize: '13px', color: '#0f172a', fontWeight: 600 }}>
-                          價格範圍 {priceDisplay}
+                        {/* Line 5: Closing Date & Release Month */}
+                        <div style={{ fontSize: '13px', color: '#475569', display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }}>
+                          <div>結單日：{(() => {
+                            if (!g.closing_date) return '-';
+                            const clean = g.closing_date.replace(/\//g, '-');
+                            const parts = clean.split('-');
+                            if (parts.length >= 3) {
+                              return `${parts[1]}/${parts[2]}`;
+                            }
+                            return g.closing_date;
+                          })()}</div>
+                          <div>發售：{formatReleaseMonth(g.release_month)}</div>
                         </div>
 
                       </div>
