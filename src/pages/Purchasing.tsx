@@ -11,6 +11,7 @@ interface VariantDetail {
   amount: number;
   purchased: number;
   gap: number;
+  cost: number;
 }
 
 interface CategoryGroup {
@@ -254,6 +255,15 @@ export default function Purchasing() {
     const categoryMap = new Map(categories.map(c => [c.id, c]));
     const inventoryMap = new Map(inventory.map(inv => [inv.myacg_item_code, inv]));
 
+    const variantDefaultJpyCosts = (() => {
+      try {
+        const stored = localStorage.getItem('variant_default_jpy_costs');
+        return stored ? JSON.parse(stored) : {};
+      } catch (e) {
+        return {};
+      }
+    })();
+
     return purchaseGroups.map(g => {
       // Find all variants of this group
       const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
@@ -304,6 +314,11 @@ export default function Purchasing() {
         const price = invItem?.final_price ?? 0;
         const amount = totalDemand * price;
 
+        // Get cost
+        const cost = (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null)
+          ? v.default_jpy_cost
+          : (variantDefaultJpyCosts[v.id] ?? 0);
+
         // Parse category and variant name
         const parsed = parseVariantFallback(v, categoryMap);
         const catTitle = parsed.categoryTitle || '單品';
@@ -319,7 +334,8 @@ export default function Purchasing() {
             demand: totalDemand,
             purchased,
             gap,
-            amount
+            amount,
+            cost
           });
         }
       });
@@ -1086,7 +1102,7 @@ export default function Purchasing() {
                                   待採購 {v.gap}
                                 </span>
                                 <span style={{ fontWeight: 600, color: '#475569', fontSize: '13px' }}>
-                                  ¥{v.amount.toLocaleString()}
+                                  ¥{(v.cost ?? 0).toLocaleString()}
                                 </span>
                               </div>
                             </div>
