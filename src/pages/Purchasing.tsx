@@ -26,6 +26,7 @@ interface GroupSummary {
   amount: number;
   purchased: number;
   gap: number;
+  toPurchaseCost: number;
   categories: CategoryGroup[];
 }
 
@@ -396,12 +397,16 @@ export default function Purchasing() {
       let groupAmount = 0;
       let groupPurchased = 0;
       let groupGap = 0;
+      let groupToPurchaseCost = 0;
       categoryGroups.forEach(cg => {
         cg.variants.forEach(v => {
           groupDemand += v.demand;
           groupAmount += v.amount;
           groupPurchased += v.purchased;
           groupGap += v.gap;
+          if (v.gap > 0) {
+            groupToPurchaseCost += v.gap * (v.cost ?? 0);
+          }
         });
       });
 
@@ -412,6 +417,7 @@ export default function Purchasing() {
         amount: groupAmount,
         purchased: groupPurchased,
         gap: groupGap,
+        toPurchaseCost: groupToPurchaseCost,
         categories: categoryGroups
       };
     })
@@ -431,6 +437,8 @@ export default function Purchasing() {
     if (!selectedGroupId) return null;
     return groupSummaries.find(g => g.id === selectedGroupId) || null;
   }, [groupSummaries, selectedGroupId]);
+
+
 
   if (loading) {
     return (
@@ -891,13 +899,12 @@ export default function Purchasing() {
                     <div className="card-content" style={{ cursor: 'pointer' }}>
                       <h2 className="card-title">{item.title}</h2>
                       <div className="card-stats">
-                        <span className="stat-demand" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>需求 {item.demand}</span>
                         {item.gap > 0 && (
                           <span style={{ backgroundColor: '#fef2f2', color: '#dc2626', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>
                             待採購 {item.gap}
                           </span>
                         )}
-                        <span className="stat-amount">總金額 ¥{item.amount.toLocaleString()}</span>
+                        <span className="stat-amount">待採購金額 ¥{item.toPurchaseCost.toLocaleString()}</span>
                       </div>
                     </div>
 
@@ -975,22 +982,14 @@ export default function Purchasing() {
           
           <div className="detail-summary-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '24px' }}>
             <div className="detail-stat-card">
-              <span className="stat-label">總需求數量</span>
-              <span className="stat-value" style={{ color: '#2563eb' }}>{selectedGroup.demand}</span>
-            </div>
-            <div className="detail-stat-card">
-              <span className="stat-label">預估總金額</span>
-              <span className="stat-value success">¥{selectedGroup.amount.toLocaleString()}</span>
-            </div>
-            <div className="detail-stat-card">
-              <span className="stat-label">已採購數量</span>
-              <span className="stat-value" style={{ color: '#475569' }}>{selectedGroup.purchased}</span>
-            </div>
-            <div className="detail-stat-card">
-              <span className="stat-label">待採購數量 (缺口)</span>
+              <span className="stat-label">待採購數量</span>
               <span className="stat-value" style={{ color: selectedGroup.gap > 0 ? '#dc2626' : '#16a34a' }}>
                 {selectedGroup.gap}
               </span>
+            </div>
+            <div className="detail-stat-card">
+              <span className="stat-label">待採購金額</span>
+              <span className="stat-value success">¥{selectedGroup.toPurchaseCost.toLocaleString()}</span>
             </div>
           </div>
 
@@ -1012,7 +1011,7 @@ export default function Purchasing() {
 
             return (
               <div style={{ marginTop: '20px' }}>
-                <h3 className="variant-section-title">待採購規格</h3>
+                <h3 className="variant-section-title">本次採購清單</h3>
                 {visibleCategories.map((cat, catIdx) => {
                   const catGap = cat.variants.reduce((sum, v) => sum + v.gap, 0);
                   const hasMultiple = cat.variants.length > 1;
