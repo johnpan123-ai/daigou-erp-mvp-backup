@@ -978,128 +978,127 @@ export default function Purchasing() {
             </div>
           </div>
 
-          {selectedGroup.categories.length > 0 && (
-            <div style={{ marginTop: '20px' }}>
-              <h3 className="variant-section-title">規格明細需求</h3>
-              {selectedGroup.categories.map((cat, catIdx) => {
-                const catDemand = cat.variants.reduce((sum, v) => sum + v.demand, 0);
-                const catGap = cat.variants.reduce((sum, v) => sum + v.gap, 0);
-                const hasMultiple = cat.variants.length > 1;
-                const isExpanded = !hasMultiple || expandedCats.has(cat.title);
+          {(() => {
+            const visibleCategories = selectedGroup.categories
+              .map(cat => {
+                const visibleVariants = cat.variants.filter(v => v.gap > 0);
+                return { ...cat, variants: visibleVariants };
+              })
+              .filter(cat => cat.variants.length > 0);
 
-                return (
-                  <div key={catIdx} className="category-group" style={{ marginBottom: '12px' }}>
-                    {hasMultiple ? (
-                      // Collapsible Header (for 2 or more variants)
-                      <div 
-                        className="category-title" 
-                        onClick={() => {
-                          setExpandedCats(prev => {
-                            const next = new Set(prev);
-                            if (next.has(cat.title)) {
-                              next.delete(cat.title);
-                            } else {
-                              next.add(cat.title);
-                            }
-                            return next;
-                          });
-                        }}
-                        style={{ 
-                          fontSize: '15px', 
-                          fontWeight: 700, 
-                          color: '#1e293b', 
-                          marginTop: '12px', 
-                          marginBottom: '6px', 
-                          borderBottom: '1px solid #e2e8f0', 
-                          paddingBottom: '6px', 
-                          display: 'flex', 
-                          justifyContent: 'space-between', 
-                          alignItems: 'center', 
-                          cursor: 'pointer',
-                          userSelect: 'none'
-                        }}
-                      >
-                        <span>
-                          {cat.title} (需求 {catDemand}
-                          {catGap > 0 ? `, 待採購 ${catGap}` : ''})
-                        </span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          {isExpanded ? '▼' : '▶'}
-                        </span>
-                      </div>
-                    ) : (
-                      // Static Header (for exactly 1 variant)
-                      <div 
-                        className="category-title" 
-                        style={{ 
-                          fontSize: '15px', 
-                          fontWeight: 700, 
-                          color: '#1e293b', 
-                          marginTop: '12px', 
-                          marginBottom: '6px', 
-                          borderBottom: '1px solid #e2e8f0', 
-                          paddingBottom: '6px',
-                          userSelect: 'none'
-                        }}
-                      >
-                        {cat.title}
-                      </div>
-                    )}
-                    
-                    {isExpanded && (
-                      <div className="variant-list" style={{ paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-                        {cat.variants.map((v, vIdx) => (
-                          <div 
-                            key={vIdx} 
-                            className="variant-row" 
-                            style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between',
-                              alignItems: 'center', 
-                              padding: '8px 12px', 
-                              borderBottom: '1px solid #f1f5f9', 
-                              backgroundColor: '#f8fafc',
-                              borderRadius: '6px'
-                            }}
-                          >
-                            {/* Left Side: Variant Display Name */}
-                            <div style={{ fontSize: '14px', fontWeight: 600, color: '#334155', flex: 1, paddingRight: '8px' }}>
-                              {v.displayName}
-                            </div>
-                            {/* Right Side: Demand, Purchased, Gap, and Price stacked vertically */}
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: '4px', flexShrink: 0 }}>
-                              <span style={{ color: '#475569', fontSize: '14px', fontWeight: 600 }}>
-                                需求 {v.demand}
-                              </span>
-                              {v.purchased > 0 && (
-                                <span style={{ color: '#64748b', fontSize: '12px' }}>
-                                  已採購 {v.purchased}
-                                </span>
-                              )}
-                              {v.gap > 0 ? (
-                                <span style={{ color: '#dc2626', fontSize: '13px', fontWeight: 700 }}>
+            if (visibleCategories.length === 0) {
+              return (
+                <div className="empty-state" style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>
+                  <p>目前沒有待採購規格。</p>
+                </div>
+              );
+            }
+
+            return (
+              <div style={{ marginTop: '20px' }}>
+                <h3 className="variant-section-title">待採購規格</h3>
+                {visibleCategories.map((cat, catIdx) => {
+                  const catGap = cat.variants.reduce((sum, v) => sum + v.gap, 0);
+                  const hasMultiple = cat.variants.length > 1;
+                  const isExpanded = !hasMultiple || expandedCats.has(cat.title);
+
+                  return (
+                    <div key={catIdx} className="category-group" style={{ marginBottom: '12px' }}>
+                      {hasMultiple ? (
+                        // Collapsible Header (for 2 or more variants)
+                        <div 
+                          className="category-title" 
+                          onClick={() => {
+                            setExpandedCats(prev => {
+                              const next = new Set(prev);
+                              if (next.has(cat.title)) {
+                                next.delete(cat.title);
+                              } else {
+                                next.add(cat.title);
+                              }
+                              return next;
+                            });
+                          }}
+                          style={{ 
+                            fontSize: '15px', 
+                            fontWeight: 700, 
+                            color: '#1e293b', 
+                            marginTop: '12px', 
+                            marginBottom: '6px', 
+                            borderBottom: '1px solid #e2e8f0', 
+                            paddingBottom: '6px', 
+                            display: 'flex', 
+                            justifyContent: 'space-between', 
+                            alignItems: 'center', 
+                            cursor: 'pointer',
+                            userSelect: 'none'
+                          }}
+                        >
+                          <span>
+                            {cat.title} (待採購 {catGap})
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            {isExpanded ? '▼' : '▶'}
+                          </span>
+                        </div>
+                      ) : (
+                        // Static Header (for exactly 1 variant)
+                        <div 
+                          className="category-title" 
+                          style={{ 
+                            fontSize: '15px', 
+                            fontWeight: 700, 
+                            color: '#1e293b', 
+                            marginTop: '12px', 
+                            marginBottom: '6px', 
+                            borderBottom: '1px solid #e2e8f0', 
+                            paddingBottom: '6px',
+                            userSelect: 'none'
+                          }}
+                        >
+                          {cat.title} (待採購 {catGap})
+                        </div>
+                      )}
+                      
+                      {isExpanded && (
+                        <div className="variant-list" style={{ paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                          {cat.variants.map((v, vIdx) => (
+                            <div 
+                              key={vIdx} 
+                              className="variant-row" 
+                              style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between',
+                                alignItems: 'center', 
+                                padding: '8px 12px', 
+                                borderBottom: '1px solid #f1f5f9', 
+                                backgroundColor: '#f8fafc',
+                                borderRadius: '6px'
+                              }}
+                            >
+                              {/* Left Side: Variant Display Name */}
+                              <div style={{ fontSize: '14px', fontWeight: 600, color: '#334155', flex: 1, paddingRight: '8px' }}>
+                                {v.displayName}
+                              </div>
+                              {/* Right Side: Gap and Price stacked vertically */}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: '4px', flexShrink: 0 }}>
+                                <span style={{ color: '#dc2626', fontSize: '14px', fontWeight: 700 }}>
                                   待採購 {v.gap}
                                 </span>
-                              ) : (
-                                v.demand > 0 && (
-                                  <span style={{ color: '#16a34a', fontSize: '12px', fontWeight: 600 }}>
-                                    已補齊
-                                  </span>
-                                )
-                              )}
-                              <span style={{ fontWeight: 600, color: '#475569', fontSize: '13px' }}>
-                                ¥{v.amount.toLocaleString()}
-                              </span>
+                                <span style={{ fontWeight: 600, color: '#475569', fontSize: '13px' }}>
+                                  ¥{v.amount.toLocaleString()}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
