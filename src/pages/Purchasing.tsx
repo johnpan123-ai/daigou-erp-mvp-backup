@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
-import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem } from '../lib/db';
-import { calculateFinalMyacgDemand } from '../lib/db';
+import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem } from '../lib/db';
+import { calculateVariantDemandAndPurchased } from '../lib/db';
 import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2 } from 'lucide-react';
 
 interface VariantDetail {
@@ -9,6 +9,8 @@ interface VariantDetail {
   displayName: string;
   demand: number;
   amount: number;
+  purchased: number;
+  gap: number;
 }
 
 interface CategoryGroup {
@@ -21,6 +23,8 @@ interface GroupSummary {
   title: string;
   demand: number;
   amount: number;
+  purchased: number;
+  gap: number;
   categories: CategoryGroup[];
 }
 
@@ -112,6 +116,8 @@ export default function Purchasing() {
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
+  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
   
   const [loading, setLoading] = useState(true);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -141,13 +147,17 @@ export default function Purchasing() {
         fetchedVars,
         fetchedCats,
         fetchedPrivateItems,
-        fetchedInventory
+        fetchedInventory,
+        fetchedBatchItems,
+        fetchedSalesOrderItems
       ] = await Promise.all([
         dataProvider.getProductGroups().catch(() => []),
         dataProvider.getProductVariants().catch(() => []),
         dataProvider.getProductCategories().catch(() => []),
         dataProvider.getPrivateOrderItems().catch(() => []),
-        dataProvider.getInventory().catch(() => [])
+        dataProvider.getInventory().catch(() => []),
+        dataProvider.getPurchaseBatchItems().catch(() => []),
+        dataProvider.getSalesOrderItems().catch(() => [])
       ]);
 
       setGroups(fetchedGroups);
@@ -155,6 +165,8 @@ export default function Purchasing() {
       setCategories(fetchedCats);
       setPrivateOrderItems(fetchedPrivateItems);
       setInventory(fetchedInventory);
+      setPurchaseBatchItems(fetchedBatchItems);
+      setSalesOrderItems(fetchedSalesOrderItems);
       dataProvider.registerFreshLoad();
     } catch (err) {
       console.error("Failed to load data for mobile purchase summary:", err);
@@ -276,33 +288,16 @@ export default function Purchasing() {
       const categoryGroupsMap = new Map<string, VariantDetail[]>();
 
       groupVars.forEach(v => {
-        // Calculate MyACG demand
-        const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, Array.from(inventoryMap.values()));
-        const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
-        const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
-          ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
-          : null;
-        const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-          ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
-          : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
-        const myacgDemand = rawMyacg >= 0 ? rawMyacg : 0;
-
-        // Calculate WACA demand
-        const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-        const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-          ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-          : null;
-        const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-        const wacaDemand = rawWaca >= 0 ? rawWaca : 0;
-
-        // Calculate Private demand
-        const localPrivate = privateOrderItems
-          .filter(poi => poi.product_variant_id === v.id)
-          .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-        const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-        const privateDemand = rawPrivate >= 0 ? rawPrivate : 0;
-
-        const totalDemand = myacgDemand + wacaDemand + privateDemand;
+        const res = calculateVariantDemandAndPurchased(
+          v,
+          privateOrderItems,
+          purchaseBatchItems,
+          inventory,
+          salesOrderItems
+        );
+        const totalDemand = res.myacg + res.waca + res.privateOrder;
+        const gap = res.gap;
+        const purchased = res.purchased;
 
         // Get selling price
         const invItem = inventoryMap.get(v.myacg_item_code);
@@ -322,6 +317,8 @@ export default function Purchasing() {
             id: v.id,
             displayName,
             demand: totalDemand,
+            purchased,
+            gap,
             amount
           });
         }
@@ -381,10 +378,14 @@ export default function Purchasing() {
       // Calculate total demand and amount for the group
       let groupDemand = 0;
       let groupAmount = 0;
+      let groupPurchased = 0;
+      let groupGap = 0;
       categoryGroups.forEach(cg => {
         cg.variants.forEach(v => {
           groupDemand += v.demand;
           groupAmount += v.amount;
+          groupPurchased += v.purchased;
+          groupGap += v.gap;
         });
       });
 
@@ -393,12 +394,14 @@ export default function Purchasing() {
         title: g.normalized_title || g.title,
         demand: groupDemand,
         amount: groupAmount,
+        purchased: groupPurchased,
+        gap: groupGap,
         categories: categoryGroups
       };
     })
     .filter(g => g.demand > 0) // Only show items with actual demand
     .sort((a, b) => b.demand - a.demand); // Sort by demand quantity descending
-  }, [groups, variants, categories, privateOrderItems, inventory]);
+  }, [groups, variants, categories, privateOrderItems, inventory, purchaseBatchItems, salesOrderItems]);
 
   // Filtered summaries for search
   const filteredSummaries = useMemo(() => {
@@ -872,7 +875,12 @@ export default function Purchasing() {
                     <div className="card-content" style={{ cursor: 'pointer' }}>
                       <h2 className="card-title">{item.title}</h2>
                       <div className="card-stats">
-                        <span className="stat-demand">需求 {item.demand}</span>
+                        <span className="stat-demand" style={{ backgroundColor: '#f1f5f9', color: '#475569' }}>需求 {item.demand}</span>
+                        {item.gap > 0 && (
+                          <span style={{ backgroundColor: '#fef2f2', color: '#dc2626', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>
+                            待採購 {item.gap}
+                          </span>
+                        )}
                         <span className="stat-amount">總金額 ¥{item.amount.toLocaleString()}</span>
                       </div>
                     </div>
@@ -949,14 +957,24 @@ export default function Purchasing() {
           
           <h2 className="detail-title">{selectedGroup.title}</h2>
           
-          <div className="detail-summary-cards">
+          <div className="detail-summary-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '24px' }}>
             <div className="detail-stat-card">
               <span className="stat-label">總需求數量</span>
-              <span className="stat-value primary">{selectedGroup.demand}</span>
+              <span className="stat-value" style={{ color: '#2563eb' }}>{selectedGroup.demand}</span>
             </div>
             <div className="detail-stat-card">
               <span className="stat-label">預估總金額</span>
               <span className="stat-value success">¥{selectedGroup.amount.toLocaleString()}</span>
+            </div>
+            <div className="detail-stat-card">
+              <span className="stat-label">已採購數量</span>
+              <span className="stat-value" style={{ color: '#475569' }}>{selectedGroup.purchased}</span>
+            </div>
+            <div className="detail-stat-card">
+              <span className="stat-label">待採購數量 (缺口)</span>
+              <span className="stat-value" style={{ color: selectedGroup.gap > 0 ? '#dc2626' : '#16a34a' }}>
+                {selectedGroup.gap}
+              </span>
             </div>
           </div>
 
@@ -965,6 +983,7 @@ export default function Purchasing() {
               <h3 className="variant-section-title">規格明細需求</h3>
               {selectedGroup.categories.map((cat, catIdx) => {
                 const catDemand = cat.variants.reduce((sum, v) => sum + v.demand, 0);
+                const catGap = cat.variants.reduce((sum, v) => sum + v.gap, 0);
                 const hasMultiple = cat.variants.length > 1;
                 const isExpanded = !hasMultiple || expandedCats.has(cat.title);
 
@@ -1000,7 +1019,10 @@ export default function Purchasing() {
                           userSelect: 'none'
                         }}
                       >
-                        <span>{cat.title}（{catDemand}）</span>
+                        <span>
+                          {cat.title} (需求 {catDemand}
+                          {catGap > 0 ? `, 待採購 ${catGap}` : ''})
+                        </span>
                         <span style={{ fontSize: '12px', color: '#64748b' }}>
                           {isExpanded ? '▼' : '▶'}
                         </span>
@@ -1044,11 +1066,27 @@ export default function Purchasing() {
                             <div style={{ fontSize: '14px', fontWeight: 600, color: '#334155', flex: 1, paddingRight: '8px' }}>
                               {v.displayName}
                             </div>
-                            {/* Right Side: Demand and Price stacked vertically */}
+                            {/* Right Side: Demand, Purchased, Gap, and Price stacked vertically */}
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: '4px', flexShrink: 0 }}>
-                              <span style={{ color: '#dc2626', fontSize: '15px', fontWeight: 700 }}>
+                              <span style={{ color: '#475569', fontSize: '14px', fontWeight: 600 }}>
                                 需求 {v.demand}
                               </span>
+                              {v.purchased > 0 && (
+                                <span style={{ color: '#64748b', fontSize: '12px' }}>
+                                  已採購 {v.purchased}
+                                </span>
+                              )}
+                              {v.gap > 0 ? (
+                                <span style={{ color: '#dc2626', fontSize: '13px', fontWeight: 700 }}>
+                                  待採購 {v.gap}
+                                </span>
+                              ) : (
+                                v.demand > 0 && (
+                                  <span style={{ color: '#16a34a', fontSize: '12px', fontWeight: 600 }}>
+                                    已補齊
+                                  </span>
+                                )
+                              )}
                               <span style={{ fontWeight: 600, color: '#475569', fontSize: '13px' }}>
                                 ¥{v.amount.toLocaleString()}
                               </span>

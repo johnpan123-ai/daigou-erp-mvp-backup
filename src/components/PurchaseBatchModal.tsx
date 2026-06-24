@@ -17,6 +17,7 @@ interface PurchaseBatchModalProps {
   editingBatchId: string | null;
   onSaveSuccess: () => void;
   onStale?: () => void;
+  getDisplayProductName: (v: ProductVariant) => string;
 }
 
 const cleanDailiTitle = (title: string): string => {
@@ -57,7 +58,8 @@ export default function PurchaseBatchModal({
   purchaseBatches,
   editingBatchId,
   onSaveSuccess,
-  onStale
+  onStale,
+  getDisplayProductName: propGetDisplayProductName
 }: PurchaseBatchModalProps) {
   const [onlyShowShortage, setOnlyShowShortage] = useState<boolean>(false);
   const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
@@ -141,6 +143,9 @@ export default function PurchaseBatchModal({
   };
 
   const getDisplayProductName = (v: ProductVariant): string => {
+    if (propGetDisplayProductName) {
+      return propGetDisplayProductName(v);
+    }
     const variantName = (v.variant_name || '').trim();
     const productTitle = group?.normalized_title || group?.title || '';
     

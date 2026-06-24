@@ -3623,6 +3623,7 @@ export default function PurchaseManagement() {
             setIsStale(true);
             loadData();
           }}
+          getDisplayProductName={getDisplayProductName}
         />
       )}
 
