@@ -110,6 +110,7 @@ interface MobilePurchaseBatchTabProps {
   batches: PurchaseBatch[];
   batchItems: PurchaseBatchItem[];
   variants: ProductVariant[];
+  categoryMap: Map<string, ProductCategory>;
   groups?: ProductGroup[];
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
@@ -122,6 +123,7 @@ function MobilePurchaseBatchTab({
   batches,
   batchItems,
   variants,
+  categoryMap,
   groups = [],
   onRefresh,
   onEditBatch,
@@ -177,8 +179,15 @@ function MobilePurchaseBatchTab({
         || g?.title
         || variant.product_title
         || '未命名商品';
-      const varName = variant.variant_name || '';
-      const displayName = varName ? `${groupTitle}-${varName}` : groupTitle;
+      
+      const cat = variant.product_category_id ? categoryMap.get(variant.product_category_id) : null;
+      const catTitle = (cat && cat.title && cat.title !== '單品') ? cat.title : '';
+      const displayProdName = getDisplayProductName(variant);
+      let restName = displayProdName;
+      if (catTitle && !displayProdName.includes(catTitle)) {
+        restName = `${catTitle} - ${displayProdName}`;
+      }
+      const displayName = `${groupTitle} - ${restName}`.replace(/\s*-\s*/g, '-');
 
       const costVal = item.cost ?? 0;
       const key = `${displayName}_${costVal}`;
@@ -204,6 +213,17 @@ function MobilePurchaseBatchTab({
       alert('已複製本批次帳目（TSV 格式）至剪貼簿！');
     } catch (err) {
       console.error('Failed to copy ledger:', err);
+      alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
+    }
+  };
+
+  const handleCopyBatchName = async (e: React.MouseEvent, name: string) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(name);
+      alert('已複製批次名稱');
+    } catch (err) {
+      console.error('Failed to copy batch name:', err);
       alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
     }
   };
@@ -262,8 +282,26 @@ function MobilePurchaseBatchTab({
               
               {/* Line 1: Name and Date */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '14px' }}>
-                  {batch.name}
+                <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>{batch.name}</span>
+                  <button 
+                    onClick={(e) => handleCopyBatchName(e, batch.name)}
+                    title="複製批次名稱"
+                    style={{
+                      border: 'none',
+                      background: 'none',
+                      cursor: 'pointer',
+                      color: '#64748b',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '4px',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <Copy size={13} />
+                  </button>
                 </div>
                 <div style={{ fontSize: '12px', color: '#64748b' }}>
                   {batch.date}
@@ -3477,6 +3515,7 @@ export default function PurchaseManagement() {
               batches={purchaseBatches}
               batchItems={purchaseBatchItems}
               variants={variants}
+              categoryMap={categoryMap}
               groups={groups}
               onRefresh={loadData}
               onEditBatch={handleEditBatch}

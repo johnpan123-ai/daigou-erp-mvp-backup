@@ -17,7 +17,7 @@ interface PurchaseBatchTabProps {
   isDaili?: boolean;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, groups = [], onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, groups = [], onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
@@ -70,8 +70,15 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, groups
         || g?.title
         || variant.product_title
         || '未命名商品';
-      const varName = variant.variant_name || '';
-      const displayName = varName ? `${groupTitle}-${varName}` : groupTitle;
+      
+      const cat = variant.product_category_id ? categoryMap.get(variant.product_category_id) : null;
+      const catTitle = (cat && cat.title && cat.title !== '單品') ? cat.title : '';
+      const displayProdName = getDisplayProductName(variant);
+      let restName = displayProdName;
+      if (catTitle && !displayProdName.includes(catTitle)) {
+        restName = `${catTitle} - ${displayProdName}`;
+      }
+      const displayName = `${groupTitle} - ${restName}`.replace(/\s*-\s*/g, '-');
 
       const costVal = item.cost ?? 0;
       const key = `${displayName}_${costVal}`;
@@ -98,6 +105,17 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, groups
       alert('已複製本批次帳目（TSV 格式）至剪貼簿！');
     } catch (err) {
       console.error('Failed to copy ledger:', err);
+      alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
+    }
+  };
+
+  const handleCopyBatchName = async (e: React.MouseEvent, name: string) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(name);
+      alert('已複製批次名稱');
+    } catch (err) {
+      console.error('Failed to copy batch name:', err);
       alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
     }
   };
@@ -162,7 +180,27 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, groups
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       {isExpanded ? <ChevronDown size={18} className="text-muted"/> : <ChevronRight size={18} className="text-muted"/>}
-                      <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px' }}>{batch.name}</div>
+                      <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{batch.name}</span>
+                        <button 
+                          onClick={(e) => handleCopyBatchName(e, batch.name)}
+                          title="複製批次名稱"
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            cursor: 'pointer',
+                            color: '#64748b',
+                            padding: '2px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '4px',
+                            transition: 'all 0.2s',
+                          }}
+                        >
+                          <Copy size={13} />
+                        </button>
+                      </div>
                     </div>
                     <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '12px' }}>{batch.date}</div>
                   </div>
@@ -195,7 +233,27 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, groups
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     {isExpanded ? <ChevronDown size={18} className="text-muted"/> : <ChevronRight size={18} className="text-muted"/>}
-                    <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px' }}>{batch.name}</div>
+                    <div style={{ fontWeight: 600, color: '#0f172a', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{batch.name}</span>
+                      <button 
+                        onClick={(e) => handleCopyBatchName(e, batch.name)}
+                        title="複製批次名稱"
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          cursor: 'pointer',
+                          color: '#64748b',
+                          padding: '2px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '4px',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        <Copy size={13} />
+                      </button>
+                    </div>
                     <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '12px' }}>{batch.date}</div>
                     {batch.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>({batch.note})</div>}
                   </div>
