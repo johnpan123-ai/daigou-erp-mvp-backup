@@ -8,6 +8,8 @@ import OrdersImport from './pages/OrdersImport';
 import PurchaseRecords from './pages/PurchaseRecords';
 import PurchaseManagement from './pages/PurchaseManagement';
 import Purchasing from './pages/Purchasing';
+import JapanPackagesList from './pages/JapanPackagesList';
+import JapanPackageDetail from './pages/JapanPackageDetail';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 
@@ -29,6 +31,8 @@ function App() {
               <Route path="/purchase-records" element={<PurchaseRecords />} />
               <Route path="/purchase-records/:id" element={<PurchaseManagement />} />
               <Route path="/purchasing" element={<Purchasing />} />
+              <Route path="/japan-packages" element={<JapanPackagesList />} />
+              <Route path="/japan-packages/:id" element={<JapanPackageDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/login" element={<Login />} />
             </Routes>

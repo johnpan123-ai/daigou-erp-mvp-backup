@@ -9,10 +9,10 @@
 }
 
 .app-sidebar {
-  width: 240px;
-  min-width: 240px;
-  max-width: 240px;
-  flex: 0 0 240px;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  max-width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
   height: 100vh;
   position: sticky;
   top: 0;
@@ -20,12 +20,58 @@
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+              min-width 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+              max-width 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+              flex 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-logo {
+  padding: 38px 20px 32px;
+}
+
+.logo-text-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon-box {
+  width: 44px;
+  height: 44px;
+  background-color: var(--color-primary);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.logo-text {
   font-size: 20px;
-  font-weight: 700;
-  padding: 24px 20px;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  letter-spacing: -0.5px;
+  white-space: nowrap;
+}
+
+.btn-toggle-sidebar {
+  background: none;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.btn-toggle-sidebar:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--color-text-primary);
 }
 
 .sidebar-nav-container {
@@ -33,26 +79,33 @@
 }
 
 .nav-item {
-  height: 44px;
+  height: 64px;
   padding: 0 18px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 15px;
+  gap: 14px;
+  font-size: 16px;
   font-weight: 600;
-  border-radius: 10px;
+  border-radius: 14px;
   color: var(--color-text-secondary);
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, padding 0.2s, justify-content 0.2s;
+  white-space: nowrap;
+  margin: 4px 0;
 }
 
 .nav-icon {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.nav-icon svg {
+  width: 24px !important;
+  height: 24px !important;
 }
 
 .nav-item.active {
@@ -66,12 +119,55 @@
 }
 
 .sidebar-section-title {
-  font-size: 12px;
+  font-size: 13px;
   color: #8b95a7;
-  margin: 18px 20px 8px;
+  margin: 24px 20px 12px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  transition: opacity 0.2s, height 0.2s, margin 0.2s;
+}
+
+/* Collapsed Sidebar State */
+.sidebar-collapsed {
+  --sidebar-width: var(--sidebar-collapsed-width);
+}
+
+.sidebar-collapsed .logo-text {
+  display: none;
+}
+
+.sidebar-collapsed .nav-label {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-section-title {
+  opacity: 0;
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+.sidebar-collapsed .sidebar-logo {
+  padding: 36px 0 24px !important;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar-collapsed .logo-text-group {
+  justify-content: center;
+}
+
+.sidebar-collapsed .btn-toggle-sidebar {
+  margin-top: 4px;
 }
 
 .main-area {
@@ -100,6 +196,11 @@
   flex: 1;
 }
 
+.page-content-full {
+  max-width: none !important;
+  width: 100% !important;
+}
+
 /* Mobile Layout Overrides (For actual mobile devices, not preview mode) */
 @media (max-width: 767px) {
   .app-shell {
@@ -122,6 +223,27 @@
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
     background-color: var(--color-bg-base);
     display: flex !important;
+  }
+
+  .sidebar-logo {
+    font-size: 20px !important;
+    padding: 24px 20px !important;
+  }
+
+  .sidebar-nav-container {
+    padding: 0 12px !important;
+  }
+
+  .nav-item {
+    padding: 0 18px !important;
+    gap: 12px !important;
+    font-size: 15px !important;
+    white-space: normal !important;
+  }
+
+  .sidebar-section-title {
+    margin: 18px 20px 8px !important;
+    font-size: 12px !important;
   }
 
   .main-area {

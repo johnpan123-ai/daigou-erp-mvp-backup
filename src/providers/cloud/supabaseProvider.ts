@@ -98,7 +98,9 @@ import type {
   PrivateOrder, 
   PrivateOrderItem, 
   ImportBatch,
-  ImportStats
+  ImportStats,
+  JapanPackage,
+  JapanPackageItem
 } from '../../lib/db';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -250,14 +252,16 @@ export class SupabaseProvider implements IDataProvider {
           console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
           
           // 1. 同時從 Supabase 抓取未刪除的資料
-          const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes, poRes, poiRes] = await Promise.all([
+          const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes, poRes, poiRes, jpRes, jpiRes] = await Promise.all([
             supabase.from('product_groups').select('*').is('deleted_at', null),
             supabase.from('product_categories').select('*').is('deleted_at', null),
             supabase.from('product_variants').select('*').is('deleted_at', null),
             supabase.from('purchase_batches').select('*').is('deleted_at', null),
             supabase.from('purchase_batch_items').select('*').is('deleted_at', null),
             supabase.from('private_orders').select('*').is('deleted_at', null),
-            supabase.from('private_order_items').select('*').is('deleted_at', null)
+            supabase.from('private_order_items').select('*').is('deleted_at', null),
+            supabase.from('japan_packages').select('*').is('deleted_at', null),
+            supabase.from('japan_package_items').select('*').is('deleted_at', null)
           ]);
 
           if (groupsRes.error) throw groupsRes.error;
@@ -267,6 +271,8 @@ export class SupabaseProvider implements IDataProvider {
           if (batchItemsRes.error) throw batchItemsRes.error;
           if (poRes.error) throw poRes.error;
           if (poiRes.error) throw poiRes.error;
+          if (jpRes.error) throw jpRes.error;
+          if (jpiRes.error) throw jpiRes.error;
 
           const gLen = groupsRes.data?.length || 0;
           const cLen = categoriesRes.data?.length || 0;
@@ -369,8 +375,45 @@ export class SupabaseProvider implements IDataProvider {
             note: r.note || ''
           }));
 
-          await db.savePrivateOrders(mappedOrders);
+           await db.savePrivateOrders(mappedOrders);
           await db.savePrivateOrderItems(mappedItems);
+
+          // Japan Packages Sync
+          const mappedPackages = (jpRes.data || []).map((r: any) => ({
+            id: r.id,
+            title: r.title,
+            vendor_name: r.vendor_name || '',
+            carrier: r.carrier || '',
+            tracking_number: r.tracking_number || '',
+            shipped_at: r.shipped_at || '',
+            expected_arrival_at: r.expected_arrival_at || '',
+            arrived_at: r.arrived_at || '',
+            status: r.status || 'registered',
+            note: r.note || '',
+            created_at: r.created_at,
+            updated_at: r.updated_at
+          }));
+          await db.saveJapanPackages(mappedPackages);
+
+          const mappedPackageItems = (jpiRes.data || []).map((r: any) => ({
+            id: r.id,
+            japan_package_id: r.japan_package_id,
+            product_group_id: r.product_group_id || null,
+            product_variant_id: r.product_variant_id || null,
+            purchase_batch_id: r.purchase_batch_id || null,
+            purchase_batch_item_id: r.purchase_batch_item_id || null,
+            product_title: r.product_title || '',
+            category_name: r.category_name || '',
+            variant_name: r.variant_name || '',
+            sku: r.sku || '',
+            quantity: Number(r.quantity ?? 1),
+            note: r.note || '',
+            checked: Boolean(r.checked ?? false),
+            checked_at: r.checked_at || null,
+            created_at: r.created_at,
+            updated_at: r.updated_at
+          }));
+          await db.saveJapanPackageItems(mappedPackageItems);
 
           // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
           await this.pullSalesOrders();
@@ -1637,6 +1680,150 @@ export class SupabaseProvider implements IDataProvider {
       console.error('[Cloud Push ERROR] Supabase delete error message:', err.message || err);
       await this.pullCoreProductData(true);
       alert(`雲端刪除私下訂單項目發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
+  async getJapanPackages(): Promise<JapanPackage[]> {
+    return db.getJapanPackages();
+  }
+
+  async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    // 1. Identify deleted ones by comparing with current local storage records
+    const currentLocal = await db.getJapanPackages();
+    const incomingIds = new Set(packages.map(p => p.id));
+    const removedPackages = currentLocal.filter(p => !incomingIds.has(p.id));
+
+    // 2. Save locally
+    await db.saveJapanPackages(packages);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip japan_packages cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    try {
+      // (A) Handle soft deletion of removed packages in Supabase
+      if (removedPackages.length > 0) {
+        const removedIds = removedPackages.map(p => p.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          console.log(`[Sync Push] japan_packages marking deleted_at: ${removedIds.length} rows`);
+          const { error: delError } = await supabase
+            .from('japan_packages')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds);
+          if (delError) {
+            console.error('[Sync Push] japan_packages delete update failed:', delError);
+          }
+        }
+      }
+
+      // (B) Upsert incoming active packages to Supabase
+      const activePackages = packages.filter(p => isValidUuid(p.id));
+      if (activePackages.length > 0) {
+        console.log(`[Sync Push] japan_packages upserting: ${activePackages.length} rows`);
+        const upsertData = activePackages.map(p => ({
+          id: p.id,
+          title: p.title,
+          vendor_name: p.vendor_name || null,
+          carrier: p.carrier || null,
+          tracking_number: p.tracking_number || null,
+          shipped_at: p.shipped_at || null,
+          expected_arrival_at: p.expected_arrival_at || null,
+          arrived_at: p.arrived_at || null,
+          status: p.status || 'registered',
+          note: p.note || null
+        }));
+
+        const { error: upsertError } = await supabase
+          .from('japan_packages')
+          .upsert(upsertData);
+        if (upsertError) {
+          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
+          await this.pullCoreProductData(true);
+          alert(`雲端同步日本包裹失敗：${upsertError.message}。已回復本地快取資料！`);
+          throw upsertError;
+        }
+      }
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步日本包裹發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
+  async getJapanPackageItems(): Promise<JapanPackageItem[]> {
+    return db.getJapanPackageItems();
+  }
+
+  async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
+    // 1. Identify deleted ones by comparing with current local storage records
+    const currentLocal = await db.getJapanPackageItems();
+    const incomingIds = new Set(items.map(i => i.id));
+    const removedItems = currentLocal.filter(i => !incomingIds.has(i.id));
+
+    // 2. Save locally
+    await db.saveJapanPackageItems(items);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip japan_package_items cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    try {
+      // (A) Handle soft deletion of removed items in Supabase
+      if (removedItems.length > 0) {
+        const removedIds = removedItems.map(i => i.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          console.log(`[Sync Push] japan_package_items marking deleted_at: ${removedIds.length} rows`);
+          const { error: delError } = await supabase
+            .from('japan_package_items')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds);
+          if (delError) {
+            console.error('[Sync Push] japan_package_items delete update failed:', delError);
+          }
+        }
+      }
+
+      // (B) Upsert incoming active items to Supabase
+      const activeItems = items.filter(i => isValidUuid(i.id) && isValidUuid(i.japan_package_id));
+      if (activeItems.length > 0) {
+        console.log(`[Sync Push] japan_package_items upserting: ${activeItems.length} rows`);
+        const upsertData = activeItems.map(i => ({
+          id: i.id,
+          japan_package_id: i.japan_package_id,
+          product_group_id: isValidUuid(i.product_group_id) ? i.product_group_id : null,
+          product_variant_id: isValidUuid(i.product_variant_id) ? i.product_variant_id : null,
+          purchase_batch_id: isValidUuid(i.purchase_batch_id) ? i.purchase_batch_id : null,
+          purchase_batch_item_id: isValidUuid(i.purchase_batch_item_id) ? i.purchase_batch_item_id : null,
+          product_title: i.product_title || null,
+          category_name: i.category_name || null,
+          variant_name: i.variant_name || null,
+          sku: i.sku || null,
+          quantity: i.quantity || 1,
+          note: i.note || null,
+          checked: i.checked || false,
+          checked_at: i.checked_at || null
+        }));
+
+        const { error: upsertError } = await supabase
+          .from('japan_package_items')
+          .upsert(upsertData);
+        if (upsertError) {
+          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
+          await this.pullCoreProductData(true);
+          alert(`雲端同步日本包裹明細失敗：${upsertError.message}。已回復本地快取資料！`);
+          throw upsertError;
+        }
+      }
+    } catch (err: any) {
+      console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步日本包裹明細發生異常：${err.message || err}。已回復本地快取資料！`);
       throw err;
     }
   }

@@ -58,6 +58,40 @@ export interface PurchaseBatchItem {
   note: string;
 }
 
+export interface JapanPackage {
+  id: string;
+  title: string;
+  vendor_name?: string;
+  carrier?: string;
+  tracking_number?: string;
+  shipped_at?: string;
+  expected_arrival_at?: string;
+  arrived_at?: string;
+  status: string;
+  note?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface JapanPackageItem {
+  id: string;
+  japan_package_id: string;
+  product_group_id?: string;
+  product_variant_id?: string;
+  purchase_batch_id?: string;
+  purchase_batch_item_id?: string;
+  product_title?: string;
+  category_name?: string;
+  variant_name?: string;
+  sku?: string;
+  quantity: number;
+  note?: string;
+  checked: boolean;
+  checked_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface PrivateOrder {
   id: string; // PK
   product_group_id: string; // FK
@@ -389,6 +423,11 @@ export interface DatabaseAdapter {
   getPrivateOrderItems(): Promise<PrivateOrderItem[]>;
   savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void>;
   deletePrivateOrderItems(ids: string[]): Promise<void>;
+
+  getJapanPackages(): Promise<JapanPackage[]>;
+  saveJapanPackages(packages: JapanPackage[]): Promise<void>;
+  getJapanPackageItems(): Promise<JapanPackageItem[]>;
+  saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
 
   getImportBatches(): Promise<ImportBatch[]>;
   saveImportBatches(batches: ImportBatch[]): Promise<void>;
@@ -1606,6 +1645,22 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     saveData('erp_import_batches', batches);
   }
 
+  async getJapanPackages(): Promise<JapanPackage[]> {
+    return loadData<JapanPackage[]>('erp_japan_packages', []);
+  }
+
+  async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    saveData('erp_japan_packages', packages);
+  }
+
+  async getJapanPackageItems(): Promise<JapanPackageItem[]> {
+    return loadData<JapanPackageItem[]>('erp_japan_package_items', []);
+  }
+
+  async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
+    saveData('erp_japan_package_items', items);
+  }
+
   async exportData(): Promise<void> {
     const data = {
       inventory: await this.getInventory(),
@@ -2731,6 +2786,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       purchaseBatchItems: await this.getPurchaseBatchItems(),
       privateOrders: await this.getPrivateOrders(),
       privateOrderItems: await this.getPrivateOrderItems(),
+      japanPackages: await this.getJapanPackages(),
+      japanPackageItems: await this.getJapanPackageItems(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2756,6 +2813,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       if (data.purchaseBatchItems) await this.savePurchaseBatchItems(data.purchaseBatchItems);
       if (data.privateOrders) await this.savePrivateOrders(data.privateOrders);
       if (data.privateOrderItems) await this.savePrivateOrderItems(data.privateOrderItems);
+      if (data.japanPackages) await this.saveJapanPackages(data.japanPackages);
+      if (data.japanPackageItems) await this.saveJapanPackageItems(data.japanPackageItems);
       if (data.importBatches) await this.saveImportBatches(data.importBatches);
       return true;
     } catch (e) {
@@ -2787,6 +2846,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     localStorage.removeItem('erp_purchase_batch_items');
     localStorage.removeItem('erp_private_orders');
     localStorage.removeItem('erp_private_order_items');
+    localStorage.removeItem('erp_japan_packages');
+    localStorage.removeItem('erp_japan_package_items');
   }
 
   async clearPurchaseRecords(): Promise<void> {
@@ -2824,6 +2885,22 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       console.error('[IndexedDB clearPurchaseRecords Error]', e);
     }
     keysToRemove.forEach(key => localStorage.removeItem(key));
+  }
+
+  async getJapanPackages(): Promise<JapanPackage[]> {
+    return this.get<JapanPackage[]>('erp_japan_packages', []);
+  }
+
+  async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    await this.set('erp_japan_packages', packages);
+  }
+
+  async getJapanPackageItems(): Promise<JapanPackageItem[]> {
+    return this.get<JapanPackageItem[]>('erp_japan_package_items', []);
+  }
+
+  async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
+    await this.set('erp_japan_package_items', items);
   }
 
   async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {

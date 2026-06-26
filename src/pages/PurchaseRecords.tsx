@@ -1207,6 +1207,26 @@ export default function PurchaseRecords() {
             font-weight: 600;
           }
         }
+        @media (min-width: 1400px) {
+          .th-inner {
+            padding: 10px 14px !important;
+            min-height: 44px !important;
+          }
+          .resizer-handle {
+            top: 6px !important;
+            bottom: 6px !important;
+          }
+        }
+        @media (min-width: 2500px) {
+          .th-inner {
+            padding: 12px 18px !important;
+            min-height: 50px !important;
+          }
+          .resizer-handle {
+            top: 8px !important;
+            bottom: 8px !important;
+          }
+        }
       `}</style>
 
 

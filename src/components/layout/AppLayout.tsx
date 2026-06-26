@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { PackageSearch, ListOrdered, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout } from 'lucide-react';
+import { PackageSearch, ListOrdered, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
@@ -32,7 +32,7 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
       <span className="nav-icon">
         {icon}
       </span>
-      {label}
+      <span className="nav-label">{label}</span>
     </Link>
   );
 }
@@ -43,8 +43,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, signOut } = useAuth();
   const { role, displayName, isProfileLoading, canViewPage } = useRole();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    const saved = localStorage.getItem('sidebar_collapsed');
+    return saved === 'true';
+  });
   const location = useLocation();
   const navigate = useNavigate();
+
+  const toggleSidebar = () => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar_collapsed', String(next));
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!loading && !isProfileLoading) {
@@ -98,7 +110,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''}`}>
       
       {/* Backdrop overlay for mobile drawer */}
       {isMobile && isMobileMenuOpen && (
@@ -123,19 +135,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className={`app-sidebar ${isMobile ? (isMobileMenuOpen ? 'mobile-open' : 'mobile-hidden') : ''}`} style={{ zIndex: isMobile ? 9999 : undefined }}>
         
         {/* Sidebar Logo */}
-        <div className="flex items-center justify-between sidebar-logo" style={{ padding: '24px 20px' }}>
-          <div className="flex items-center gap-sm">
-            <div style={{
-              width: '28px', height: '28px', backgroundColor: 'var(--color-primary)',
-              borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff'
-            }}>
-              <Box size={16} />
+        <div className="flex items-center justify-between sidebar-logo">
+          <div className="flex items-center logo-text-group">
+            <div className="logo-icon-box">
+              <Box size={26} />
             </div>
-            <span>採購工作台</span>
+            <span className="logo-text">採購工作台</span>
           </div>
-          {isMobile && (
-            <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setIsMobileMenuOpen(false)}>
+          {isMobile ? (
+            <button className="btn btn-ghost close-mobile-menu" onClick={() => setIsMobileMenuOpen(false)}>
               <X size={18} />
+            </button>
+          ) : (
+            <button className="btn-toggle-sidebar" onClick={toggleSidebar} title={isCollapsed ? '展開選單' : '收合選單'}>
+              {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
             </button>
           )}
         </div>
@@ -154,6 +167,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarItem to="/purchase-records" icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/purchasing') && (
             <SidebarItem to="/purchasing" icon={<FileText size={20} />} label="採購總表" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
+          {canViewPage('/japan-packages') && (
+            <SidebarItem to="/japan-packages" icon={<Truck size={20} />} label="日本包裹管理" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           {canViewPage('/settings') && (
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
@@ -471,7 +487,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className="page-content">
+        <div className={`page-content ${location.pathname.startsWith('/japan-packages') ? 'page-content-full' : ''}`}>
           {getProviderMode() === 'local' && location.pathname !== '/login' && (
             <div style={{
               backgroundColor: '#fffbeb',
