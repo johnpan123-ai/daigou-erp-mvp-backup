@@ -748,11 +748,189 @@ export default function Purchasing() {
           color: #64748b;
           font-size: 14px;
         }
+        .btn-toggle-select {
+          height: 44px;
+          padding: 0 12px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 13px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .variant-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px 12px;
+          border-bottom: 1px solid #f1f5f9;
+          background-color: #f8fafc;
+          border-radius: 6px;
+          border: 1px solid #f1f5f9;
+        }
+
+        .variant-name {
+          font-size: 14px;
+          font-weight: 600;
+          color: #334155;
+          flex: 1;
+          padding-right: 8px;
+        }
+
+        .variant-right-section {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 4px;
+          flex-shrink: 0;
+        }
+
+        .variant-gap {
+          color: #dc2626;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .variant-price {
+          font-weight: 600;
+          color: #475569;
+          font-size: 13px;
+        }
+
+        @media (min-width: 1024px) {
+          .mobile-summary-container {
+            max-width: none !important;
+            width: 100% !important;
+            padding: 32px !important;
+          }
+          .purchasing-page-inner {
+            max-width: 760px !important;
+            margin: 0 auto !important;
+            width: 100% !important;
+            box-sizing: border-box;
+          }
+          .detail-view {
+            max-width: 860px !important;
+            margin: 0 auto !important;
+            width: 100% !important;
+            padding: 36px 48px !important;
+            box-sizing: border-box;
+          }
+          .detail-summary-cards {
+            max-width: 100% !important;
+            margin: 0 auto 30px !important;
+          }
+          
+          /* Scaled elements on desktop */
+          .summary-header {
+            padding: 36px 40px !important;
+            margin-bottom: 24px !important;
+          }
+          .summary-title, .summary-title span {
+            font-size: 28px !important;
+          }
+          .summary-title svg {
+            width: 28px !important;
+            height: 28px !important;
+          }
+          .summary-subtitle {
+            font-size: 15px !important;
+            margin-top: 8px !important;
+          }
+          .search-input {
+            height: 48px !important;
+            font-size: 15px !important;
+            padding-left: 46px !important;
+          }
+          .search-icon {
+            top: 15px !important;
+            width: 20px !important;
+            height: 20px !important;
+          }
+          .btn-toggle-select {
+            height: 48px !important;
+            font-size: 15px !important;
+            padding: 0 16px !important;
+          }
+          
+          /* Card list scaled up */
+          .summary-card {
+            padding: 24px !important;
+            gap: 16px !important;
+            border-radius: 12px !important;
+          }
+          .card-title {
+            font-size: 17px !important;
+          }
+          .card-variant-summary {
+            font-size: 14.5px !important;
+          }
+          .card-stats {
+            font-size: 15px !important;
+            gap: 16px !important;
+          }
+          .stat-demand {
+            font-size: 14.5px !important;
+            padding: 4px 10px !important;
+          }
+          .stat-amount {
+            font-size: 15px !important;
+          }
+          
+          /* Detail Page elements scaled up */
+          .detail-title {
+            font-size: 26px !important;
+            margin-bottom: 24px !important;
+          }
+          .detail-stat-card {
+            padding: 20px 24px !important;
+            border-radius: 12px !important;
+          }
+          .detail-stat-card .stat-label {
+            font-size: 14px !important;
+            margin-bottom: 6px !important;
+          }
+          .detail-stat-card .stat-value {
+            font-size: 24px !important;
+          }
+          
+          /* Specifications List scaled up */
+          .variant-section-title {
+            font-size: 17px !important;
+            margin-bottom: 16px !important;
+            padding-left: 10px !important;
+            border-left-width: 4px !important;
+          }
+          .category-title {
+            font-size: 17px !important;
+            padding-bottom: 10px !important;
+            margin-top: 24px !important;
+            margin-bottom: 12px !important;
+          }
+          .variant-row {
+            padding: 12px 18px !important;
+            border-radius: 8px !important;
+          }
+          .variant-name {
+            font-size: 15.5px !important;
+          }
+          .variant-gap {
+            font-size: 15.5px !important;
+          }
+          .variant-price {
+            font-size: 14.5px !important;
+          }
+        }
       `}</style>
 
       {!selectedGroup ? (
         // List View
-        <>
+        <div className="purchasing-page-inner">
           <div className="summary-header">
             <h1 className="summary-title">
               <ClipboardList size={22} />
@@ -777,21 +955,10 @@ export default function Purchasing() {
                 setIsSelectMode(!isSelectMode);
                 setSelectedGroupIds(new Set());
               }}
+              className="btn-toggle-select"
               style={{
-                height: '44px',
-                padding: '0 12px',
                 backgroundColor: isSelectMode ? '#2563eb' : '#ffffff',
                 color: isSelectMode ? '#ffffff' : '#475569',
-                border: '1px solid #cbd5e1',
-                borderRadius: '8px',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'all 0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
               }}
             >
               {isSelectMode ? '退出選取' : '選取模式'}
@@ -944,7 +1111,7 @@ export default function Purchasing() {
               <p>沒有符合條件或有需求的商品。</p>
             </div>
           )}
-        </>
+        </div>
       ) : (
         // Detail View
         <div className="detail-view">
@@ -1080,27 +1247,18 @@ export default function Purchasing() {
                           {cat.variants.map((v, vIdx) => (
                             <div 
                               key={vIdx} 
-                              className="variant-row" 
-                              style={{ 
-                                display: 'flex', 
-                                justifyContent: 'space-between',
-                                alignItems: 'center', 
-                                padding: '8px 12px', 
-                                borderBottom: '1px solid #f1f5f9', 
-                                backgroundColor: '#f8fafc',
-                                borderRadius: '6px'
-                              }}
+                              className="variant-row"
                             >
                               {/* Left Side: Variant Display Name */}
-                              <div style={{ fontSize: '14px', fontWeight: 600, color: '#334155', flex: 1, paddingRight: '8px' }}>
+                              <div className="variant-name">
                                 {v.displayName}
                               </div>
                               {/* Right Side: Gap and Price stacked vertically */}
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'end', gap: '4px', flexShrink: 0 }}>
-                                <span style={{ color: '#dc2626', fontSize: '14px', fontWeight: 700 }}>
+                              <div className="variant-right-section">
+                                <span className="variant-gap">
                                   待採購 {v.gap}
                                 </span>
-                                <span style={{ fontWeight: 600, color: '#475569', fontSize: '13px' }}>
+                                <span className="variant-price">
                                   ¥{(v.cost ?? 0).toLocaleString()}
                                 </span>
                               </div>
@@ -1116,6 +1274,24 @@ export default function Purchasing() {
           })()}
         </div>
       )}
+      
+      {/* Version Tag */}
+      <div className="purchasing-version-tag" style={{
+        position: 'fixed',
+        bottom: '16px',
+        right: '16px',
+        backgroundColor: '#1e293b',
+        color: '#ffffff',
+        padding: '6px 12px',
+        borderRadius: '6px',
+        fontSize: '12px',
+        fontWeight: 'bold',
+        zIndex: 9999,
+        pointerEvents: 'none',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+      }}>
+        Purchasing UI width fix v1
+      </div>
     </div>
   );
 }

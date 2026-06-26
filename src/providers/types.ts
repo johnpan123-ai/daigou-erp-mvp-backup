@@ -10,7 +10,9 @@ import type {
   PrivateOrder, 
   PrivateOrderItem, 
   ImportBatch,
-  ImportStats
+  ImportStats,
+  JapanPackage,
+  JapanPackageItem
 } from '../lib/db';
 
 export interface IDataProvider {
@@ -42,6 +44,11 @@ export interface IDataProvider {
   getPrivateOrderItems(): Promise<PrivateOrderItem[]>;
   savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void>;
   deletePrivateOrderItems(ids: string[]): Promise<void>;
+
+  getJapanPackages(): Promise<JapanPackage[]>;
+  saveJapanPackages(packages: JapanPackage[]): Promise<void>;
+  getJapanPackageItems(): Promise<JapanPackageItem[]>;
+  saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
 
   getImportBatches(): Promise<ImportBatch[]>;
   saveImportBatches(batches: ImportBatch[]): Promise<void>;

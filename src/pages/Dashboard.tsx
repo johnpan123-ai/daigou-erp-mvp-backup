@@ -1015,6 +1015,54 @@ export default function Dashboard() {
             gap: 12px;
           }
         }
+        @media (min-width: 1400px) {
+          .kpi-card {
+            padding: 24px !important;
+          }
+          .kpi-value {
+            font-size: 32px !important;
+          }
+          .kpi-label {
+            font-size: 15px !important;
+          }
+          .kpi-sub {
+            font-size: 13.5px !important;
+          }
+          .category-card {
+            padding: 24px !important;
+          }
+          .category-title {
+            font-size: 18px !important;
+          }
+          .category-desc {
+            font-size: 14.5px !important;
+          }
+        }
+        @media (min-width: 2500px) {
+          .kpi-card {
+            padding: 30px !important;
+            border-radius: 12px !important;
+          }
+          .kpi-value {
+            font-size: 38px !important;
+          }
+          .kpi-label {
+            font-size: 17px !important;
+          }
+          .kpi-sub {
+            font-size: 15.5px !important;
+          }
+          .category-card {
+            padding: 30px !important;
+            border-radius: 12px !important;
+          }
+          .category-title {
+            font-size: 21px !important;
+          }
+          .category-desc {
+            font-size: 16.5px !important;
+          }
+        }
       `}</style>
 
       {/* Header section */}

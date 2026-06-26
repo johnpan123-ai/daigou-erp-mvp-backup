@@ -14,7 +14,9 @@ import type {
   PrivateOrder, 
   PrivateOrderItem, 
   ImportBatch,
-  ImportStats
+  ImportStats,
+  JapanPackage,
+  JapanPackageItem
 } from '../lib/db';
 
 export class StaleDataError extends Error {
@@ -184,6 +186,22 @@ class DynamicDataProvider implements IDataProvider {
   }
   async deletePrivateOrderItems(ids: string[]): Promise<void> {
     return this.getActiveProvider().deletePrivateOrderItems(ids);
+  }
+  async getJapanPackages(): Promise<JapanPackage[]> {
+    return this.getActiveProvider().getJapanPackages();
+  }
+  async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    this.guardStale();
+    await this.getActiveProvider().saveJapanPackages(packages);
+    this.registerWrite();
+  }
+  async getJapanPackageItems(): Promise<JapanPackageItem[]> {
+    return this.getActiveProvider().getJapanPackageItems();
+  }
+  async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
+    this.guardStale();
+    await this.getActiveProvider().saveJapanPackageItems(items);
+    this.registerWrite();
   }
   async getImportBatches(): Promise<ImportBatch[]> {
     return this.getActiveProvider().getImportBatches();

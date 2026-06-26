@@ -1,4 +1,6 @@
 :root {
+  --sidebar-width: 208px;
+  --sidebar-collapsed-width: 72px;
   /* Light Theme Colors based on mockup */
   --color-bg-base: #F8F9FA;
   --color-bg-surface: #FFFFFF;
@@ -75,3 +77,83 @@ body {
 .text-danger { color: var(--color-danger); }
 .text-warning { color: var(--color-warning); }
 .text-success { color: var(--color-success); }
+
+@media (min-width: 1440px) {
+  :root {
+    --sidebar-width: 240px;
+    --sidebar-collapsed-width: 80px;
+    --spacing-xs: 5px;
+    --spacing-sm: 10px;
+    --spacing-md: 14px;
+    --spacing-lg: 18px;
+    --spacing-xl: 28px;
+    --spacing-2xl: 36px;
+  }
+  
+  body {
+    font-size: 15.5px !important;
+  }
+  
+  .text-xs { font-size: 13.5px !important; }
+  .text-sm { font-size: 14.5px !important; }
+  .text-base { font-size: 15.5px !important; }
+  .text-lg { font-size: 18px !important; }
+
+  .input {
+    padding: 8px 14px !important;
+    font-size: 14.5px !important;
+    height: auto !important;
+  }
+  
+  .btn {
+    padding: 8px 18px !important;
+    font-size: 14.5px !important;
+    height: auto !important;
+  }
+  
+  .erp-table {
+    font-size: 14.5px !important;
+  }
+  
+  .erp-table th, .erp-table td {
+    padding: 10px 14px !important;
+  }
+}
+
+@media (min-width: 2500px) {
+  :root {
+    --spacing-xs: 6px;
+    --spacing-sm: 12px;
+    --spacing-md: 16px;
+    --spacing-lg: 20px;
+    --spacing-xl: 32px;
+    --spacing-2xl: 40px;
+  }
+  
+  body {
+    font-size: 17.5px !important;
+  }
+  
+  .text-xs { font-size: 15.5px !important; }
+  .text-sm { font-size: 16.5px !important; }
+  .text-base { font-size: 17.5px !important; }
+  .text-lg { font-size: 20px !important; }
+
+  .input {
+    padding: 10px 16px !important;
+    font-size: 16.5px !important;
+  }
+  
+  .btn {
+    padding: 10px 22px !important;
+    font-size: 16.5px !important;
+  }
+  
+  .erp-table {
+    font-size: 16.5px !important;
+  }
+  
+  .erp-table th, .erp-table td {
+    padding: 12px 18px !important;
+  }
+}

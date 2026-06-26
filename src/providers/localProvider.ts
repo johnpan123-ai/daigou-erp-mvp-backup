@@ -12,7 +12,9 @@ import type {
   PrivateOrder, 
   PrivateOrderItem, 
   ImportBatch,
-  ImportStats
+  ImportStats,
+  JapanPackage,
+  JapanPackageItem
 } from '../lib/db';
 
 export class LocalProvider implements IDataProvider {
@@ -98,6 +100,18 @@ export class LocalProvider implements IDataProvider {
   }
   async deletePrivateOrderItems(ids: string[]): Promise<void> {
     return db.deletePrivateOrderItems(ids);
+  }
+  async getJapanPackages(): Promise<JapanPackage[]> {
+    return db.getJapanPackages();
+  }
+  async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    return db.saveJapanPackages(packages);
+  }
+  async getJapanPackageItems(): Promise<JapanPackageItem[]> {
+    return db.getJapanPackageItems();
+  }
+  async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
+    return db.saveJapanPackageItems(items);
   }
   async getImportBatches(): Promise<ImportBatch[]> {
     return db.getImportBatches();
