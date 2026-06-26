@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, CheckCircle2, Pencil, Eye, AlertTriangle } from 'lucide-react';
+import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, CheckCircle2, Pencil, Eye, AlertTriangle, ChevronRight } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
@@ -10,6 +10,26 @@ const CARRIERS_LIST = [
   { name: '佐川急便 (Sagawa)', keyword: 'sagawa' },
   { name: '日本郵便 (Japan Post)', keyword: 'post' }
 ];
+
+const getShortCarrierName = (carrier: string) => {
+  const c = carrier.toLowerCase();
+  if (c.includes('post') || c.includes('郵便') || c.includes('郵政')) return 'JP Post';
+  if (c.includes('yamato') || c.includes('ヤマト') || c.includes('黑貓') || c.includes('宅急便') || c.includes('大和')) return 'Yamato';
+  if (c.includes('sagawa') || c.includes('佐川')) return 'Sagawa';
+  if (c.includes('amazon') || c.includes('亞馬遜') || c.includes('アマゾン')) return 'Amazon';
+  return carrier.split(' ')[0] || carrier;
+};
+
+const getCarrierLabel = (val: string) => {
+  switch (val) {
+    case 'all': return '全部物流';
+    case 'post': return 'JP Post';
+    case 'yamato': return 'Yamato';
+    case 'sagawa': return 'Sagawa';
+    case 'custom': return '其他';
+    default: return '全部';
+  }
+};
 
 export default function JapanPackagesList() {
   const navigate = useNavigate();
@@ -23,6 +43,7 @@ export default function JapanPackagesList() {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [carrierFilter, setCarrierFilter] = useState<string>('all');
+  const [showCarrierDrawer, setShowCarrierDrawer] = useState<boolean>(false);
 
   const [editingPackageId, setEditingPackageId] = useState<string | null>(null);
 
@@ -788,16 +809,285 @@ export default function JapanPackagesList() {
         }
         @media (max-width: 768px) {
           .stats-grid {
-            grid-template-columns: repeat(2, 1fr);
+            display: none !important;
           }
-          .stats-grid > :first-child {
-            grid-column: span 2;
+          .toolbar {
+            display: none !important;
           }
-          .form-grid {
-            grid-template-columns: 1fr;
+          .mobile-toolbar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 16px;
+            width: 100%;
           }
-          .form-group.full-width {
-            grid-column: span 1;
+          .mobile-search-row {
+            position: relative;
+            width: 100%;
+          }
+          .mobile-search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+          }
+          .mobile-search-input {
+            width: 100%;
+            height: 44px;
+            padding-left: 38px;
+            padding-right: 12px;
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            font-size: 14px;
+            outline: none;
+            background: #fff;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            box-sizing: border-box;
+          }
+          .mobile-search-input:focus {
+            border-color: #3b82f6;
+          }
+          .mobile-chips-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            width: 100%;
+            margin-top: 4px;
+          }
+          .mobile-wrap-chip {
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12.5px;
+            font-weight: 600;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.15s;
+            height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+          }
+          .mobile-wrap-chip.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #2563eb;
+          }
+          .mobile-logistics-row {
+            width: 100%;
+            margin-top: 2px;
+          }
+          .mobile-logistics-btn {
+            width: 100%;
+            height: 40px;
+            background: #fff;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 13.5px;
+            font-weight: 700;
+            color: #334155;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            box-sizing: border-box;
+          }
+          .mobile-logistics-btn:active {
+            background: #f8fafc;
+          }
+          
+          /* Mobile Card */
+          .mobile-package-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px 14px !important;
+            margin-bottom: 10px !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02) !important;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 120px !important;
+            min-height: 120px !important;
+            max-height: 120px !important;
+            box-sizing: border-box !important;
+            gap: 0 !important;
+          }
+          .mobile-card-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+          }
+          .mobile-card-header {
+            margin-bottom: 4px;
+          }
+          .mobile-card-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 60%;
+          }
+          .mobile-status-pill {
+            padding: 2px 8px !important;
+            font-size: 11px !important;
+            border-radius: 6px !important;
+            height: 20px !important;
+          }
+          .mobile-card-meta {
+            font-size: 12px;
+            color: #64748b;
+            justify-content: flex-start;
+            gap: 6px;
+            margin-bottom: 6px;
+          }
+          .mobile-meta-divider {
+            color: #cbd5e1;
+            font-size: 10px;
+          }
+          .mobile-card-footer {
+            border-top: 1px solid #f1f5f9;
+            padding-top: 8px;
+            margin-top: auto;
+          }
+          .mobile-footer-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #475569;
+          }
+          .mobile-footer-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+          }
+          .mobile-card-delete-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            padding: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.15s;
+          }
+          .mobile-card-delete-btn:hover, .mobile-card-delete-btn:active {
+            color: #ef4444;
+          }
+          .mobile-card-link {
+            color: #2563eb;
+            font-size: 13px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+          }
+          .fab-btn {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3), 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+          }
+          .fab-btn:active {
+            transform: scale(0.95);
+            background: #1d4ed8;
+          }
+
+          /* Bottom Drawer */
+          .drawer-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(4px);
+            z-index: 1001;
+            display: flex;
+            align-items: flex-end;
+          }
+          .drawer-content {
+            background: #fff;
+            border-top-left-radius: 16px;
+            border-top-right-radius: 16px;
+            width: 100%;
+            padding: 16px 20px 28px 20px;
+            box-shadow: 0 -10px 25px rgba(0,0,0,0.1);
+            animation: slideUp 0.25s ease-out;
+            box-sizing: border-box;
+          }
+          @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+          }
+          .drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #f1f5f9;
+            padding-bottom: 12px;
+          }
+          .drawer-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+          }
+          .drawer-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #64748b;
+            cursor: pointer;
+            padding: 0 4px;
+          }
+          .drawer-body {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          }
+          .drawer-item {
+            width: 100%;
+            height: 48px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 14.5px;
+            font-weight: 600;
+            color: #475569;
+            text-align: left;
+            padding: 0 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.15s;
+            box-sizing: border-box;
+          }
+          .drawer-item.active {
+            background: #eff6ff;
+            border-color: #3b82f6;
+            color: #2563eb;
           }
         }
         @media (min-width: 1400px) {
@@ -903,171 +1193,222 @@ export default function JapanPackagesList() {
 
       {/* Header with Title and Add Button */}
       <div className="header-section">
-        <h1 className="header-title">
-          <Truck size={24} style={{ color: '#2563eb' }} />
+        <h1 className="header-title" style={isMobile ? { fontSize: '20px' } : undefined}>
+          <Truck size={isMobile ? 20 : 24} style={{ color: '#2563eb' }} />
           日本包裹管理
         </h1>
-        <button 
-          className="btn btn-primary" 
-          onClick={() => {
-            setEditingPackageId(null);
-            setNewPackageForm({
-              title: '',
-              vendor_name: '',
-              carrier: 'ヤマト運輸 (Yamato)',
-              custom_carrier: '',
-              tracking_number: '',
-              shipped_at: '',
-              expected_arrival_at: '',
-              arrived_at: '',
-              status: 'registered',
-              note: ''
-            });
-            setShowAddModal(true);
-          }}
-          style={{ padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          <Plus size={18} />
-          登記新包裹
-        </button>
+        {!isMobile && (
+          <button 
+            className="btn btn-primary" 
+            onClick={() => {
+              setEditingPackageId(null);
+              setNewPackageForm({
+                title: '',
+                vendor_name: '',
+                carrier: 'ヤマト運輸 (Yamato)',
+                custom_carrier: '',
+                tracking_number: '',
+                shipped_at: '',
+                expected_arrival_at: '',
+                arrived_at: '',
+                status: 'registered',
+                note: ''
+              });
+              setShowAddModal(true);
+            }}
+            style={{ padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Plus size={18} />
+            登記新包裹
+          </button>
+        )}
       </div>
 
-      {/* Statistics Cards */}
-      <div className="stats-grid">
-        <div className="stat-card" style={{ borderLeft: '4px solid #2563eb' }}>
-          <div className="stat-icon-wrapper" style={{ background: '#eff6ff', color: '#2563eb' }}>
-            <Package size={24} />
-          </div>
-          <div className="stat-info">
-            <div className="stat-number">{stats.total}</div>
-            <div className="stat-label">總包裹數量</div>
-          </div>
-        </div>
-        <div className="stat-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <div className="stat-icon-wrapper" style={{ background: '#fef3c7', color: '#f59e0b' }}>
-            <Clock size={24} />
-          </div>
-          <div className="stat-info">
-            <div className="stat-number">{stats.registered}</div>
-            <div className="stat-label">已登記</div>
-          </div>
-        </div>
-        <div className="stat-card" style={{ borderLeft: '4px solid #0284c7' }}>
-          <div className="stat-icon-wrapper" style={{ background: '#e0f2fe', color: '#0284c7' }}>
-            <MapPin size={24} />
-          </div>
-          <div className="stat-info">
-            <div className="stat-number">{stats.arrived}</div>
-            <div className="stat-label">已到小幫手家</div>
-          </div>
-        </div>
-        <div className="stat-card" style={{ borderLeft: '4px solid #10b981' }}>
-          <div className="stat-icon-wrapper" style={{ background: '#ecfdf5', color: '#10b981' }}>
-            <CheckCircle2 size={24} />
-          </div>
-          <div className="stat-info">
-            <div className="stat-number">{stats.confirmed}</div>
-            <div className="stat-label">已點收</div>
-          </div>
-        </div>
-        <div className="stat-card" style={{ borderLeft: '4px solid #ef4444' }}>
-          <div className="stat-icon-wrapper" style={{ background: '#fef2f2', color: '#ef4444' }}>
-            <AlertTriangle size={24} />
-          </div>
-          <div className="stat-info">
-            <div className="stat-number">{stats.problem}</div>
-            <div className="stat-label">有問題</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Search & Filter Toolbar */}
-      <div className="toolbar">
-        <div className="toolbar-top">
-          <div className="search-wrapper" style={{ flex: 1, maxWidth: '480px' }}>
-            <Search size={16} className="search-icon" />
+      {/* Statistics & Search Toolbar */}
+      {isMobile ? (
+        <div className="mobile-toolbar">
+          {/* Search Bar */}
+          <div className="mobile-search-row">
+            <Search size={16} className="mobile-search-icon" />
             <input 
               type="text" 
-              placeholder="搜尋包裹名稱、寄件廠商、物流單號..." 
-              className="input search-input"
+              placeholder="搜尋包裹 / 單號 / 廠商" 
+              className="mobile-search-input"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-        </div>
-        <div className="toolbar-filters">
-          <div className="filter-group">
-            <span className="filter-group-label">物流廠商：</span>
-            <div className="chips-row">
+
+          {/* Filter Row 1: Status Wrap Chips (No Horizontal Scroll) */}
+          <div className="mobile-chips-wrap">
+            {[
+              { key: 'all', label: '全部', count: stats.total },
+              { key: 'registered', label: '已登記', count: stats.registered },
+              { key: 'arrived', label: '已到小幫手', count: stats.arrived },
+              { key: 'confirmed', label: '已點收', count: stats.confirmed },
+              { key: 'problem', label: '有問題', count: stats.problem }
+            ].map(item => (
               <button 
-                className={`chip ${carrierFilter === 'all' ? 'active' : ''}`}
-                onClick={() => setCarrierFilter('all')}
+                key={item.key}
+                className={`mobile-wrap-chip ${statusFilter === item.key ? 'active' : ''}`}
+                onClick={() => setStatusFilter(item.key)}
               >
-                全部
+                {item.label} {item.count}
               </button>
-              <button 
-                className={`chip ${carrierFilter === 'post' ? 'active' : ''}`}
-                onClick={() => setCarrierFilter('post')}
-              >
-                JP Post
-              </button>
-              <button 
-                className={`chip ${carrierFilter === 'yamato' ? 'active' : ''}`}
-                onClick={() => setCarrierFilter('yamato')}
-              >
-                Yamato
-              </button>
-              <button 
-                className={`chip ${carrierFilter === 'sagawa' ? 'active' : ''}`}
-                onClick={() => setCarrierFilter('sagawa')}
-              >
-                Sagawa
-              </button>
-              <button 
-                className={`chip ${carrierFilter === 'custom' ? 'active' : ''}`}
-                onClick={() => setCarrierFilter('custom')}
-              >
-                其他
-              </button>
-            </div>
+            ))}
           </div>
-          <div className="filter-group">
-            <span className="filter-group-label">包裹狀態：</span>
-            <div className="chips-row">
-              <button 
-                className={`chip ${statusFilter === 'all' ? 'active' : ''}`}
-                onClick={() => setStatusFilter('all')}
-              >
-                全部
-              </button>
-              <button 
-                className={`chip ${statusFilter === 'registered' ? 'active' : ''}`}
-                onClick={() => setStatusFilter('registered')}
-              >
-                已登記
-              </button>
-              <button 
-                className={`chip ${statusFilter === 'arrived' ? 'active' : ''}`}
-                onClick={() => setStatusFilter('arrived')}
-              >
-                已到小幫手家
-              </button>
-              <button 
-                className={`chip ${statusFilter === 'confirmed' ? 'active' : ''}`}
-                onClick={() => setStatusFilter('confirmed')}
-              >
-                已點收
-              </button>
-              <button 
-                className={`chip ${statusFilter === 'problem' ? 'active' : ''}`}
-                onClick={() => setStatusFilter('problem')}
-              >
-                有問題
-              </button>
-            </div>
+
+          {/* Filter Row 2: Carrier Dropdown Button */}
+          <div className="mobile-logistics-row">
+            <button 
+              className="mobile-logistics-btn"
+              onClick={() => setShowCarrierDrawer(true)}
+            >
+              <span>篩選物流：{getCarrierLabel(carrierFilter)}</span>
+              <ChevronRight size={16} style={{ color: '#64748b', transform: 'rotate(90deg)' }} />
+            </button>
           </div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Statistics Cards */}
+          <div className="stats-grid">
+            <div className="stat-card" style={{ borderLeft: '4px solid #2563eb' }}>
+              <div className="stat-icon-wrapper" style={{ background: '#eff6ff', color: '#2563eb' }}>
+                <Package size={24} />
+              </div>
+              <div className="stat-info">
+                <div className="stat-number">{stats.total}</div>
+                <div className="stat-label">總包裹數量</div>
+              </div>
+            </div>
+            <div className="stat-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+              <div className="stat-icon-wrapper" style={{ background: '#fef3c7', color: '#f59e0b' }}>
+                <Clock size={24} />
+              </div>
+              <div className="stat-info">
+                <div className="stat-number">{stats.registered}</div>
+                <div className="stat-label">已登記</div>
+              </div>
+            </div>
+            <div className="stat-card" style={{ borderLeft: '4px solid #0284c7' }}>
+              <div className="stat-icon-wrapper" style={{ background: '#e0f2fe', color: '#0284c7' }}>
+                <MapPin size={24} />
+              </div>
+              <div className="stat-info">
+                <div className="stat-number">{stats.arrived}</div>
+                <div className="stat-label">已到小幫手家</div>
+              </div>
+            </div>
+            <div className="stat-card" style={{ borderLeft: '4px solid #10b981' }}>
+              <div className="stat-icon-wrapper" style={{ background: '#ecfdf5', color: '#10b981' }}>
+                <CheckCircle2 size={24} />
+              </div>
+              <div className="stat-info">
+                <div className="stat-number">{stats.confirmed}</div>
+                <div className="stat-label">已點收</div>
+              </div>
+            </div>
+            <div className="stat-card" style={{ borderLeft: '4px solid #ef4444' }}>
+              <div className="stat-icon-wrapper" style={{ background: '#fef2f2', color: '#ef4444' }}>
+                <AlertTriangle size={24} />
+              </div>
+              <div className="stat-info">
+                <div className="stat-number">{stats.problem}</div>
+                <div className="stat-label">有問題</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Filter Toolbar */}
+          <div className="toolbar">
+            <div className="toolbar-top">
+              <div className="search-wrapper" style={{ flex: 1, maxWidth: '480px' }}>
+                <Search size={16} className="search-icon" />
+                <input 
+                  type="text" 
+                  placeholder="搜尋包裹名稱、寄件廠商、物流單號..." 
+                  className="input search-input"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="toolbar-filters">
+              <div className="filter-group">
+                <span className="filter-group-label">物流廠商：</span>
+                <div className="chips-row">
+                  <button 
+                    className={`chip ${carrierFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setCarrierFilter('all')}
+                  >
+                    全部
+                  </button>
+                  <button 
+                    className={`chip ${carrierFilter === 'post' ? 'active' : ''}`}
+                    onClick={() => setCarrierFilter('post')}
+                  >
+                    JP Post
+                  </button>
+                  <button 
+                    className={`chip ${carrierFilter === 'yamato' ? 'active' : ''}`}
+                    onClick={() => setCarrierFilter('yamato')}
+                  >
+                    Yamato
+                  </button>
+                  <button 
+                    className={`chip ${carrierFilter === 'sagawa' ? 'active' : ''}`}
+                    onClick={() => setCarrierFilter('sagawa')}
+                  >
+                    Sagawa
+                  </button>
+                  <button 
+                    className={`chip ${carrierFilter === 'custom' ? 'active' : ''}`}
+                    onClick={() => setCarrierFilter('custom')}
+                  >
+                    其他
+                  </button>
+                </div>
+              </div>
+              <div className="filter-group">
+                <span className="filter-group-label">包裹狀態：</span>
+                <div className="chips-row">
+                  <button 
+                    className={`chip ${statusFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setStatusFilter('all')}
+                  >
+                    全部
+                  </button>
+                  <button 
+                    className={`chip ${statusFilter === 'registered' ? 'active' : ''}`}
+                    onClick={() => setStatusFilter('registered')}
+                  >
+                    已登記
+                  </button>
+                  <button 
+                    className={`chip ${statusFilter === 'arrived' ? 'active' : ''}`}
+                    onClick={() => setStatusFilter('arrived')}
+                  >
+                    已到小幫手家
+                  </button>
+                  <button 
+                    className={`chip ${statusFilter === 'confirmed' ? 'active' : ''}`}
+                    onClick={() => setStatusFilter('confirmed')}
+                  >
+                    已點收
+                  </button>
+                  <button 
+                    className={`chip ${statusFilter === 'problem' ? 'active' : ''}`}
+                    onClick={() => setStatusFilter('problem')}
+                  >
+                    有問題
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Package List */}
       {isLoading ? (
@@ -1094,56 +1435,132 @@ export default function JapanPackagesList() {
                 className="mobile-package-card"
                 onClick={() => navigate(`/japan-packages/${p.id}`)}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px', color: '#1e293b' }}>{p.title}</div>
-                  <span className={`status-pill-dashboard status-${p.status}`}>
+                {/* First Row: Title & Status */}
+                <div className="mobile-card-row mobile-card-header">
+                  <div className="mobile-card-title">{p.title}</div>
+                  <span className={`status-pill-dashboard status-${p.status} mobile-status-pill`}>
                     <span className={`status-dot status-dot-${p.status}`}></span>
                     <span>{getStatusName(p.status)}</span>
                   </span>
                 </div>
-                
-                <div style={{ fontSize: '13px', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {p.vendor_name && <div><strong>寄件廠商：</strong>{p.vendor_name}</div>}
-                  {p.tracking_number && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <strong>追蹤單號：</strong>
-                      {p.carrier ? renderCarrierBadge(p.carrier) : null}
-                      <span>{p.tracking_number}</span>
-                      {(() => {
-                        const url = getTrackingUrl(p.carrier || '', p.tracking_number || '');
-                        return url ? (
-                          <a 
-                            href={url} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            onClick={e => e.stopPropagation()} 
-                            style={{ color: '#2563eb', display: 'inline-flex', alignItems: 'center' }}
-                            title="物流查詢"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
-                        ) : null;
-                      })()}
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', borderTop: '1px solid #f1f5f9', paddingTop: '8px' }}>
-                    <span>商品總數: <strong style={{ color: '#0f172a' }}>{itemsCount}</strong> 件</span>
-                    {p.shipped_at && <span>寄出日: {p.shipped_at}</span>}
-                  </div>
+
+                {/* Second Row: Carrier & Tracking Number */}
+                <div className="mobile-card-row mobile-card-meta">
+                  <span>物流：{p.carrier ? getShortCarrierName(p.carrier) : '其他'}</span>
+                  <span className="mobile-meta-divider">|</span>
+                  <span>單號：{p.tracking_number || '無'}</span>
+                  {p.tracking_number && (() => {
+                    const url = getTrackingUrl(p.carrier || '', p.tracking_number || '');
+                    return url ? (
+                      <a 
+                        href={url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        onClick={e => e.stopPropagation()} 
+                        style={{ color: '#2563eb', marginLeft: '4px', display: 'inline-flex', alignItems: 'center' }}
+                      >
+                        <ExternalLink size={12} />
+                      </a>
+                    ) : null;
+                  })()}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f1f5f9', paddingTop: '8px', marginTop: '2px' }}>
-                  <button 
-                    className="btn btn-ghost" 
-                    onClick={(e) => handleDeletePackage(p.id, e)} 
-                    style={{ color: '#ef4444', padding: '4px' }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                {/* Third Row: Items count, Date & Action Buttons */}
+                <div className="mobile-card-row mobile-card-footer">
+                  <div className="mobile-footer-info">
+                    <span>商品 {itemsCount} 件</span>
+                    <span className="mobile-meta-divider">|</span>
+                    <span>到貨：{p.arrived_at ? p.arrived_at.replace(/-/g, '/') : '未到貨'}</span>
+                  </div>
+                  
+                  <div className="mobile-footer-actions">
+                    <button 
+                      className="mobile-card-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeletePackage(p.id, e);
+                      }}
+                      title="刪除包裹"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                    <span className="mobile-card-link">
+                      查看內容
+                      <ChevronRight size={14} style={{ marginLeft: '1px' }} />
+                    </span>
+                  </div>
                 </div>
               </div>
             );
           })}
+
+          {/* Floating Action Button for Mobile */}
+          <button
+            className="fab-btn"
+            onClick={() => {
+              setEditingPackageId(null);
+              setNewPackageForm({
+                title: '',
+                vendor_name: '',
+                carrier: 'ヤマト運輸 (Yamato)',
+                custom_carrier: '',
+                tracking_number: '',
+                shipped_at: '',
+                expected_arrival_at: '',
+                arrived_at: '',
+                status: 'registered',
+                note: ''
+              });
+              setShowAddModal(true);
+            }}
+            title="登記新包裹"
+          >
+            <Plus size={24} />
+          </button>
+
+          {/* Bottom Sheet Drawer for Carrier Selection */}
+          {showCarrierDrawer && (
+            <div 
+              className="drawer-overlay" 
+              onClick={() => setShowCarrierDrawer(false)}
+            >
+              <div 
+                className="drawer-content" 
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="drawer-header">
+                  <span className="drawer-title">選擇物流廠商</span>
+                  <button 
+                    className="drawer-close"
+                    onClick={() => setShowCarrierDrawer(false)}
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="drawer-body">
+                  {[
+                    { key: 'all', label: '全部物流' },
+                    { key: 'post', label: 'JP Post' },
+                    { key: 'yamato', label: 'Yamato' },
+                    { key: 'sagawa', label: 'Sagawa' },
+                    { key: 'custom', label: '其他' }
+                  ].map(item => (
+                    <button
+                      key={item.key}
+                      className={`drawer-item ${carrierFilter === item.key ? 'active' : ''}`}
+                      onClick={() => {
+                        setCarrierFilter(item.key);
+                        setShowCarrierDrawer(false);
+                      }}
+                    >
+                      <span>{item.label}</span>
+                      {carrierFilter === item.key && <CheckCircle2 size={16} style={{ color: '#2563eb' }} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         // Desktop Logistics Dashboard Cards Layout
