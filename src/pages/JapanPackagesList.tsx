@@ -12,6 +12,7 @@ const CARRIERS_LIST = [
 ];
 
 const getShortCarrierName = (carrier: string) => {
+  if (!carrier) return '其他';
   const c = carrier.toLowerCase();
   if (c.includes('post') || c.includes('郵便') || c.includes('郵政')) return 'JP Post';
   if (c.includes('yamato') || c.includes('ヤマト') || c.includes('黑貓') || c.includes('宅急便') || c.includes('大和')) return 'Yamato';
@@ -329,7 +330,7 @@ export default function JapanPackagesList() {
   const filteredPackages = useMemo(() => {
     return packages.filter(p => {
       // Search
-      const titleMatch = p.title.toLowerCase().includes(searchTerm.toLowerCase());
+      const titleMatch = (p.title || '').toLowerCase().includes(searchTerm.toLowerCase());
       const vendorMatch = (p.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase());
       const trackingMatch = (p.tracking_number || '').toLowerCase().includes(searchTerm.toLowerCase());
       const searchMatch = titleMatch || vendorMatch || trackingMatch;

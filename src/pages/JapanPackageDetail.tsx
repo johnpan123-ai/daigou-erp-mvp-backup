@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
@@ -83,16 +83,31 @@ export default function JapanPackageDetail() {
   const [mobileInfoExpanded, setMobileInfoExpanded] = useState<boolean>(false);
   const [mobileExpandedGroups, setMobileExpandedGroups] = useState<Set<string>>(new Set());
 
-  const toggleMobileGroupExpand = (groupId: string) => {
-    setMobileExpandedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
+  // URL Sync for Mobile Group Expansion
+  const [searchParams, setSearchParams] = useSearchParams();
+  const groupQuery = searchParams.get('group') || '';
+
+  useEffect(() => {
+    if (isMobile) {
+      if (groupQuery) {
+        setMobileExpandedGroups(new Set([groupQuery]));
       } else {
-        next.add(groupId);
+        setMobileExpandedGroups(new Set());
       }
-      return next;
-    });
+    }
+  }, [groupQuery, isMobile]);
+
+  const toggleMobileGroupExpand = (groupId: string) => {
+    if (!isMobile) return;
+    const isCurrentlyExpanded = mobileExpandedGroups.has(groupId);
+    const newParams = new URLSearchParams(searchParams);
+    if (isCurrentlyExpanded) {
+      newParams.delete('group');
+      setSearchParams(newParams, { replace: true });
+    } else {
+      newParams.set('group', groupId);
+      setSearchParams(newParams, { replace: false });
+    }
   };
 
   const toggleGroupCollapse = (groupId: string) => {
@@ -176,6 +191,13 @@ export default function JapanPackageDetail() {
     }
   };
 
+  function getProductGroupTitle(vId?: string) {
+    if (!vId) return '';
+    const v = variants.find(x => x.id === vId);
+    if (!v) return '';
+    const group = productGroups.find(g => g.id === v.product_group_id);
+    return group ? cleanDisplayProductTitle(group.title) : '';
+  }
 
   // Group items by product_group_id, fallback to product_title
   const groupedItems = useMemo(() => {
@@ -707,14 +729,6 @@ export default function JapanPackageDetail() {
     return [catName, varName].filter(Boolean).join(' - ');
   };
 
-  const getProductGroupTitle = (vId?: string) => {
-    if (!vId) return '';
-    const v = variants.find(x => x.id === vId);
-    if (!v) return '';
-    const group = productGroups.find(g => g.id === v.product_group_id);
-    return group ? cleanDisplayProductTitle(group.title) : '';
-  };
-
   // Checked stats
   const checkedStats = useMemo(() => {
     const totalCount = packageItems.length;
@@ -1039,20 +1053,44 @@ export default function JapanPackageDetail() {
                       style={{ padding: '12px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '6px' }}
                       onClick={() => toggleMobileGroupExpand(g.id)}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
-                          <span style={{ fontSize: '12px', color: '#64748b', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'none', display: 'inline-block' }}>▶</span>
-                          <span style={{ fontSize: '14px', fontWeight: 700, color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📦 {g.title}</span>
-                        </div>
-                        <span style={{ fontSize: '12.5px', color: '#475569', fontWeight: 600, flexShrink: 0 }}>
-                          已完成 {checkedGroupQty} / {totalGroupQty}
+                      {/* First Line: Title + Arrow right-aligned */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                        <span style={{ 
+                          fontSize: '14px', 
+                          fontWeight: 700, 
+                          color: '#1e293b', 
+                          display: '-webkit-box', 
+                          WebkitLineClamp: 2, 
+                          WebkitBoxOrient: 'vertical', 
+                          overflow: 'hidden', 
+                          textOverflow: 'ellipsis', 
+                          whiteSpace: 'normal', 
+                          wordBreak: 'break-all', 
+                          flex: 1 
+                        }}>
+                          📦 {g.title}
+                        </span>
+                        <span style={{ 
+                          fontSize: '12px', 
+                          color: '#64748b', 
+                          transition: 'transform 0.2s', 
+                          transform: isExpanded ? 'rotate(90deg)' : 'none', 
+                          display: 'inline-block',
+                          flexShrink: 0,
+                          marginTop: '4px'
+                        }}>
+                          ▶
                         </span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ width: `${percent}%`, height: '100%', background: '#10b981', borderRadius: '3px' }} />
-                        </div>
-                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, width: '32px', textAlign: 'right' }}>{percent}%</span>
+
+                      {/* Second Line: Stats */}
+                      <div style={{ fontSize: '12.5px', color: '#475569', fontWeight: 600 }}>
+                        已完成 {checkedGroupQty} / {totalGroupQty}・共 {totalGroupQty} 件・{percent}%
+                      </div>
+
+                      {/* Third Line: Full-width Progress Bar */}
+                      <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>
+                        <div style={{ width: `${percent}%`, height: '100%', background: '#10b981', borderRadius: '3px' }} />
                       </div>
                     </div>
 
