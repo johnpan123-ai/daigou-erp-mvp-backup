@@ -33,6 +33,8 @@ const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMo
   return <>{children}</>;
 };
 
+const WACA_META_ID = '00000000-0000-4000-a000-000000000000';
+
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
 
@@ -45,6 +47,10 @@ export default function PurchaseRecords() {
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
 
   const [editMode, setEditMode] = useState<boolean>(false);
+
+  const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(null);
+  const [showWacaDialog, setShowWacaDialog] = useState<boolean>(false);
+  const [selectedWacaUpdater, setSelectedWacaUpdater] = useState<'小河馬' | 'Flanlove' | '許願'>('小河馬');
 
   const handleUpdateAgent = async (groupId: string, agent: string) => {
     if (guardAgainstStaleWrite()) return;
@@ -758,7 +764,11 @@ export default function PurchaseRecords() {
       }
     }
 
-    setGroups(finalGroups);
+    const meta = finalGroups.find(g => g.id === WACA_META_ID) || null;
+    setWacaMeta(meta);
+    const regularGroups = finalGroups.filter(g => g.id !== WACA_META_ID);
+    
+    setGroups(regularGroups);
     setVariants(fetchedVars);
     setCategories(fetchedCats);
     setBatchItems(fetchedBatchItems);
@@ -766,6 +776,63 @@ export default function PurchaseRecords() {
     setInventory(fetchedInventory);
     setSalesOrderItems(fetchedOrderItems);
     dataProvider.registerFreshLoad();
+  };
+
+  const handleUpdateWacaMeta = async (updatedBy: string) => {
+    if (guardAgainstStaleWrite()) return;
+    
+    const now = new Date();
+    const YYYY = now.getFullYear();
+    const MM = String(now.getMonth() + 1).padStart(2, '0');
+    const DD = String(now.getDate()).padStart(2, '0');
+    const HH = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const nowStr = `${YYYY}/${MM}/${DD} ${HH}:${mm}`;
+    
+    const wacaMetaId = WACA_META_ID;
+    const allGroups = await dataProvider.getProductGroups();
+    const existingMeta = allGroups.find(g => g.id === wacaMetaId);
+    
+    let updatedMeta: ProductGroup;
+    if (existingMeta) {
+      updatedMeta = {
+        ...existingMeta,
+        proxy_agent: updatedBy,
+        closing_date: nowStr,
+        updated_at: new Date().toISOString()
+      };
+    } else {
+      updatedMeta = {
+        id: wacaMetaId,
+        title: 'WACA_UPDATE_METADATA_DO_NOT_DELETE',
+        purchase_date: new Date().toISOString().split('T')[0],
+        priority: 'Low',
+        closing_date: nowStr,
+        release_month: '',
+        has_official_site: false,
+        product_url: '',
+        proxy_agent: updatedBy,
+        show_in_purchase_list: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+    }
+    
+    const newAllGroups = [...allGroups.filter(g => g.id !== wacaMetaId), updatedMeta];
+    
+    try {
+      await dataProvider.saveProductGroups(newAllGroups);
+      setWacaMeta(updatedMeta);
+      setShowWacaDialog(false);
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return;
+      }
+      throw err;
+    }
   };
 
   const guardAgainstStaleWrite = (): boolean => {
@@ -1578,9 +1645,64 @@ export default function PurchaseRecords() {
             </span>
           )}
         </div>
-        
+      </div>
 
-
+      {/* WACA 更新資訊卡 */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 20px',
+        backgroundColor: '#f8fafc',
+        border: '1px solid #e2e8f0',
+        borderRadius: '12px',
+        marginBottom: '16px',
+        flexWrap: 'wrap',
+        gap: '12px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>📊</span>
+            <span style={{ fontSize: '14.5px', fontWeight: 700, color: '#1e293b' }}>WACA 最後更新：</span>
+            <span style={{ fontSize: '14.5px', fontWeight: 600, color: wacaMeta?.closing_date ? '#2563eb' : '#94a3b8' }}>
+              {wacaMeta?.closing_date ? wacaMeta.closing_date.replace(/-/g, '/') : '尚未更新'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '16px' }}>👤</span>
+            <span style={{ fontSize: '14.5px', fontWeight: 700, color: '#1e293b' }}>更新人：</span>
+            <span style={{ fontSize: '14.5px', fontWeight: 600, color: wacaMeta?.proxy_agent ? '#0f172a' : '#94a3b8' }}>
+              {wacaMeta?.proxy_agent || '無'}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            if (wacaMeta?.proxy_agent) {
+              const currentAgent = wacaMeta.proxy_agent as any;
+              if (['小河馬', 'Flanlove', '許願'].includes(currentAgent)) {
+                setSelectedWacaUpdater(currentAgent);
+              }
+            }
+            setShowWacaDialog(true);
+          }}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13.5px',
+            fontWeight: 600,
+            color: '#fff',
+            backgroundColor: '#2563eb',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            transition: 'background-color 0.15s ease',
+            boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)'
+          }}
+          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1d4ed8'}
+          onMouseLeave={e => e.currentTarget.style.backgroundColor = '#2563eb'}
+        >
+          更新紀錄
+        </button>
       </div>
 
       {editMode && (
@@ -2766,6 +2888,100 @@ export default function PurchaseRecords() {
         </div>
       );
     })()}
+
+      {/* WACA 更新紀錄對話框 */}
+      {showWacaDialog && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '16px'
+        }}>
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '360px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            overflow: 'hidden'
+          }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>更新 WACA 記錄</h3>
+            </div>
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>選擇更新人</label>
+                <select
+                  id="waca-updater-select"
+                  value={selectedWacaUpdater}
+                  onChange={e => setSelectedWacaUpdater(e.target.value as any)}
+                  style={{
+                    width: '100%',
+                    height: '38px',
+                    padding: '0 10px',
+                    fontSize: '14px',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    outline: 'none',
+                    backgroundColor: '#fff',
+                    color: '#0f172a'
+                  }}
+                >
+                  <option value="小河馬">小河馬</option>
+                  <option value="Flanlove">Flanlove</option>
+                  <option value="許願">許願</option>
+                </select>
+              </div>
+            </div>
+            <div style={{
+              padding: '12px 20px',
+              backgroundColor: '#f8fafc',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                onClick={() => setShowWacaDialog(false)}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  color: '#475569',
+                  backgroundColor: '#fff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleUpdateWacaMeta(selectedWacaUpdater)}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '13.5px',
+                  fontWeight: 600,
+                  color: '#fff',
+                  backgroundColor: '#2563eb',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                儲存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Floating Action Button (FAB) */}
       <button
