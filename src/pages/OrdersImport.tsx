@@ -153,6 +153,7 @@ export default function OrdersImport() {
                 myacg_item_code: gi.myacg_item_code,
                 product_title: gi.product_title,
                 variant_name: gi.raw_variant_name || '',
+                raw_variant_name: gi.raw_variant_name || '',
                 myacg_auto_quantity: 0,
                 note: '',
                 sort_order: 9999
@@ -205,6 +206,7 @@ export default function OrdersImport() {
                 myacg_item_code: sku,
                 product_title: orderDataForSku.product_title,
                 variant_name: orderDataForSku.variant_name,
+                raw_variant_name: orderDataForSku.variant_name || '',
                 myacg_auto_quantity: 0,
                 note: '',
                 sort_order: 9999,

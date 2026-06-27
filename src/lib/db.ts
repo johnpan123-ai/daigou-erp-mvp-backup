@@ -242,12 +242,12 @@ export function determineListingType(title: string): string {
 export function resolveMyacgSpecs(rawNames: string[]): Record<string, { category_label: string | null, variant_label: string }> {
   const result: Record<string, { category_label: string | null, variant_label: string }> = {};
   
-  // 1. Filter and clean names
-  const cleanNames = rawNames.map(n => (n || '').trim()).filter(Boolean);
+  // 1. Filter, clean, and deduplicate names
+  const uniqueNames = Array.from(new Set(rawNames.map(n => (n || '').trim()).filter(Boolean)));
   
   // 2. Count prefix frequencies (by word combinations)
   const prefixCounts: Record<string, number> = {};
-  cleanNames.forEach(name => {
+  uniqueNames.forEach(name => {
     const parts = name.split(/\s+/);
     // Generate prefixes from 1 word up to N-1 words
     for (let i = 1; i < parts.length; i++) {
@@ -257,7 +257,7 @@ export function resolveMyacgSpecs(rawNames: string[]): Record<string, { category
   });
 
   // 3. Find the longest prefix with count > 1 for each name
-  cleanNames.forEach(name => {
+  uniqueNames.forEach(name => {
     const parts = name.split(/\s+/);
     let bestPrefix: string | null = null;
     let maxWords = 0;
