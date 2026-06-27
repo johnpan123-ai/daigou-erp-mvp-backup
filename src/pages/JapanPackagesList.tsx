@@ -912,11 +912,11 @@ export default function JapanPackagesList() {
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            height: 120px !important;
+            height: auto !important;
             min-height: 120px !important;
-            max-height: 120px !important;
+            max-height: none !important;
             box-sizing: border-box !important;
-            gap: 0 !important;
+            gap: 8px !important;
           }
           .mobile-card-row {
             display: flex;
@@ -1436,9 +1436,29 @@ export default function JapanPackagesList() {
                 className="mobile-package-card"
                 onClick={() => navigate(`/japan-packages/${p.id}`)}
               >
-                {/* First Row: Title & Status */}
-                <div className="mobile-card-row mobile-card-header">
-                  <div className="mobile-card-title">{p.title}</div>
+                {/* Title Area (up to 2 lines) */}
+                <div style={{ width: '100%' }}>
+                  <div style={{ 
+                    fontSize: '15px', 
+                    fontWeight: 700, 
+                    color: '#0f172a',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-all',
+                    width: '100%',
+                    lineHeight: '1.4',
+                    marginBottom: '4px'
+                  }}>
+                    {p.title || '無標題包裹'}
+                  </div>
+                </div>
+
+                {/* Status Row */}
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
                   <span className={`status-pill-dashboard status-${p.status} mobile-status-pill`}>
                     <span className={`status-dot status-dot-${p.status}`}></span>
                     <span>{getStatusName(p.status)}</span>
