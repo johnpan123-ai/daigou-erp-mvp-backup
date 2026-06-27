@@ -871,27 +871,46 @@ export default function JapanPackageDetail() {
           {/* 1. 包裹資訊區 (Collapsible) */}
           <div className="mobile-pkg-info-card" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
             <div 
-              style={{ padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: mobileInfoExpanded ? '1px solid #f1f5f9' : 'none' }}
+              style={{ padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '10px', borderBottom: mobileInfoExpanded ? '1px solid #f1f5f9' : 'none' }}
               onClick={() => setMobileInfoExpanded(!mobileInfoExpanded)}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                  <Truck size={18} style={{ color: '#2563eb', flexShrink: 0 }} />
-                  <span style={{ fontWeight: 700, fontSize: '15px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pkg.title}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                  <span className={`badge ${getStatusBadgeClass(pkg.status)}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
-                    {getStatusName(pkg.status)}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
-                    {mobileInfoExpanded ? '收合 ▲' : '展開 ▼'}
-                  </span>
-                </div>
+              {/* Row 1: Title (up to 2 lines) */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0 }}>
+                <Truck size={18} style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }} />
+                <span style={{ 
+                  fontWeight: 700, 
+                  fontSize: '15px', 
+                  color: '#0f172a',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'normal',
+                  wordBreak: 'break-all',
+                  flex: 1
+                }}>
+                  {pkg.title}
+                </span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#475569', marginTop: '4px' }}>
+
+              {/* Row 2: Status Badge + Expand/Collapse Button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingLeft: '26px' }}>
+                <span className={`badge ${getStatusBadgeClass(pkg.status)}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
+                  {getStatusName(pkg.status)}
+                </span>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
+                  {mobileInfoExpanded ? '收合 ▲' : '展開 ▼'}
+                </span>
+              </div>
+
+              {/* Row 3: Progress text */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#475569', marginTop: '2px' }}>
                 <span>總進度：{checkedStats.checkedQty} / {checkedStats.totalQty} 已完成</span>
                 <span>{checkedStats.totalQty > 0 ? Math.round((checkedStats.checkedQty / checkedStats.totalQty) * 100) : 0}%</span>
               </div>
+
+              {/* Row 4: Progress Bar */}
               <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
                 <div 
                   style={{ 
