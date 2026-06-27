@@ -1438,6 +1438,60 @@ export default function PurchaseRecords() {
         >
           其他商品 ({groups.filter(isOtherProduct).length})
         </button>
+
+        {/* WACA 迷你更新資訊區塊 */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 16px',
+          fontSize: '13px',
+          color: '#475569',
+          marginLeft: isMobile ? '0' : 'auto',
+          alignSelf: 'center',
+          whiteSpace: 'nowrap',
+          borderLeft: isMobile ? 'none' : '1px solid #e2e8f0',
+          paddingLeft: isMobile ? '16px' : '24px',
+          flexShrink: 0
+        }}>
+          <span style={{ fontWeight: 600 }}>
+            {wacaMeta?.closing_date 
+              ? `WACA：${wacaMeta.closing_date.replace(/-/g, '/')}・${wacaMeta.proxy_agent || '無'}` 
+              : 'WACA：尚未更新'}
+          </span>
+          <button
+            onClick={() => {
+              if (wacaMeta?.proxy_agent) {
+                const currentAgent = wacaMeta.proxy_agent as any;
+                if (['小河馬', 'Flanlove', '許願'].includes(currentAgent)) {
+                  setSelectedWacaUpdater(currentAgent);
+                }
+              }
+              setShowWacaDialog(true);
+            }}
+            style={{
+              padding: '2px 8px',
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#2563eb',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = '#dbeafe';
+              e.currentTarget.style.color = '#1d4ed8';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = '#eff6ff';
+              e.currentTarget.style.color = '#2563eb';
+            }}
+          >
+            更新紀錄
+          </button>
+        </div>
       </div>
 
       <div style={{ 
@@ -1647,63 +1701,6 @@ export default function PurchaseRecords() {
         </div>
       </div>
 
-      {/* WACA 更新資訊卡 */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 20px',
-        backgroundColor: '#f8fafc',
-        border: '1px solid #e2e8f0',
-        borderRadius: '12px',
-        marginBottom: '16px',
-        flexWrap: 'wrap',
-        gap: '12px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>📊</span>
-            <span style={{ fontSize: '14.5px', fontWeight: 700, color: '#1e293b' }}>WACA 最後更新：</span>
-            <span style={{ fontSize: '14.5px', fontWeight: 600, color: wacaMeta?.closing_date ? '#2563eb' : '#94a3b8' }}>
-              {wacaMeta?.closing_date ? wacaMeta.closing_date.replace(/-/g, '/') : '尚未更新'}
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '16px' }}>👤</span>
-            <span style={{ fontSize: '14.5px', fontWeight: 700, color: '#1e293b' }}>更新人：</span>
-            <span style={{ fontSize: '14.5px', fontWeight: 600, color: wacaMeta?.proxy_agent ? '#0f172a' : '#94a3b8' }}>
-              {wacaMeta?.proxy_agent || '無'}
-            </span>
-          </div>
-        </div>
-        <button
-          onClick={() => {
-            if (wacaMeta?.proxy_agent) {
-              const currentAgent = wacaMeta.proxy_agent as any;
-              if (['小河馬', 'Flanlove', '許願'].includes(currentAgent)) {
-                setSelectedWacaUpdater(currentAgent);
-              }
-            }
-            setShowWacaDialog(true);
-          }}
-          style={{
-            padding: '8px 16px',
-            fontSize: '13.5px',
-            fontWeight: 600,
-            color: '#fff',
-            backgroundColor: '#2563eb',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            transition: 'background-color 0.15s ease',
-            boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)'
-          }}
-          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#1d4ed8'}
-          onMouseLeave={e => e.currentTarget.style.backgroundColor = '#2563eb'}
-        >
-          更新紀錄
-        </button>
-      </div>
 
       {editMode && (
         <div style={{
