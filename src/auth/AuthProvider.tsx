@@ -53,6 +53,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [authPending]);
 
+  // Safety timeout: Ensure loading is set to false after 4 seconds regardless of auth status
+  useEffect(() => {
+    if (loading) {
+      const timer = setTimeout(() => {
+        console.warn('[AuthProvider] Safety timeout: Force loading to false to prevent page hang');
+        setLoading(false);
+        setAuthPending(false);
+      }, 4000); // 4 seconds safety timeout
+      return () => clearTimeout(timer);
+    }
+  }, [loading]);
+
   const fetchProfile = async (userId: string) => {
     // Only query database if not in pure local mode
     if (getProviderMode() === 'local') {

@@ -236,7 +236,7 @@ export class SupabaseProvider implements IDataProvider {
     if (this.isPulled) return;
     if (this.pullPromise) return this.pullPromise;
 
-    this.pullPromise = (async () => {
+    const syncPromise = (async () => {
       try {
         try {
           console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
@@ -450,6 +450,15 @@ export class SupabaseProvider implements IDataProvider {
         this.pullPromise = null;
       }
     })();
+
+    const syncTimeout = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
+    });
+
+    this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(err => {
+      console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
+      this.isPulled = true; // Bypasses future blockages
+    });
 
     return this.pullPromise;
   }
