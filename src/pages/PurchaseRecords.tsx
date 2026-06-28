@@ -1344,7 +1344,7 @@ export default function PurchaseRecords() {
 
       <div style={{ display: 'flex', gap: isMobile ? '4px' : '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '0px', marginBottom: '16px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', width: '100%', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
         <button 
-          onClick={() => setActiveTab('all')}
+          onClick={() => { setActiveTab('all'); setSearchTerm(''); }}
           style={{
             padding: '8px 16px',
             fontSize: '14px',
@@ -1363,7 +1363,7 @@ export default function PurchaseRecords() {
           全部商品 ({groups.length})
         </button>
         <button 
-          onClick={() => setActiveTab('hololive')}
+          onClick={() => { setActiveTab('hololive'); setSearchTerm(''); }}
           style={{
             padding: '8px 16px',
             fontSize: '14px',
@@ -1382,7 +1382,7 @@ export default function PurchaseRecords() {
           Hololive商品 ({groups.filter(isHololiveProduct).length})
         </button>
         <button 
-          onClick={() => setActiveTab('vspo')}
+          onClick={() => { setActiveTab('vspo'); setSearchTerm(''); }}
           style={{
             padding: '8px 16px',
             fontSize: '14px',
@@ -1401,7 +1401,7 @@ export default function PurchaseRecords() {
           VSPO商品 ({groups.filter(isVspoProduct).length})
         </button>
         <button 
-          onClick={() => setActiveTab('proxy')}
+          onClick={() => { setActiveTab('proxy'); setSearchTerm(''); }}
           style={{
             padding: '8px 16px',
             fontSize: '14px',
@@ -1420,7 +1420,7 @@ export default function PurchaseRecords() {
           代理版商品 ({groups.filter(isProxyProduct).length})
         </button>
         <button 
-          onClick={() => setActiveTab('other')}
+          onClick={() => { setActiveTab('other'); setSearchTerm(''); }}
           style={{
             padding: '8px 16px',
             fontSize: '14px',
@@ -1504,7 +1504,7 @@ export default function PurchaseRecords() {
       }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
-            onClick={() => setSecondaryTab('progress')}
+            onClick={() => { setSecondaryTab('progress'); setSearchTerm(''); }}
             style={{
               padding: '6px 16px',
               fontSize: '13px',
@@ -1520,7 +1520,7 @@ export default function PurchaseRecords() {
             進行中 ({progressCount})
           </button>
           <button
-            onClick={() => setSecondaryTab('closed')}
+            onClick={() => { setSecondaryTab('closed'); setSearchTerm(''); }}
             style={{
               padding: '6px 16px',
               fontSize: '13px',
@@ -1536,7 +1536,7 @@ export default function PurchaseRecords() {
             已結單 ({closedCount})
           </button>
           <button
-            onClick={() => setSecondaryTab('all')}
+            onClick={() => { setSecondaryTab('all'); setSearchTerm(''); }}
             style={{
               padding: '6px 16px',
               fontSize: '13px',
@@ -1580,7 +1580,7 @@ export default function PurchaseRecords() {
                   className="select" 
                   style={{ width: '100%', height: '36px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', backgroundColor: '#fff' }} 
                   value={filterSource} 
-                  onChange={e => setFilterSource(e.target.value)}
+                  onChange={e => { setFilterSource(e.target.value); setSearchTerm(''); }}
                 >
                   <option value="all">全部</option>
                   <option value="Hololive">Hololive</option>
@@ -1595,7 +1595,7 @@ export default function PurchaseRecords() {
                   className="select" 
                   style={{ width: '100%', height: '36px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', backgroundColor: '#fff' }} 
                   value={filterType} 
-                  onChange={e => setFilterType(e.target.value)}
+                  onChange={e => { setFilterType(e.target.value); setSearchTerm(''); }}
                 >
                   <option value="all">全部</option>
                   <option value="一般預購">一般預購</option>
@@ -1627,7 +1627,7 @@ export default function PurchaseRecords() {
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品來源</span>
-              <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterSource} onChange={e => setFilterSource(e.target.value)}>
+              <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterSource} onChange={e => { setFilterSource(e.target.value); setSearchTerm(''); }}>
                 <option value="all">全部</option>
                 <option value="Hololive">Hololive</option>
                 <option value="VSPO">VSPO</option>
@@ -1637,7 +1637,7 @@ export default function PurchaseRecords() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>商品類型</span>
-              <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterType} onChange={e => setFilterType(e.target.value)}>
+              <select className="input" style={{ width: '140px', height: '36px', fontSize: '13px' }} value={filterType} onChange={e => { setFilterType(e.target.value); setSearchTerm(''); }}>
                 <option value="all">全部</option>
                 <option value="一般預購">一般預購</option>
                 <option value="現貨">現貨</option>
