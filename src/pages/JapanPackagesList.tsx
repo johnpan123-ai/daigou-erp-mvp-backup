@@ -49,13 +49,25 @@ export default function JapanPackagesList() {
 
   const openCarrierDrawer = () => {
     setShowCarrierDrawer(true);
-    setTimeout(() => setAnimateCarrierDrawer(true), 20);
   };
 
   const closeCarrierDrawer = () => {
     setAnimateCarrierDrawer(false);
     setTimeout(() => setShowCarrierDrawer(false), 220);
   };
+
+  useEffect(() => {
+    if (showCarrierDrawer) {
+      let rAFId = requestAnimationFrame(() => {
+        rAFId = requestAnimationFrame(() => {
+          setAnimateCarrierDrawer(true);
+        });
+      });
+      return () => cancelAnimationFrame(rAFId);
+    } else {
+      setAnimateCarrierDrawer(false);
+    }
+  }, [showCarrierDrawer]);
 
   const [editingPackageId, setEditingPackageId] = useState<string | null>(null);
 
@@ -153,13 +165,25 @@ export default function JapanPackagesList() {
 
   const openAddModal = () => {
     setShowAddModal(true);
-    setTimeout(() => setAnimateAddModal(true), 20);
   };
 
   const closeAddModal = () => {
     setAnimateAddModal(false);
     setTimeout(() => setShowAddModal(false), 220);
   };
+
+  useEffect(() => {
+    if (showAddModal) {
+      let rAFId = requestAnimationFrame(() => {
+        rAFId = requestAnimationFrame(() => {
+          setAnimateAddModal(true);
+        });
+      });
+      return () => cancelAnimationFrame(rAFId);
+    } else {
+      setAnimateAddModal(false);
+    }
+  }, [showAddModal]);
   const [newPackageForm, setNewPackageForm] = useState({
     title: '',
     vendor_name: '',
@@ -1200,7 +1224,7 @@ export default function JapanPackagesList() {
                 status: 'registered',
                 note: ''
               });
-              setShowAddModal(true);
+              openAddModal();
             }}
             style={{ padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}
           >

@@ -54,13 +54,25 @@ export default function PurchaseRecords() {
 
   const openWacaDialog = () => {
     setShowWacaDialog(true);
-    setTimeout(() => setAnimateWacaDialog(true), 20);
   };
 
   const closeWacaDialog = () => {
     setAnimateWacaDialog(false);
     setTimeout(() => setShowWacaDialog(false), 220);
   };
+
+  useEffect(() => {
+    if (showWacaDialog) {
+      let rAFId = requestAnimationFrame(() => {
+        rAFId = requestAnimationFrame(() => {
+          setAnimateWacaDialog(true);
+        });
+      });
+      return () => cancelAnimationFrame(rAFId);
+    } else {
+      setAnimateWacaDialog(false);
+    }
+  }, [showWacaDialog]);
   const [selectedWacaUpdater, setSelectedWacaUpdater] = useState<'小河馬' | 'Flanlove' | '許願'>('小河馬');
 
   const handleUpdateAgent = async (groupId: string, agent: string) => {
