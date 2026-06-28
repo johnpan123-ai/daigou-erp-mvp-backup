@@ -50,6 +50,17 @@ export default function PurchaseRecords() {
 
   const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(null);
   const [showWacaDialog, setShowWacaDialog] = useState<boolean>(false);
+  const [animateWacaDialog, setAnimateWacaDialog] = useState<boolean>(false);
+
+  const openWacaDialog = () => {
+    setShowWacaDialog(true);
+    setTimeout(() => setAnimateWacaDialog(true), 20);
+  };
+
+  const closeWacaDialog = () => {
+    setAnimateWacaDialog(false);
+    setTimeout(() => setShowWacaDialog(false), 220);
+  };
   const [selectedWacaUpdater, setSelectedWacaUpdater] = useState<'小河馬' | 'Flanlove' | '許願'>('小河馬');
 
   const handleUpdateAgent = async (groupId: string, agent: string) => {
@@ -823,7 +834,7 @@ export default function PurchaseRecords() {
     try {
       await dataProvider.saveProductGroups(newAllGroups);
       setWacaMeta(updatedMeta);
-      setShowWacaDialog(false);
+      closeWacaDialog();
     } catch (err) {
       if (err instanceof StaleDataError) {
         alert(err.message);
@@ -853,6 +864,16 @@ export default function PurchaseRecords() {
     setIsStale(dataProvider.checkIsStaleLive());
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && showWacaDialog) {
+        closeWacaDialog();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showWacaDialog]);
 
   const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
     if (guardAgainstStaleWrite()) return;
@@ -1467,7 +1488,7 @@ export default function PurchaseRecords() {
                   setSelectedWacaUpdater(currentAgent);
                 }
               }
-              setShowWacaDialog(true);
+              openWacaDialog();
             }}
             style={{
               padding: '2px 8px',
@@ -2888,27 +2909,15 @@ export default function PurchaseRecords() {
 
       {/* WACA 更新紀錄對話框 */}
       {showWacaDialog && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(15, 23, 42, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 99999,
-          padding: '16px'
-        }}>
-          <div style={{
-            backgroundColor: '#fff',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '360px',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-            overflow: 'hidden'
-          }}>
+        <div 
+          className={`modal-overlay ${animateWacaDialog ? 'active' : ''}`} 
+          onClick={closeWacaDialog}
+        >
+          <div 
+            className="modal-content" 
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: '360px' }}
+          >
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0' }}>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>更新 WACA 記錄</h3>
             </div>
@@ -2946,7 +2955,7 @@ export default function PurchaseRecords() {
               gap: '10px'
             }}>
               <button
-                onClick={() => setShowWacaDialog(false)}
+                onClick={closeWacaDialog}
                 style={{
                   padding: '6px 14px',
                   fontSize: '13.5px',

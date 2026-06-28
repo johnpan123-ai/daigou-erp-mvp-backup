@@ -45,6 +45,17 @@ export default function JapanPackagesList() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [carrierFilter, setCarrierFilter] = useState<string>('all');
   const [showCarrierDrawer, setShowCarrierDrawer] = useState<boolean>(false);
+  const [animateCarrierDrawer, setAnimateCarrierDrawer] = useState<boolean>(false);
+
+  const openCarrierDrawer = () => {
+    setShowCarrierDrawer(true);
+    setTimeout(() => setAnimateCarrierDrawer(true), 20);
+  };
+
+  const closeCarrierDrawer = () => {
+    setAnimateCarrierDrawer(false);
+    setTimeout(() => setShowCarrierDrawer(false), 220);
+  };
 
   const [editingPackageId, setEditingPackageId] = useState<string | null>(null);
 
@@ -67,7 +78,7 @@ export default function JapanPackagesList() {
       status: p.status || 'registered',
       note: p.note || ''
     });
-    setShowAddModal(true);
+    openAddModal();
   };
 
   const handleTrackingClick = (p: JapanPackage, e: React.MouseEvent) => {
@@ -138,6 +149,17 @@ export default function JapanPackagesList() {
 
   // Add Package Modal
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [animateAddModal, setAnimateAddModal] = useState<boolean>(false);
+
+  const openAddModal = () => {
+    setShowAddModal(true);
+    setTimeout(() => setAnimateAddModal(true), 20);
+  };
+
+  const closeAddModal = () => {
+    setAnimateAddModal(false);
+    setTimeout(() => setShowAddModal(false), 220);
+  };
   const [newPackageForm, setNewPackageForm] = useState({
     title: '',
     vendor_name: '',
@@ -154,6 +176,17 @@ export default function JapanPackagesList() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showAddModal) closeAddModal();
+        if (showCarrierDrawer) closeCarrierDrawer();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal, showCarrierDrawer]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -234,7 +267,7 @@ export default function JapanPackagesList() {
         await dataProvider.saveJapanPackages(updatedList);
         setPackages(updatedList);
         setEditingPackageId(null);
-        setShowAddModal(false);
+        closeAddModal();
         // Reset form
         setNewPackageForm({
           title: '',
@@ -272,7 +305,7 @@ export default function JapanPackagesList() {
         const updatedList = [...packages, newPkg];
         await dataProvider.saveJapanPackages(updatedList);
         setPackages(updatedList);
-        setShowAddModal(false);
+        closeAddModal();
         // Reset form
         setNewPackageForm({
           title: '',
@@ -718,28 +751,7 @@ export default function JapanPackagesList() {
           line-height: 1.6;
         }
 
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(15, 23, 42, 0.4);
-          backdrop-filter: blur(4px);
-          z-index: 1000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 16px;
-        }
-        .modal-content {
-          background: #fff;
-          border-radius: 16px;
-          width: 100%;
-          max-width: 580px;
-          box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
-          overflow: hidden;
-        }
+
         .modal-header {
           padding: 18px 24px;
           border-bottom: 1px solid #e2e8f0;
@@ -1014,33 +1026,6 @@ export default function JapanPackagesList() {
             background: #1d4ed8;
           }
 
-          /* Bottom Drawer */
-          .drawer-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(15, 23, 42, 0.4);
-            backdrop-filter: blur(4px);
-            z-index: 1001;
-            display: flex;
-            align-items: flex-end;
-          }
-          .drawer-content {
-            background: #fff;
-            border-top-left-radius: 16px;
-            border-top-right-radius: 16px;
-            width: 100%;
-            padding: 16px 20px 28px 20px;
-            box-shadow: 0 -10px 25px rgba(0,0,0,0.1);
-            animation: slideUp 0.25s ease-out;
-            box-sizing: border-box;
-          }
-          @keyframes slideUp {
-            from { transform: translateY(100%); }
-            to { transform: translateY(0); }
-          }
           .drawer-header {
             display: flex;
             justify-content: space-between;
@@ -1263,7 +1248,7 @@ export default function JapanPackagesList() {
           <div className="mobile-logistics-row">
             <button 
               className="mobile-logistics-btn"
-              onClick={() => setShowCarrierDrawer(true)}
+              onClick={openCarrierDrawer}
             >
               <span>篩選物流：{getCarrierLabel(carrierFilter)}</span>
               <ChevronRight size={16} style={{ color: '#64748b', transform: 'rotate(90deg)' }} />
@@ -1514,74 +1499,6 @@ export default function JapanPackagesList() {
               </div>
             );
           })}
-
-          {/* Floating Action Button for Mobile */}
-          <button
-            className="fab-btn"
-            onClick={() => {
-              setEditingPackageId(null);
-              setNewPackageForm({
-                title: '',
-                vendor_name: '',
-                carrier: 'ヤマト運輸 (Yamato)',
-                custom_carrier: '',
-                tracking_number: '',
-                shipped_at: '',
-                expected_arrival_at: '',
-                arrived_at: '',
-                status: 'registered',
-                note: ''
-              });
-              setShowAddModal(true);
-            }}
-            title="登記新包裹"
-          >
-            <Plus size={24} />
-          </button>
-
-          {/* Bottom Sheet Drawer for Carrier Selection */}
-          {showCarrierDrawer && (
-            <div 
-              className="drawer-overlay" 
-              onClick={() => setShowCarrierDrawer(false)}
-            >
-              <div 
-                className="drawer-content" 
-                onClick={e => e.stopPropagation()}
-              >
-                <div className="drawer-header">
-                  <span className="drawer-title">選擇物流廠商</span>
-                  <button 
-                    className="drawer-close"
-                    onClick={() => setShowCarrierDrawer(false)}
-                  >
-                    &times;
-                  </button>
-                </div>
-                <div className="drawer-body">
-                  {[
-                    { key: 'all', label: '全部物流' },
-                    { key: 'post', label: 'JP Post' },
-                    { key: 'yamato', label: 'Yamato' },
-                    { key: 'sagawa', label: 'Sagawa' },
-                    { key: 'custom', label: '其他' }
-                  ].map(item => (
-                    <button
-                      key={item.key}
-                      className={`drawer-item ${carrierFilter === item.key ? 'active' : ''}`}
-                      onClick={() => {
-                        setCarrierFilter(item.key);
-                        setShowCarrierDrawer(false);
-                      }}
-                    >
-                      <span>{item.label}</span>
-                      {carrierFilter === item.key && <CheckCircle2 size={16} style={{ color: '#2563eb' }} />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       ) : (
         // Desktop Logistics Dashboard Cards Layout
@@ -1764,16 +1681,95 @@ export default function JapanPackagesList() {
         </div>
       )}
 
+      {isMobile && (
+        <>
+          {/* Floating Action Button for Mobile */}
+          <button
+            className="fab-btn"
+            onClick={() => {
+              setEditingPackageId(null);
+              setNewPackageForm({
+                title: '',
+                vendor_name: '',
+                carrier: 'ヤマト運輸 (Yamato)',
+                custom_carrier: '',
+                tracking_number: '',
+                shipped_at: '',
+                expected_arrival_at: '',
+                arrived_at: '',
+                status: 'registered',
+                note: ''
+              });
+              openAddModal();
+            }}
+            title="登記新包裹"
+          >
+            <Plus size={24} />
+          </button>
+
+          {/* Bottom Sheet Drawer for Carrier Selection */}
+          {showCarrierDrawer && (
+            <div 
+              className={`drawer-overlay ${animateCarrierDrawer ? 'active' : ''}`} 
+              onClick={closeCarrierDrawer}
+            >
+              <div 
+                className="drawer-content" 
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="drawer-header">
+                  <span className="drawer-title">選擇物流廠商</span>
+                  <button 
+                    className="drawer-close"
+                    onClick={closeCarrierDrawer}
+                  >
+                    &times;
+                  </button>
+                </div>
+                <div className="drawer-body">
+                  {[
+                    { key: 'all', label: '全部物流' },
+                    { key: 'post', label: 'JP Post' },
+                    { key: 'yamato', label: 'Yamato' },
+                    { key: 'sagawa', label: 'Sagawa' },
+                    { key: 'custom', label: '其他' }
+                  ].map(item => (
+                    <button
+                      key={item.key}
+                      className={`drawer-item ${carrierFilter === item.key ? 'active' : ''}`}
+                      onClick={() => {
+                        setCarrierFilter(item.key);
+                        closeCarrierDrawer();
+                      }}
+                    >
+                      <span>{item.label}</span>
+                      {carrierFilter === item.key && <CheckCircle2 size={16} style={{ color: '#2563eb' }} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {/* Add / Edit Package Modal */}
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div 
+          className={`modal-overlay ${animateAddModal ? 'active' : ''}`} 
+          onClick={closeAddModal}
+        >
+          <div 
+            className="modal-content" 
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: '580px' }}
+          >
             <div className="modal-header">
               <h3 style={{ fontSize: '16px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <Plus size={18} style={{ color: '#2563eb' }} />
                 {editingPackageId ? '修改日本國內包裹資訊' : '登記日本國內新包裹'}
               </h3>
-              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowAddModal(false)}>
+              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={closeAddModal}>
                 <Plus size={18} style={{ transform: 'rotate(45deg)' }} />
               </button>
             </div>
@@ -1899,7 +1895,7 @@ export default function JapanPackagesList() {
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-outline" onClick={() => setShowAddModal(false)}>取消</button>
+                <button type="button" className="btn btn-outline" onClick={closeAddModal}>取消</button>
                 <button type="submit" className="btn btn-primary" disabled={!newPackageForm.title.trim()}>
                   {editingPackageId ? '儲存修改' : '儲存登記'}
                 </button>
