@@ -381,14 +381,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <header className="app-header">
           <div className="flex items-center gap-sm">
             {isMobile && (
-              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-                {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+              <button className="btn btn-ghost" style={{ padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+                {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
             )}
             {!isMobile && (
               <span className="text-sm font-semibold text-secondary">WorkSpace /</span>
             )}
-            <h2 style={{ fontSize: '14px', margin: 0, fontWeight: 600 }}>
+            <h2 style={{ fontSize: isMobile ? '18px' : '14px', margin: 0, fontWeight: 600 }}>
               {isMobile ? '採購工作台' : '主系統'}
             </h2>
             {!isMobile && (() => {
