@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PackageSearch, ListOrdered, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
@@ -24,21 +24,29 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
         ? location.pathname === '/inventory'
         : location.pathname.startsWith(to);
 
+  // Dynamically resize Lucide icons on mobile to 26px
+  const clonedIcon = isMobile && React.isValidElement(icon)
+    ? React.cloneElement(icon, { size: 26 } as any)
+    : icon;
+
   return (
     <Link 
       to={to} 
       onClick={onClick}
       className={`nav-item ${isActive ? 'active' : ''}`}
       style={isMobile ? {
-        height: '60px',
-        margin: '8px 0',
+        height: '64px',
+        minHeight: '64px',
+        margin: '10px 0',
         padding: '0 20px',
-        gap: '18px',
-        borderRadius: '12px'
+        gap: '22px',
+        borderRadius: '12px',
+        fontSize: '20px',
+        fontWeight: 600
       } : undefined}
     >
-      <span className="nav-icon">
-        {icon}
+      <span className="nav-icon" style={isMobile ? { width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}>
+        {clonedIcon}
       </span>
       <span className="nav-label">{label}</span>
     </Link>
@@ -186,115 +194,116 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <>
               {/* Connection Mode & Account block */}
               <div className="sidebar-mobile-auth" style={{ 
-                padding: '20px 16px', 
+                padding: '24px 20px', 
                 backgroundColor: '#f8fafc', 
                 borderRadius: '16px', 
                 border: '1px solid #e2e8f0', 
-                marginTop: '32px',
+                marginTop: '40px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '16px'
+                gap: '20px'
               }}>
-                <div className="sidebar-section-title" style={{ margin: 0, padding: 0, fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
-                  系統狀態與帳戶
-                </div>
-                
-                {/* Connection Mode Status */}
-                <div className="flex items-center justify-between text-xs" style={{ padding: '2px 0' }}>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>系統連線模式：</span>
+                {/* 系統狀態 */}
+                <div className="flex flex-col gap-xs">
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    系統狀態
+                  </span>
                   {(() => {
                     const mode = getProviderMode();
                     let modeLabel = '本地模式';
-                    let badgeColor = '#319795';
-                    let badgeBg = '#e6fffa';
-                    let badgeBorder = '#b2f5ea';
+                    let dotColor = '#10B981'; // green
 
                     if (mode === 'cloud') {
                       modeLabel = '雲端模式';
-                      badgeColor = '#6366f1';
-                      badgeBg = '#e0e7ff';
-                      badgeBorder = '#c7d2fe';
+                      dotColor = '#6366f1'; // indigo
                     } else if (mode === 'fallback') {
                       modeLabel = '備援模式';
-                      badgeColor = '#3182ce';
-                      badgeBg = '#ebf8ff';
-                      badgeBorder = '#bee3f8';
+                      dotColor = '#3b82f6'; // blue
                     }
 
                     return (
-                      <span className="badge flex items-center gap-xs" style={{ 
-                        fontSize: '11px', 
-                        padding: '2px 8px', 
-                        borderRadius: '12px', 
-                        backgroundColor: badgeBg, 
-                        color: badgeColor, 
-                        border: `1px solid ${badgeBorder}`,
-                        fontWeight: 500
-                      }}>
+                      <div className="flex items-center gap-xs" style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', marginTop: '2px' }}>
                         <span style={{ 
-                          width: '6px', 
-                          height: '6px', 
+                          width: '8px', 
+                          height: '8px', 
                           borderRadius: '50%', 
-                          backgroundColor: badgeColor, 
+                          backgroundColor: dotColor, 
                           display: 'inline-block' 
                         }}></span>
                         {modeLabel}
-                      </span>
+                      </div>
                     );
                   })()}
                 </div>
 
-                {/* User Account Info */}
+                {/* 目前身分 / 帳號資訊 */}
                 {(() => {
                   if (loading || isProfileLoading) {
                     return <div className="text-xs text-muted">載入中...</div>;
                   }
+                  
+                  const isCloud = providerMode === 'cloud' || providerMode === 'fallback';
+                  
                   if (!user) {
-                    const isCloud = providerMode === 'cloud' || providerMode === 'fallback';
                     return (
-                      <div className="flex flex-col gap-sm">
-                        <div className="flex items-center justify-between text-xs">
-                          <span style={{ color: 'var(--color-text-secondary)' }}>目前身分：</span>
-                          <div className="flex items-center gap-xs">
-                            <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-                              {isCloud ? '訪客 (雲端唯讀)' : '本地管理員'}
-                            </span>
-                            {!isCloud && (
-                              <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
-                                owner
-                              </span>
-                            )}
+                      <div className="flex flex-col gap-md">
+                        <div className="flex flex-col gap-xs">
+                          <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            目前身分
+                          </span>
+                          <div style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', marginTop: '2px' }}>
+                            {isCloud ? '訪客 (雲端唯讀)' : '本地管理員（OWNER）'}
                           </div>
                         </div>
-                        <Link to="/login" onClick={() => setIsMobileMenuOpen(false)} className="btn btn-primary" style={{ width: '100%', textAlign: 'center', padding: '10px', fontSize: '13px', color: '#fff', backgroundColor: 'var(--color-primary)', border: 'none', borderRadius: '8px', fontWeight: 600, display: 'block', textDecoration: 'none' }}>
+                        <Link 
+                          to="/login" 
+                          onClick={() => setIsMobileMenuOpen(false)} 
+                          className="btn btn-primary" 
+                          style={{ 
+                            width: '100%', 
+                            textAlign: 'center', 
+                            padding: '12px', 
+                            fontSize: '14px', 
+                            color: '#fff', 
+                            backgroundColor: 'var(--color-primary)', 
+                            border: 'none', 
+                            borderRadius: '10px', 
+                            fontWeight: 600, 
+                            display: 'block', 
+                            textDecoration: 'none',
+                            boxShadow: '0 2px 4px rgba(59, 130, 246, 0.15)'
+                          }}
+                        >
                           {isCloud ? '管理員登入' : '登入雲端'}
                         </Link>
                       </div>
                     );
                   }
+
                   return (
-                    <div className="flex flex-col gap-sm">
-                      <div className="flex items-center justify-between text-xs">
-                        <span style={{ color: 'var(--color-text-secondary)' }}>帳號資訊：</span>
-                        <span className="badge" style={{ 
-                          backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
-                          color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
-                          border: '1px solid currentColor', 
-                          padding: '1px 6px', 
-                          borderRadius: '4px', 
-                          fontSize: '10px',
-                          textTransform: 'uppercase'
-                        }}>
-                          {role || 'viewer'}
+                    <div className="flex flex-col gap-md">
+                      <div className="flex flex-col gap-xs">
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          目前身分
                         </span>
-                      </div>
-                      <div className="flex flex-col gap-3xs" style={{ lineHeight: '1.4', backgroundColor: 'rgba(0,0,0,0.02)', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <span className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                          {displayName || '已登入'}
-                        </span>
-                        <span className="text-muted text-xs" style={{ wordBreak: 'break-all', opacity: 0.8 }}>
+                        <div style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                          {displayName || user.email?.split('@')[0] || '已登入'}
+                          <span className="badge" style={{ 
+                            backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : '#e2e8f0', 
+                            color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : '#4a5568', 
+                            border: '1px solid currentColor', 
+                            padding: '2px 6px', 
+                            borderRadius: '6px', 
+                            fontSize: '10px',
+                            textTransform: 'uppercase',
+                            fontWeight: 700
+                          }}>
+                            {role || 'viewer'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b', wordBreak: 'break-all', opacity: 0.8, marginTop: '2px' }}>
                           {user.email}
-                        </span>
+                        </div>
                       </div>
                       <button 
                         onClick={() => {
@@ -302,7 +311,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                           setIsMobileMenuOpen(false);
                         }}
                         className="btn btn-ghost text-danger" 
-                        style={{ width: '100%', padding: '10px', fontSize: '13px', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
+                        style={{ 
+                          width: '100%', 
+                          padding: '12px', 
+                          fontSize: '14px', 
+                          border: '1px solid #fed7d7', 
+                          color: 'var(--color-danger)', 
+                          backgroundColor: '#fff5f5', 
+                          borderRadius: '10px', 
+                          fontWeight: 600, 
+                          cursor: 'pointer' 
+                        }}
                       >
                         登出
                       </button>
@@ -313,13 +332,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
               {/* Viewport Switcher (DevTools) */}
               <div style={{ 
-                marginTop: '24px', 
-                padding: '16px', 
+                marginTop: '20px', 
+                padding: '20px', 
                 backgroundColor: '#f1f5f9', 
                 borderRadius: '16px', 
-                border: '1px solid #e2e8f0'
+                border: '1px solid #e2e8f0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
               }}>
-                <div className="sidebar-section-title" style={{ margin: '0 0 10px 0', padding: 0, fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+                <div style={{ margin: 0, padding: 0, fontSize: '12px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   版面預覽 (開發者工具)
                 </div>
                 <div className="flex items-center gap-xs" style={{ border: '1px solid #cbd5e1', padding: '3px', borderRadius: '10px', backgroundColor: '#fff' }}>
