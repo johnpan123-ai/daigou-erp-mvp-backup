@@ -1537,7 +1537,7 @@ export default function PurchaseRecords() {
       }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
-            onClick={() => { setSecondaryTab('progress'); setSearchTerm(''); }}
+            onClick={() => { setSecondaryTab('progress'); }}
             style={{
               padding: '6px 16px',
               fontSize: '13px',
@@ -1553,7 +1553,7 @@ export default function PurchaseRecords() {
             進行中 ({progressCount})
           </button>
           <button
-            onClick={() => { setSecondaryTab('closed'); setSearchTerm(''); }}
+            onClick={() => { setSecondaryTab('closed'); }}
             style={{
               padding: '6px 16px',
               fontSize: '13px',
@@ -1569,7 +1569,7 @@ export default function PurchaseRecords() {
             已結單 ({closedCount})
           </button>
           <button
-            onClick={() => { setSecondaryTab('all'); setSearchTerm(''); }}
+            onClick={() => { setSecondaryTab('all'); }}
             style={{
               padding: '6px 16px',
               fontSize: '13px',
@@ -1647,7 +1647,7 @@ export default function PurchaseRecords() {
                 className="select" 
                 style={{ width: '100%', height: '36px', fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', backgroundColor: '#fff' }} 
                 value={sortMode} 
-                onChange={e => setSortMode(e.target.value)}
+                onChange={e => { setSortMode(e.target.value); setSearchTerm(''); }}
               >
                 <option value="closing_urgent">開單中優先 + 結單日近優先</option>
                 <option value="created_desc">建立時間 (新到舊)</option>
@@ -1684,7 +1684,7 @@ export default function PurchaseRecords() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>排序</span>
-              <select className="input" style={{ width: '220px', height: '36px', fontSize: '13px' }} value={sortMode} onChange={e => setSortMode(e.target.value)}>
+              <select className="input" style={{ width: '220px', height: '36px', fontSize: '13px' }} value={sortMode} onChange={e => { setSortMode(e.target.value); setSearchTerm(''); }}>
                 <option value="closing_urgent">開單中優先 + 結單日近優先</option>
                 <option value="created_desc">建立時間 (新到舊)</option>
                 <option value="closing_asc">結單日 (近到遠)</option>
