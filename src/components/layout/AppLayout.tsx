@@ -129,21 +129,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     <div className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''}`}>
       
       {/* Backdrop overlay for mobile drawer */}
-      {isMobile && isMobileMenuOpen && (
+      {isMobile && (
         <div 
+          className={`mobile-backdrop ${isMobileMenuOpen ? 'active' : ''}`}
           onClick={() => setIsMobileMenuOpen(false)}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: '100vw',
-            height: '100vh',
-            backgroundColor: 'rgba(0, 0, 0, 0.65)',
-            zIndex: 9998,
-            cursor: 'pointer',
-          }}
         />
       )}
 
