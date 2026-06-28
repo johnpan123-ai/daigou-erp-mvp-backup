@@ -14,7 +14,10 @@ interface ViewportContextType {
 const ViewportContext = createContext<ViewportContextType | undefined>(undefined);
 
 export function ViewportProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<ViewMode>('desktop');
+  const [mode, setMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('erp_view_mode') as ViewMode;
+    return saved || 'auto';
+  });
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   useEffect(() => {
@@ -22,6 +25,10 @@ export function ViewportProvider({ children }: { children: ReactNode }) {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('erp_view_mode', mode);
+  }, [mode]);
 
   let isMobile = false;
   let isTablet = false;

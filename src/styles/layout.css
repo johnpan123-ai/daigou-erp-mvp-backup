@@ -239,10 +239,29 @@
   }
 
   .nav-item {
-    padding: 0 18px !important;
-    gap: 12px !important;
+    height: 60px !important;
+    margin: 8px 0 !important;
+    padding: 0 20px !important;
+    gap: 18px !important;
     font-size: 15px !important;
     white-space: normal !important;
+    border-radius: 12px !important;
+    position: relative;
+  }
+
+  /* Soft divider in between mobile navigation items */
+  .app-sidebar.mobile-open .nav-item::after {
+    content: "";
+    position: absolute;
+    bottom: -9px;
+    left: 16px;
+    right: 16px;
+    height: 1px;
+    background-color: rgba(226, 232, 240, 0.8);
+  }
+
+  .app-sidebar.mobile-open .nav-item:last-of-type::after {
+    display: none;
   }
 
   .sidebar-section-title {

@@ -16,6 +16,7 @@ interface SidebarItemProps {
 
 function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
   const location = useLocation();
+  const { isMobile } = useViewport();
   const isActive = 
     (to === '/dashboard' || to === '/')
       ? (location.pathname === '/' || location.pathname === '/dashboard')
@@ -28,6 +29,13 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
       to={to} 
       onClick={onClick}
       className={`nav-item ${isActive ? 'active' : ''}`}
+      style={isMobile ? {
+        height: '60px',
+        margin: '8px 0',
+        padding: '0 20px',
+        gap: '18px',
+        borderRadius: '12px'
+      } : undefined}
     >
       <span className="nav-icon">
         {icon}
@@ -175,131 +183,153 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           {isMobile && (
-            <div className="sidebar-mobile-auth" style={{ padding: '16px 8px', borderTop: '1px solid var(--color-border)', marginTop: '20px' }}>
-              <div className="sidebar-section-title" style={{ margin: '0 0 12px 0', padding: 0 }}>系統狀態與帳戶</div>
-              
-              {/* Connection Mode Status */}
-              <div className="flex items-center justify-between text-xs" style={{ marginBottom: '12px', padding: '4px 0' }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>系統連線模式：</span>
+            <>
+              {/* Connection Mode & Account block */}
+              <div className="sidebar-mobile-auth" style={{ 
+                padding: '20px 16px', 
+                backgroundColor: '#f8fafc', 
+                borderRadius: '16px', 
+                border: '1px solid #e2e8f0', 
+                marginTop: '32px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px'
+              }}>
+                <div className="sidebar-section-title" style={{ margin: 0, padding: 0, fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                  系統狀態與帳戶
+                </div>
+                
+                {/* Connection Mode Status */}
+                <div className="flex items-center justify-between text-xs" style={{ padding: '2px 0' }}>
+                  <span style={{ color: 'var(--color-text-secondary)' }}>系統連線模式：</span>
+                  {(() => {
+                    const mode = getProviderMode();
+                    let modeLabel = '本地模式';
+                    let badgeColor = '#319795';
+                    let badgeBg = '#e6fffa';
+                    let badgeBorder = '#b2f5ea';
+
+                    if (mode === 'cloud') {
+                      modeLabel = '雲端模式';
+                      badgeColor = '#6366f1';
+                      badgeBg = '#e0e7ff';
+                      badgeBorder = '#c7d2fe';
+                    } else if (mode === 'fallback') {
+                      modeLabel = '備援模式';
+                      badgeColor = '#3182ce';
+                      badgeBg = '#ebf8ff';
+                      badgeBorder = '#bee3f8';
+                    }
+
+                    return (
+                      <span className="badge flex items-center gap-xs" style={{ 
+                        fontSize: '11px', 
+                        padding: '2px 8px', 
+                        borderRadius: '12px', 
+                        backgroundColor: badgeBg, 
+                        color: badgeColor, 
+                        border: `1px solid ${badgeBorder}`,
+                        fontWeight: 500
+                      }}>
+                        <span style={{ 
+                          width: '6px', 
+                          height: '6px', 
+                          borderRadius: '50%', 
+                          backgroundColor: badgeColor, 
+                          display: 'inline-block' 
+                        }}></span>
+                        {modeLabel}
+                      </span>
+                    );
+                  })()}
+                </div>
+
+                {/* User Account Info */}
                 {(() => {
-                  const mode = getProviderMode();
-                  let modeLabel = '本地模式';
-                  let badgeColor = '#319795';
-                  let badgeBg = '#e6fffa';
-                  let badgeBorder = '#b2f5ea';
-
-                  if (mode === 'cloud') {
-                    modeLabel = '雲端模式';
-                    badgeColor = '#6366f1';
-                    badgeBg = '#e0e7ff';
-                    badgeBorder = '#c7d2fe';
-                  } else if (mode === 'fallback') {
-                    modeLabel = '備援模式';
-                    badgeColor = '#3182ce';
-                    badgeBg = '#ebf8ff';
-                    badgeBorder = '#bee3f8';
+                  if (loading || isProfileLoading) {
+                    return <div className="text-xs text-muted">載入中...</div>;
                   }
-
+                  if (!user) {
+                    const isCloud = providerMode === 'cloud' || providerMode === 'fallback';
+                    return (
+                      <div className="flex flex-col gap-sm">
+                        <div className="flex items-center justify-between text-xs">
+                          <span style={{ color: 'var(--color-text-secondary)' }}>目前身分：</span>
+                          <div className="flex items-center gap-xs">
+                            <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
+                              {isCloud ? '訪客 (雲端唯讀)' : '本地管理員'}
+                            </span>
+                            {!isCloud && (
+                              <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
+                                owner
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <Link to="/login" onClick={() => setIsMobileMenuOpen(false)} className="btn btn-primary" style={{ width: '100%', textAlign: 'center', padding: '10px', fontSize: '13px', color: '#fff', backgroundColor: 'var(--color-primary)', border: 'none', borderRadius: '8px', fontWeight: 600, display: 'block', textDecoration: 'none' }}>
+                          {isCloud ? '管理員登入' : '登入雲端'}
+                        </Link>
+                      </div>
+                    );
+                  }
                   return (
-                    <span className="badge flex items-center gap-xs" style={{ 
-                      fontSize: '11px', 
-                      padding: '2px 8px', 
-                      borderRadius: '12px', 
-                      backgroundColor: badgeBg, 
-                      color: badgeColor, 
-                      border: `1px solid ${badgeBorder}`,
-                      fontWeight: 500
-                    }}>
-                      <span style={{ 
-                        width: '6px', 
-                        height: '6px', 
-                        borderRadius: '50%', 
-                        backgroundColor: badgeColor, 
-                        display: 'inline-block' 
-                      }}></span>
-                      {modeLabel}
-                    </span>
+                    <div className="flex flex-col gap-sm">
+                      <div className="flex items-center justify-between text-xs">
+                        <span style={{ color: 'var(--color-text-secondary)' }}>帳號資訊：</span>
+                        <span className="badge" style={{ 
+                          backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
+                          color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
+                          border: '1px solid currentColor', 
+                          padding: '1px 6px', 
+                          borderRadius: '4px', 
+                          fontSize: '10px',
+                          textTransform: 'uppercase'
+                        }}>
+                          {role || 'viewer'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-3xs" style={{ lineHeight: '1.4', backgroundColor: 'rgba(0,0,0,0.02)', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <span className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                          {displayName || '已登入'}
+                        </span>
+                        <span className="text-muted text-xs" style={{ wordBreak: 'break-all', opacity: 0.8 }}>
+                          {user.email}
+                        </span>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          signOut();
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className="btn btn-ghost text-danger" 
+                        style={{ width: '100%', padding: '10px', fontSize: '13px', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        登出
+                      </button>
+                    </div>
                   );
                 })()}
               </div>
 
-              {/* User Account Info */}
-              {(() => {
-                if (loading || isProfileLoading) {
-                  return <div className="text-xs text-muted">載入中...</div>;
-                }
-                if (!user) {
-                  const isCloud = providerMode === 'cloud' || providerMode === 'fallback';
-                  return (
-                    <div className="flex flex-col gap-sm">
-                      <div className="flex items-center justify-between text-xs">
-                        <span style={{ color: 'var(--color-text-secondary)' }}>目前身分：</span>
-                        <div className="flex items-center gap-xs">
-                          <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-                            {isCloud ? '訪客 (雲端唯讀)' : '本地管理員'}
-                          </span>
-                          {!isCloud && (
-                            <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
-                              owner
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <Link to="/login" onClick={() => setIsMobileMenuOpen(false)} className="btn btn-primary" style={{ width: '100%', textAlign: 'center', padding: '8px', fontSize: '13px', color: '#fff', backgroundColor: 'var(--color-primary)', border: 'none', borderRadius: '6px', fontWeight: 600, display: 'block' }}>
-                        {isCloud ? '管理員登入' : '登入雲端'}
-                      </Link>
-                    </div>
-                  );
-                }
-                return (
-                  <div className="flex flex-col gap-sm">
-                    <div className="flex items-center justify-between text-xs">
-                      <span style={{ color: 'var(--color-text-secondary)' }}>帳號資訊：</span>
-                      <span className="badge" style={{ 
-                        backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
-                        color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
-                        border: '1px solid currentColor', 
-                        padding: '1px 6px', 
-                        borderRadius: '4px', 
-                        fontSize: '10px',
-                        textTransform: 'uppercase'
-                      }}>
-                        {role || 'viewer'}
-                      </span>
-                    </div>
-                    <div className="flex flex-col gap-3xs" style={{ lineHeight: '1.4', backgroundColor: 'rgba(0,0,0,0.02)', padding: '8px', borderRadius: '6px' }}>
-                      <span className="font-semibold text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                        {displayName || '已登入'}
-                      </span>
-                      <span className="text-muted text-xs" style={{ wordBreak: 'break-all' }}>
-                        {user.email}
-                      </span>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        signOut();
-                        setIsMobileMenuOpen(false);
-                      }}
-                      className="btn btn-ghost text-danger" 
-                      style={{ width: '100%', padding: '8px', fontSize: '13px', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5', borderRadius: '6px' }}
-                    >
-                      登出
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {/* Viewport Switcher */}
-              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' }}>
-                <div className="sidebar-section-title" style={{ margin: '0 0 8px 0', padding: 0 }}>版面預覽 (開發者工具)</div>
-                <div className="flex items-center gap-xs" style={{ border: '1px solid var(--color-border)', padding: '2px', borderRadius: 'var(--radius-sm)' }}>
+              {/* Viewport Switcher (DevTools) */}
+              <div style={{ 
+                marginTop: '24px', 
+                padding: '16px', 
+                backgroundColor: '#f1f5f9', 
+                borderRadius: '16px', 
+                border: '1px solid #e2e8f0'
+              }}>
+                <div className="sidebar-section-title" style={{ margin: '0 0 10px 0', padding: 0, fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+                  版面預覽 (開發者工具)
+                </div>
+                <div className="flex items-center gap-xs" style={{ border: '1px solid #cbd5e1', padding: '3px', borderRadius: '10px', backgroundColor: '#fff' }}>
                   <button 
                     onClick={() => {
                       setMode('auto');
                       setIsMobileMenuOpen(false);
                     }} 
                     className={`btn ${mode === 'auto' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ flex: 1, padding: '6px 4px', borderRadius: '4px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                    style={{ flex: 1, padding: '8px 4px', borderRadius: '6px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', border: 'none', cursor: 'pointer', backgroundColor: mode === 'auto' ? 'var(--color-primary)' : 'transparent', color: mode === 'auto' ? '#fff' : 'var(--color-text-secondary)' }}
                     title="自動偵測 (Auto)"
                   >
                     <Layout size={12} /> <span>Auto</span>
@@ -310,7 +340,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       setIsMobileMenuOpen(false);
                     }} 
                     className={`btn ${mode === 'desktop' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ flex: 1, padding: '6px 4px', borderRadius: '4px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                    style={{ flex: 1, padding: '8px 4px', borderRadius: '6px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', border: 'none', cursor: 'pointer', backgroundColor: mode === 'desktop' ? 'var(--color-primary)' : 'transparent', color: mode === 'desktop' ? '#fff' : 'var(--color-text-secondary)' }}
                     title="強制桌機版"
                   >
                     <Monitor size={12} /> <span>Desktop</span>
@@ -321,14 +351,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       setIsMobileMenuOpen(false);
                     }} 
                     className={`btn ${mode === 'mobile' ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ flex: 1, padding: '6px 4px', borderRadius: '4px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                    style={{ flex: 1, padding: '8px 4px', borderRadius: '6px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', border: 'none', cursor: 'pointer', backgroundColor: mode === 'mobile' ? 'var(--color-primary)' : 'transparent', color: mode === 'mobile' ? '#fff' : 'var(--color-text-secondary)' }}
                     title="強制手機版"
                   >
                     <Smartphone size={12} /> <span>Mobile</span>
                   </button>
                 </div>
               </div>
-            </div>
+            </>
           )}
         </nav>
       </aside>
