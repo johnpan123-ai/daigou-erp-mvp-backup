@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { PackageSearch, ListOrdered, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
@@ -166,9 +166,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {user && canViewPage('/inventory') && (
             <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="商品清單匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )}
-          {canViewPage('/orders-import') && (
+          {/* Hiding 訂單快速匯入 per request, but keeping code/page intact */}
+          {/* {canViewPage('/orders-import') && (
             <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
-          )}
+          )} */}
           <SidebarItem to="/purchase-records" icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/purchasing') && (
             <SidebarItem to="/purchasing" icon={<FileText size={20} />} label="採購總表" onClick={() => setIsMobileMenuOpen(false)} />
@@ -176,6 +177,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {canViewPage('/japan-packages') && (
             <SidebarItem to="/japan-packages" icon={<Truck size={20} />} label="日本包裹管理" onClick={() => setIsMobileMenuOpen(false)} />
           )}
+          <SidebarItem to="/unlisted-items" icon={<Archive size={20} />} label="待下架商品" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/settings') && (
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
           )}

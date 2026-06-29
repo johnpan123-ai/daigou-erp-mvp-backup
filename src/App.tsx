@@ -12,6 +12,7 @@ import JapanPackagesList from './pages/JapanPackagesList';
 import JapanPackageDetail from './pages/JapanPackageDetail';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import UnlistedItems from './pages/UnlistedItems';
 
 function App() {
   return (
@@ -34,6 +35,7 @@ function App() {
               <Route path="/japan-packages" element={<JapanPackagesList />} />
               <Route path="/japan-packages/:id" element={<JapanPackageDetail />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/unlisted-items" element={<UnlistedItems />} />
               <Route path="/login" element={<Login />} />
             </Routes>
           </AppLayout>
