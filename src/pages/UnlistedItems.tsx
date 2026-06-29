@@ -45,7 +45,8 @@ export default function UnlistedItems() {
 
   const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
     'erp_unlisted_col_widths',
-    DEFAULT_COL_WIDTHS
+    DEFAULT_COL_WIDTHS,
+    ['name', 'closingDate', 'daysOverdue', 'source', 'category']
   );
 
   // Load and process data
@@ -814,8 +815,8 @@ export default function UnlistedItems() {
                     <div className="resizer-handle" onMouseDown={e => handleMouseDown('daysOverdue', e)} />
                   </div>
                 </th>
-                <th style={{ width: `${colWidths.source}px` }}>
-                  <div className="th-inner">
+                <th style={{ width: `${colWidths.source}px`, textAlign: 'center' }}>
+                  <div className="th-inner justify-center">
                     <span>商品來源</span>
                     <div className="resizer-handle" onMouseDown={e => handleMouseDown('source', e)} />
                   </div>

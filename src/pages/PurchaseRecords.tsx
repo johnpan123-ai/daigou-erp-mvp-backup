@@ -224,7 +224,8 @@ export default function PurchaseRecords() {
 
   const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
     'erp_purchase_records_col_widths',
-    DEFAULT_COL_WIDTHS
+    DEFAULT_COL_WIDTHS,
+    ['title', 'myacg', 'waca', 'privateOrder', 'totalDemand', 'purchased', 'gap', 'closingDate', 'releaseMonth', 'productUrl']
   );
 
   const navigate = useNavigate();

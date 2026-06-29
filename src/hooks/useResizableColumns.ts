@@ -1,6 +1,10 @@
 import { useState } from 'react';
 
-export function useResizableColumns(storageKey: string, defaultWidths: Record<string, number>) {
+export function useResizableColumns(
+  storageKey: string,
+  defaultWidths: Record<string, number>,
+  columnOrder: string[]
+) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem(storageKey);
     if (saved) {
@@ -24,13 +28,41 @@ export function useResizableColumns(storageKey: string, defaultWidths: Record<st
 
     const startWidth = colWidths[colKey] || defaultWidths[colKey] || renderedWidth || 150;
 
+    // Find the adjacent column in columnOrder
+    const colIndex = columnOrder.indexOf(colKey);
+    const nextColKey = colIndex !== -1 && colIndex < columnOrder.length - 1 ? columnOrder[colIndex + 1] : null;
+
+    // Find next th to get its rendered width if not set
+    let nextRenderedWidth = 0;
+    if (nextColKey && th && th.nextElementSibling) {
+      nextRenderedWidth = (th.nextElementSibling as HTMLElement).offsetWidth;
+    }
+
+    const startNextWidth = nextColKey
+      ? (colWidths[nextColKey] || defaultWidths[nextColKey] || nextRenderedWidth || 100)
+      : 0;
+
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const dx = moveEvent.clientX - startX;
-      const newWidth = Math.max(50, startWidth + dx);
-      setColWidths(prev => ({
-        ...prev,
-        [colKey]: newWidth
-      }));
+      let newWidth = Math.max(50, startWidth + dx);
+
+      if (nextColKey) {
+        const actualDx = newWidth - startWidth;
+        const newNextWidth = Math.max(50, startNextWidth - actualDx);
+        const finalActualDx = startNextWidth - newNextWidth;
+        newWidth = startWidth + finalActualDx;
+
+        setColWidths(prev => ({
+          ...prev,
+          [colKey]: newWidth,
+          [nextColKey]: newNextWidth
+        }));
+      } else {
+        setColWidths(prev => ({
+          ...prev,
+          [colKey]: newWidth
+        }));
+      }
     };
 
     const handleMouseUp = () => {
