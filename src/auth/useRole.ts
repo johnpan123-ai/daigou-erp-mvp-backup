@@ -49,11 +49,11 @@ export function useRole(): UserRole {
     canViewPage: (path: string) => {
       // Unauthenticated (role is null)
       if (!role) {
-        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/login';
+        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/unlisted-items' || path === '/login';
       }
       // Viewer
       if (role === 'viewer') {
-        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/purchasing' || path === '/login' || path === '/japan-packages' || path.startsWith('/japan-packages/');
+        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/purchasing' || path === '/login' || path === '/japan-packages' || path.startsWith('/japan-packages/') || path === '/unlisted-items';
       }
       // Helper (cannot view settings)
       if (role === 'helper') {
