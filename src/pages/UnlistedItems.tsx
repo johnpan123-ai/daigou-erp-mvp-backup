@@ -29,8 +29,9 @@ const DEFAULT_COL_WIDTHS = {
   name: 450,
   closingDate: 130,
   daysOverdue: 110,
-  purchaseInfo: 150,
-  purchaseStatus: 140
+  source: 100,
+  hitSkuCount: 160,
+  category: 120
 };
 
 export default function UnlistedItems() {
@@ -700,22 +701,38 @@ export default function UnlistedItems() {
                     </span>
                   </div>
                 </div>
+
+                <div className="mobile-card-detail-item">
+                  <span className="mobile-card-detail-label">來源</span>
+                  <div className="mobile-card-detail-value">
+                    <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`}>
+                      {item.source}
+                    </span>
+                  </div>
+                </div>
+                <div className="mobile-card-detail-item">
+                  <span className="mobile-card-detail-label">分類</span>
+                  <span className="mobile-card-detail-value">{item.category}</span>
+                </div>
                 
                 <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
-                  <span className="mobile-card-detail-label">採購狀態</span>
-                  <span className="mobile-card-detail-value" style={{ 
-                    fontWeight: 600,
-                    color: item.gap === 0 ? '#166534' : item.purchased > 0 ? '#b45309' : '#dc2626'
-                  }}>
-                    {item.gap === 0 ? '🟢 已採購完成' : item.purchased > 0 ? '🟡 部分採購' : '🔴 尚未採購'}
-                  </span>
-                </div>
-
-                <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
-                  <span className="mobile-card-detail-label">採購資訊</span>
-                  <span className="mobile-card-detail-value" style={{ color: '#475569' }}>
-                    需求：{item.totalDemand} │ 已採購：{item.purchased} │ 缺口：<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
-                  </span>
+                  <span className="mobile-card-detail-label">採購狀態與資訊</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                    <span style={{ 
+                      fontSize: '11px', 
+                      fontWeight: 600, 
+                      color: item.gap === 0 ? '#15803d' : item.purchased > 0 ? '#b45309' : '#b91c1c', 
+                      backgroundColor: item.gap === 0 ? '#f0fdf4' : item.purchased > 0 ? '#fef3c7' : '#fef2f2', 
+                      padding: '2px 8px', 
+                      borderRadius: '4px',
+                      border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`
+                    }}>
+                      {item.gap === 0 ? '已採購完成' : item.purchased > 0 ? '部分採購' : '尚未採購'}
+                    </span>
+                    <span style={{ fontSize: '12px', color: '#475569' }}>
+                      需求{item.totalDemand} │ 已採購{item.purchased} │ 缺<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
+                    </span>
+                  </div>
                 </div>
 
                 <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
@@ -738,7 +755,7 @@ export default function UnlistedItems() {
                       marginTop: '4px'
                     }}
                   >
-                    {expandedGroupIds.has(item.id) ? '收合規格明細 ▲' : `查看規格與來源明細 (${item.hitSkus.length}) ▼`}
+                    {expandedGroupIds.has(item.id) ? '收合規格明細 ▲' : `查看命中規格 (${item.hitSkus.length}) ▼`}
                   </button>
                   {expandedGroupIds.has(item.id) && (
                     <div style={{ 
@@ -751,10 +768,6 @@ export default function UnlistedItems() {
                       flexDirection: 'column',
                       gap: '6px'
                     }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', borderBottom: '1px dashed #cbd5e1', paddingBottom: '6px', marginBottom: '6px' }}>
-                        <span>來源: {item.source}</span>
-                        <span>分類: {item.category}</span>
-                      </div>
                       {item.hitSkus.map(sku => (
                         <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'monospace' }}>
                           <span style={{ color: '#2563eb', fontWeight: 600 }}>{sku.sku}</span>
@@ -803,16 +816,22 @@ export default function UnlistedItems() {
                     <div className="resizer-handle" onMouseDown={e => handleMouseDown('daysOverdue', e)} />
                   </div>
                 </th>
-                <th style={{ width: `${colWidths.purchaseInfo}px` }}>
+                <th style={{ width: `${colWidths.source}px` }}>
                   <div className="th-inner">
-                    <span>採購資訊 (需求/已買/缺口)</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('purchaseInfo', e)} />
+                    <span>商品來源</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('source', e)} />
                   </div>
                 </th>
-                <th style={{ width: `${colWidths.purchaseStatus}px` }}>
+                <th style={{ width: `${colWidths.hitSkuCount}px` }}>
                   <div className="th-inner">
-                    <span>採購狀態</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('purchaseStatus', e)} />
+                    <span>最新 Catalog 命中 SKU 數</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('hitSkuCount', e)} />
+                  </div>
+                </th>
+                <th style={{ width: `${colWidths.category}px` }}>
+                  <div className="th-inner">
+                    <span>分類</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('category', e)} />
                   </div>
                 </th>
               </tr>
@@ -829,51 +848,73 @@ export default function UnlistedItems() {
                       />
                     </td>
                     <td style={{ fontWeight: 600, color: '#0f172a', verticalAlign: 'middle' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <button 
-                          onClick={() => toggleExpandGroup(item.id)}
-                          style={{ 
-                            border: 'none', 
-                            background: 'none', 
-                            cursor: 'pointer', 
-                            padding: '4px',
-                            color: '#64748b', 
-                            fontSize: '11px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                        >
-                          {expandedGroupIds.has(item.id) ? '▼' : '▶'}
-                        </button>
-                        <span>{normalizeProductTitle(item.name)}</span>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
-                          <button
-                            onClick={() => handleCopyItemName(item.id, item.name)}
-                            title="複製商品名稱"
-                            style={{
-                              border: 'none',
-                              background: 'none',
-                              cursor: 'pointer',
-                              padding: '2px',
-                              color: copiedItemId === item.id ? '#10b981' : '#94a3b8',
-                              display: 'inline-flex',
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button 
+                            onClick={() => toggleExpandGroup(item.id)}
+                            style={{ 
+                              border: 'none', 
+                              background: 'none', 
+                              cursor: 'pointer', 
+                              padding: '4px',
+                              color: '#64748b', 
+                              fontSize: '11px',
+                              display: 'flex',
                               alignItems: 'center'
                             }}
                           >
-                            {copiedItemId === item.id ? <Check size={14} /> : <Copy size={14} />}
+                            {expandedGroupIds.has(item.id) ? '▼' : '▶'}
                           </button>
-                          <Link
-                            to={`/purchase-records/${item.id}`}
-                            title="前往訂購紀錄表詳細資訊"
-                            style={{
-                              color: '#3b82f6',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              padding: '2px'
-                            }}
-                          >
-                            <ExternalLink size={14} />
-                          </Link>
+                          <span>{normalizeProductTitle(item.name)}</span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+                            <button
+                              onClick={() => handleCopyItemName(item.id, item.name)}
+                              title="複製商品名稱"
+                              style={{
+                                border: 'none',
+                                background: 'none',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                color: copiedItemId === item.id ? '#10b981' : '#94a3b8',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                            >
+                              {copiedItemId === item.id ? <Check size={14} /> : <Copy size={14} />}
+                            </button>
+                            <Link
+                              to={`/purchase-records/${item.id}`}
+                              title="前往訂購紀錄表詳細資訊"
+                              style={{
+                                color: '#3b82f6',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '2px'
+                              }}
+                            >
+                              <ExternalLink size={14} />
+                            </Link>
+                          </div>
+                        </div>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', fontSize: '12px', fontWeight: 500 }}>
+                          <span style={{ 
+                            fontSize: '11px', 
+                            fontWeight: 600, 
+                            color: item.gap === 0 ? '#15803d' : item.purchased > 0 ? '#b45309' : '#b91c1c', 
+                            backgroundColor: item.gap === 0 ? '#f0fdf4' : item.purchased > 0 ? '#fef3c7' : '#fef2f2', 
+                            padding: '2px 8px', 
+                            borderRadius: '4px',
+                            border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            {item.gap === 0 ? '已採購完成' : item.purchased > 0 ? '部分採購' : '尚未採購'}
+                          </span>
+                          <span style={{ color: '#64748b' }}>
+                            需求{item.totalDemand} │ 已採購{item.purchased} │ 缺<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
+                          </span>
                         </div>
                       </div>
                     </td>
@@ -884,52 +925,21 @@ export default function UnlistedItems() {
                         逾期 {item.daysOverdue} 天
                       </span>
                     </td>
-                    <td style={{ padding: '8px 12px', fontSize: '13px', color: '#334155', lineHeight: '1.5', verticalAlign: 'middle' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <div>需求：<strong>{item.totalDemand}</strong></div>
-                        <div>已採購：<span style={{ color: '#64748b' }}>{item.purchased}</span></div>
-                        <div>缺口：<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong></div>
-                      </div>
-                    </td>
                     <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                      <span style={{ 
-                        fontSize: '11px', 
-                        fontWeight: 600, 
-                        color: item.gap === 0 ? '#15803d' : item.purchased > 0 ? '#b45309' : '#b91c1c', 
-                        backgroundColor: item.gap === 0 ? '#f0fdf4' : item.purchased > 0 ? '#fef3c7' : '#fef2f2', 
-                        padding: '2px 8px', 
-                        borderRadius: '4px',
-                        border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        {item.gap === 0 ? '🟢 已採購完成' : item.purchased > 0 ? '🟡 部分採購' : '🔴 尚未採購'}
+                      <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {item.source}
                       </span>
                     </td>
+                    <td style={{ textAlign: 'center', verticalAlign: 'middle', fontWeight: 600, color: '#1e293b' }}>
+                      {item.hitSkus.length} 筆
+                    </td>
+                    <td style={{ verticalAlign: 'middle' }}>{item.category}</td>
                   </tr>
                   {expandedGroupIds.has(item.id) && (
                     <tr style={{ backgroundColor: '#f8fafc' }}>
                       <td></td>
-                      <td colSpan={5} style={{ padding: '8px 16px' }}>
+                      <td colSpan={6} style={{ padding: '8px 16px' }}>
                         <div style={{ padding: '12px 16px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
-                          <div style={{ display: 'flex', gap: '24px', marginBottom: '10px', fontSize: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-                            <div>
-                              <span style={{ color: '#64748b', marginRight: '6px' }}>商品來源:</span>
-                              <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`} style={{ display: 'inline-flex' }}>
-                                {item.source}
-                              </span>
-                            </div>
-                            <div>
-                              <span style={{ color: '#64748b', marginRight: '6px' }}>分類:</span>
-                              <span style={{ fontWeight: 600, color: '#334155' }}>{item.category}</span>
-                            </div>
-                            <div>
-                              <span style={{ color: '#64748b', marginRight: '6px' }}>最新 Catalog 命中規格數:</span>
-                              <span style={{ fontWeight: 700, color: '#2563eb' }}>{item.hitSkus.length} 筆</span>
-                            </div>
-                          </div>
-
                           <div style={{ fontWeight: 600, fontSize: '12px', color: '#475569', marginBottom: '6px' }}>
                             🔍 命中最新 Catalog 規格清單：
                           </div>
