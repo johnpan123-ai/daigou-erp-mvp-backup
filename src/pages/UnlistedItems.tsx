@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw } from 'lucide-react';
+import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
-import { calculateGroupDemandAndPurchased } from '../lib/db';
+import { calculateGroupDemandAndPurchased, normalizeProductTitle } from '../lib/db';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 
 interface UnlistedItemSku {
@@ -160,7 +161,7 @@ export default function UnlistedItems() {
 
           unlistedList.push({
             id: group.id,
-            name: group.title,
+            name: group.normalized_title || group.title,
             closingDate: group.closing_date,
             daysOverdue,
             source,
@@ -258,13 +259,26 @@ export default function UnlistedItems() {
   const isAllSelected = filteredItems.length > 0 && selectedIds.size === filteredItems.length;
   const isSomeSelected = selectedIds.size > 0 && selectedIds.size < filteredItems.length;
 
+  const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
+
+  const handleCopyItemName = async (itemId: string, name: string) => {
+    try {
+      const cleanName = normalizeProductTitle(name);
+      await navigator.clipboard.writeText(cleanName);
+      setCopiedItemId(itemId);
+      setTimeout(() => setCopiedItemId(current => current === itemId ? null : current), 1000);
+    } catch (err) {
+      console.error('[Copy Item Error]:', err);
+    }
+  };
+
   // Copy selected to clipboard
   const handleCopySelected = async () => {
     if (selectedIds.size === 0) return;
     const selectedItems = items.filter(item => selectedIds.has(item.id));
     
     // Format: Product Name (Group Title)
-    const textToCopy = selectedItems.map(item => item.name).join('\n');
+    const textToCopy = selectedItems.map(item => normalizeProductTitle(item.name)).join('\n');
 
     try {
       await navigator.clipboard.writeText(textToCopy);
@@ -637,7 +651,38 @@ export default function UnlistedItems() {
                   style={{ width: '18px', height: '18px', marginTop: '2px' }}
                 />
                 <div style={{ flex: 1, marginLeft: '10px' }}>
-                  <div className="mobile-card-title">{item.name}</div>
+                  <div className="mobile-card-title" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <span>{normalizeProductTitle(item.name)}</span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        onClick={() => handleCopyItemName(item.id, item.name)}
+                        title="複製商品名稱"
+                        style={{
+                          border: 'none',
+                          background: 'none',
+                          cursor: 'pointer',
+                          padding: '2px',
+                          color: copiedItemId === item.id ? '#10b981' : '#94a3b8',
+                          display: 'inline-flex',
+                          alignItems: 'center'
+                        }}
+                      >
+                        {copiedItemId === item.id ? <Check size={12} /> : <Copy size={12} />}
+                      </button>
+                      <Link
+                        to={`/purchase-records/${item.id}`}
+                        title="前往訂購紀錄表詳細資訊"
+                        style={{
+                          color: '#3b82f6',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '2px'
+                        }}
+                      >
+                        <ExternalLink size={12} />
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               </div>
               
@@ -776,14 +821,14 @@ export default function UnlistedItems() {
               {filteredItems.map(item => (
                 <Fragment key={item.id}>
                   <tr>
-                    <td style={{ textAlign: 'center' }}>
+                    <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                       <input 
                         type="checkbox"
                         checked={selectedIds.has(item.id)}
                         onChange={() => handleToggleSelect(item.id)}
                       />
                     </td>
-                    <td style={{ fontWeight: 600, color: '#0f172a' }}>
+                    <td style={{ fontWeight: 600, color: '#0f172a', verticalAlign: 'middle' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <button 
                           onClick={() => toggleExpandGroup(item.id)}
@@ -800,24 +845,53 @@ export default function UnlistedItems() {
                         >
                           {expandedGroupIds.has(item.id) ? '▼' : '▶'}
                         </button>
-                        <span>{item.name}</span>
+                        <span>{normalizeProductTitle(item.name)}</span>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+                          <button
+                            onClick={() => handleCopyItemName(item.id, item.name)}
+                            title="複製商品名稱"
+                            style={{
+                              border: 'none',
+                              background: 'none',
+                              cursor: 'pointer',
+                              padding: '2px',
+                              color: copiedItemId === item.id ? '#10b981' : '#94a3b8',
+                              display: 'inline-flex',
+                              alignItems: 'center'
+                            }}
+                          >
+                            {copiedItemId === item.id ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                          <Link
+                            to={`/purchase-records/${item.id}`}
+                            title="前往訂購紀錄表詳細資訊"
+                            style={{
+                              color: '#3b82f6',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '2px'
+                            }}
+                          >
+                            <ExternalLink size={14} />
+                          </Link>
+                        </div>
                       </div>
                     </td>
-                    <td>{item.closingDate}</td>
-                    <td>
+                    <td style={{ verticalAlign: 'middle' }}>{item.closingDate}</td>
+                    <td style={{ verticalAlign: 'middle' }}>
                       <span className="badge-overdue">
                         <AlertTriangle size={12} />
                         逾期 {item.daysOverdue} 天
                       </span>
                     </td>
-                    <td style={{ padding: '8px 12px', fontSize: '13px', color: '#334155', lineHeight: '1.5' }}>
+                    <td style={{ padding: '8px 12px', fontSize: '13px', color: '#334155', lineHeight: '1.5', verticalAlign: 'middle' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <div>需求：<strong>{item.totalDemand}</strong></div>
                         <div>已採購：<span style={{ color: '#64748b' }}>{item.purchased}</span></div>
                         <div>缺口：<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong></div>
                       </div>
                     </td>
-                    <td style={{ textAlign: 'center' }}>
+                    <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                       <span style={{ 
                         fontSize: '11px', 
                         fontWeight: 600, 
@@ -825,7 +899,10 @@ export default function UnlistedItems() {
                         backgroundColor: item.gap === 0 ? '#f0fdf4' : item.purchased > 0 ? '#fef3c7' : '#fef2f2', 
                         padding: '2px 8px', 
                         borderRadius: '4px',
-                        border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`
+                        border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
                       }}>
                         {item.gap === 0 ? '🟢 已採購完成' : item.purchased > 0 ? '🟡 部分採購' : '🔴 尚未採購'}
                       </span>
