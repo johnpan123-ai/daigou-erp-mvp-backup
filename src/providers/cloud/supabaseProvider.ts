@@ -1062,7 +1062,9 @@ export class SupabaseProvider implements IDataProvider {
         myacg_sold_quantity: item.myacg_sold_quantity ?? 0,
         myacg_demand_quantity: item.myacg_demand_quantity ?? 0,
         myacg_listed_at: item.myacg_listed_at || null,
-        import_sort_index: item.import_sort_index || null
+        import_sort_index: item.import_sort_index || null,
+        latest_catalog_import_id: item.latest_catalog_import_id || null,
+        catalog_last_seen_at: item.catalog_last_seen_at || null
       }));
 
       console.log('[Inventory Sync] actual upsert payload sample', JSON.stringify(upsertData[0]));

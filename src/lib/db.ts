@@ -13,6 +13,8 @@ export interface InventoryItem {
   myacg_demand_quantity?: number;
   myacg_listed_at: string;
   inventory_key?: string; // New composite field
+  latest_catalog_import_id?: string;
+  catalog_last_seen_at?: string;
 }
 
 export interface SalesOrder {

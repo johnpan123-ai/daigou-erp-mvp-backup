@@ -22,6 +22,7 @@ export default function UnlistedItems() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [copied, setCopied] = useState(false);
+  const [catalogImportTime, setCatalogImportTime] = useState<string | null>(null);
 
   // Load and process data
   const loadData = async () => {
@@ -35,6 +36,26 @@ export default function UnlistedItems() {
 
       const todayStr = getTodayStr();
 
+      // Find the latest import ID and timestamp
+      let latestImportId: string | null = null;
+      let latestImportTime: string | null = null;
+
+      for (const item of inventory) {
+        if (item.catalog_last_seen_at) {
+          if (!latestImportTime || item.catalog_last_seen_at > latestImportTime) {
+            latestImportTime = item.catalog_last_seen_at;
+            latestImportId = item.latest_catalog_import_id || null;
+          }
+        }
+      }
+
+      setCatalogImportTime(latestImportTime);
+
+      // Filter inventory to only items from the latest import batch (fallback to all if none have timestamps)
+      const latestInventory = latestImportId
+        ? inventory.filter(item => item.latest_catalog_import_id === latestImportId)
+        : inventory;
+
       // Filter groups that have passed closing date
       const overdueGroups = groups.filter(g => {
         const normalized = normalizeDate(g.closing_date);
@@ -45,14 +66,14 @@ export default function UnlistedItems() {
       const groupMap = new Map(overdueGroups.map(g => [g.id, g]));
 
       // Create a set of SKUs currently present in latest Catalog/Inventory
-      const catalogSkus = new Set(inventory.map(item => item.myacg_item_code.trim().toUpperCase()));
-      const catalogItemMap = new Map(inventory.map(item => [item.myacg_item_code.trim().toUpperCase(), item]));
+      const catalogSkus = new Set(latestInventory.map(item => item.myacg_item_code.trim().toUpperCase()));
+      const catalogItemMap = new Map(latestInventory.map(item => [item.myacg_item_code.trim().toUpperCase(), item]));
 
       // Find variants of overdue groups that are still present in catalog
       const unlistedList: UnlistedItem[] = [];
 
       for (const v of variants) {
-        if (!v.product_group_id) continue;
+        if (!v.myacg_item_code || !v.product_group_id) continue;
         if (!overdueGroupIds.has(v.product_group_id)) continue;
 
         const skuUpper = v.myacg_item_code.trim().toUpperCase();
@@ -84,8 +105,6 @@ export default function UnlistedItems() {
           const category = group.listing_type || invItem?.listing_type || '一般預購';
 
           // 4. Status
-          // A group is closed if today is after closing date (which is true here)
-          // But check if it is active/in-progress or closed based on normal checks
           const status = '已結單';
 
           unlistedList.push({
@@ -450,7 +469,16 @@ export default function UnlistedItems() {
             <Archive size={26} style={{ color: '#2563eb' }} />
             待下架商品
           </h1>
-          <p>檢查已過官方結單日但仍存在於最新 Catalog (商品主檔) 的品項，這代表商店可能尚未下架。</p>
+          <p style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px 12px', marginTop: '6px' }}>
+            <span>檢查已過官方結單日但仍存在於最新 Catalog (商品主檔) 的品項，這代表商店可能尚未下架。</span>
+            <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f1f5f9', color: '#475569', fontSize: '12px', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              📅 目前比對 Catalog 匯入時間：
+              {catalogImportTime 
+                ? new Date(catalogImportTime).toLocaleString('zh-TW', { hour12: false })
+                : '無暫存匯入記錄 (比對全部快取)'
+              }
+            </span>
+          </p>
         </div>
         
         <div className="unlisted-actions">

@@ -157,7 +157,14 @@ export default function Inventory() {
       }
 
       const parsedItems = await parseMyAcgFile(file);
-      const stats = await dataProvider.upsertInventory(parsedItems);
+      const currentImportId = `catalog_import_${Date.now()}`;
+      const currentTimestamp = new Date().toISOString();
+      const itemsWithBatchMeta = parsedItems.map(item => ({
+        ...item,
+        latest_catalog_import_id: currentImportId,
+        catalog_last_seen_at: currentTimestamp
+      }));
+      const stats = await dataProvider.upsertInventory(itemsWithBatchMeta);
       
       // Sync ProductGroups with new inventory
       const syncStats = await dataProvider.syncProductGroupsWithInventory();
