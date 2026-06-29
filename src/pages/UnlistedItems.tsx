@@ -45,8 +45,7 @@ export default function UnlistedItems() {
 
   const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
     'erp_unlisted_col_widths',
-    DEFAULT_COL_WIDTHS,
-    ['name', 'closingDate', 'daysOverdue', 'source', 'category']
+    DEFAULT_COL_WIDTHS
   );
 
   // Load and process data

@@ -56,8 +56,7 @@ export default function Inventory() {
 
   const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
     'erp_inventory_col_widths',
-    DEFAULT_COL_WIDTHS,
-    ['title', 'category', 'status', 'listedAt', 'sales']
+    DEFAULT_COL_WIDTHS
   );
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
