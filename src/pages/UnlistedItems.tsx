@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
-import { Archive, Copy, Check, Search, AlertTriangle, Loader2 } from 'lucide-react';
+import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateGroupDemandAndPurchased } from '../lib/db';
+import { useResizableColumns } from '../hooks/useResizableColumns';
 
 interface UnlistedItemSku {
   sku: string;
@@ -23,6 +24,14 @@ interface UnlistedItem {
   gap: number;
 }
 
+const DEFAULT_COL_WIDTHS = {
+  name: 450,
+  closingDate: 130,
+  daysOverdue: 110,
+  purchaseInfo: 150,
+  purchaseStatus: 140
+};
+
 export default function UnlistedItems() {
   const { isMobile } = useViewport();
   
@@ -33,6 +42,11 @@ export default function UnlistedItems() {
   const [copied, setCopied] = useState(false);
   const [catalogImportTime, setCatalogImportTime] = useState<string | null>(null);
   const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+
+  const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
+    'erp_unlisted_col_widths',
+    DEFAULT_COL_WIDTHS
+  );
 
   // Load and process data
   const loadData = async () => {
@@ -534,7 +548,26 @@ export default function UnlistedItems() {
           </p>
         </div>
         
-        <div className="unlisted-actions">
+        <div className="unlisted-actions" style={{ display: 'flex', gap: '8px' }}>
+          {!isMobile && (
+            <button
+              className="btn btn-ghost flex items-center gap-xs"
+              onClick={resetWidths}
+              style={{
+                height: '38px',
+                fontSize: '13px',
+                padding: '0 12px',
+                border: '1px solid #cbd5e1',
+                borderRadius: '6px',
+                color: '#64748b',
+                backgroundColor: '#fff',
+                cursor: 'pointer'
+              }}
+            >
+              <RotateCcw size={16} />
+              重設欄寬
+            </button>
+          )}
           <button 
             className="btn btn-primary flex items-center gap-xs"
             onClick={handleCopySelected}
@@ -610,14 +643,6 @@ export default function UnlistedItems() {
               
               <div className="mobile-card-details">
                 <div className="mobile-card-detail-item">
-                  <span className="mobile-card-detail-label">來源</span>
-                  <div className="mobile-card-detail-value">
-                    <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`}>
-                      {item.source}
-                    </span>
-                  </div>
-                </div>
-                <div className="mobile-card-detail-item">
                   <span className="mobile-card-detail-label">結單日</span>
                   <span className="mobile-card-detail-value">{item.closingDate}</span>
                 </div>
@@ -630,9 +655,22 @@ export default function UnlistedItems() {
                     </span>
                   </div>
                 </div>
-                <div className="mobile-card-detail-item">
-                  <span className="mobile-card-detail-label">分類</span>
-                  <span className="mobile-card-detail-value">{item.category}</span>
+                
+                <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
+                  <span className="mobile-card-detail-label">採購狀態</span>
+                  <span className="mobile-card-detail-value" style={{ 
+                    fontWeight: 600,
+                    color: item.gap === 0 ? '#166534' : item.purchased > 0 ? '#b45309' : '#dc2626'
+                  }}>
+                    {item.gap === 0 ? '🟢 已採購完成' : item.purchased > 0 ? '🟡 部分採購' : '🔴 尚未採購'}
+                  </span>
+                </div>
+
+                <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
+                  <span className="mobile-card-detail-label">採購資訊</span>
+                  <span className="mobile-card-detail-value" style={{ color: '#475569' }}>
+                    需求：{item.totalDemand} │ 已採購：{item.purchased} │ 缺口：<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
+                  </span>
                 </div>
 
                 <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
@@ -655,7 +693,7 @@ export default function UnlistedItems() {
                       marginTop: '4px'
                     }}
                   >
-                    {expandedGroupIds.has(item.id) ? '收合規格明細 ▲' : `查看命中規格 (${item.hitSkus.length}) ▼`}
+                    {expandedGroupIds.has(item.id) ? '收合規格明細 ▲' : `查看規格與來源明細 (${item.hitSkus.length}) ▼`}
                   </button>
                   {expandedGroupIds.has(item.id) && (
                     <div style={{ 
@@ -668,6 +706,10 @@ export default function UnlistedItems() {
                       flexDirection: 'column',
                       gap: '6px'
                     }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', borderBottom: '1px dashed #cbd5e1', paddingBottom: '6px', marginBottom: '6px' }}>
+                        <span>來源: {item.source}</span>
+                        <span>分類: {item.category}</span>
+                      </div>
                       {item.hitSkus.map(sku => (
                         <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'monospace' }}>
                           <span style={{ color: '#2563eb', fontWeight: 600 }}>{sku.sku}</span>
@@ -698,17 +740,36 @@ export default function UnlistedItems() {
                     onChange={e => handleSelectAll(e.target.checked)}
                   />
                 </th>
-                <th>商品名稱</th>
-                <th style={{ width: '130px' }}>官方結單日</th>
-                <th style={{ width: '110px' }}>已逾期</th>
-                <th style={{ width: '90px', textAlign: 'center' }}>商品來源</th>
-                <th style={{ width: '140px', textAlign: 'center' }}>最新 Catalog 命中 SKU 數</th>
-                <th style={{ width: '70px', textAlign: 'center' }}>總需求</th>
-                <th style={{ width: '70px', textAlign: 'center' }}>已採購</th>
-                <th style={{ width: '70px', textAlign: 'center' }}>缺口</th>
-                <th style={{ width: '115px', textAlign: 'center' }}>採購狀態</th>
-                <th style={{ width: '120px' }}>分類</th>
-                <th style={{ width: '90px', textAlign: 'center' }}>狀態</th>
+                <th style={{ width: `${colWidths.name}px` }}>
+                  <div className="th-inner">
+                    <span>商品名稱</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('name', e)} />
+                  </div>
+                </th>
+                <th style={{ width: `${colWidths.closingDate}px` }}>
+                  <div className="th-inner">
+                    <span>官方結單日</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('closingDate', e)} />
+                  </div>
+                </th>
+                <th style={{ width: `${colWidths.daysOverdue}px` }}>
+                  <div className="th-inner">
+                    <span>已逾期天數</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('daysOverdue', e)} />
+                  </div>
+                </th>
+                <th style={{ width: `${colWidths.purchaseInfo}px` }}>
+                  <div className="th-inner">
+                    <span>採購資訊 (需求/已買/缺口)</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('purchaseInfo', e)} />
+                  </div>
+                </th>
+                <th style={{ width: `${colWidths.purchaseStatus}px` }}>
+                  <div className="th-inner">
+                    <span>採購狀態</span>
+                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('purchaseStatus', e)} />
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -749,18 +810,12 @@ export default function UnlistedItems() {
                         逾期 {item.daysOverdue} 天
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`}>
-                        {item.source}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center', fontWeight: 600, color: '#1e293b' }}>
-                      {item.hitSkus.length} 筆
-                    </td>
-                    <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.totalDemand}</td>
-                    <td style={{ textAlign: 'center', color: '#475569' }}>{item.purchased}</td>
-                    <td style={{ textAlign: 'center', fontWeight: 700, color: item.gap > 0 ? '#ef4444' : '#166534' }}>
-                      {item.gap}
+                    <td style={{ padding: '8px 12px', fontSize: '13px', color: '#334155', lineHeight: '1.5' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div>需求：<strong>{item.totalDemand}</strong></div>
+                        <div>已採購：<span style={{ color: '#64748b' }}>{item.purchased}</span></div>
+                        <div>缺口：<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong></div>
+                      </div>
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <span style={{ 
@@ -775,26 +830,29 @@ export default function UnlistedItems() {
                         {item.gap === 0 ? '🟢 已採購完成' : item.purchased > 0 ? '🟡 部分採購' : '🔴 尚未採購'}
                       </span>
                     </td>
-                    <td>{item.category}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span style={{ 
-                        fontSize: '11px', 
-                        fontWeight: 600, 
-                        color: '#ef4444', 
-                        backgroundColor: '#fef2f2', 
-                        padding: '2px 8px', 
-                        borderRadius: '4px',
-                        border: '1px solid #fecaca'
-                      }}>
-                        {item.status}
-                      </span>
-                    </td>
                   </tr>
                   {expandedGroupIds.has(item.id) && (
                     <tr style={{ backgroundColor: '#f8fafc' }}>
                       <td></td>
-                      <td colSpan={11} style={{ padding: '8px 16px' }}>
-                        <div style={{ padding: '8px 12px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <td colSpan={5} style={{ padding: '8px 16px' }}>
+                        <div style={{ padding: '12px 16px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
+                          <div style={{ display: 'flex', gap: '24px', marginBottom: '10px', fontSize: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                            <div>
+                              <span style={{ color: '#64748b', marginRight: '6px' }}>商品來源:</span>
+                              <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`} style={{ display: 'inline-flex' }}>
+                                {item.source}
+                              </span>
+                            </div>
+                            <div>
+                              <span style={{ color: '#64748b', marginRight: '6px' }}>分類:</span>
+                              <span style={{ fontWeight: 600, color: '#334155' }}>{item.category}</span>
+                            </div>
+                            <div>
+                              <span style={{ color: '#64748b', marginRight: '6px' }}>最新 Catalog 命中規格數:</span>
+                              <span style={{ fontWeight: 700, color: '#2563eb' }}>{item.hitSkus.length} 筆</span>
+                            </div>
+                          </div>
+
                           <div style={{ fontWeight: 600, fontSize: '12px', color: '#475569', marginBottom: '6px' }}>
                             🔍 命中最新 Catalog 規格清單：
                           </div>

@@ -7,6 +7,7 @@ import { Receipt, Search, Trash2, Calendar, Copy, Check } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
+import { useResizableColumns } from '../hooks/useResizableColumns';
 
 const DEFAULT_COL_WIDTHS = {
   title: 350,
@@ -221,45 +222,10 @@ export default function PurchaseRecords() {
   console.log(`[UI Render] UI groups count: ${groups.length}`);
   console.log(`[UI Render] UI variants count: ${variants.length}`);
 
-  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem('erp_purchase_records_col_widths');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // ignore
-      }
-    }
-    return DEFAULT_COL_WIDTHS;
-  });
-
-  const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = colWidths[colKey] || DEFAULT_COL_WIDTHS[colKey as keyof typeof DEFAULT_COL_WIDTHS];
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const newWidth = Math.max(50, startWidth + dx);
-      setColWidths(prev => ({
-        ...prev,
-        [colKey]: newWidth
-      }));
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      
-      setColWidths(current => {
-        localStorage.setItem('erp_purchase_records_col_widths', JSON.stringify(current));
-        return current;
-      });
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  };
+  const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
+    'erp_purchase_records_col_widths',
+    DEFAULT_COL_WIDTHS
+  );
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -1691,8 +1657,7 @@ export default function PurchaseRecords() {
               </select>
               <button
                 onClick={() => {
-                  setColWidths(DEFAULT_COL_WIDTHS);
-                  localStorage.removeItem('erp_purchase_records_col_widths');
+                  resetWidths();
                   alert('欄位寬度已重設為預設值！');
                 }}
                 style={{

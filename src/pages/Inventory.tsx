@@ -4,6 +4,7 @@ import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { Upload, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
+import { useResizableColumns } from '../hooks/useResizableColumns';
 
 interface InventoryGroup {
   title: string;
@@ -53,45 +54,10 @@ export default function Inventory() {
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
-    const saved = localStorage.getItem('erp_inventory_col_widths');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        // ignore
-      }
-    }
-    return DEFAULT_COL_WIDTHS;
-  });
-
-  const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = colWidths[colKey] || DEFAULT_COL_WIDTHS[colKey as keyof typeof DEFAULT_COL_WIDTHS];
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const newWidth = Math.max(80, startWidth + dx);
-      setColWidths(prev => ({
-        ...prev,
-        [colKey]: newWidth
-      }));
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      
-      setColWidths(current => {
-        localStorage.setItem('erp_inventory_col_widths', JSON.stringify(current));
-        return current;
-      });
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  };
+  const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
+    'erp_inventory_col_widths',
+    DEFAULT_COL_WIDTHS
+  );
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
@@ -1308,14 +1274,7 @@ export default function Inventory() {
           <button 
             className="btn-more-filters"
             onClick={() => {
-              setColWidths({
-                title: 450,
-                category: 180,
-                status: 200,
-                listedAt: 120,
-                sales: 100
-              });
-              localStorage.removeItem('erp_inventory_col_widths');
+              resetWidths();
               alert('欄位寬度已重設為預設值！');
             }}
           >
