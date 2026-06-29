@@ -5,18 +5,24 @@ export function useResizableColumns(storageKey: string, defaultWidths: Record<st
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
-        return { ...defaultWidths, ...JSON.parse(saved) };
+        return { ...JSON.parse(saved) };
       } catch (e) {
         // ignore
       }
     }
-    return defaultWidths;
+    return {};
   });
 
   const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startWidth = colWidths[colKey] || defaultWidths[colKey];
+
+    // Get current rendered width from DOM as fallback
+    const target = e.target as HTMLElement;
+    const th = target.closest('th');
+    const renderedWidth = th ? th.offsetWidth : 0;
+
+    const startWidth = colWidths[colKey] || defaultWidths[colKey] || renderedWidth || 150;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const dx = moveEvent.clientX - startX;
@@ -42,7 +48,7 @@ export function useResizableColumns(storageKey: string, defaultWidths: Record<st
   };
 
   const resetWidths = () => {
-    setColWidths(defaultWidths);
+    setColWidths({});
     localStorage.removeItem(storageKey);
   };
 

@@ -26,11 +26,9 @@ interface UnlistedItem {
 }
 
 const DEFAULT_COL_WIDTHS = {
-  name: 450,
   closingDate: 130,
   daysOverdue: 110,
   source: 100,
-  hitSkuCount: 160,
   category: 120
 };
 
@@ -798,7 +796,7 @@ export default function UnlistedItems() {
                     onChange={e => handleSelectAll(e.target.checked)}
                   />
                 </th>
-                <th style={{ width: `${colWidths.name}px` }}>
+                <th style={{ width: colWidths.name ? `${colWidths.name}px` : undefined }}>
                   <div className="th-inner">
                     <span>商品名稱</span>
                     <div className="resizer-handle" onMouseDown={e => handleMouseDown('name', e)} />
@@ -820,12 +818,6 @@ export default function UnlistedItems() {
                   <div className="th-inner">
                     <span>商品來源</span>
                     <div className="resizer-handle" onMouseDown={e => handleMouseDown('source', e)} />
-                  </div>
-                </th>
-                <th style={{ width: `${colWidths.hitSkuCount}px` }}>
-                  <div className="th-inner">
-                    <span>最新 Catalog 命中 SKU 數</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('hitSkuCount', e)} />
                   </div>
                 </th>
                 <th style={{ width: `${colWidths.category}px` }}>
@@ -930,15 +922,12 @@ export default function UnlistedItems() {
                         {item.source}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center', verticalAlign: 'middle', fontWeight: 600, color: '#1e293b' }}>
-                      {item.hitSkus.length} 筆
-                    </td>
                     <td style={{ verticalAlign: 'middle' }}>{item.category}</td>
                   </tr>
                   {expandedGroupIds.has(item.id) && (
                     <tr style={{ backgroundColor: '#f8fafc' }}>
                       <td></td>
-                      <td colSpan={6} style={{ padding: '8px 16px' }}>
+                      <td colSpan={5} style={{ padding: '8px 16px' }}>
                         <div style={{ padding: '12px 16px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
                           <div style={{ fontWeight: 600, fontSize: '12px', color: '#475569', marginBottom: '6px' }}>
                             🔍 命中最新 Catalog 規格清單：
