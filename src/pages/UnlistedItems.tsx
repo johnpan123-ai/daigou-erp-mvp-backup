@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Archive, Copy, Check, Search, AlertTriangle, Loader2 } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
+import { calculateGroupDemandAndPurchased } from '../lib/db';
 
 interface UnlistedItemSku {
   sku: string;
@@ -17,6 +18,9 @@ interface UnlistedItem {
   category: string;
   status: '已結單' | '進行中';
   hitSkus: UnlistedItemSku[];
+  totalDemand: number;
+  purchased: number;
+  gap: number;
 }
 
 export default function UnlistedItems() {
@@ -34,10 +38,14 @@ export default function UnlistedItems() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [inventory, groups, variants] = await Promise.all([
+      const [inventory, groups, variants, categories, privateOrderItems, batchItems, salesOrderItems] = await Promise.all([
         dataProvider.getInventory(),
         dataProvider.getProductGroups(),
-        dataProvider.getProductVariants()
+        dataProvider.getProductVariants(),
+        dataProvider.getProductCategories(),
+        dataProvider.getPrivateOrderItems(),
+        dataProvider.getPurchaseBatchItems(),
+        dataProvider.getSalesOrderItems()
       ]);
 
       const todayStr = getTodayStr();
@@ -126,6 +134,16 @@ export default function UnlistedItems() {
           // Status
           const status = '已結單';
 
+          const demandResult = calculateGroupDemandAndPurchased(
+            group.id,
+            categories,
+            variants,
+            privateOrderItems,
+            batchItems,
+            inventory,
+            salesOrderItems
+          );
+
           unlistedList.push({
             id: group.id,
             name: group.title,
@@ -134,7 +152,10 @@ export default function UnlistedItems() {
             source,
             category,
             status,
-            hitSkus
+            hitSkus,
+            totalDemand: demandResult.demand,
+            purchased: demandResult.purchased,
+            gap: demandResult.gap
           });
         }
       }
@@ -679,9 +700,13 @@ export default function UnlistedItems() {
                 </th>
                 <th>商品名稱</th>
                 <th style={{ width: '130px' }}>官方結單日</th>
-                <th style={{ width: '120px' }}>已逾期</th>
-                <th style={{ width: '100px', textAlign: 'center' }}>商品來源</th>
-                <th style={{ width: '180px', textAlign: 'center' }}>最新 Catalog 命中 SKU 數</th>
+                <th style={{ width: '110px' }}>已逾期</th>
+                <th style={{ width: '90px', textAlign: 'center' }}>商品來源</th>
+                <th style={{ width: '140px', textAlign: 'center' }}>最新 Catalog 命中 SKU 數</th>
+                <th style={{ width: '70px', textAlign: 'center' }}>總需求</th>
+                <th style={{ width: '70px', textAlign: 'center' }}>已採購</th>
+                <th style={{ width: '70px', textAlign: 'center' }}>缺口</th>
+                <th style={{ width: '115px', textAlign: 'center' }}>採購狀態</th>
                 <th style={{ width: '120px' }}>分類</th>
                 <th style={{ width: '90px', textAlign: 'center' }}>狀態</th>
               </tr>
@@ -732,6 +757,24 @@ export default function UnlistedItems() {
                     <td style={{ textAlign: 'center', fontWeight: 600, color: '#1e293b' }}>
                       {item.hitSkus.length} 筆
                     </td>
+                    <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.totalDemand}</td>
+                    <td style={{ textAlign: 'center', color: '#475569' }}>{item.purchased}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, color: item.gap > 0 ? '#ef4444' : '#166534' }}>
+                      {item.gap}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span style={{ 
+                        fontSize: '11px', 
+                        fontWeight: 600, 
+                        color: item.gap === 0 ? '#15803d' : item.purchased > 0 ? '#b45309' : '#b91c1c', 
+                        backgroundColor: item.gap === 0 ? '#f0fdf4' : item.purchased > 0 ? '#fef3c7' : '#fef2f2', 
+                        padding: '2px 8px', 
+                        borderRadius: '4px',
+                        border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`
+                      }}>
+                        {item.gap === 0 ? '🟢 已採購完成' : item.purchased > 0 ? '🟡 部分採購' : '🔴 尚未採購'}
+                      </span>
+                    </td>
                     <td>{item.category}</td>
                     <td style={{ textAlign: 'center' }}>
                       <span style={{ 
@@ -750,7 +793,7 @@ export default function UnlistedItems() {
                   {expandedGroupIds.has(item.id) && (
                     <tr style={{ backgroundColor: '#f8fafc' }}>
                       <td></td>
-                      <td colSpan={7} style={{ padding: '8px 16px' }}>
+                      <td colSpan={11} style={{ padding: '8px 16px' }}>
                         <div style={{ padding: '8px 12px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
                           <div style={{ fontWeight: 600, fontSize: '12px', color: '#475569', marginBottom: '6px' }}>
                             🔍 命中最新 Catalog 規格清單：
