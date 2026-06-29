@@ -1,17 +1,22 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { Archive, Copy, Check, Search, AlertTriangle, Loader2 } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 
-interface UnlistedItem {
-  id: string; // SKU or variant ID
-  name: string;
+interface UnlistedItemSku {
   sku: string;
+  variantName: string;
+}
+
+interface UnlistedItem {
+  id: string; // ProductGroup ID
+  name: string; // ProductGroup Title
   closingDate: string;
   daysOverdue: number;
   source: '買動漫' | 'WACA' | '其他';
   category: string;
   status: '已結單' | '進行中';
+  hitSkus: UnlistedItemSku[];
 }
 
 export default function UnlistedItems() {
@@ -23,6 +28,7 @@ export default function UnlistedItems() {
   const [searchTerm, setSearchTerm] = useState('');
   const [copied, setCopied] = useState(false);
   const [catalogImportTime, setCatalogImportTime] = useState<string | null>(null);
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
 
   // Load and process data
   const loadData = async () => {
@@ -62,26 +68,38 @@ export default function UnlistedItems() {
         return normalized && normalized < todayStr;
       });
 
-      const overdueGroupIds = new Set(overdueGroups.map(g => g.id));
-      const groupMap = new Map(overdueGroups.map(g => [g.id, g]));
+      // Group variants by group ID
+      const groupVariantsMap = new Map<string, typeof variants>();
+      for (const v of variants) {
+        if (!v.product_group_id) continue;
+        const list = groupVariantsMap.get(v.product_group_id) || [];
+        list.push(v);
+        groupVariantsMap.set(v.product_group_id, list);
+      }
 
       // Create a set of SKUs currently present in latest Catalog/Inventory
       const catalogSkus = new Set(latestInventory.map(item => item.myacg_item_code.trim().toUpperCase()));
-      const catalogItemMap = new Map(latestInventory.map(item => [item.myacg_item_code.trim().toUpperCase(), item]));
 
       // Find variants of overdue groups that are still present in catalog
       const unlistedList: UnlistedItem[] = [];
 
-      for (const v of variants) {
-        if (!v.myacg_item_code || !v.product_group_id) continue;
-        if (!overdueGroupIds.has(v.product_group_id)) continue;
+      for (const group of overdueGroups) {
+        const groupVars = groupVariantsMap.get(group.id) || [];
+        const hitSkus: UnlistedItemSku[] = [];
 
-        const skuUpper = v.myacg_item_code.trim().toUpperCase();
-        if (catalogSkus.has(skuUpper)) {
-          const group = groupMap.get(v.product_group_id)!;
-          const invItem = catalogItemMap.get(skuUpper);
+        for (const v of groupVars) {
+          if (!v.myacg_item_code) continue;
+          const skuUpper = v.myacg_item_code.trim().toUpperCase();
+          if (catalogSkus.has(skuUpper)) {
+            hitSkus.push({
+              sku: v.myacg_item_code,
+              variantName: v.variant_name || ''
+            });
+          }
+        }
 
-          // 1. Calculate Overdue Days
+        if (hitSkus.length > 0) {
+          // Calculate Overdue Days
           const daysOverdue = (() => {
             const close = normalizeDate(group.closing_date);
             if (!close) return 0;
@@ -90,32 +108,33 @@ export default function UnlistedItems() {
             return diffDays > 0 ? diffDays : 0;
           })();
 
-          // 2. Determine Source (買動漫 / WACA / 其他)
+          // Determine Source (買動漫 / WACA / 其他)
           const source = (() => {
             const url = (group.product_url || '').toLowerCase();
             if (url.includes('waca')) return 'WACA';
             if (url.includes('myacg')) return '買動漫';
-            const code = (v.myacg_item_code || '').toUpperCase();
-            if (code.includes('WACA') || code.startsWith('W_') || code.startsWith('WA')) return 'WACA';
-            if (v.waca_sku) return 'WACA';
+            for (const h of hitSkus) {
+              const code = h.sku.toUpperCase();
+              if (code.includes('WACA') || code.startsWith('W_') || code.startsWith('WA')) return 'WACA';
+            }
             return '買動漫';
           })();
 
-          // 3. Category
-          const category = group.listing_type || invItem?.listing_type || '一般預購';
+          // Category
+          const category = group.listing_type || '一般預購';
 
-          // 4. Status
+          // Status
           const status = '已結單';
 
           unlistedList.push({
-            id: v.id,
-            name: `${group.title} (${v.variant_name})`,
-            sku: v.myacg_item_code,
+            id: group.id,
+            name: group.title,
             closingDate: group.closing_date,
             daysOverdue,
             source,
             category,
-            status
+            status,
+            hitSkus
           });
         }
       }
@@ -124,6 +143,7 @@ export default function UnlistedItems() {
       unlistedList.sort((a, b) => b.daysOverdue - a.daysOverdue);
       setItems(unlistedList);
       setSelectedIds(new Set()); // Reset selections
+      setExpandedGroupIds(new Set()); // Reset expand states
     } catch (err) {
       console.error('[UnlistedItems Load Error]:', err);
     } finally {
@@ -155,15 +175,27 @@ export default function UnlistedItems() {
     return `${year}-${month}-${day}`;
   };
 
+  const toggleExpandGroup = (groupId: string) => {
+    setExpandedGroupIds(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
   // Filter items by search
   const filteredItems = useMemo(() => {
     if (!searchTerm.trim()) return items;
     const lower = searchTerm.toLowerCase();
     return items.filter(item => 
       item.name.toLowerCase().includes(lower) || 
-      item.sku.toLowerCase().includes(lower) ||
       item.category.toLowerCase().includes(lower) ||
-      item.source.toLowerCase().includes(lower)
+      item.source.toLowerCase().includes(lower) ||
+      item.hitSkus.some(sku => sku.sku.toLowerCase().includes(lower) || sku.variantName.toLowerCase().includes(lower))
     );
   }, [items, searchTerm]);
 
@@ -196,8 +228,8 @@ export default function UnlistedItems() {
     if (selectedIds.size === 0) return;
     const selectedItems = items.filter(item => selectedIds.has(item.id));
     
-    // Format: SKU + Product Name
-    const textToCopy = selectedItems.map(item => `${item.sku} ${item.name}`).join('\n');
+    // Format: Product Name (Group Title)
+    const textToCopy = selectedItems.map(item => item.name).join('\n');
 
     try {
       await navigator.clipboard.writeText(textToCopy);
@@ -552,9 +584,6 @@ export default function UnlistedItems() {
                 />
                 <div style={{ flex: 1, marginLeft: '10px' }}>
                   <div className="mobile-card-title">{item.name}</div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', fontFamily: 'monospace' }}>
-                    {item.sku}
-                  </div>
                 </div>
               </div>
               
@@ -584,6 +613,49 @@ export default function UnlistedItems() {
                   <span className="mobile-card-detail-label">分類</span>
                   <span className="mobile-card-detail-value">{item.category}</span>
                 </div>
+
+                <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
+                  <button 
+                    onClick={() => toggleExpandGroup(item.id)}
+                    style={{ 
+                      width: '100%', 
+                      padding: '6px 12px', 
+                      backgroundColor: '#f1f5f9', 
+                      border: '1px solid #cbd5e1', 
+                      borderRadius: '6px', 
+                      fontSize: '12px', 
+                      fontWeight: 600, 
+                      color: '#475569', 
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      gap: '4px',
+                      marginTop: '4px'
+                    }}
+                  >
+                    {expandedGroupIds.has(item.id) ? '收合規格明細 ▲' : `查看命中規格 (${item.hitSkus.length}) ▼`}
+                  </button>
+                  {expandedGroupIds.has(item.id) && (
+                    <div style={{ 
+                      marginTop: '8px', 
+                      padding: '8px 12px', 
+                      backgroundColor: '#fff', 
+                      border: '1px solid #e2e8f0', 
+                      borderRadius: '6px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px'
+                    }}>
+                      {item.hitSkus.map(sku => (
+                        <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'monospace' }}>
+                          <span style={{ color: '#2563eb', fontWeight: 600 }}>{sku.sku}</span>
+                          <span style={{ color: '#64748b' }}>{sku.variantName}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -606,53 +678,96 @@ export default function UnlistedItems() {
                   />
                 </th>
                 <th>商品名稱</th>
-                <th style={{ width: '180px' }}>SKU / 商品編號</th>
                 <th style={{ width: '130px' }}>官方結單日</th>
                 <th style={{ width: '120px' }}>已逾期</th>
                 <th style={{ width: '100px', textAlign: 'center' }}>商品來源</th>
+                <th style={{ width: '180px', textAlign: 'center' }}>最新 Catalog 命中 SKU 數</th>
                 <th style={{ width: '120px' }}>分類</th>
                 <th style={{ width: '90px', textAlign: 'center' }}>狀態</th>
               </tr>
             </thead>
             <tbody>
               {filteredItems.map(item => (
-                <tr key={item.id}>
-                  <td style={{ textAlign: 'center' }}>
-                    <input 
-                      type="checkbox"
-                      checked={selectedIds.has(item.id)}
-                      onChange={() => handleToggleSelect(item.id)}
-                    />
-                  </td>
-                  <td style={{ fontWeight: 600, color: '#0f172a' }}>{item.name}</td>
-                  <td style={{ fontFamily: 'monospace', color: '#475569' }}>{item.sku}</td>
-                  <td>{item.closingDate}</td>
-                  <td>
-                    <span className="badge-overdue">
-                      <AlertTriangle size={12} />
-                      逾期 {item.daysOverdue} 天
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>
-                    <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`}>
-                      {item.source}
-                    </span>
-                  </td>
-                  <td>{item.category}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    <span style={{ 
-                      fontSize: '11px', 
-                      fontWeight: 600, 
-                      color: '#ef4444', 
-                      backgroundColor: '#fef2f2', 
-                      padding: '2px 8px', 
-                      borderRadius: '4px',
-                      border: '1px solid #fecaca'
-                    }}>
-                      {item.status}
-                    </span>
-                  </td>
-                </tr>
+                <Fragment key={item.id}>
+                  <tr>
+                    <td style={{ textAlign: 'center' }}>
+                      <input 
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => handleToggleSelect(item.id)}
+                      />
+                    </td>
+                    <td style={{ fontWeight: 600, color: '#0f172a' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button 
+                          onClick={() => toggleExpandGroup(item.id)}
+                          style={{ 
+                            border: 'none', 
+                            background: 'none', 
+                            cursor: 'pointer', 
+                            padding: '4px',
+                            color: '#64748b', 
+                            fontSize: '11px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          {expandedGroupIds.has(item.id) ? '▼' : '▶'}
+                        </button>
+                        <span>{item.name}</span>
+                      </div>
+                    </td>
+                    <td>{item.closingDate}</td>
+                    <td>
+                      <span className="badge-overdue">
+                        <AlertTriangle size={12} />
+                        逾期 {item.daysOverdue} 天
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`}>
+                        {item.source}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 600, color: '#1e293b' }}>
+                      {item.hitSkus.length} 筆
+                    </td>
+                    <td>{item.category}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span style={{ 
+                        fontSize: '11px', 
+                        fontWeight: 600, 
+                        color: '#ef4444', 
+                        backgroundColor: '#fef2f2', 
+                        padding: '2px 8px', 
+                        borderRadius: '4px',
+                        border: '1px solid #fecaca'
+                      }}>
+                        {item.status}
+                      </span>
+                    </td>
+                  </tr>
+                  {expandedGroupIds.has(item.id) && (
+                    <tr style={{ backgroundColor: '#f8fafc' }}>
+                      <td></td>
+                      <td colSpan={7} style={{ padding: '8px 16px' }}>
+                        <div style={{ padding: '8px 12px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
+                          <div style={{ fontWeight: 600, fontSize: '12px', color: '#475569', marginBottom: '6px' }}>
+                            🔍 命中最新 Catalog 規格清單：
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {item.hitSkus.map(sku => (
+                              <div key={sku.sku} style={{ display: 'flex', gap: '16px', fontSize: '12px', fontFamily: 'monospace' }}>
+                                <span style={{ color: '#2563eb', fontWeight: 600, width: '150px' }}>{sku.sku}</span>
+                                <span style={{ color: '#334155' }}>{sku.variantName}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
