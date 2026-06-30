@@ -463,6 +463,67 @@ export default function PurchaseManagement() {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const originalValuesRef = useRef<Record<string, string>>({});
 
+  const [tempJpyCosts, setTempJpyCosts] = useState<Record<string, string>>({});
+  const [tempTwdCosts, setTempTwdCosts] = useState<Record<string, string>>({});
+
+  const handleCommitJpyCost = async (variantId: string, valStr: string) => {
+    const v = variants.find(x => x.id === variantId);
+    const dbCost = v ? (v.default_jpy_cost ?? '') : '';
+    if (String(dbCost) === valStr) {
+      setTempJpyCosts(prev => {
+        const copy = { ...prev };
+        delete copy[variantId];
+        return copy;
+      });
+      return;
+    }
+    await handleUpdateDefaultJpyCost(variantId, valStr);
+    setTempJpyCosts(prev => {
+      const copy = { ...prev };
+      delete copy[variantId];
+      return copy;
+    });
+  };
+
+  const handleCommitTwdCost = async (variantId: string, valStr: string) => {
+    const v = variants.find(x => x.id === variantId);
+    const dbCost = v ? (v.default_twd_cost ?? '') : '';
+    if (String(dbCost) === valStr) {
+      setTempTwdCosts(prev => {
+        const copy = { ...prev };
+        delete copy[variantId];
+        return copy;
+      });
+      return;
+    }
+    await handleUpdateDefaultTwdCost(variantId, valStr);
+    setTempTwdCosts(prev => {
+      const copy = { ...prev };
+      delete copy[variantId];
+      return copy;
+    });
+  };
+
+  const getVariantDefaultJpyCostInputVal = (v: ProductVariant): string => {
+    if (tempJpyCosts[v.id] !== undefined) {
+      return tempJpyCosts[v.id];
+    }
+    const defCost = (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) 
+      ? v.default_jpy_cost 
+      : variantDefaultJpyCosts[v.id];
+    return defCost !== undefined && defCost !== null ? String(defCost) : '';
+  };
+
+  const getVariantDefaultTwdCostInputVal = (v: ProductVariant): string => {
+    if (tempTwdCosts[v.id] !== undefined) {
+      return tempTwdCosts[v.id];
+    }
+    const defCost = (v.default_twd_cost !== undefined && v.default_twd_cost !== null) 
+      ? v.default_twd_cost 
+      : variantDefaultTwdCosts[v.id];
+    return defCost !== undefined && defCost !== null ? String(defCost) : '';
+  };
+
   const catalogSortedIds = useMemo(() => {
     const catalogVars = variants.filter(v => v.source !== 'manual');
     catalogVars.sort((a, b) => {
@@ -650,9 +711,6 @@ export default function PurchaseManagement() {
     if (!canWrite) return;
     const val = valStr === '' ? null : parseInt(valStr);
     
-    console.log(`[DEBUG] saveProduct/updateProduct start (handleUpdateDefaultJpyCost): variantId=${variantId}, val=${val}`);
-    console.log(`[Default Cost Sync] update variant: id=${variantId}, jpy=${val}, twd=N/A`);
-
     const updated = { ...variantDefaultJpyCosts };
     if (val === null || isNaN(val) || val <= 0) {
       delete updated[variantId];
@@ -667,14 +725,7 @@ export default function PurchaseManagement() {
       updated_at: new Date().toISOString()
     });
     
-    console.log(`[DEBUG] setProducts/setVariants callback firing (handleUpdateDefaultJpyCost): setting default_jpy_cost to ${val} for id=${variantId}`);
-    setVariants(variants.map(v => {
-      if (v.id === variantId) {
-        console.log(`[DEBUG] mapping variant id=${v.id}: changing default_jpy_cost from ${v.default_jpy_cost} to ${val}`);
-        return { ...v, default_jpy_cost: val };
-      }
-      return v;
-    }));
+    setVariants(variants.map(v => v.id === variantId ? { ...v, default_jpy_cost: val } : v));
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
@@ -690,9 +741,6 @@ export default function PurchaseManagement() {
     if (!canWrite) return;
     const val = valStr === '' ? null : parseInt(valStr);
 
-    console.log(`[DEBUG] saveProduct/updateProduct start (handleUpdateDefaultTwdCost): variantId=${variantId}, val=${val}`);
-    console.log(`[Default Cost Sync] update variant: id=${variantId}, jpy=N/A, twd=${val}`);
-
     const updated = { ...variantDefaultTwdCosts };
     if (val === null || isNaN(val) || val <= 0) {
       delete updated[variantId];
@@ -707,14 +755,7 @@ export default function PurchaseManagement() {
       updated_at: new Date().toISOString()
     });
     
-    console.log(`[DEBUG] setProducts/setVariants callback firing (handleUpdateDefaultTwdCost): setting default_twd_cost to ${val} for id=${variantId}`);
-    setVariants(variants.map(v => {
-      if (v.id === variantId) {
-        console.log(`[DEBUG] mapping variant id=${v.id}: changing default_twd_cost from ${v.default_twd_cost} to ${val}`);
-        return { ...v, default_twd_cost: val };
-      }
-      return v;
-    }));
+    setVariants(variants.map(v => v.id === variantId ? { ...v, default_twd_cost: val } : v));
   };
 
   const cleanDailiTitle = (title: string): string => {
@@ -2691,14 +2732,16 @@ export default function PurchaseManagement() {
                                       margin: '0 0 0 auto',
                                       display: 'block'
                                     }}
-                                    value={getVariantDefaultTwdCost(v) ?? ''}
+                                    value={getVariantDefaultTwdCostInputVal(v)}
                                     onChange={e => {
                                       const val = e.target.value.replace(/[^0-9]/g, '');
-                                      console.log(`[DEBUG] TWD Cost input 1 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
-                                      handleUpdateDefaultTwdCost(v.id, val);
+                                      setTempTwdCosts(prev => ({ ...prev, [v.id]: val }));
                                     }}
-                                    onBlur={e => {
-                                      console.log(`[DEBUG] TWD Cost input 1 onBlur: val=${e.target.value}`);
+                                    onBlur={e => handleCommitTwdCost(v.id, e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.currentTarget.blur();
+                                      }
                                     }}
                                   />
                                 ) : (
@@ -2738,14 +2781,16 @@ export default function PurchaseManagement() {
                                     margin: '0 0 0 auto',
                                     display: 'block'
                                   }}
-                                  value={getVariantDefaultJpyCost(v) ?? ''}
+                                  value={getVariantDefaultJpyCostInputVal(v)}
                                   onChange={e => {
                                     const val = e.target.value.replace(/[^0-9]/g, '');
-                                    console.log(`[DEBUG] JPY Cost input 1 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
-                                    handleUpdateDefaultJpyCost(v.id, val);
+                                    setTempJpyCosts(prev => ({ ...prev, [v.id]: val }));
                                   }}
-                                  onBlur={e => {
-                                    console.log(`[DEBUG] JPY Cost input 1 onBlur: val=${e.target.value}`);
+                                  onBlur={e => handleCommitJpyCost(v.id, e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                      e.currentTarget.blur();
+                                    }
                                   }}
                                 />
                               ) : (
@@ -3200,14 +3245,16 @@ export default function PurchaseManagement() {
                                               margin: '0 0 0 auto',
                                               display: 'block'
                                             }}
-                                            value={getVariantDefaultTwdCost(v) ?? ''}
+                                            value={getVariantDefaultTwdCostInputVal(v)}
                                             onChange={e => {
                                               const val = e.target.value.replace(/[^0-9]/g, '');
-                                              console.log(`[DEBUG] TWD Cost input 2 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
-                                              handleUpdateDefaultTwdCost(v.id, val);
+                                              setTempTwdCosts(prev => ({ ...prev, [v.id]: val }));
                                             }}
-                                            onBlur={e => {
-                                              console.log(`[DEBUG] TWD Cost input 2 onBlur: val=${e.target.value}`);
+                                            onBlur={e => handleCommitTwdCost(v.id, e.target.value)}
+                                            onKeyDown={e => {
+                                              if (e.key === 'Enter') {
+                                                e.currentTarget.blur();
+                                              }
                                             }}
                                           />
                                         ) : (
@@ -3247,14 +3294,16 @@ export default function PurchaseManagement() {
                                             margin: '0 0 0 auto',
                                             display: 'block'
                                           }}
-                                          value={getVariantDefaultJpyCost(v) ?? ''}
+                                          value={getVariantDefaultJpyCostInputVal(v)}
                                           onChange={e => {
                                             const val = e.target.value.replace(/[^0-9]/g, '');
-                                            console.log(`[DEBUG] JPY Cost input 2 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
-                                            handleUpdateDefaultJpyCost(v.id, val);
+                                            setTempJpyCosts(prev => ({ ...prev, [v.id]: val }));
                                           }}
-                                          onBlur={e => {
-                                            console.log(`[DEBUG] JPY Cost input 2 onBlur: val=${e.target.value}`);
+                                          onBlur={e => handleCommitJpyCost(v.id, e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') {
+                                              e.currentTarget.blur();
+                                            }
                                           }}
                                         />
                                       ) : (

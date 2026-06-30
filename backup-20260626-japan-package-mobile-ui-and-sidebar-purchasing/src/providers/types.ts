@@ -1,0 +1,71 @@
+import type { 
+  InventoryItem, 
+  SalesOrder, 
+  SalesOrderItem, 
+  ProductGroup, 
+  ProductCategory, 
+  ProductVariant, 
+  PurchaseBatch, 
+  PurchaseBatchItem, 
+  PrivateOrder, 
+  PrivateOrderItem, 
+  ImportBatch,
+  ImportStats,
+  JapanPackage,
+  JapanPackageItem
+} from '../lib/db';
+
+export interface IDataProvider {
+  getInventory(): Promise<InventoryItem[]>;
+  upsertInventory(items: InventoryItem[]): Promise<ImportStats>;
+  
+  getSalesOrders(): Promise<SalesOrder[]>;
+  saveSalesOrders(items: SalesOrder[]): Promise<void>;
+  getSalesOrderItems(): Promise<SalesOrderItem[]>;
+  saveSalesOrderItems(items: SalesOrderItem[]): Promise<void>;
+
+  getProductGroups(): Promise<ProductGroup[]>;
+  saveProductGroups(groups: ProductGroup[]): Promise<void>;
+  getProductCategories(): Promise<ProductCategory[]>;
+  saveProductCategories(categories: ProductCategory[]): Promise<void>;
+  getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
+  saveProductVariants(variants: ProductVariant[]): Promise<void>;
+  deleteProductVariant(id: string): Promise<void>;
+  updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void>;
+  updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void>;
+
+  getPurchaseBatches(): Promise<PurchaseBatch[]>;
+  savePurchaseBatches(batches: PurchaseBatch[]): Promise<void>;
+  getPurchaseBatchItems(): Promise<PurchaseBatchItem[]>;
+  savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void>;
+
+  getPrivateOrders(): Promise<PrivateOrder[]>;
+  savePrivateOrders(orders: PrivateOrder[]): Promise<void>;
+  getPrivateOrderItems(): Promise<PrivateOrderItem[]>;
+  savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void>;
+  deletePrivateOrderItems(ids: string[]): Promise<void>;
+
+  getJapanPackages(): Promise<JapanPackage[]>;
+  saveJapanPackages(packages: JapanPackage[]): Promise<void>;
+  getJapanPackageItems(): Promise<JapanPackageItem[]>;
+  saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+
+  getImportBatches(): Promise<ImportBatch[]>;
+  saveImportBatches(batches: ImportBatch[]): Promise<void>;
+
+  exportData(): Promise<void>;
+  importData(jsonString: string): Promise<boolean>;
+  clearData(): Promise<void>;
+  clearPurchaseRecords(): Promise<void>;
+  createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void>;
+  reparseProductVariants(): Promise<void>;
+  reparseProductTitles(): Promise<void>;
+  syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount?: number }>;
+  deleteProductGroup(groupId: string): Promise<void>;
+  deleteProductGroups(groupIds: string[]): Promise<void>;
+  canWriteCloud(): Promise<boolean>;
+  getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
+  saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
+  restoreBackup(backupData: any): Promise<boolean>;
+}
+

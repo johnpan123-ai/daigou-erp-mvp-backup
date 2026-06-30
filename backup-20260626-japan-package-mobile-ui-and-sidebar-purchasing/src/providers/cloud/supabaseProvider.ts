@@ -236,7 +236,7 @@ export class SupabaseProvider implements IDataProvider {
     if (this.isPulled) return;
     if (this.pullPromise) return this.pullPromise;
 
-    const syncPromise = (async () => {
+    this.pullPromise = (async () => {
       try {
         try {
           console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
@@ -450,15 +450,6 @@ export class SupabaseProvider implements IDataProvider {
         this.pullPromise = null;
       }
     })();
-
-    const syncTimeout = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
-    });
-
-    this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(err => {
-      console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
-      this.isPulled = true; // Bypasses future blockages
-    });
 
     return this.pullPromise;
   }
@@ -1062,9 +1053,7 @@ export class SupabaseProvider implements IDataProvider {
         myacg_sold_quantity: item.myacg_sold_quantity ?? 0,
         myacg_demand_quantity: item.myacg_demand_quantity ?? 0,
         myacg_listed_at: item.myacg_listed_at || null,
-        import_sort_index: item.import_sort_index || null,
-        latest_catalog_import_id: item.latest_catalog_import_id || null,
-        catalog_last_seen_at: item.catalog_last_seen_at || null
+        import_sort_index: item.import_sort_index || null
       }));
 
       console.log('[Inventory Sync] actual upsert payload sample', JSON.stringify(upsertData[0]));
