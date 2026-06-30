@@ -650,7 +650,7 @@ export default function PurchaseManagement() {
     if (!canWrite) return;
     const val = valStr === '' ? null : parseInt(valStr);
     
-    // Log price update
+    console.log(`[DEBUG] saveProduct/updateProduct start (handleUpdateDefaultJpyCost): variantId=${variantId}, val=${val}`);
     console.log(`[Default Cost Sync] update variant: id=${variantId}, jpy=${val}, twd=N/A`);
 
     const updated = { ...variantDefaultJpyCosts };
@@ -666,7 +666,15 @@ export default function PurchaseManagement() {
       default_jpy_cost: val,
       updated_at: new Date().toISOString()
     });
-    setVariants(variants.map(v => v.id === variantId ? { ...v, default_jpy_cost: val } : v));
+    
+    console.log(`[DEBUG] setProducts/setVariants callback firing (handleUpdateDefaultJpyCost): setting default_jpy_cost to ${val} for id=${variantId}`);
+    setVariants(variants.map(v => {
+      if (v.id === variantId) {
+        console.log(`[DEBUG] mapping variant id=${v.id}: changing default_jpy_cost from ${v.default_jpy_cost} to ${val}`);
+        return { ...v, default_jpy_cost: val };
+      }
+      return v;
+    }));
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
@@ -682,7 +690,7 @@ export default function PurchaseManagement() {
     if (!canWrite) return;
     const val = valStr === '' ? null : parseInt(valStr);
 
-    // Log price update
+    console.log(`[DEBUG] saveProduct/updateProduct start (handleUpdateDefaultTwdCost): variantId=${variantId}, val=${val}`);
     console.log(`[Default Cost Sync] update variant: id=${variantId}, jpy=N/A, twd=${val}`);
 
     const updated = { ...variantDefaultTwdCosts };
@@ -698,7 +706,15 @@ export default function PurchaseManagement() {
       default_twd_cost: val,
       updated_at: new Date().toISOString()
     });
-    setVariants(variants.map(v => v.id === variantId ? { ...v, default_twd_cost: val } : v));
+    
+    console.log(`[DEBUG] setProducts/setVariants callback firing (handleUpdateDefaultTwdCost): setting default_twd_cost to ${val} for id=${variantId}`);
+    setVariants(variants.map(v => {
+      if (v.id === variantId) {
+        console.log(`[DEBUG] mapping variant id=${v.id}: changing default_twd_cost from ${v.default_twd_cost} to ${val}`);
+        return { ...v, default_twd_cost: val };
+      }
+      return v;
+    }));
   };
 
   const cleanDailiTitle = (title: string): string => {
@@ -2678,7 +2694,11 @@ export default function PurchaseManagement() {
                                     value={getVariantDefaultTwdCost(v) ?? ''}
                                     onChange={e => {
                                       const val = e.target.value.replace(/[^0-9]/g, '');
+                                      console.log(`[DEBUG] TWD Cost input 1 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
                                       handleUpdateDefaultTwdCost(v.id, val);
+                                    }}
+                                    onBlur={e => {
+                                      console.log(`[DEBUG] TWD Cost input 1 onBlur: val=${e.target.value}`);
                                     }}
                                   />
                                 ) : (
@@ -2721,7 +2741,11 @@ export default function PurchaseManagement() {
                                   value={getVariantDefaultJpyCost(v) ?? ''}
                                   onChange={e => {
                                     const val = e.target.value.replace(/[^0-9]/g, '');
+                                    console.log(`[DEBUG] JPY Cost input 1 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
                                     handleUpdateDefaultJpyCost(v.id, val);
+                                  }}
+                                  onBlur={e => {
+                                    console.log(`[DEBUG] JPY Cost input 1 onBlur: val=${e.target.value}`);
                                   }}
                                 />
                               ) : (
@@ -3179,7 +3203,11 @@ export default function PurchaseManagement() {
                                             value={getVariantDefaultTwdCost(v) ?? ''}
                                             onChange={e => {
                                               const val = e.target.value.replace(/[^0-9]/g, '');
+                                              console.log(`[DEBUG] TWD Cost input 2 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
                                               handleUpdateDefaultTwdCost(v.id, val);
+                                            }}
+                                            onBlur={e => {
+                                              console.log(`[DEBUG] TWD Cost input 2 onBlur: val=${e.target.value}`);
                                             }}
                                           />
                                         ) : (
@@ -3222,7 +3250,11 @@ export default function PurchaseManagement() {
                                           value={getVariantDefaultJpyCost(v) ?? ''}
                                           onChange={e => {
                                             const val = e.target.value.replace(/[^0-9]/g, '');
+                                            console.log(`[DEBUG] JPY Cost input 2 onChange: inputVal=${e.target.value}, cleanVal=${val}`);
                                             handleUpdateDefaultJpyCost(v.id, val);
+                                          }}
+                                          onBlur={e => {
+                                            console.log(`[DEBUG] JPY Cost input 2 onBlur: val=${e.target.value}`);
                                           }}
                                         />
                                       ) : (

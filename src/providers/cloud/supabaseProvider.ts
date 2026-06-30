@@ -869,6 +869,7 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     try {
+      console.log(`[DEBUG] 雲端同步收到資料 (updateProductVariantPatch): target id=${id}, patch=${JSON.stringify(patch)}`);
       console.log(`[Cloud Patch] product_variants target id: ${id}, patch keys: ${Object.keys(patch).join(', ')}`);
       
       const finalPatch = {
@@ -882,11 +883,13 @@ export class SupabaseProvider implements IDataProvider {
         .eq('id', id);
 
       if (error) {
+        console.log(`[DEBUG] 雲端同步發生錯誤 (updateProductVariantPatch): id=${id}, error=${error.message}`);
         console.error(`[Cloud Patch ERROR] Supabase error message: ${error.message}`);
         await this.pullCoreProductData(true);
         alert(`雲端局部更新商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
         throw error;
       } else {
+        console.log(`[DEBUG] 雲端同步完成 (updateProductVariantPatch): id=${id}`);
         console.log(`[Sync Patch] product_variants update success for id: ${id}`);
       }
     } catch (err: any) {
