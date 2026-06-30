@@ -36,6 +36,21 @@ const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMo
 
 const WACA_META_ID = '00000000-0000-4000-a000-000000000000';
 
+const formatWacaDate = (dateStr: string) => {
+  if (!dateStr) return '尚未更新';
+  if (dateStr.includes('T') && !isNaN(Date.parse(dateStr))) {
+    const d = new Date(dateStr);
+    const YYYY = d.getFullYear();
+    const MM = String(d.getMonth() + 1).padStart(2, '0');
+    const DD = String(d.getDate()).padStart(2, '0');
+    const HH = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${YYYY}/${MM}/${DD} ${HH}:${mm}:${ss}`;
+  }
+  return dateStr.replace(/-/g, '/');
+};
+
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
 
@@ -770,13 +785,7 @@ export default function PurchaseRecords() {
   const handleUpdateWacaMeta = async (updatedBy: string) => {
     if (guardAgainstStaleWrite()) return;
     
-    const now = new Date();
-    const YYYY = now.getFullYear();
-    const MM = String(now.getMonth() + 1).padStart(2, '0');
-    const DD = String(now.getDate()).padStart(2, '0');
-    const HH = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const nowStr = `${YYYY}/${MM}/${DD} ${HH}:${mm}`;
+    const nowStr = new Date().toISOString();
     
     const wacaMetaId = WACA_META_ID;
     const allGroups = await dataProvider.getProductGroups();
@@ -1455,7 +1464,7 @@ export default function PurchaseRecords() {
         }}>
           <span style={{ fontWeight: 600 }}>
             {wacaMeta?.closing_date 
-              ? `WACA：${wacaMeta.closing_date.replace(/-/g, '/')}・${wacaMeta.proxy_agent || '無'}` 
+              ? `WACA：${formatWacaDate(wacaMeta.closing_date)}・${wacaMeta.proxy_agent || '無'}` 
               : 'WACA：尚未更新'}
           </span>
           <button
