@@ -263,17 +263,26 @@ export default function Dashboard() {
   };
 
   // --- Date helpers ---
+  const normalizeDateStr = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return '';
+    const clean = dateStr.trim().replace(/\//g, '-');
+    const match = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (!match) return clean;
+    const year = match[1];
+    const month = match[2].padStart(2, '0');
+    const day = match[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const parseDateStr = (dateStr: string) => {
-    const [year, month, day] = dateStr.split('-').map(Number);
+    const normalized = normalizeDateStr(dateStr);
+    const [year, month, day] = normalized.split('-').map(Number);
     return new Date(year, month - 1, day);
   };
 
   const getTargetClosingDate = (g: ProductGroup) => {
-    if (g.purchase_date && g.purchase_date.trim() !== '') {
-      return { date: g.purchase_date.trim(), type: 'purchase' as const };
-    }
     if (g.closing_date && g.closing_date.trim() !== '') {
-      return { date: g.closing_date.trim(), type: 'closing' as const };
+      return { date: normalizeDateStr(g.closing_date), type: 'closing' as const };
     }
     return null;
   };
@@ -425,7 +434,7 @@ export default function Dashboard() {
       return b.gap - a.gap;
     });
 
-    return eligibleList.slice(0, 5);
+    return eligibleList.slice(0, 10);
   }, [groups, today, variants, inventory, salesOrderItems, batchItems, privateOrderItems]);
 
   return (
