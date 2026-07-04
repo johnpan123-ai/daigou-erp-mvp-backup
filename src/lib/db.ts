@@ -722,6 +722,58 @@ export const calculateGroupDemandAndPurchased = (
   return { demand: totalDemand, purchased: totalPurchased, gap, hasCatalogMissing };
 };
 
+export const normalizeDateInput = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const clean = value.trim();
+  if (clean === '') return null;
+
+  // Format: YYYYMMDD (e.g. 20261005)
+  const yyyymmddMatch = clean.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (yyyymmddMatch) {
+    const y = parseInt(yyyymmddMatch[1], 10);
+    const m = parseInt(yyyymmddMatch[2], 10);
+    const d = parseInt(yyyymmddMatch[3], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // Format: MMDD (e.g. 1005, 0704)
+  const mmddMatch = clean.match(/^(\d{2})(\d{2})$/);
+  if (mmddMatch) {
+    const y = 2026; // Default to 2026 (this year)
+    const m = parseInt(mmddMatch[1], 10);
+    const d = parseInt(mmddMatch[2], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // Format: YYYY/MM/DD or YYYY-MM-DD (e.g. 2026/10/5, 2026-10-5)
+  const fullSplitMatch = clean.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (fullSplitMatch) {
+    const y = parseInt(fullSplitMatch[1], 10);
+    const m = parseInt(fullSplitMatch[2], 10);
+    const d = parseInt(fullSplitMatch[3], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // Format: MM/DD or MM-DD (e.g. 10/5, 10-5, 7/4)
+  const partialSplitMatch = clean.match(/^(\d{1,2})[\/\-](\d{1,2})$/);
+  if (partialSplitMatch) {
+    const y = 2026; // Default to 2026 (this year)
+    const m = parseInt(partialSplitMatch[1], 10);
+    const d = parseInt(partialSplitMatch[2], 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+};
+
 export class LocalStorageAdapter implements DatabaseAdapter {
   async getInventory(): Promise<InventoryItem[]> {
     return loadData<InventoryItem[]>('erp_inventory', []);

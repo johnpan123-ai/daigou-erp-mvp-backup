@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, calculateGroupDemandAndPurchased } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, calculateGroupDemandAndPurchased, normalizeDateInput } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -117,6 +117,51 @@ export default function PurchaseRecords() {
   };
 
   const [draftDemands, setDraftDemands] = useState<Record<string, string>>({});
+
+  const [draftClosingDates, setDraftClosingDates] = useState<Record<string, string>>({});
+
+  const getClosingDateInputVal = (g: ProductGroup): string => {
+    if (draftClosingDates[g.id] !== undefined) {
+      return draftClosingDates[g.id];
+    }
+    return g.closing_date || '';
+  };
+
+  const handleCommitClosingDate = async (groupId: string, rawVal: string) => {
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+
+    const currentVal = group.closing_date || '';
+    if (rawVal.trim() === currentVal.trim()) {
+      setDraftClosingDates(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+      return;
+    }
+
+    if (rawVal.trim() === '') {
+      await handleUpdateGroupField(groupId, 'closing_date', '');
+      return;
+    }
+
+    const normalized = normalizeDateInput(rawVal);
+    if (normalized) {
+      await handleUpdateGroupField(groupId, 'closing_date', normalized);
+    } else {
+      // Keep in draft for incomplete inputs, do not sync, do not alert
+      console.log(`[Date Input] incomplete/invalid input ignored: ${rawVal}`);
+    }
+  };
+
+  const handleCancelClosingDateDraft = (groupId: string) => {
+    setDraftClosingDates(prev => {
+      const next = { ...prev };
+      delete next[groupId];
+      return next;
+    });
+  };
 
   const handleUpdateDraft = (groupId: string, platform: 'myacg' | 'waca' | 'purchased', value: string) => {
     setDraftDemands(prev => ({
@@ -867,6 +912,13 @@ export default function PurchaseRecords() {
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
       return;
     }
+    if (field === 'closing_date') {
+      setDraftClosingDates(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+    }
     let processedValue = value;
     if ((field === 'closing_date' || field === 'purchase_date') && typeof value === 'string') {
       processedValue = value.replace(/-/g, '/');
@@ -905,11 +957,21 @@ export default function PurchaseRecords() {
     const confirmMsg = `您即將批次更新 ${selectedGroupIds.size} 筆商品群組的日期資訊，是否確認？`;
     if (!window.confirm(confirmMsg)) return;
 
+    let finalBatchClosingDate = '';
+    if (batchClosingDate.trim()) {
+      const normalized = normalizeDateInput(batchClosingDate);
+      if (!normalized) {
+        alert('官方結單日格式不正確，請輸入正確的日期格式 (例如 10/5、2026-10-05)！');
+        return;
+      }
+      finalBatchClosingDate = normalized.replace(/-/g, '/');
+    }
+
     const updatedGroups = groups.map(g => {
       if (selectedGroupIds.has(g.id)) {
         const nextGroup = { ...g };
-        if (batchClosingDate.trim()) {
-          nextGroup.closing_date = batchClosingDate.trim().replace(/-/g, '/');
+        if (finalBatchClosingDate) {
+          nextGroup.closing_date = finalBatchClosingDate;
         }
         if (batchReleaseMonth.trim()) {
           nextGroup.release_month = batchReleaseMonth.trim();
@@ -961,7 +1023,13 @@ export default function PurchaseRecords() {
       if (dbGroup) {
         let val = lines[offset];
         if (field === 'closing_date' || field === 'purchase_date') {
-          val = val.replace(/-/g, '/');
+          const normalized = normalizeDateInput(val);
+          if (normalized) {
+            val = normalized.replace(/-/g, '/');
+          } else {
+            // Keep unchanged if it cannot be normalized
+            return;
+          }
         }
         dbGroup[field] = val;
       }
@@ -2384,10 +2452,19 @@ export default function PurchaseRecords() {
                                 type="text" 
                                 placeholder="YYYY/MM/DD"
                                 style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                value={g.closing_date || ''} 
-                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                                value={getClosingDateInputVal(g)} 
+                                onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))} 
                                 onClick={e => e.stopPropagation()}
-                                onKeyDown={e => handleKeyDown(e, idx, 'closing_date', tableId)}
+                                onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') {
+                                    handleCommitClosingDate(g.id, getClosingDateInputVal(g));
+                                  } else if (e.key === 'Escape') {
+                                    handleCancelClosingDateDraft(g.id);
+                                    e.currentTarget.blur();
+                                  }
+                                  handleKeyDown(e, idx, 'closing_date', tableId);
+                                }}
                                 onPaste={e => handlePaste(e, idx, 'closing_date', list)}
                                 data-table={tableId}
                                 data-row={idx}
@@ -2749,10 +2826,19 @@ export default function PurchaseRecords() {
                                     type="text" 
                                     placeholder="YYYY/MM/DD"
                                     style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                    value={g.closing_date || ''} 
-                                    onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)} 
+                                    value={getClosingDateInputVal(g)} 
+                                    onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))} 
                                     onClick={e => e.stopPropagation()}
-                                    onKeyDown={e => handleKeyDown(e, idx, 'closing_date', tableId)}
+                                    onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        handleCommitClosingDate(g.id, getClosingDateInputVal(g));
+                                      } else if (e.key === 'Escape') {
+                                        handleCancelClosingDateDraft(g.id);
+                                        e.currentTarget.blur();
+                                      }
+                                      handleKeyDown(e, idx, 'closing_date', tableId);
+                                    }}
                                     onPaste={e => handlePaste(e, idx, 'closing_date', list)}
                                     data-table={tableId}
                                     data-row={idx}
