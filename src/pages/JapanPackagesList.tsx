@@ -42,7 +42,7 @@ export default function JapanPackagesList() {
 
   // Filters & Search
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('registered');
   const [carrierFilter, setCarrierFilter] = useState<string>('all');
   const [showCarrierDrawer, setShowCarrierDrawer] = useState<boolean>(false);
   const [animateCarrierDrawer, setAnimateCarrierDrawer] = useState<boolean>(false);

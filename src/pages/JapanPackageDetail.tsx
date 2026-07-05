@@ -953,6 +953,14 @@ export default function JapanPackageDetail() {
           .btn-outline:hover {
             background: #f8fafc;
           }
+          .mobile-detail-layout {
+            width: 100%;
+            box-sizing: border-box;
+          }
+          .mobile-pkg-info-card {
+            width: 100%;
+            box-sizing: border-box;
+          }
         `}</style>
 
         {/* Back button */}
@@ -1367,7 +1375,9 @@ export default function JapanPackageDetail() {
                                       display: 'flex',
                                       flexDirection: 'column',
                                       gap: '4px',
-                                      border: '1px solid #e2e8f0'
+                                      border: '1px solid #e2e8f0',
+                                      width: '100%',
+                                      boxSizing: 'border-box'
                                     }}
                                     onClick={e => e.stopPropagation()}
                                   >
@@ -1377,9 +1387,9 @@ export default function JapanPackageDetail() {
                                     {bundleComps.map((comp) => {
                                       const compLabel = comp.variant_name || '單品';
                                       return (
-                                        <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
-                                          <span style={{ color: '#94a3b8' }}>•</span>
-                                          <span style={{ fontWeight: 500 }}>{compLabel}</span>
+                                        <div key={comp.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
+                                          <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
+                                          <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{compLabel}</span>
                                         </div>
                                       );
                                     })}
@@ -2715,7 +2725,9 @@ export default function JapanPackageDetail() {
                             display: 'flex',
                             flexDirection: 'column',
                             gap: '4px',
-                            border: '1px solid #e2e8f0'
+                            border: '1px solid #e2e8f0',
+                            width: '100%',
+                            boxSizing: 'border-box'
                           }}
                           onClick={e => e.stopPropagation()}
                         >
@@ -2725,9 +2737,9 @@ export default function JapanPackageDetail() {
                           {bundleComps.map((comp) => {
                             const compLabel = comp.variant_name || '單品';
                             return (
-                              <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
-                                <span style={{ color: '#94a3b8' }}>•</span>
-                                <span style={{ fontWeight: 500 }}>{compLabel}</span>
+                              <div key={comp.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
+                                <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
+                                <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{compLabel}</span>
                               </div>
                             );
                           })}
