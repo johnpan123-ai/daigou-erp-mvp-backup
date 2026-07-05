@@ -3,7 +3,7 @@ import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchas
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Search, Trash2, Calendar, Copy, Check } from 'lucide-react';
+import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
@@ -306,7 +306,7 @@ export default function PurchaseRecords() {
     return (localStorage.getItem('erp_active_tab') as 'all' | 'hololive' | 'vspo' | 'proxy' | 'other') || 'all';
   });
 
-  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'all'>('progress');
+  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'to_purchase' | 'all'>('progress');
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
 
   const normalizeDate = (dateStr: string | undefined | null): string | null => {
@@ -340,6 +340,23 @@ export default function PurchaseRecords() {
     if (!closing) return false;
     const todayStr = getTodayStr();
     return closing < todayStr;
+  };
+
+  const checkIsToPurchase = (g: ProductGroup): boolean => {
+    const closing = normalizeDate(g.closing_date);
+    if (!closing) return false;
+    const todayStr = getTodayStr();
+    if (closing > todayStr) return false;
+    
+    const details = getGroupPlatformDetails(g.id);
+    const demandAndPurchased = getGroupDemandAndPurchased(g.id);
+    const isProxy = isProxyProduct(g);
+    const totalDemand = isProxy 
+      ? (details.myacg + details.wacaManual + details.privateOrder) 
+      : demandAndPurchased.demand;
+    const purchased = isProxy ? details.purchased : demandAndPurchased.purchased;
+
+    return purchased < totalDemand;
   };
 
   useEffect(() => {
@@ -631,11 +648,12 @@ export default function PurchaseRecords() {
     return result;
   }, [groups, searchTerm, filterSource, filterType, activeTab, variants, categories, inventory]);
 
-  const { progressCount, closedCount, allCount } = useMemo(() => {
+  const { progressCount, closedCount, allCount, toPurchaseCount } = useMemo(() => {
     const progress = baseGroups.filter(g => !checkIsGroupClosed(g)).length;
     const closed = baseGroups.filter(g => checkIsGroupClosed(g)).length;
     const total = baseGroups.length;
-    return { progressCount: progress, closedCount: closed, allCount: total };
+    const toPurchase = baseGroups.filter(g => checkIsToPurchase(g)).length;
+    return { progressCount: progress, closedCount: closed, allCount: total, toPurchaseCount: toPurchase };
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
@@ -687,6 +705,8 @@ export default function PurchaseRecords() {
       });
     } else if (secondaryTab === 'closed') {
       result = result.filter(g => checkIsGroupClosed(g));
+    } else if (secondaryTab === 'to_purchase') {
+      result = result.filter(g => checkIsToPurchase(g));
     }
 
     // Sort
@@ -1189,11 +1209,12 @@ export default function PurchaseRecords() {
 
 
   const handleRowClick = (id: string, e: React.MouseEvent) => {
-    // Don't navigate if clicking inputs/buttons
+    // Don't navigate if clicking inputs/buttons or selecting product name text
     if ((e.target as HTMLElement).tagName === 'INPUT' || 
         (e.target as HTMLElement).tagName === 'SELECT' || 
         (e.target as HTMLElement).tagName === 'BUTTON' ||
-        (e.target as HTMLElement).closest('button')) {
+        (e.target as HTMLElement).closest('button') ||
+        (e.target as HTMLElement).closest('.product-name-text')) {
       return;
     }
     if (editMode) return;
@@ -1626,6 +1647,22 @@ export default function PurchaseRecords() {
             }}
           >
             已結單 ({closedCount})
+          </button>
+          <button
+            onClick={() => { setSecondaryTab('to_purchase'); }}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (secondaryTab === 'to_purchase' ? '#ef4444' : (toPurchaseCount > 0 ? '#fca5a5' : '#cbd5e1')),
+              backgroundColor: secondaryTab === 'to_purchase' ? '#fee2e2' : (toPurchaseCount > 0 ? '#fff5f5' : '#ffffff'),
+              color: secondaryTab === 'to_purchase' ? '#ef4444' : (toPurchaseCount > 0 ? '#dc2626' : '#475569'),
+              transition: 'all 0.15s ease'
+            }}
+          >
+            🚨 待採購 ({toPurchaseCount})
           </button>
           <button
             onClick={() => { setSecondaryTab('all'); }}
@@ -2292,7 +2329,31 @@ export default function PurchaseRecords() {
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span>{g.normalized_title || g.title}</span>
+                              <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/purchase-records/${g.id}`);
+                                }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: '4px',
+                                  cursor: 'pointer',
+                                  color: '#2563eb',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: '4px',
+                                  transition: 'all 0.2s',
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#eff6ff'; }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                                title="進入商品詳情"
+                              >
+                                <ExternalLink size={14} />
+                              </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2693,7 +2754,31 @@ export default function PurchaseRecords() {
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span>{g.normalized_title || g.title}</span>
+                              <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/purchase-records/${g.id}`);
+                                }}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: '4px',
+                                  cursor: 'pointer',
+                                  color: '#2563eb',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: '4px',
+                                  transition: 'all 0.2s',
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#eff6ff'; }}
+                                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                                title="進入商品詳情"
+                              >
+                                <ExternalLink size={14} />
+                              </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
