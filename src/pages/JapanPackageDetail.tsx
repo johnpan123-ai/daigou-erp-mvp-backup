@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
-import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
+import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 
 const cleanDisplayProductTitle = (title: string): string => {
@@ -79,6 +79,100 @@ export default function JapanPackageDetail() {
   // Group collapsing state
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
+  const [expandedBundleItems, setExpandedBundleItems] = useState<Set<string>>(new Set());
+  const [showDetailedInfo, setShowDetailedInfo] = useState<boolean>(false);
+
+  const getBundleComponents = (parentVar: ProductVariant): ProductVariant[] => {
+    const compIds = new Set(
+      bundleComponents
+        .filter(bc => bc.bundle_variant_id === parentVar.id)
+        .map(bc => bc.component_variant_id)
+    );
+    if (compIds.size === 0) return [];
+    return variants.filter(v => compIds.has(v.id));
+  };
+
+  const toggleBundleExpand = (itemId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedBundleItems(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
+
+  const checkAndAutoUpdateStatus = async (updatedItems: JapanPackageItem[]) => {
+    if (!pkg) return;
+    const totalQty = updatedItems.reduce((sum, item) => sum + item.quantity, 0);
+    const checkedQty = updatedItems.filter(item => item.checked).reduce((sum, item) => sum + item.quantity, 0);
+    const isCompleted = totalQty > 0 && checkedQty === totalQty;
+
+    let targetStatus = pkg.status;
+    if (isCompleted) {
+      targetStatus = 'confirmed';
+    } else if (pkg.status === 'confirmed') {
+      targetStatus = 'arrived';
+    }
+
+    if (targetStatus !== pkg.status) {
+      let arrivedAtVal = pkg.arrived_at;
+      if (targetStatus === 'arrived' && !arrivedAtVal) {
+        arrivedAtVal = new Date().toISOString().split('T')[0];
+      }
+      const updatedPkg: JapanPackage = {
+        ...pkg,
+        status: targetStatus,
+        arrived_at: arrivedAtVal,
+        updated_at: new Date().toISOString()
+      };
+      try {
+        const allPkgs = await dataProvider.getJapanPackages();
+        const updatedList = allPkgs.map(p => p.id === id ? updatedPkg : p);
+        await dataProvider.saveJapanPackages(updatedList);
+        setPkg(updatedPkg);
+        setPkgForm(prev => ({ ...prev, status: targetStatus, arrived_at: arrivedAtVal || '' }));
+      } catch (err) {
+        console.error('Auto status update failed:', err);
+      }
+    }
+  };
+
+  const handleQuickUpdateStatus = async (newStatus: string) => {
+    if (!pkg) return;
+    setIsSaving(true);
+    let arrivedAtVal = pkg.arrived_at;
+    if (newStatus === 'arrived' && !arrivedAtVal) {
+      arrivedAtVal = new Date().toISOString().split('T')[0];
+    }
+    const updatedPkg: JapanPackage = {
+      ...pkg,
+      status: newStatus as any,
+      arrived_at: arrivedAtVal,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      const allPkgs = await dataProvider.getJapanPackages();
+      const updatedList = allPkgs.map(p => p.id === id ? updatedPkg : p);
+      await dataProvider.saveJapanPackages(updatedList);
+      setPkg(updatedPkg);
+      setPkgForm(prev => ({ ...prev, status: newStatus as any, arrived_at: arrivedAtVal || '' }));
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        await loadData(id || '');
+      } else {
+        alert('狀態更新失敗，請重試！');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Mobile UI States
   const [mobileInfoExpanded, setMobileInfoExpanded] = useState<boolean>(false);
   const [mobileExpandedGroups, setMobileExpandedGroups] = useState<Set<string>>(new Set());
@@ -145,11 +239,13 @@ export default function JapanPackageDetail() {
 
     try {
       await dataProvider.saveJapanPackageItems(updatedAllItems);
-      setPackageItems(prev => prev.map(item => itemIdsSet.has(item.id) ? {
+      const updatedPackageItems = packageItems.map(item => itemIdsSet.has(item.id) ? {
         ...item,
         checked: checkedVal,
         checked_at: checkedVal ? now : undefined
-      } : item));
+      } : item);
+      setPackageItems(updatedPackageItems);
+      await checkAndAutoUpdateStatus(updatedPackageItems);
     } catch (e) {
       console.error(e);
       alert('批量修改點收狀態失敗！');
@@ -236,7 +332,7 @@ export default function JapanPackageDetail() {
 
   useEffect(() => {
     if (id) {
-      loadData(id);
+      loadData(id || '');
     }
   }, [id]);
 
@@ -268,12 +364,13 @@ export default function JapanPackageDetail() {
       setPackageItems(currentItems);
 
       // Load products metadata
-      const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems] = await Promise.all([
+      const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedBundleComponents] = await Promise.all([
         dataProvider.getProductGroups().catch(() => []),
         dataProvider.getProductVariants().catch(() => []),
         dataProvider.getProductCategories().catch(() => []),
         dataProvider.getPurchaseBatches().catch(() => []),
-        dataProvider.getPurchaseBatchItems().catch(() => [])
+        dataProvider.getPurchaseBatchItems().catch(() => []),
+        dataProvider.getBundleComponents().catch(() => [])
       ]);
 
       setProductGroups(fetchedGroups || []);
@@ -281,6 +378,7 @@ export default function JapanPackageDetail() {
       setCategories(fetchedCats || []);
       setBatches(fetchedBatches || []);
       setBatchItems(fetchedBatchItems || []);
+      setBundleComponents(fetchedBundleComponents || []);
     } catch (e) {
       console.error('Failed to load package details:', e);
     } finally {
@@ -472,7 +570,7 @@ export default function JapanPackageDetail() {
     } catch (err) {
       if (err instanceof StaleDataError) {
         alert(err.message);
-        await loadData(id);
+        await loadData(id || '');
       } else {
         alert('保存失敗，請重試！');
       }
@@ -499,11 +597,13 @@ export default function JapanPackageDetail() {
 
     try {
       await dataProvider.saveJapanPackageItems(updatedAllItems);
-      setPackageItems(prev => prev.map(item => item.id === itemId ? {
+      const updatedPackageItems = packageItems.map(item => item.id === itemId ? {
         ...item,
         checked: checkedVal,
         checked_at: checkedVal ? now : undefined
-      } : item));
+      } : item);
+      setPackageItems(updatedPackageItems);
+      await checkAndAutoUpdateStatus(updatedPackageItems);
     } catch (e) {
       console.error(e);
       alert('同步勾選狀態失敗！');
@@ -516,7 +616,9 @@ export default function JapanPackageDetail() {
       const allItems = await dataProvider.getJapanPackageItems();
       const updatedAllItems = allItems.filter(item => item.id !== itemId);
       await dataProvider.saveJapanPackageItems(updatedAllItems);
-      setPackageItems(prev => prev.filter(item => item.id !== itemId));
+      const updatedPackageItems = packageItems.filter(item => item.id !== itemId);
+      setPackageItems(updatedPackageItems);
+      await checkAndAutoUpdateStatus(updatedPackageItems);
     } catch (e) {
       alert('移除商品失敗！');
     }
@@ -638,7 +740,9 @@ export default function JapanPackageDetail() {
       await dataProvider.saveJapanPackageItems(updatedAllItems);
 
       // Reload package items
-      setPackageItems(prev => [...prev, ...newItems]);
+      const updatedPackageItems = [...packageItems, ...newItems];
+      setPackageItems(updatedPackageItems);
+      await checkAndAutoUpdateStatus(updatedPackageItems);
       
       // Reset state
       setImportGroupId('');
@@ -705,7 +809,9 @@ export default function JapanPackageDetail() {
       const updatedAllItems = [...allItems, newItem];
       await dataProvider.saveJapanPackageItems(updatedAllItems);
 
-      setPackageItems(prev => [...prev, newItem]);
+      const updatedPackageItems = [...packageItems, newItem];
+      setPackageItems(updatedPackageItems);
+      await checkAndAutoUpdateStatus(updatedPackageItems);
       alert('加入商品成功！');
     } catch (err) {
       alert('加入商品失敗！');
@@ -895,13 +1001,45 @@ export default function JapanPackageDetail() {
               </div>
 
               {/* Row 2: Status Badge + Expand/Collapse Button */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingLeft: '26px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingLeft: '26px', flexWrap: 'wrap' }}>
                 <span className={`badge ${getStatusBadgeClass(pkg.status)}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
                   {getStatusName(pkg.status)}
                 </span>
                 <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
                   {mobileInfoExpanded ? '收合 ▲' : '展開 ▼'}
                 </span>
+                
+                {/* Quick Status Buttons */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '6px', width: '100%' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>快速切換：</span>
+                  {['registered', 'arrived', 'confirmed', 'problem'].map(st => {
+                    const active = pkg.status === st;
+                    return (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleQuickUpdateStatus(st);
+                        }}
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: '11px',
+                          borderRadius: '4px',
+                          border: '1px solid',
+                          borderColor: active ? 'transparent' : '#cbd5e1',
+                          background: active ? '#2563eb' : '#ffffff',
+                          color: active ? '#ffffff' : '#475569',
+                          fontWeight: active ? 700 : 500,
+                          cursor: 'pointer',
+                          lineHeight: 1
+                        }}
+                      >
+                        {getStatusName(st)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Row 3: Progress text */}
@@ -1048,9 +1186,22 @@ export default function JapanPackageDetail() {
 
           {/* 2. 商品清單依活動分組 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 4px' }}>
-              <Package size={18} style={{ color: '#2563eb' }} />
-              <span style={{ fontSize: '15px', fontWeight: 700 }}>商品點收清單</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '0 4px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Package size={18} style={{ color: '#2563eb' }} />
+                <span style={{ fontSize: '15px', fontWeight: 700 }}>商品點收清單</span>
+              </div>
+              {packageItems.length > 0 && (
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: '#475569', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={showDetailedInfo}
+                    onChange={(e) => setShowDetailedInfo(e.target.checked)}
+                    style={{ width: '15px', height: '15px', cursor: 'pointer' }}
+                  />
+                  顯示詳細資訊
+                </label>
+              )}
             </div>
 
             {packageItems.length === 0 ? (
@@ -1117,8 +1268,11 @@ export default function JapanPackageDetail() {
                     {isExpanded && (
                       <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '10px', background: '#fafafa' }}>
                         {g.items.map(item => {
-                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join('－') 
+                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ') 
                             || getBatchItemLabel(item.product_variant_id || '');
+                          const v = variants.find(x => x.id === item.product_variant_id);
+                          const bundleComps = v ? getBundleComponents(v) : [];
+                          const isBundleExpanded = expandedBundleItems.has(item.id);
                           return (
                             <div 
                               key={item.id} 
@@ -1126,7 +1280,7 @@ export default function JapanPackageDetail() {
                                 display: 'flex', 
                                 alignItems: 'flex-start', 
                                 gap: '10px', 
-                                padding: '10px 12px', 
+                                padding: '12px 14px', 
                                 background: item.checked ? '#f0fdf4' : '#ffffff', 
                                 border: '1px solid',
                                 borderColor: item.checked ? '#bbf7d0' : '#e2e8f0',
@@ -1156,27 +1310,92 @@ export default function JapanPackageDetail() {
                                 {item.checked && <CheckSquare size={16} />}
                               </div>
 
-                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', minWidth: 0 }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <div style={{ fontWeight: 700, color: item.checked ? '#047857' : '#1e293b', wordBreak: 'break-all' }}>
-                                    {catAndVariant}
-                                    <span style={{ marginLeft: '8px', color: '#2563eb', fontWeight: 800 }}>
-                                      ×{item.quantity}
-                                    </span>
+                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', minWidth: 0, padding: '2px 0' }}>
+                                {/* Main Item spec title + quantity */}
+                                <div style={{ fontWeight: 700, color: item.checked ? '#047857' : '#1e293b', wordBreak: 'break-all', fontSize: '14px', lineHeight: 1.3 }}>
+                                  <span>{catAndVariant}</span>
+                                  <span style={{ marginLeft: '8px', color: '#2563eb', fontWeight: 800 }}>
+                                    ×{item.quantity}
+                                  </span>
+                                </div>
+
+                                {/* Source always visible, SKU completely removed */}
+                                <div style={{ color: '#475569', fontSize: '12px', lineHeight: 1.3 }}>
+                                  來源：<strong style={{ color: '#2563eb' }}>{getBatchName(item.purchase_batch_id) || '-'}</strong>
+                                </div>
+
+                                {/* Expand Button */}
+                                {bundleComps.length > 0 && (
+                                  <div style={{ marginTop: '2px' }} onClick={e => e.stopPropagation()}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleBundleExpand(item.id, e);
+                                      }}
+                                      style={{
+                                        padding: '3px 8px',
+                                        fontSize: '11px',
+                                        background: isBundleExpanded ? '#f1f5f9' : '#eff6ff',
+                                        color: isBundleExpanded ? '#475569' : '#1d4ed8',
+                                        border: '1px solid',
+                                        borderColor: isBundleExpanded ? '#cbd5e1' : '#bfdbfe',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        fontWeight: 600,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                      }}
+                                    >
+                                      {isBundleExpanded ? '▲ 套組內容' : '▼ 套組內容'}
+                                      <span style={{ fontSize: '10px', opacity: 0.85 }}>({bundleComps.length})</span>
+                                    </button>
                                   </div>
-                                </div>
-                                <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                  <div>SKU：<code>{item.sku || '-'}</code></div>
-                                  <div>來源：<strong>{getBatchName(item.purchase_batch_id) || '-'}</strong></div>
-                                </div>
+                                )}
+
+                                {/* Child bundle components card display */}
+                                {bundleComps.length > 0 && isBundleExpanded && (
+                                  <div 
+                                    style={{
+                                      marginTop: '4px',
+                                      fontSize: '12.5px',
+                                      color: '#475569',
+                                      backgroundColor: '#f1f5f9',
+                                      padding: '8px 12px',
+                                      borderRadius: '6px',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '4px',
+                                      border: '1px solid #e2e8f0'
+                                    }}
+                                    onClick={e => e.stopPropagation()}
+                                  >
+                                    <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
+                                      📦 套組內容 ({bundleComps.length})
+                                    </div>
+                                    {bundleComps.map((comp) => {
+                                      const compLabel = comp.variant_name || '單品';
+                                      return (
+                                        <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
+                                          <span style={{ color: '#94a3b8' }}>•</span>
+                                          <span style={{ fontWeight: 500 }}>{compLabel}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
                                 {item.note && (
-                                  <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 600 }}>
+                                  <div style={{ fontSize: '11.5px', color: '#dc2626', fontWeight: 600, marginTop: '4px', backgroundColor: '#fef2f2', padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', width: 'fit-content' }}>
                                     備註：{item.note}
                                   </div>
                                 )}
-                                {item.checked && item.checked_at && (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', color: '#10b981', marginTop: '2px', fontWeight: 600 }}>
-                                    <CheckCircle2 size={13} />
+
+                                {/* Checked Timestamp (only visible when checked and showDetailedInfo checked) */}
+                                {showDetailedInfo && item.checked && item.checked_at && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#10b981', marginTop: '4px', fontWeight: 600 }}>
+                                    <CheckCircle2 size={12} />
                                     <span>已點收：{formatCheckTime(item.checked_at)}</span>
                                   </div>
                                 )}
@@ -1689,7 +1908,7 @@ export default function JapanPackageDetail() {
           padding: 12px 16px;
           margin-bottom: 10px;
           display: flex;
-          align-items: center;
+          align-items: flex-start;
           gap: 12px;
         }
         .mobile-item-checked {
@@ -1720,6 +1939,34 @@ export default function JapanPackageDetail() {
           <span className={`badge ${getStatusBadgeClass(pkg.status)}`} style={{ fontSize: '13px', padding: '4px 10px' }}>
             {getStatusName(pkg.status)}
           </span>
+          
+          {/* Quick Status Buttons */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '16px' }}>
+            <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>快速切換：</span>
+            {['registered', 'arrived', 'confirmed', 'problem'].map(st => {
+              const active = pkg.status === st;
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => handleQuickUpdateStatus(st)}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    border: '1px solid',
+                    borderColor: active ? 'transparent' : '#cbd5e1',
+                    background: active ? '#2563eb' : '#ffffff',
+                    color: active ? '#ffffff' : '#475569',
+                    fontWeight: active ? 700 : 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {getStatusName(st)}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -2349,25 +2596,38 @@ export default function JapanPackageDetail() {
                 (點收進度: <strong style={{ color: checkedStats.allChecked ? '#059669' : '#d97706' }}>{checkedStats.checkedQty} / {checkedStats.totalQty} 件</strong>, 共 {checkedStats.checkedCount} / {checkedStats.totalCount} 項)
               </span>
             </div>
-            {packageItems.length > 0 && !isMobile && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>整頁批量操作：</span>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  style={{ padding: '4px 10px', fontSize: '12.5px', height: 'auto', borderRadius: '6px' }}
-                  onClick={() => handlePageBulkCheck(true)}
-                >
-                  全選已點收
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  style={{ padding: '4px 10px', fontSize: '12.5px', height: 'auto', borderRadius: '6px' }}
-                  onClick={() => handlePageBulkCheck(false)}
-                >
-                  全取消點收
-                </button>
+            {packageItems.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    checked={showDetailedInfo}
+                    onChange={(e) => setShowDetailedInfo(e.target.checked)}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                  />
+                  顯示詳細資訊
+                </label>
+                {!isMobile && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>整頁批量操作：</span>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ padding: '4px 10px', fontSize: '12.5px', height: 'auto', borderRadius: '6px' }}
+                      onClick={() => handlePageBulkCheck(true)}
+                    >
+                      全選已點收
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      style={{ padding: '4px 10px', fontSize: '12.5px', height: 'auto', borderRadius: '6px' }}
+                      onClick={() => handlePageBulkCheck(false)}
+                    >
+                      全取消點收
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2380,40 +2640,124 @@ export default function JapanPackageDetail() {
           ) : isMobile ? (
             // Mobile Card View
             <div>
-              {packageItems.map(item => (
-                <div 
-                  key={item.id} 
-                  className={`mobile-item-card ${item.checked ? 'mobile-item-checked' : ''}`}
-                >
-                  <button 
-                    onClick={() => handleToggleCheck(item.id, !item.checked)}
-                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: item.checked ? '#059669' : '#94a3b8' }}
+              {packageItems.map(item => {
+                const v = variants.find(x => x.id === item.product_variant_id);
+                const bundleComps = v ? getBundleComponents(v) : [];
+                const isBundleExpanded = expandedBundleItems.has(item.id);
+                const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ') || getBatchItemLabel(item.product_variant_id || '');
+                return (
+                  <div 
+                    key={item.id} 
+                    className={`mobile-item-card ${item.checked ? 'mobile-item-checked' : ''}`}
                   >
-                    {item.checked ? <CheckSquare size={24} /> : <Square size={24} />}
-                  </button>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '13px' }}>
-                    <div style={{ fontWeight: 700, color: '#1e293b' }}>
-                      {cleanDisplayProductTitle(item.product_title || getProductGroupTitle(item.product_variant_id))}
+                    <button 
+                      onClick={() => handleToggleCheck(item.id, !item.checked)}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: item.checked ? '#059669' : '#94a3b8', alignSelf: 'flex-start', marginTop: '2px' }}
+                    >
+                      {item.checked ? <CheckSquare size={24} /> : <Square size={24} />}
+                    </button>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', padding: '2px 0' }}>
+                      {/* Product Group title (e.g. VTuber project name) */}
+                      <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', lineHeight: 1.2 }}>
+                        {cleanDisplayProductTitle(item.product_title || getProductGroupTitle(item.product_variant_id))}
+                      </div>
+
+                      {/* Main Item spec title + quantity */}
+                      <div style={{ fontWeight: 700, color: '#1e293b', fontSize: '14px', lineHeight: 1.3 }}>
+                        <span>{catAndVariant}</span>
+                        <span style={{ marginLeft: '8px', color: '#2563eb', fontWeight: 800 }}>
+                          ×{item.quantity}
+                        </span>
+                      </div>
+
+                      {/* Source always visible, SKU completely removed */}
+                      <div style={{ color: '#475569', fontSize: '12px', lineHeight: 1.3 }}>
+                        來源：<strong style={{ color: '#2563eb' }}>{getBatchName(item.purchase_batch_id) || '-'}</strong>
+                      </div>
+
+                      {/* Expand Button */}
+                      {bundleComps.length > 0 && (
+                        <div style={{ marginTop: '2px' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => toggleBundleExpand(item.id, e)}
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: '11px',
+                              background: isBundleExpanded ? '#f1f5f9' : '#eff6ff',
+                              color: isBundleExpanded ? '#475569' : '#1d4ed8',
+                              border: '1px solid',
+                              borderColor: isBundleExpanded ? '#cbd5e1' : '#bfdbfe',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            {isBundleExpanded ? '▲ 套組內容' : '▼ 套組內容'}
+                            <span style={{ fontSize: '10px', opacity: 0.85 }}>({bundleComps.length})</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Child bundle components card display */}
+                      {bundleComps.length > 0 && isBundleExpanded && (
+                        <div 
+                          style={{
+                            marginTop: '4px',
+                            fontSize: '12.5px',
+                            color: '#475569',
+                            backgroundColor: '#f1f5f9',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            border: '1px solid #e2e8f0'
+                          }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
+                            📦 套組內容 ({bundleComps.length})
+                          </div>
+                          {bundleComps.map((comp) => {
+                            const compLabel = comp.variant_name || '單品';
+                            return (
+                              <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
+                                <span style={{ color: '#94a3b8' }}>•</span>
+                                <span style={{ fontWeight: 500 }}>{compLabel}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {item.note && (
+                        <div style={{ fontSize: '11.5px', color: '#dc2626', fontWeight: 600, marginTop: '4px', backgroundColor: '#fef2f2', padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', width: 'fit-content' }}>
+                          備註：{item.note}
+                        </div>
+                      )}
+
+                      {/* Checked Timestamp (only visible when checked and showDetailedInfo checked) */}
+                      {showDetailedInfo && item.checked && item.checked_at && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#10b981', marginTop: '4px', fontWeight: 600 }}>
+                          <CheckCircle2 size={12} />
+                          <span>已點收：{formatCheckTime(item.checked_at)}</span>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontWeight: 600, color: '#475569', fontSize: '12.5px', marginTop: '2px' }}>
-                      {[item.category_name, item.variant_name].filter(Boolean).join(' - ') || getBatchItemLabel(item.product_variant_id || '')}
-                    </div>
-                    <div style={{ color: '#64748b', fontSize: '12px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <div>SKU: <code>{item.sku || '-'}</code></div>
-                      <div>來源批次: <strong style={{ color: '#2563eb' }}>{getBatchName(item.purchase_batch_id)}</strong></div>
-                      <div>數量: <strong style={{ color: '#0f172a' }}>{item.quantity}</strong></div>
-                    </div>
-                    {item.note && <div style={{ fontSize: '11px', color: '#dc2626', marginTop: '4px' }}>備註: {item.note}</div>}
+                    <button 
+                      className="btn btn-ghost" 
+                      onClick={() => handleDeleteItem(item.id)}
+                      style={{ color: '#ef4444', padding: '4px', alignSelf: 'flex-start', marginTop: '2px' }}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
-                  <button 
-                    className="btn btn-ghost" 
-                    onClick={() => handleDeleteItem(item.id)}
-                    style={{ color: '#ef4444', padding: '4px' }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             // Grouped Checklist Desktop View
@@ -2474,6 +2818,9 @@ export default function JapanPackageDetail() {
                         {g.items.map(item => {
                           const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join('－') 
                             || getBatchItemLabel(item.product_variant_id || '');
+                          const v = variants.find(x => x.id === item.product_variant_id);
+                          const bundleComps = v ? getBundleComponents(v) : [];
+                          const isBundleExpanded = expandedBundleItems.has(item.id);
                           return (
                             <div 
                               key={item.id} 
@@ -2495,12 +2842,34 @@ export default function JapanPackageDetail() {
                                     <span className={`checklist-item-qty ${item.checked ? 'checked' : ''}`}>
                                       ×{item.quantity}
                                     </span>
+                                    {bundleComps.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => toggleBundleExpand(item.id, e)}
+                                        style={{
+                                          marginLeft: '8px',
+                                          padding: '2px 8px',
+                                          fontSize: '11px',
+                                          background: isBundleExpanded ? '#f1f5f9' : '#eff6ff',
+                                          color: isBundleExpanded ? '#475569' : '#1d4ed8',
+                                          border: '1px solid',
+                                          borderColor: isBundleExpanded ? '#cbd5e1' : '#bfdbfe',
+                                          borderRadius: '4px',
+                                          cursor: 'pointer',
+                                          fontWeight: 600,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px'
+                                        }}
+                                      >
+                                        {isBundleExpanded ? '▲ 套組內容' : '▼ 套組內容'}
+                                        <span style={{ fontSize: '10px', opacity: 0.85, marginLeft: '2px' }}>({bundleComps.length})</span>
+                                      </button>
+                                    )}
                                   </div>
                                   
-                                  {/* Line 2: SKU and Source Batch */}
+                                  {/* Line 2: Source Batch and Note */}
                                   <div className="checklist-item-meta-row">
-                                    <span>SKU：<code>{item.sku || '-'}</code></span>
-                                    <span style={{ color: '#cbd5e1', margin: '0 4px' }}>｜</span>
                                     <span>來源：<strong>{getBatchName(item.purchase_batch_id) || '-'}</strong></span>
                                     {item.note && (
                                       <>
@@ -2510,8 +2879,42 @@ export default function JapanPackageDetail() {
                                     )}
                                   </div>
 
+                                  {/* Child bundle components card display */}
+                                  {bundleComps.length > 0 && isBundleExpanded && (
+                                    <div 
+                                      style={{
+                                        marginTop: '8px',
+                                        fontSize: '13px',
+                                        color: '#475569',
+                                        backgroundColor: '#f1f5f9',
+                                        padding: '8px 12px',
+                                        borderRadius: '6px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '4px',
+                                        border: '1px solid #e2e8f0',
+                                        width: 'fit-content',
+                                        minWidth: '240px'
+                                      }}
+                                      onClick={e => e.stopPropagation()}
+                                    >
+                                      <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
+                                        📦 套組內容 ({bundleComps.length})
+                                      </div>
+                                      {bundleComps.map((comp) => {
+                                        const compLabel = comp.variant_name || '單品';
+                                        return (
+                                          <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
+                                            <span style={{ color: '#94a3b8' }}>•</span>
+                                            <span style={{ fontWeight: 500 }}>{compLabel}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
                                   {/* Line 3: Checked Timestamp (only visible when checked) */}
-                                  {item.checked && item.checked_at && (
+                                  {showDetailedInfo && item.checked && item.checked_at && (
                                     <div className="checklist-item-checked-row">
                                       <CheckCircle2 size={13} style={{ color: '#10b981' }} />
                                       <span>已點收：{formatCheckTime(item.checked_at)}</span>

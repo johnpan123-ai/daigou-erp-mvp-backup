@@ -601,13 +601,29 @@ export default function PurchaseRecords() {
       result = result.filter(g => {
         const isProxy = checkIsProxyProduct(g);
         const effectiveListingType = isProxy ? '代理版' : (g.listing_type || '');
+        
+        // Find variants in this group (including categories mapped to this group)
+        const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
+        const groupVars = variants.filter(v => v.product_group_id === g.id || (v.product_category_id && catIds.has(v.product_category_id)));
+        
+        const hasMatchingVariantOrCategory = groupVars.some(v => {
+          if (v.variant_name && v.variant_name.toLowerCase().includes(lowerTerm)) return true;
+          if (v.raw_variant_name && v.raw_variant_name.toLowerCase().includes(lowerTerm)) return true;
+          if (v.product_category_id) {
+            const cat = categories.find(c => c.id === v.product_category_id);
+            if (cat && cat.title && cat.title.toLowerCase().includes(lowerTerm)) return true;
+          }
+          return false;
+        });
+
         return (
           (g.title && g.title.toLowerCase().includes(lowerTerm)) ||
           (g.normalized_title && g.normalized_title.toLowerCase().includes(lowerTerm)) ||
           (g.release_month && g.release_month.toLowerCase().includes(lowerTerm)) ||
           (g.closing_date && g.closing_date.toLowerCase().includes(lowerTerm)) ||
           effectiveListingType.includes(lowerTerm) ||
-          (g.product_url && g.product_url.toLowerCase().includes(lowerTerm))
+          (g.product_url && g.product_url.toLowerCase().includes(lowerTerm)) ||
+          hasMatchingVariantOrCategory
         );
       });
     }

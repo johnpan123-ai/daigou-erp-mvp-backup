@@ -4,7 +4,7 @@ import { getBaseSku, calculateFinalMyacgDemand, calculateVariantDemandAndPurchas
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { 
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
-  PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem 
+  PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, BundleComponent 
 } from '../lib/db';
 import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy, Trash2, Edit2 } from 'lucide-react';
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
@@ -465,6 +465,53 @@ export default function PurchaseManagement() {
 
   const [tempJpyCosts, setTempJpyCosts] = useState<Record<string, string>>({});
   const [tempTwdCosts, setTempTwdCosts] = useState<Record<string, string>>({});
+
+  // Bundle dialog states
+  const [isBundleDialogOpen, setIsBundleDialogOpen] = useState<boolean>(false);
+  const [activeBundleVariant, setActiveBundleVariant] = useState<ProductVariant | null>(null);
+  const [selectedComponentVariantIds, setSelectedComponentVariantIds] = useState<Set<string>>(new Set());
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
+  const [isSavingBundle, setIsSavingBundle] = useState<boolean>(false);
+
+  const handleOpenBundleDialog = (variant: ProductVariant) => {
+    setActiveBundleVariant(variant);
+    const currentComponents = bundleComponents
+      .filter(bc => bc.bundle_variant_id === variant.id)
+      .map(bc => bc.component_variant_id);
+    setSelectedComponentVariantIds(new Set(currentComponents));
+    setIsBundleDialogOpen(true);
+  };
+
+  const handleToggleComponent = (variantId: string) => {
+    setSelectedComponentVariantIds(prev => {
+      const next = new Set(prev);
+      if (next.has(variantId)) {
+        next.delete(variantId);
+      } else {
+        next.add(variantId);
+      }
+      return next;
+    });
+  };
+
+  const handleSaveBundleComponents = async () => {
+    if (!activeBundleVariant) return;
+    setIsSavingBundle(true);
+    try {
+      await dataProvider.saveBundleComponentsForVariant(
+        activeBundleVariant.id,
+        Array.from(selectedComponentVariantIds)
+      );
+      setToastMessage('套組內容設定儲存成功！');
+      setIsBundleDialogOpen(false);
+      await loadData();
+    } catch (e: any) {
+      console.error(e);
+      alert('儲存套組內容失敗：' + (e.message || e));
+    } finally {
+      setIsSavingBundle(false);
+    }
+  };
 
   const handleCommitJpyCost = async (variantId: string, valStr: string) => {
     const v = variants.find(x => x.id === variantId);
@@ -1029,6 +1076,10 @@ export default function PurchaseManagement() {
     });
 
     setSalesOrderItems(groupSOI);
+
+    const allBundleComponents = await dataProvider.getBundleComponents().catch(() => []);
+    setBundleComponents(allBundleComponents);
+
     dataProvider.registerFreshLoad();
   };
 
@@ -1338,10 +1389,12 @@ export default function PurchaseManagement() {
       return;
     }
 
-    const targetVariants = variants.filter(v => {
-      const catTitle = parsedVariantsMap.get(v.id)?.categoryTitle || '';
-      return catTitle === bulkMasterCategory;
-    });
+    const matchedEntry = sortedGroupEntries.find(([key]) => key === bulkMasterCategory);
+    if (!matchedEntry) {
+      alert('找不到該分類商品！');
+      return;
+    }
+    const targetVariants = matchedEntry[1];
 
     if (targetVariants.length === 0) {
       alert('此分類下無任何商品規格！');
@@ -1353,7 +1406,11 @@ export default function PurchaseManagement() {
     const setCostState = isDaili ? setVariantDefaultTwdCosts : setVariantDefaultJpyCosts;
     const lsKey = isDaili ? 'variant_default_twd_costs' : 'variant_default_jpy_costs';
 
-    if (!confirm(`確定要將分類「${bulkMasterCategory}」下共 ${targetVariants.length} 個規格的預設單價設為 ${isDaili ? 'NT$' : '¥'} ${val} 嗎？`)) {
+    const title = matchedEntry[0].startsWith('category:')
+      ? (isDaili ? cleanDailiTitle(matchedEntry[0].slice('category:'.length)) : matchedEntry[0].slice('category:'.length))
+      : getDisplayProductName(matchedEntry[1][0]);
+
+    if (!confirm(`確定要將分類「${title}」下共 ${targetVariants.length} 個規格的預設單價設為 ${isDaili ? 'NT$' : '¥'} ${val} 嗎？`)) {
       return;
     }
 
@@ -1589,8 +1646,43 @@ export default function PurchaseManagement() {
         }}
       >
         {/* Title */}
-        <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+        <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
           <HighlightText text={title} highlight={searchTerm} />
+          {(() => {
+            const comps = bundleComponents.filter(bc => bc.bundle_variant_id === v.id);
+            if (comps.length > 0) {
+              return (
+                <span style={{
+                  backgroundColor: '#dcfce7',
+                  color: '#15803d',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  fontWeight: 600,
+                  fontSize: '9px'
+                }}>
+                  已設套組 ({comps.length})
+                </span>
+              );
+            }
+            return null;
+          })()}
+          <button
+            type="button"
+            onClick={() => handleOpenBundleDialog(v)}
+            style={{
+              padding: '1px 4px',
+              fontSize: '10px',
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              border: '1px solid #bfdbfe',
+              borderRadius: '3px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              marginLeft: 'auto'
+            }}
+          >
+            ⚙️ 設定
+          </button>
         </div>
 
         {/* Sources */}
@@ -2370,9 +2462,14 @@ export default function PurchaseManagement() {
                         style={{ width: '150px', height: '32px', padding: '0 4px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '13px', backgroundColor: isApplyingMasterCost ? '#f1f5f9' : '#fff', cursor: isApplyingMasterCost ? 'not-allowed' : 'pointer' }}
                       >
                         <option value="">-- 選擇分類 --</option>
-                        {(Array.from(new Set(variants.map(v => parsedVariantsMap.get(v.id)?.categoryTitle).filter(Boolean))) as string[]).map(cat => (
-                          <option key={cat} value={cat}>{cat}</option>
-                        ))}
+                        {sortedGroupEntries.map(([groupKey, groupItems]) => {
+                          const title = groupKey.startsWith('category:')
+                            ? (isDaili ? cleanDailiTitle(groupKey.slice('category:'.length)) : groupKey.slice('category:'.length))
+                            : getDisplayProductName(groupItems[0]);
+                          return (
+                            <option key={groupKey} value={groupKey}>{title}</option>
+                          );
+                        })}
                       </select>
                     </div>
                     <button 
@@ -2562,7 +2659,7 @@ export default function PurchaseManagement() {
                                   }}
                                   placeholder="規格名稱"
                                 />
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                   <span style={{ fontSize: '11px', color: '#94A3B8' }}>SKU:</span>
                                   <input 
                                     type="text" 
@@ -2588,6 +2685,27 @@ export default function PurchaseManagement() {
                                     }}
                                     placeholder="可空白"
                                   />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenBundleDialog(v)}
+                                    style={{
+                                      padding: '1px 5px',
+                                      fontSize: '11px',
+                                      background: '#eff6ff',
+                                      color: '#1d4ed8',
+                                      border: '1px solid #bfdbfe',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontWeight: 600,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px',
+                                      height: '18px',
+                                      lineHeight: 1
+                                    }}
+                                  >
+                                    ⚙️ 設定套組內容
+                                  </button>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                                   <span style={{
@@ -2673,11 +2791,51 @@ export default function PurchaseManagement() {
                               </div>
                             ) : (
                               <>
-                                <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={catTitle}>
+                                <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }} title={catTitle}>
                                   <HighlightText text={catTitle} highlight={searchTerm} />
+                                  {(() => {
+                                    const comps = bundleComponents.filter(bc => bc.bundle_variant_id === v.id);
+                                    if (comps.length > 0) {
+                                      return (
+                                        <span style={{
+                                          backgroundColor: '#dcfce7',
+                                          color: '#15803d',
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          fontWeight: 700,
+                                          fontSize: '10px',
+                                          display: 'inline-block'
+                                        }}>
+                                          已設套組 ({comps.length})
+                                        </span>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
-                                <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
+                                <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }} title={v.myacg_item_code}>
                                   <span>SKU: <HighlightText text={v.myacg_item_code || '(空白)'} highlight={searchTerm} /></span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenBundleDialog(v)}
+                                    style={{
+                                      padding: '1px 5px',
+                                      fontSize: '11px',
+                                      background: '#eff6ff',
+                                      color: '#1d4ed8',
+                                      border: '1px solid #bfdbfe',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontWeight: 600,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px',
+                                      height: '18px',
+                                      lineHeight: 1
+                                    }}
+                                  >
+                                    ⚙️ 設定套組內容
+                                  </button>
                                   {v.catalog_missing && (
                                     <span style={{
                                       backgroundColor: '#ffedd5',
@@ -3075,7 +3233,7 @@ export default function PurchaseManagement() {
                                           }}
                                           placeholder="規格名稱"
                                         />
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                           <span style={{ fontSize: '11px', color: '#94A3B8' }}>SKU:</span>
                                           <input 
                                             type="text" 
@@ -3101,6 +3259,27 @@ export default function PurchaseManagement() {
                                             }}
                                             placeholder="可空白"
                                           />
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenBundleDialog(v)}
+                                            style={{
+                                              padding: '1px 5px',
+                                              fontSize: '11px',
+                                              background: '#eff6ff',
+                                              color: '#1d4ed8',
+                                              border: '1px solid #bfdbfe',
+                                              borderRadius: '4px',
+                                              cursor: 'pointer',
+                                              fontWeight: 600,
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '2px',
+                                              height: '18px',
+                                              lineHeight: 1
+                                            }}
+                                          >
+                                            ⚙️ 設定套組內容
+                                          </button>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                                           <span style={{
@@ -3186,11 +3365,51 @@ export default function PurchaseManagement() {
                                       </div>
                                     ) : (
                                       <>
-                                        <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={getDisplayProductName(v)}>
+                                        <div style={{ fontWeight: 700, color: '#0F172A', fontSize: '15px', lineHeight: 1.35, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }} title={getDisplayProductName(v)}>
                                           <HighlightText text={isDaili ? getDisplayProductName(v) : getVariantDisplayLabel(v)} highlight={searchTerm} />
+                                          {(() => {
+                                            const comps = bundleComponents.filter(bc => bc.bundle_variant_id === v.id);
+                                            if (comps.length > 0) {
+                                              return (
+                                                <span style={{
+                                                  backgroundColor: '#dcfce7',
+                                                  color: '#15803d',
+                                                  padding: '2px 6px',
+                                                  borderRadius: '4px',
+                                                  fontWeight: 700,
+                                                  fontSize: '10px',
+                                                  display: 'inline-block'
+                                                }}>
+                                                  已設套組 ({comps.length})
+                                                </span>
+                                              );
+                                            }
+                                            return null;
+                                          })()}
                                         </div>
-                                        <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px' }} title={v.myacg_item_code}>
+                                        <div style={{ fontSize: '11px', fontWeight: 400, color: '#94A3B8', marginTop: '2px', lineHeight: 1.2, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }} title={v.myacg_item_code}>
                                           <span>SKU: <HighlightText text={v.myacg_item_code || '(空白)'} highlight={searchTerm} /></span>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenBundleDialog(v)}
+                                            style={{
+                                              padding: '1px 5px',
+                                              fontSize: '11px',
+                                              background: '#eff6ff',
+                                              color: '#1d4ed8',
+                                              border: '1px solid #bfdbfe',
+                                              borderRadius: '4px',
+                                              cursor: 'pointer',
+                                              fontWeight: 600,
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '2px',
+                                              height: '18px',
+                                              lineHeight: 1
+                                            }}
+                                          >
+                                            ⚙️ 設定套組內容
+                                          </button>
                                           {v.catalog_missing && (
                                             <span style={{
                                               backgroundColor: '#ffedd5',
@@ -3769,6 +3988,173 @@ export default function PurchaseManagement() {
           transition: 'all 0.3s ease'
         }}>
           {toastMessage}
+        </div>
+      )}
+
+      {/* Bundle Component Selection Dialog */}
+      {isBundleDialogOpen && activeBundleVariant && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.4)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 11000
+        }} onClick={() => setIsBundleDialogOpen(false)}>
+          <div 
+            style={{
+              width: '500px',
+              maxWidth: '90vw',
+              backgroundColor: '#ffffff',
+              borderRadius: '12px',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '80vh',
+              overflow: 'hidden'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '16px 20px',
+              borderBottom: '1px solid #f1f5f9',
+              background: '#f8fafc'
+            }}>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
+                  ⚙️ 設定套組包含商品
+                </h3>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px', fontWeight: 500 }}>
+                  套組規格：<strong>{isDaili ? getDisplayProductName(activeBundleVariant) : getVariantDisplayLabel(activeBundleVariant)}</strong>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsBundleDialogOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content list */}
+            <div style={{
+              padding: '20px',
+              overflowY: 'auto',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}>
+              <div style={{ fontSize: '13px', color: '#475569', marginBottom: '4px', lineHeight: 1.4 }}>
+                請勾選此商品包含的其他單品規格（同群組商品）：
+              </div>
+              
+              {variants.filter(v => v.id !== activeBundleVariant.id).length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                  此商品群組下無其他規格可供選取。
+                </div>
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  backgroundColor: '#f8fafc'
+                }}>
+                  {variants.filter(v => v.id !== activeBundleVariant.id).map(v => {
+                    const isChecked = selectedComponentVariantIds.has(v.id);
+                    const label = isDaili ? getDisplayProductName(v) : getVariantDisplayLabel(v);
+                    return (
+                      <label 
+                        key={v.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '12px 16px',
+                          borderBottom: '1px solid #e2e8f0',
+                          backgroundColor: isChecked ? '#eff6ff' : '#ffffff',
+                          cursor: 'pointer',
+                          transition: 'background-color 0.15s ease',
+                          userSelect: 'none'
+                        }}
+                      >
+                        <input 
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleComponent(v.id)}
+                          style={{
+                            width: '16px',
+                            height: '16px',
+                            cursor: 'pointer'
+                          }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 600, color: isChecked ? '#1d4ed8' : '#334155' }}>
+                            {label}
+                          </span>
+                          <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                            SKU: {v.myacg_item_code || '(無)'}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              padding: '12px 20px',
+              borderTop: '1px solid #f1f5f9',
+              background: '#f8fafc'
+            }}>
+              <button 
+                onClick={() => setIsBundleDialogOpen(false)}
+                className="btn btn-ghost"
+                style={{ height: '36px', padding: '0 16px', fontSize: '13px', fontWeight: 600 }}
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleSaveBundleComponents}
+                disabled={isSavingBundle}
+                className="btn btn-primary"
+                style={{ 
+                  height: '36px', 
+                  padding: '0 16px', 
+                  fontSize: '13px', 
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                {isSavingBundle ? '儲存中...' : '儲存設定'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

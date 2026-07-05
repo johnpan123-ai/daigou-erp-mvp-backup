@@ -100,7 +100,8 @@ import type {
   ImportBatch,
   ImportStats,
   JapanPackage,
-  JapanPackageItem
+  JapanPackageItem,
+  BundleComponent
 } from '../../lib/db';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -414,6 +415,27 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at
           }));
           await db.saveJapanPackageItems(mappedPackageItems);
+
+           // 2.5 Pull and save bundle components (gracefully handle missing table)
+           let bcData: any[] = [];
+           try {
+             const bcRes = await supabase.from('bundle_components').select('*');
+             if (!bcRes.error && bcRes.data) {
+               bcData = bcRes.data;
+               console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
+             } else if (bcRes.error) {
+               console.warn('[Sync WARNING] 抓取 bundle_components 失敗 (可能資料表尚未建立):', bcRes.error.message);
+             }
+           } catch (e: any) {
+             console.warn('[Sync WARNING] 抓取 bundle_components 發生異常:', e.message || e);
+           }
+           const mappedBundleComponents: BundleComponent[] = bcData.map(r => ({
+             id: r.id,
+             bundle_variant_id: r.bundle_variant_id,
+             component_variant_id: r.component_variant_id,
+             created_at: r.created_at
+           }));
+           await db.saveBundleComponents(mappedBundleComponents);
 
           // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
           await this.pullSalesOrders();
@@ -1697,6 +1719,84 @@ export class SupabaseProvider implements IDataProvider {
 
   async getJapanPackages(): Promise<JapanPackage[]> {
     return db.getJapanPackages();
+  }
+
+  async getBundleComponents(): Promise<BundleComponent[]> {
+    return db.getBundleComponents();
+  }
+
+  async saveBundleComponents(components: BundleComponent[]): Promise<void> {
+    await db.saveBundleComponents(components);
+    
+    if (!(await this.canWriteCloud())) {
+      console.warn('[Sync Push WARNING] Cannot save bundle_components to cloud (Read-Only)');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('bundle_components')
+        .upsert(components.map(c => ({
+          id: c.id,
+          bundle_variant_id: c.bundle_variant_id,
+          component_variant_id: c.component_variant_id,
+          created_at: c.created_at || new Date().toISOString()
+        })));
+
+      if (error) {
+        console.warn('[Cloud Push WARNING] bundle_components sync failed:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[Cloud Push WARNING] bundle_components sync exception:', err.message || err);
+    }
+  }
+
+  async saveBundleComponentsForVariant(bundleVariantId: string, componentVariantIds: string[]): Promise<void> {
+    const all = await this.getBundleComponents();
+    const filtered = all.filter(c => c.bundle_variant_id !== bundleVariantId);
+    const now = new Date().toISOString();
+    const newItems: BundleComponent[] = componentVariantIds.map(cId => ({
+      id: crypto.randomUUID(),
+      bundle_variant_id: bundleVariantId,
+      component_variant_id: cId,
+      created_at: now
+    }));
+    const updated = [...filtered, ...newItems];
+
+    await db.saveBundleComponents(updated);
+
+    if (!(await this.canWriteCloud())) {
+      console.log('[Sync Push] Skip bundle_components cloud push (Read-Only Viewer/Helper)');
+      return;
+    }
+
+    try {
+      const { error: delError } = await supabase
+        .from('bundle_components')
+        .delete()
+        .eq('bundle_variant_id', bundleVariantId);
+
+      if (delError) {
+        console.warn('[Cloud Push WARNING] Supabase delete bundle_components error:', delError.message);
+      }
+
+      if (newItems.length > 0) {
+        const { error: insError } = await supabase
+          .from('bundle_components')
+          .insert(newItems.map(c => ({
+            id: c.id,
+            bundle_variant_id: c.bundle_variant_id,
+            component_variant_id: c.component_variant_id,
+            created_at: c.created_at
+          })));
+
+        if (insError) {
+          console.warn('[Cloud Push WARNING] Supabase insert bundle_components error:', insError.message);
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Cloud Push WARNING] Supabase sync error for bundle_components:', err.message || err);
+    }
   }
 
   async saveJapanPackages(packages: JapanPackage[]): Promise<void> {

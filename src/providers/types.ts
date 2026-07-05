@@ -12,7 +12,8 @@ import type {
   ImportBatch,
   ImportStats,
   JapanPackage,
-  JapanPackageItem
+  JapanPackageItem,
+  BundleComponent
 } from '../lib/db';
 
 export interface IDataProvider {
@@ -49,6 +50,10 @@ export interface IDataProvider {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+
+  getBundleComponents(): Promise<BundleComponent[]>;
+  saveBundleComponents(components: BundleComponent[]): Promise<void>;
+  saveBundleComponentsForVariant(bundleVariantId: string, componentVariantIds: string[]): Promise<void>;
 
   getImportBatches(): Promise<ImportBatch[]>;
   saveImportBatches(batches: ImportBatch[]): Promise<void>;

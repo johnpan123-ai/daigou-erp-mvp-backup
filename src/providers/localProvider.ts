@@ -14,7 +14,8 @@ import type {
   ImportBatch,
   ImportStats,
   JapanPackage,
-  JapanPackageItem
+  JapanPackageItem,
+  BundleComponent
 } from '../lib/db';
 
 export class LocalProvider implements IDataProvider {
@@ -112,6 +113,24 @@ export class LocalProvider implements IDataProvider {
   }
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     return db.saveJapanPackageItems(items);
+  }
+  async getBundleComponents(): Promise<BundleComponent[]> {
+    return db.getBundleComponents();
+  }
+  async saveBundleComponents(components: BundleComponent[]): Promise<void> {
+    return db.saveBundleComponents(components);
+  }
+  async saveBundleComponentsForVariant(bundleVariantId: string, componentVariantIds: string[]): Promise<void> {
+    const all = await this.getBundleComponents();
+    const filtered = all.filter(c => c.bundle_variant_id !== bundleVariantId);
+    const now = new Date().toISOString();
+    const newItems: BundleComponent[] = componentVariantIds.map(cId => ({
+      id: crypto.randomUUID(),
+      bundle_variant_id: bundleVariantId,
+      component_variant_id: cId,
+      created_at: now
+    }));
+    await this.saveBundleComponents([...filtered, ...newItems]);
   }
   async getImportBatches(): Promise<ImportBatch[]> {
     return db.getImportBatches();

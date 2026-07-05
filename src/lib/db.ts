@@ -112,6 +112,13 @@ export interface PrivateOrderItem {
   note: string;
 }
 
+export interface BundleComponent {
+  id: string; // PK
+  bundle_variant_id: string; // FK to product_variants.id
+  component_variant_id: string; // FK to product_variants.id
+  created_at?: string;
+}
+
 export interface ProductGroup {
   id: string; // PK (We will use product_title as ID for simplicity, or UUID)
   purchase_date: string;
@@ -430,6 +437,9 @@ export interface DatabaseAdapter {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+
+  getBundleComponents(): Promise<BundleComponent[]>;
+  saveBundleComponents(components: BundleComponent[]): Promise<void>;
 
   getImportBatches(): Promise<ImportBatch[]>;
   saveImportBatches(batches: ImportBatch[]): Promise<void>;
@@ -1715,6 +1725,14 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     saveData('erp_japan_package_items', items);
   }
 
+  async getBundleComponents(): Promise<BundleComponent[]> {
+    return loadData<BundleComponent[]>('erp_bundle_components', []);
+  }
+
+  async saveBundleComponents(components: BundleComponent[]): Promise<void> {
+    saveData('erp_bundle_components', components);
+  }
+
   async exportData(): Promise<void> {
     const data = {
       inventory: await this.getInventory(),
@@ -1727,6 +1745,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       purchaseBatchItems: await this.getPurchaseBatchItems(),
       privateOrders: await this.getPrivateOrders(),
       privateOrderItems: await this.getPrivateOrderItems(),
+      bundleComponents: await this.getBundleComponents(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1752,6 +1771,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       if (data.purchaseBatchItems) await this.savePurchaseBatchItems(data.purchaseBatchItems);
       if (data.privateOrders) await this.savePrivateOrders(data.privateOrders);
       if (data.privateOrderItems) await this.savePrivateOrderItems(data.privateOrderItems);
+      if (data.bundleComponents) await this.saveBundleComponents(data.bundleComponents);
       if (data.importBatches) await this.saveImportBatches(data.importBatches);
       return true;
     } catch (e) {
@@ -1771,6 +1791,7 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     localStorage.removeItem('erp_purchase_batch_items');
     localStorage.removeItem('erp_private_orders');
     localStorage.removeItem('erp_private_order_items');
+    localStorage.removeItem('erp_bundle_components');
   }
 
   async clearPurchaseRecords(): Promise<void> {
@@ -2828,6 +2849,14 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     await this.set('erp_import_batches', batches);
   }
 
+  async getBundleComponents(): Promise<BundleComponent[]> {
+    return this.get<BundleComponent[]>('erp_bundle_components', []);
+  }
+
+  async saveBundleComponents(components: BundleComponent[]): Promise<void> {
+    await this.set('erp_bundle_components', components);
+  }
+
   async exportData(): Promise<void> {
     const data = {
       inventory: await this.getInventory(),
@@ -2842,6 +2871,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       privateOrderItems: await this.getPrivateOrderItems(),
       japanPackages: await this.getJapanPackages(),
       japanPackageItems: await this.getJapanPackageItems(),
+      bundleComponents: await this.getBundleComponents(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2869,6 +2899,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       if (data.privateOrderItems) await this.savePrivateOrderItems(data.privateOrderItems);
       if (data.japanPackages) await this.saveJapanPackages(data.japanPackages);
       if (data.japanPackageItems) await this.saveJapanPackageItems(data.japanPackageItems);
+      if (data.bundleComponents) await this.saveBundleComponents(data.bundleComponents);
       if (data.importBatches) await this.saveImportBatches(data.importBatches);
       return true;
     } catch (e) {
@@ -2900,6 +2931,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     localStorage.removeItem('erp_purchase_batch_items');
     localStorage.removeItem('erp_private_orders');
     localStorage.removeItem('erp_private_order_items');
+    localStorage.removeItem('erp_bundle_components');
     localStorage.removeItem('erp_japan_packages');
     localStorage.removeItem('erp_japan_package_items');
   }
