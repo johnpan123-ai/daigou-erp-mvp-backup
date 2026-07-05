@@ -2089,14 +2089,13 @@ export default function PurchaseRecords() {
                               <span style={{
                                 backgroundColor: '#fee2e2',
                                 color: '#991b1b',
-                                padding: '1px 6px',
+                                padding: '2px 8px',
                                 borderRadius: '12px',
-                                fontWeight: 700,
-                                fontSize: '11px',
+                                fontWeight: 600,
+                                fontSize: '12px',
                                 marginLeft: '6px',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                height: '18px',
                                 lineHeight: 1
                               }}>
                                 -{gap}
@@ -2343,16 +2342,15 @@ export default function PurchaseRecords() {
                                 <span style={{
                                   backgroundColor: '#fee2e2',
                                   color: '#991b1b',
-                                  padding: '1px 6px',
+                                  padding: '2px 8px',
                                   borderRadius: '12px',
-                                  fontWeight: 700,
-                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  fontSize: '12px',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  height: '18px',
                                   lineHeight: 1
                                 }}>
-                                  -${dynamicGap}
+                                  -{dynamicGap}
                                 </span>
                               )}
                               <button
@@ -2772,16 +2770,15 @@ export default function PurchaseRecords() {
                                 <span style={{
                                   backgroundColor: '#fee2e2',
                                   color: '#991b1b',
-                                  padding: '1px 6px',
+                                  padding: '2px 8px',
                                   borderRadius: '12px',
-                                  fontWeight: 700,
-                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  fontSize: '12px',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  height: '18px',
                                   lineHeight: 1
                                 }}>
-                                  -${demandAndPurchased.gap}
+                                  -{demandAndPurchased.gap}
                                 </span>
                               )}
                               <button
