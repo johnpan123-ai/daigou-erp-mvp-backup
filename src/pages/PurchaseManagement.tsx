@@ -2836,18 +2836,7 @@ export default function PurchaseManagement() {
                                   >
                                     ⚙️ 設定套組內容
                                   </button>
-                                  {v.catalog_missing && (
-                                    <span style={{
-                                      backgroundColor: '#ffedd5',
-                                      color: '#ea580c',
-                                      padding: '1px 6px',
-                                      borderRadius: '4px',
-                                      fontWeight: 600,
-                                      fontSize: '10px'
-                                    }}>
-                                      [清單無此項]
-                                    </span>
-                                  )}
+                                  
                                   {v.source === 'manual' && (
                                     <span style={{
                                       backgroundColor: '#f1f5f9',
@@ -3410,18 +3399,7 @@ export default function PurchaseManagement() {
                                           >
                                             ⚙️ 設定套組內容
                                           </button>
-                                          {v.catalog_missing && (
-                                            <span style={{
-                                              backgroundColor: '#ffedd5',
-                                              color: '#ea580c',
-                                              padding: '1px 6px',
-                                              borderRadius: '4px',
-                                              fontWeight: 600,
-                                              fontSize: '10px'
-                                            }}>
-                                              [清單無此項]
-                                            </span>
-                                          )}
+                                          
                                           {v.source === 'manual' && (
                                             <span style={{
                                               backgroundColor: '#f1f5f9',
