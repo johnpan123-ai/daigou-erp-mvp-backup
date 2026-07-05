@@ -2086,20 +2086,7 @@ export default function PurchaseRecords() {
                           }}>
                             {g.normalized_title || g.title}
                           </span>
-                          {details.hasCatalogMissing && (
-                            <span style={{
-                              backgroundColor: '#ffedd5',
-                              color: '#ea580c',
-                              padding: '1px 4px',
-                              borderRadius: '3px',
-                              fontWeight: 600,
-                              fontSize: '9px',
-                              whiteSpace: 'nowrap',
-                              flexShrink: 0
-                            }}>
-                              [型錄無此規格]
-                            </span>
-                          )}
+
                         </div>
 
                         {/* Line 2: SKU */}
@@ -2383,19 +2370,7 @@ export default function PurchaseRecords() {
                                   <Copy size={14} />
                                 )}
                               </button>
-                              {details.hasCatalogMissing && (
-                                <span style={{
-                                  backgroundColor: '#ffedd5',
-                                  color: '#ea580c',
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  fontWeight: 600,
-                                  fontSize: '11px',
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                  [清單無此項]
-                                </span>
-                              )}
+
                             </div>
                             <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                               {g.listing_type && (
@@ -2808,19 +2783,7 @@ export default function PurchaseRecords() {
                                   <Copy size={14} />
                                 )}
                               </button>
-                              {editMode && demandAndPurchased.hasCatalogMissing && (
-                                <span style={{
-                                  backgroundColor: '#ffedd5',
-                                  color: '#ea580c',
-                                  padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  fontWeight: 600,
-                                  fontSize: '11px',
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                  [清單無此項]
-                                </span>
-                              )}
+
                             </div>
                             {editMode ? (
                               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
