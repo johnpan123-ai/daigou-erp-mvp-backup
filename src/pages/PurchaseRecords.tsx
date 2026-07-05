@@ -2085,6 +2085,23 @@ export default function PurchaseRecords() {
                             flex: 1
                           }}>
                             {g.normalized_title || g.title}
+                            {gap > 0 && (
+                              <span style={{
+                                backgroundColor: '#fee2e2',
+                                color: '#991b1b',
+                                padding: '1px 6px',
+                                borderRadius: '12px',
+                                fontWeight: 700,
+                                fontSize: '11px',
+                                marginLeft: '6px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                height: '18px',
+                                lineHeight: 1
+                              }}>
+                                -{gap}
+                              </span>
+                            )}
                           </span>
 
                         </div>
@@ -2134,7 +2151,12 @@ export default function PurchaseRecords() {
                           <span style={{ color: '#cbd5e1' }}>|</span>
                           <span>已採購 <strong>{purchased}</strong></span>
                           <span style={{ color: '#cbd5e1' }}>|</span>
-                          <span>缺 <strong style={{ color: gap > 0 ? '#ef4444' : '#166534' }}>{gap}</strong></span>
+                          {gap > 0 && (
+                            <>
+                              <span style={{ color: '#cbd5e1' }}>|</span>
+                              <span style={{ color: '#ef4444', fontWeight: 700 }}>-{gap}</span>
+                            </>
+                          )}
                         </div>
 
                         {/* Line 5: Closing Date & Release Month */}
@@ -2317,6 +2339,22 @@ export default function PurchaseRecords() {
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              {dynamicGap > 0 && (
+                                <span style={{
+                                  backgroundColor: '#fee2e2',
+                                  color: '#991b1b',
+                                  padding: '1px 6px',
+                                  borderRadius: '12px',
+                                  fontWeight: 700,
+                                  fontSize: '11px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  height: '18px',
+                                  lineHeight: 1
+                                }}>
+                                  -${dynamicGap}
+                                </span>
+                              )}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2492,8 +2530,8 @@ export default function PurchaseRecords() {
                           ) : (
                             details.purchased
                           )}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: dynamicGap > 0 ? '#ef4444' : '#166534' }}>
-                          缺 {dynamicGap}
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
+                          {dynamicGap > 0 ? `-${dynamicGap}` : ''}
                         </td>
     
                         <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
@@ -2730,6 +2768,22 @@ export default function PurchaseRecords() {
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              {demandAndPurchased.gap > 0 && (
+                                <span style={{
+                                  backgroundColor: '#fee2e2',
+                                  color: '#991b1b',
+                                  padding: '1px 6px',
+                                  borderRadius: '12px',
+                                  fontWeight: 700,
+                                  fontSize: '11px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  height: '18px',
+                                  lineHeight: 1
+                                }}>
+                                  -${demandAndPurchased.gap}
+                                </span>
+                              )}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2877,8 +2931,8 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {details.purchased}
                         </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: demandAndPurchased.gap > 0 ? '#ef4444' : '#166534' }}>
-                          缺 {demandAndPurchased.gap}
+                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
+                          {demandAndPurchased.gap > 0 ? `-${demandAndPurchased.gap}` : ''}
                         </td>
                         {editMode && (
                           <>
