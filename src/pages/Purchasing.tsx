@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
-import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem } from '../lib/db';
+import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
-import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, ExternalLink, Plus } from 'lucide-react';
+import PurchaseBatchModal from '../components/PurchaseBatchModal';
 
 interface VariantDetail {
   id: string;
@@ -112,7 +114,34 @@ function parseVariantFallback(v: ProductVariant, categoryMap: Map<string, Produc
   };
 }
 
+const cleanDailiTitle = (title: string): string => {
+  if (!title) return '';
+  let res = title;
+  const keywords = [
+    '【小河馬日本代購】',
+    '【小河馬代購】',
+    '小河馬日本代購',
+    '小河馬代購',
+    '預購',
+    '現貨',
+    '日本代購',
+    '現地代購',
+    '代理版',
+    '代理',
+    '日版',
+    '再版',
+    '預約'
+  ];
+  keywords.forEach(kw => {
+    res = res.replaceAll(kw, '');
+  });
+  res = res.replace(/\d{2,4}年\d{1,2}月/g, '');
+  res = res.replace(/\s+/g, ' ').trim();
+  return res;
+};
+
 export default function Purchasing() {
+  const navigate = useNavigate();
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -120,6 +149,8 @@ export default function Purchasing() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
+  const [purchaseBatches, setPurchaseBatches] = useState<PurchaseBatch[]>([]);
+  const [showBatchModal, setShowBatchModal] = useState(false);
   
   const [loading, setLoading] = useState(true);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -130,6 +161,60 @@ export default function Purchasing() {
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [isStale, setIsStale] = useState(false);
+
+  const activeProductGroup = useMemo(() => {
+    if (!selectedGroupId) return null;
+    return groups.find(g => g.id === selectedGroupId) || null;
+  }, [groups, selectedGroupId]);
+
+  const groupCatIds = useMemo(() => {
+    if (!selectedGroupId) return new Set<string>();
+    return new Set(categories.filter(c => c.product_group_id === selectedGroupId).map(c => c.id));
+  }, [categories, selectedGroupId]);
+
+  const groupVars = useMemo(() => {
+    if (!selectedGroupId) return [];
+    return variants.filter(v => v.product_group_id === selectedGroupId || (v.product_category_id && groupCatIds.has(v.product_category_id)));
+  }, [variants, selectedGroupId, groupCatIds]);
+
+  const categoryMap = useMemo(() => {
+    return new Map(categories.map(c => [c.id, c]));
+  }, [categories]);
+
+  const getDisplayProductName = (v: ProductVariant): string => {
+    const variantName = (v.variant_name || '').trim();
+    const productTitle = activeProductGroup?.normalized_title || activeProductGroup?.title || '';
+    const isDaili = activeProductGroup?.listing_type === '代理版';
+    
+    if (isDaili) {
+      if (variantName && variantName !== '單品' && variantName !== '一箱') {
+        return variantName;
+      }
+      const targetTitle = v.product_title || productTitle;
+      const cleaned = cleanDailiTitle(targetTitle);
+      if (cleaned) {
+        return cleaned;
+      }
+      if (targetTitle) {
+        return targetTitle;
+      }
+      return v.myacg_item_code || '未命名規格';
+    } else {
+      if (v.product_category_id) {
+        const cat = categoryMap.get(v.product_category_id);
+        if (cat && cat.title && cat.title !== '單品') {
+          return `${cat.title} - ${variantName || '單品'}`;
+        }
+      }
+      if (variantName) {
+        return variantName;
+      }
+      if (productTitle) {
+        return productTitle;
+      }
+      return v.myacg_item_code || '未命名規格';
+    }
+  };
 
   useEffect(() => {
     setExpandedCats(new Set());
@@ -151,7 +236,8 @@ export default function Purchasing() {
         fetchedPrivateItems,
         fetchedInventory,
         fetchedBatchItems,
-        fetchedSalesOrderItems
+        fetchedSalesOrderItems,
+        fetchedBatches
       ] = await Promise.all([
         dataProvider.getProductGroups().catch(() => []),
         dataProvider.getProductVariants().catch(() => []),
@@ -159,7 +245,8 @@ export default function Purchasing() {
         dataProvider.getPrivateOrderItems().catch(() => []),
         dataProvider.getInventory().catch(() => []),
         dataProvider.getPurchaseBatchItems().catch(() => []),
-        dataProvider.getSalesOrderItems().catch(() => [])
+        dataProvider.getSalesOrderItems().catch(() => []),
+        dataProvider.getPurchaseBatches().catch(() => [])
       ]);
 
       setGroups(fetchedGroups);
@@ -169,6 +256,7 @@ export default function Purchasing() {
       setInventory(fetchedInventory);
       setPurchaseBatchItems(fetchedBatchItems);
       setSalesOrderItems(fetchedSalesOrderItems);
+      setPurchaseBatches(fetchedBatches);
       dataProvider.registerFreshLoad();
     } catch (err) {
       console.error("Failed to load data for mobile purchase summary:", err);
@@ -1078,6 +1166,14 @@ export default function Purchasing() {
                     {!isSelectMode && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <button
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchEnd={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleSingleRemove(item.id);
+                          }}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleSingleRemove(item.id);
@@ -1120,29 +1216,75 @@ export default function Purchasing() {
               <ArrowLeft size={16} />
               <span>返回清單</span>
             </button>
-            <button
-              onClick={() => {
-                handleSingleRemove(selectedGroup.id);
-                setSelectedGroupId(null);
-              }}
-              style={{
-                padding: '6px 12px',
-                backgroundColor: '#ffffff',
-                color: '#ef4444',
-                border: '1px solid #fee2e2',
-                borderRadius: '6px',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.2s'
-              }}
-            >
-              <Trash2 size={14} />
-              <span>移出採購總表</span>
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => {
+                  setShowBatchModal(true);
+                }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#f0fdf4',
+                  color: '#166534',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <Plus size={14} />
+                <span>新增採購批次</span>
+              </button>
+              <button
+                onClick={() => {
+                  navigate(`/purchase-records/${selectedGroup.id}`, { state: { from: '/purchasing' } });
+                }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#eff6ff',
+                  color: '#2563eb',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <ExternalLink size={14} />
+                <span>前往訂購紀錄</span>
+              </button>
+              <button
+                onClick={() => {
+                  handleSingleRemove(selectedGroup.id);
+                  setSelectedGroupId(null);
+                }}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: '#ffffff',
+                  color: '#ef4444',
+                  border: '1px solid #fee2e2',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <Trash2 size={14} />
+                <span>移出採購總表</span>
+              </button>
+            </div>
           </div>
           
           <h2 className="detail-title">{selectedGroup.title}</h2>
@@ -1275,6 +1417,29 @@ export default function Purchasing() {
         </div>
       )}
       
+      {showBatchModal && activeProductGroup && (
+        <PurchaseBatchModal
+          show={showBatchModal}
+          onClose={() => setShowBatchModal(false)}
+          group={activeProductGroup}
+          variants={groupVars}
+          inventory={inventory}
+          salesOrderItems={salesOrderItems}
+          privateOrderItems={privateOrderItems}
+          purchaseBatchItems={purchaseBatchItems}
+          purchaseBatches={purchaseBatches}
+          editingBatchId={null}
+          onSaveSuccess={async () => {
+            await loadAllData();
+          }}
+          onStale={() => {
+            setIsStale(true);
+            loadAllData();
+          }}
+          getDisplayProductName={getDisplayProductName}
+        />
+      )}
+
       {/* Version Tag */}
       <div className="purchasing-version-tag" style={{
         position: 'fixed',

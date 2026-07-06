@@ -2258,18 +2258,22 @@ export default function PurchaseRecords() {
                       </div>
                     </th>
     
-                    <th style={{ width: `${colWidths.closingDate}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>官方結單日</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('closingDate', e)} />
-                      </div>
-                    </th>
-                    <th style={{ width: `${colWidths.releaseMonth}px` }}>
-                      <div className="th-inner justify-center">
-                        <span>發售月份</span>
-                        <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('releaseMonth', e)} />
-                      </div>
-                    </th>
+                    {editMode && (
+                      <>
+                        <th style={{ width: `${colWidths.closingDate}px` }}>
+                          <div className="th-inner justify-center">
+                            <span>官方結單日</span>
+                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('closingDate', e)} />
+                          </div>
+                        </th>
+                        <th style={{ width: `${colWidths.releaseMonth}px` }}>
+                          <div className="th-inner justify-center">
+                            <span>發售月份</span>
+                            <div className="resizer-handle" onMouseDown={(e) => handleMouseDown('releaseMonth', e)} />
+                          </div>
+                        </th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -2408,13 +2412,53 @@ export default function PurchaseRecords() {
                               </button>
 
                             </div>
-                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
-                              {g.listing_type && (
-                                <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
-                                  {g.listing_type}
-                                </span>
-                              )}
-                            </div>
+                            {editMode ? (
+                              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                {g.listing_type && (
+                                  <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                    {g.listing_type}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (() => {
+                              const isClosed = closingDateStyle.color === '#ef4444';
+                              const isUrgent = closingDateStyle.color === '#f97316';
+                              const closingDateTagStyle = isClosed
+                                ? { background: '#fee2e2', color: '#ef4444', border: '1px solid #fca5a5' }
+                                : isUrgent
+                                ? { background: '#ffedd5', color: '#ea580c', border: '1px solid #fed7aa' }
+                                : { background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0' };
+
+                              const formatClosingDateSimplified = (dateStr: string | undefined | null) => {
+                                if (!dateStr) return '';
+                                const clean = dateStr.replace(/\//g, '-');
+                                const parts = clean.split('-');
+                                if (parts.length >= 3) {
+                                  return `結單 ${parts[1]}/${parts[2]}`;
+                                }
+                                return `結單 ${dateStr}`;
+                              };
+
+                              return (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px', alignItems: 'center', fontSize: '11px', marginTop: '4px' }}>
+                                  {g.listing_type && (
+                                    <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '11px', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                      {g.listing_type}
+                                    </span>
+                                  )}
+                                  {g.closing_date && (
+                                    <span style={{ ...closingDateTagStyle, borderRadius: '4px', padding: '2px 6px', display: 'inline-flex', alignItems: 'center', fontWeight: isClosed || isUrgent ? 600 : 500 }}>
+                                      {formatClosingDateSimplified(g.closing_date)}
+                                    </span>
+                                  )}
+                                  {g.release_month && (
+                                    <span style={{ background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '2px 6px', fontWeight: 500 }}>
+                                      發售：{formatReleaseMonth(g.release_month)}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
@@ -2532,68 +2576,72 @@ export default function PurchaseRecords() {
                           {dynamicGap > 0 ? `-${dynamicGap}` : ''}
                         </td>
     
-                        <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
-                          {editMode ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                              <input 
-                                className="input" 
-                                type="text" 
-                                placeholder="YYYY/MM/DD"
-                                style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                value={getClosingDateInputVal(g)} 
-                                onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))} 
-                                onClick={e => e.stopPropagation()}
-                                onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') {
-                                    handleCommitClosingDate(g.id, getClosingDateInputVal(g));
-                                  } else if (e.key === 'Escape') {
-                                    handleCancelClosingDateDraft(g.id);
-                                    e.currentTarget.blur();
-                                  }
-                                  handleKeyDown(e, idx, 'closing_date', tableId);
-                                }}
-                                onPaste={e => handlePaste(e, idx, 'closing_date', list)}
-                                data-table={tableId}
-                                data-row={idx}
-                                data-field="closing_date"
-                              />
-                              <Calendar 
-                                size={14} 
-                                style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  datePickerRefs.current[g.id]?.showPicker();
-                                }}
-                              />
-                              <input 
-                                type="date"
-                                ref={el => { datePickerRefs.current[g.id] = el; }}
-                                style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
-                                value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
-                                onClick={e => e.stopPropagation()}
-                              />
-                            </div>
-                          ) : closingDateStyle.text}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          {editMode ? (
-                            <input 
-                              className="input" 
-                              style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
-                              value={g.release_month || ''} 
-                              onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => handleKeyDown(e, idx, 'release_month', tableId)}
-                              onPaste={e => handlePaste(e, idx, 'release_month', list)}
-                              data-table={tableId}
-                              data-row={idx}
-                              data-field="release_month"
-                              placeholder="例如：2026-11"
-                            />
-                          ) : formatReleaseMonth(g.release_month)}
-                        </td>
+                        {editMode && (
+                          <>
+                            <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
+                              {editMode ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+                                  <input 
+                                    className="input" 
+                                    type="text" 
+                                    placeholder="YYYY/MM/DD"
+                                    style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
+                                    value={getClosingDateInputVal(g)} 
+                                    onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))} 
+                                    onClick={e => e.stopPropagation()}
+                                    onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        handleCommitClosingDate(g.id, getClosingDateInputVal(g));
+                                      } else if (e.key === 'Escape') {
+                                        handleCancelClosingDateDraft(g.id);
+                                        e.currentTarget.blur();
+                                      }
+                                      handleKeyDown(e, idx, 'closing_date', tableId);
+                                    }}
+                                    onPaste={e => handlePaste(e, idx, 'closing_date', list)}
+                                    data-table={tableId}
+                                    data-row={idx}
+                                    data-field="closing_date"
+                                  />
+                                  <Calendar 
+                                    size={14} 
+                                    style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      datePickerRefs.current[g.id]?.showPicker();
+                                    }}
+                                  />
+                                  <input 
+                                    type="date"
+                                    ref={el => { datePickerRefs.current[g.id] = el; }}
+                                    style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
+                                    value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
+                                    onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
+                                    onClick={e => e.stopPropagation()}
+                                  />
+                                </div>
+                              ) : closingDateStyle.text}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {editMode ? (
+                                <input 
+                                  className="input" 
+                                  style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }} 
+                                  value={g.release_month || ''} 
+                                  onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)} 
+                                  onClick={e => e.stopPropagation()}
+                                  onKeyDown={e => handleKeyDown(e, idx, 'release_month', tableId)}
+                                  onPaste={e => handlePaste(e, idx, 'release_month', list)}
+                                  data-table={tableId}
+                                  data-row={idx}
+                                  data-field="release_month"
+                                  placeholder="例如：2026-11"
+                                />
+                              ) : formatReleaseMonth(g.release_month)}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     );
                   })}

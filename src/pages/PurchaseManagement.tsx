@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getBaseSku, calculateFinalMyacgDemand, calculateVariantDemandAndPurchased } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { 
@@ -380,6 +380,8 @@ export default function PurchaseManagement() {
 
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromPath = location.state?.from || '/purchase-records';
 
   const getVariantDemands = (v: ProductVariant) => {
     const inventoryList = Array.from(inventoryMap.values());
@@ -925,7 +927,7 @@ export default function PurchaseManagement() {
     const allGroups = await dataProvider.getProductGroups();
     const g = allGroups.find(x => x.id === id);
     if (!g) {
-      navigate('/purchase-records');
+      navigate(fromPath);
       return;
     }
     setGroup(g);
@@ -1817,7 +1819,7 @@ export default function PurchaseManagement() {
       {/* Top Breadcrumb & Title Area */}
       <div style={{ backgroundColor: '#fff', padding: '16px 24px', borderBottom: '1px solid #e5e7eb' }}>
         <div className="flex items-center gap-sm text-muted text-sm" style={{ marginBottom: '12px' }}>
-          <button className="btn btn-ghost" style={{ padding: 0 }} onClick={() => navigate('/purchase-records')}>
+          <button className="btn btn-ghost" style={{ padding: 0 }} onClick={() => navigate(fromPath)}>
             <ArrowLeft size={16} />
           </button>
           <span>團務與商品管理</span>
