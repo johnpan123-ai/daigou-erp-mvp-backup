@@ -386,6 +386,27 @@ export default function PurchaseRecords() {
     }
   }, [location.search, setActiveTab]);
 
+  useEffect(() => {
+    const state = location.state as { resetSearch?: number } | null;
+    if (state?.resetSearch) {
+      setSearchTerm('');
+      setFilterSource('all');
+      setFilterType('all');
+      setActiveTab('all');
+      setSecondaryTab('progress');
+
+      // Clear localStorage so the reset persists
+      localStorage.setItem('erp_search_term', '');
+      localStorage.setItem('erp_filter_source', 'all');
+      localStorage.setItem('erp_filter_type', 'all');
+      localStorage.setItem('erp_active_tab', 'all');
+      localStorage.setItem('erp_active_secondary_tab', 'progress');
+
+      // Replace history to clear state
+      navigate(location.pathname + location.search, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, location.search, navigate]);
+
 
   const [copiedGroupId, setCopiedGroupId] = useState<string | null>(null);
   const handleCopyTitle = async (groupId: string, title: string) => {

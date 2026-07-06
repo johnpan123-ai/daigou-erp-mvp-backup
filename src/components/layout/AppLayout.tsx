@@ -12,9 +12,10 @@ interface SidebarItemProps {
   icon: React.ReactNode;
   label: string;
   onClick?: () => void;
+  state?: any;
 }
 
-function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
+function SidebarItem({ to, icon, label, onClick, state }: SidebarItemProps) {
   const location = useLocation();
   const { isMobile } = useViewport();
   const isActive = 
@@ -32,6 +33,7 @@ function SidebarItem({ to, icon, label, onClick }: SidebarItemProps) {
   return (
     <Link 
       to={to} 
+      state={state}
       onClick={onClick}
       className={`nav-item ${isActive ? 'active' : ''}`}
       style={isMobile ? {
@@ -170,7 +172,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {/* {canViewPage('/orders-import') && (
             <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )} */}
-          <SidebarItem to="/purchase-records" icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
+          <SidebarItem to="/purchase-records" state={{ resetSearch: Date.now() }} icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/purchasing') && (
             <SidebarItem to="/purchasing" icon={<FileText size={20} />} label="採購總表" onClick={() => setIsMobileMenuOpen(false)} />
           )}

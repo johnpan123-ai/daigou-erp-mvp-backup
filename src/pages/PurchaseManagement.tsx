@@ -2263,81 +2263,89 @@ export default function PurchaseManagement() {
                 flexDirection: isMobile ? 'column' : 'row',
                 alignItems: isMobile ? 'stretch' : 'center',
                 gap: '12px',
-                flexWrap: isMobile ? 'wrap' : 'nowrap',
+                flexWrap: 'wrap',
                 width: '100%',
                 flexShrink: 0
               }}>
-                {/* Mode Toggle Buttons */}
-                <div style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-start', flexShrink: 0 }}>
-                  <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px', width: isMobile ? '100%' : 'auto' }}>
-                    <div 
-                      style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
-                      onClick={() => setFilterMode('all')}
-                    >顯示全部商品</div>
-                    <div 
-                      style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
-                      onClick={() => setFilterMode('abnormal')}
-                    >缺貨採購模式</div>
+                {/* Left actions group */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: isMobile ? 'column' : 'row',
+                  alignItems: isMobile ? 'stretch' : 'center',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                  flexShrink: 0
+                }}>
+                  {/* Mode Toggle Buttons */}
+                  <div style={{ display: 'flex', justifyContent: isMobile ? 'center' : 'flex-start', flexShrink: 0 }}>
+                    <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px', width: isMobile ? '100%' : 'auto' }}>
+                      <div 
+                        style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'all' ? '#1e293b' : '#64748b', backgroundColor: filterMode === 'all' ? '#fff' : 'transparent', boxShadow: filterMode === 'all' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                        onClick={() => setFilterMode('all')}
+                      >顯示全部商品</div>
+                      <div 
+                        style={{ flex: isMobile ? 1 : 'none', textAlign: 'center', padding: '6px 16px', cursor: 'pointer', fontWeight: 600, fontSize: '13px', borderRadius: '6px', color: filterMode === 'abnormal' ? '#2563eb' : '#64748b', backgroundColor: filterMode === 'abnormal' ? '#fff' : 'transparent', boxShadow: filterMode === 'abnormal' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none' }}
+                        onClick={() => setFilterMode('abnormal')}
+                      >缺貨採購模式</div>
+                    </div>
+                  </div>
+
+                  {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                  {/* Sort select */}
+                  <select 
+                    className="input" 
+                    style={{ width: isMobile ? '100%' : '200px', height: '36px', fontSize: '13px', padding: '0 12px', flexShrink: 0 }}
+                    value={sortMode}
+                    onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
+                  >
+                    <option value="catalog">依商品主檔順序排序</option>
+                    <option value="shortage">依缺貨多寡排序</option>
+                  </select>
+
+                  {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                  {/* Exchange rate input */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>設定匯率:</span>
+                    <input 
+                      type="text" 
+                      inputMode="decimal"
+                      pattern="[0-9.]*"
+                      className="input" 
+                      style={{ flex: isMobile ? 1 : 'none', width: isMobile ? 'auto' : '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
+                      value={exchangeRateInput}
+                      onChange={e => {
+                        const valStr = e.target.value.replace(/[^0-9.]/g, '');
+                        const parts = valStr.split('.');
+                        const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
+                        setExchangeRateInput(cleanVal);
+                        if (cleanVal && !cleanVal.endsWith('.')) {
+                          const val = parseFloat(cleanVal) || 0;
+                          setExchangeRate(val);
+                          localStorage.setItem('erp_exchange_rate', String(val));
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
+
+                  {/* Search bar */}
+                  <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: isMobile ? '100%' : '200px', flexShrink: 0 }}>
+                    <Search size={16} style={{ color: '#64748b', marginRight: '8px' }} />
+                    <input 
+                      type="text" 
+                      placeholder="搜尋商品..." 
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '13px', color: '#334155' }}
+                    />
                   </div>
                 </div>
 
-                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-                {/* Sort select */}
-                <select 
-                  className="input" 
-                  style={{ width: isMobile ? '100%' : '200px', height: '36px', fontSize: '13px', padding: '0 12px', flexShrink: 0 }}
-                  value={sortMode}
-                  onChange={e => setSortMode(e.target.value as 'catalog' | 'shortage')}
-                >
-                  <option value="catalog">依商品主檔順序排序</option>
-                  <option value="shortage">依缺貨多寡排序</option>
-                </select>
-
-                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-                {/* Exchange rate input */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: isMobile ? '100%' : 'auto', flexShrink: 0 }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>設定匯率:</span>
-                  <input 
-                    type="text" 
-                    inputMode="decimal"
-                    pattern="[0-9.]*"
-                    className="input" 
-                    style={{ flex: isMobile ? 1 : 'none', width: isMobile ? 'auto' : '80px', height: '36px', fontSize: '13px', padding: '0 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '6px' }}
-                    value={exchangeRateInput}
-                    onChange={e => {
-                      const valStr = e.target.value.replace(/[^0-9.]/g, '');
-                      const parts = valStr.split('.');
-                      const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
-                      setExchangeRateInput(cleanVal);
-                      if (cleanVal && !cleanVal.endsWith('.')) {
-                        const val = parseFloat(cleanVal) || 0;
-                        setExchangeRate(val);
-                        localStorage.setItem('erp_exchange_rate', String(val));
-                      }
-                    }}
-                  />
-                </div>
-
-                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
-                {/* Search bar */}
-                <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '6px', border: '1px solid #cbd5e1', padding: '0 12px', height: '36px', width: isMobile ? '100%' : '200px', flexShrink: 0 }}>
-                  <Search size={16} style={{ color: '#64748b', marginRight: '8px' }} />
-                  <input 
-                    type="text" 
-                    placeholder="搜尋商品..." 
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '13px', color: '#334155' }}
-                  />
-                </div>
-
-                {!isMobile && <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0', flexShrink: 0 }}></div>}
-
                 {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', flexWrap: isMobile ? 'wrap' : 'nowrap', flexShrink: 0 }}>
+                <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', flexWrap: 'wrap', flexShrink: 0, marginLeft: isMobile ? '0' : 'auto' }}>
                   {canWrite && (
                     <button 
                       className="btn btn-outline" 
@@ -4004,7 +4012,8 @@ export default function PurchaseManagement() {
               alignItems: 'center',
               padding: '16px 20px',
               borderBottom: '1px solid #f1f5f9',
-              background: '#f8fafc'
+              background: '#f8fafc',
+              flexShrink: 0
             }}>
               <div>
                 <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
@@ -4032,19 +4041,24 @@ export default function PurchaseManagement() {
               </button>
             </div>
 
-            {/* Content list */}
+            {/* Description (fixed below header) */}
+            <div style={{ 
+              padding: '16px 20px 8px 20px', 
+              fontSize: '13px', 
+              color: '#475569', 
+              lineHeight: 1.4, 
+              flexShrink: 0 
+            }}>
+              請勾選此商品包含的其他單品規格（同群組商品）：
+            </div>
+
+            {/* Content list (scrollable area) */}
             <div style={{
-              padding: '20px',
+              padding: '0 20px 16px 20px',
               overflowY: 'auto',
               flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px'
+              minHeight: 0
             }}>
-              <div style={{ fontSize: '13px', color: '#475569', marginBottom: '4px', lineHeight: 1.4 }}>
-                請勾選此商品包含的其他單品規格（同群組商品）：
-              </div>
-              
               {variants.filter(v => v.id !== activeBundleVariant.id).length === 0 ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
                   此商品群組下無其他規格可供選取。
@@ -4108,7 +4122,8 @@ export default function PurchaseManagement() {
               gap: '12px',
               padding: '12px 20px',
               borderTop: '1px solid #f1f5f9',
-              background: '#f8fafc'
+              background: '#f8fafc',
+              flexShrink: 0
             }}>
               <button 
                 onClick={() => setIsBundleDialogOpen(false)}
