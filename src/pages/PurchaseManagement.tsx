@@ -1811,6 +1811,11 @@ export default function PurchaseManagement() {
   const costSample = variants.find(v => (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) || (v.default_twd_cost !== undefined && v.default_twd_cost !== null)) || variants[0];
   console.log('[Default Cost Sync] UI render sample:', costSample ? { id: costSample.id, default_jpy_cost: costSample.default_jpy_cost, default_twd_cost: costSample.default_twd_cost } : 'empty');
 
+  const orderedVariants: ProductVariant[] = [];
+  sortedGroupEntries.forEach(([, items]) => {
+    orderedVariants.push(...items);
+  });
+
 
 
   return (
@@ -3936,7 +3941,7 @@ export default function PurchaseManagement() {
           show={showBatchModal}
           onClose={() => setShowBatchModal(false)}
           group={group}
-          variants={variants}
+          variants={orderedVariants}
           inventory={Array.from(inventoryMap.values())}
           salesOrderItems={salesOrderItems}
           privateOrderItems={privateOrderItems}

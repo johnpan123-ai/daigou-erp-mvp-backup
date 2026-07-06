@@ -174,7 +174,32 @@ export default function Purchasing() {
 
   const groupVars = useMemo(() => {
     if (!selectedGroupId) return [];
-    return variants.filter(v => v.product_group_id === selectedGroupId || (v.product_category_id && groupCatIds.has(v.product_category_id)));
+    const filtered = variants.filter(v => v.product_group_id === selectedGroupId || (v.product_category_id && groupCatIds.has(v.product_category_id)));
+    
+    // Sort Catalog variants of this group by SKU to define sorting index
+    const catalogVars = filtered.filter(v => v.source !== 'manual');
+    catalogVars.sort((a, b) => {
+      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+    });
+    const catalogIds = catalogVars.map(v => v.id);
+
+    const getSortVal = (x: ProductVariant) => {
+      if (x.source === 'manual') {
+        return x.sort_order ?? 999999;
+      } else {
+        const catIdx = catalogIds.indexOf(x.id);
+        return catIdx !== -1 ? catIdx * 10 : 999999;
+      }
+    };
+
+    filtered.sort((a, b) => {
+      const valA = getSortVal(a);
+      const valB = getSortVal(b);
+      if (valA !== valB) return valA - valB;
+      return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    return filtered;
   }, [variants, selectedGroupId, groupCatIds]);
 
   const categoryMap = useMemo(() => {
