@@ -320,6 +320,14 @@ export default function PurchaseRecords() {
     return `${year}-${month}-${day}`;
   };
 
+  const getNormalizedTitle = (title: string): string => {
+    if (!title) return '';
+    let res = title;
+    res = res.replace(/^代理版\s*/, '');
+    res = res.replace(/\s+/g, ' ').trim().toLowerCase();
+    return res;
+  };
+
   const checkIsGroupClosed = (g: ProductGroup): boolean => {
     const closing = normalizeDate(g.closing_date);
     if (!closing) return false;
@@ -694,6 +702,15 @@ export default function PurchaseRecords() {
         const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
         return dateA.localeCompare(dateB);
+      } else if (sortMode === 'closing_name') {
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateComp = dateA.localeCompare(dateB);
+        if (dateComp !== 0) return dateComp;
+        
+        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
+        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
+        return titleA.localeCompare(titleB);
       } else if (sortMode === 'closing_asc') {
         const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
@@ -743,6 +760,15 @@ export default function PurchaseRecords() {
         const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
         return dateA.localeCompare(dateB);
+      } else if (sortMode === 'closing_name') {
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateComp = dateA.localeCompare(dateB);
+        if (dateComp !== 0) return dateComp;
+        
+        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
+        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
+        return titleA.localeCompare(titleB);
       } else if (sortMode === 'closing_asc') {
         const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
         const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
@@ -1767,6 +1793,7 @@ export default function PurchaseRecords() {
                 onChange={e => { setSortMode(e.target.value); setSearchTerm(''); }}
               >
                 <option value="closing_urgent">開單中優先 + 結單日近優先</option>
+                <option value="closing_name">結單日近 ＋ 名稱相近</option>
                 <option value="created_desc">建立時間 (新到舊)</option>
                 <option value="closing_asc">結單日 (近到遠)</option>
               </select>
@@ -1803,6 +1830,7 @@ export default function PurchaseRecords() {
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>排序</span>
               <select className="input" style={{ width: '220px', height: '36px', fontSize: '13px' }} value={sortMode} onChange={e => { setSortMode(e.target.value); setSearchTerm(''); }}>
                 <option value="closing_urgent">開單中優先 + 結單日近優先</option>
+                <option value="closing_name">結單日近 ＋ 名稱相近</option>
                 <option value="created_desc">建立時間 (新到舊)</option>
                 <option value="closing_asc">結單日 (近到遠)</option>
               </select>
