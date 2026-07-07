@@ -160,14 +160,17 @@ export default function Purchasing() {
   useEffect(() => {
     if (selectedGroupId) {
       if (window.location.hash !== '#detail') {
-        window.history.pushState({ type: 'purchasing-detail' }, '', '#detail');
+        window.history.pushState({ type: 'purchasing-detail', groupId: selectedGroupId }, '', '#detail');
       }
     }
   }, [selectedGroupId]);
 
   useEffect(() => {
-    const handlePopState = () => {
-      if (window.location.hash !== '#detail') {
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state;
+      if (state && state.type === 'purchasing-detail' && state.groupId) {
+        setSelectedGroupId(state.groupId);
+      } else {
         setSelectedGroupId(null);
       }
     };
