@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrderItem } from '../lib/db';
+import { useViewport } from '../contexts/ViewportContext';
 
 interface PurchaseBatchModalProps {
   show: boolean;
@@ -18,6 +19,80 @@ interface PurchaseBatchModalProps {
   onSaveSuccess: () => void;
   onStale?: () => void;
   getDisplayProductName: (v: ProductVariant) => string;
+}
+
+function cleanVariantName(variantName: string, categoryTitle: string): string {
+  let name = variantName.trim();
+  const catTitle = categoryTitle.trim();
+  if (!catTitle) return name;
+
+  if (name.startsWith(catTitle)) {
+    let rest = name.slice(catTitle.length).trim();
+    if (rest.startsWith('-') || rest.startsWith('_') || rest.startsWith('—')) {
+      rest = rest.slice(1).trim();
+    }
+    if (rest) return rest;
+  }
+  return name;
+}
+
+interface ParsedVariant {
+  categoryTitle: string | null;
+  variantDisplayName: string;
+}
+
+function parseVariantFallback(v: ProductVariant, categoryMap: Map<string, any>): ParsedVariant {
+  if (v.product_category_id) {
+    const cat = categoryMap.get(v.product_category_id);
+    if (cat) {
+      const catTitle = cat.title || (cat as any).name || '';
+      const varName = (v.variant_name || v.raw_variant_name || '').trim();
+      const displayName = cleanVariantName(varName, catTitle);
+      return {
+        categoryTitle: catTitle || null,
+        variantDisplayName: displayName
+      };
+    }
+  }
+
+  const name = (v.variant_name || v.raw_variant_name || '').trim();
+  if (name.includes(' - ')) {
+    const parts = name.split(' - ');
+    const prefix = parts[0].trim();
+    let rest = parts.slice(1).join(' - ').trim();
+    if (rest.startsWith(prefix)) {
+      let sub = rest.slice(prefix.length).trim();
+      if (sub.startsWith('-') || sub.startsWith('_') || sub.startsWith('—')) {
+        sub = sub.slice(1).trim();
+      }
+      return {
+        categoryTitle: prefix,
+        variantDisplayName: sub || rest
+      };
+    }
+    return {
+      categoryTitle: prefix,
+      variantDisplayName: rest
+    };
+  }
+
+  const whitespaceRegex = /\s+/;
+  if (whitespaceRegex.test(name)) {
+    const parts = name.split(whitespaceRegex);
+    const prefix = parts[0].trim();
+    const rest = parts.slice(1).join(' ').trim();
+    if (prefix && rest) {
+      return {
+        categoryTitle: prefix,
+        variantDisplayName: rest
+      };
+    }
+  }
+
+  return {
+    categoryTitle: null,
+    variantDisplayName: name
+  };
 }
 
 const cleanDailiTitle = (title: string): string => {
@@ -61,6 +136,16 @@ export default function PurchaseBatchModal({
   onStale,
   getDisplayProductName: propGetDisplayProductName
 }: PurchaseBatchModalProps) {
+  const { isMobile } = useViewport();
+  const [categories, setCategories] = useState<any[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (show) {
+      dataProvider.getProductCategories().then(setCategories).catch(console.error);
+    }
+  }, [show]);
+
   const [onlyShowShortage, setOnlyShowShortage] = useState<boolean>(false);
   const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
   const [batchLines, setBatchLines] = useState<{ variant_id: string; quantity: number; cost: number | string; note: string }[]>([]);
@@ -205,10 +290,99 @@ export default function PurchaseBatchModal({
     }
   }, [show, editingBatchId, group, variants, purchaseBatches, purchaseBatchItems, isDaili]);
 
+  const mobileGroups = useMemo(() => {
+    const categoryMap = new Map<string, any>(categories.map(c => [c.id, c]));
+    const groupsMap = new Map<string, Array<{ variant: ProductVariant; originalIndex: number }>>();
+    
+    variants.forEach((v, idx) => {
+      const shortage = getVariantShortageForModal(v);
+      const isHidden = onlyShowShortage && shortage <= 0;
+      if (isHidden) return;
+
+      const parsed = parseVariantFallback(v, categoryMap);
+      const catTitle = parsed.categoryTitle || '單品';
+      
+      if (!groupsMap.has(catTitle)) {
+        groupsMap.set(catTitle, []);
+      }
+      groupsMap.get(catTitle)!.push({ variant: v, originalIndex: idx });
+    });
+    
+    return Array.from(groupsMap.entries()).map(([title, items]) => {
+      const totalShortage = items.reduce((sum, item) => {
+        const shortage = getVariantShortageForModal(item.variant);
+        return sum + Math.max(shortage, 0);
+      }, 0);
+      return {
+        title,
+        items,
+        totalShortage
+      };
+    });
+  }, [variants, categories, onlyShowShortage]);
+
+  const toggleGroup = (title: string) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [title]: !prev[title]
+    }));
+  };
+
+  const pressTimerRef = useRef<any>(null);
+  const pressIntervalRef = useRef<any>(null);
+
+  const stopContinuousPress = () => {
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    if (pressIntervalRef.current) clearInterval(pressIntervalRef.current);
+  };
+
+  const adjustBatchLineQuantity = (index: number, delta: number) => {
+    setBatchLines(prev => {
+      const newLines = [...prev];
+      if (newLines[index]) {
+        const currentQty = newLines[index].quantity || 0;
+        newLines[index] = { 
+          ...newLines[index], 
+          quantity: Math.max(currentQty + delta, 0) 
+        };
+      }
+      return newLines;
+    });
+  };
+
+  const startContinuousPress = (index: number, delta: number) => {
+    stopContinuousPress();
+    adjustBatchLineQuantity(index, delta);
+    pressTimerRef.current = setTimeout(() => {
+      pressIntervalRef.current = setInterval(() => {
+        adjustBatchLineQuantity(index, delta);
+      }, 100);
+    }, 400);
+  };
+
   const updateBatchLine = (index: number, field: string, value: any) => {
     const newLines = [...batchLines];
     newLines[index] = { ...newLines[index], [field]: value };
     setBatchLines(newLines);
+  };
+
+  const fillAllShortages = () => {
+    setBatchLines(prev => {
+      const newLines = [...prev];
+      mobileGroups.forEach(cg => {
+        cg.items.forEach(item => {
+          const idx = item.originalIndex;
+          const shortage = getVariantShortageForModal(item.variant);
+          if (shortage > 0) {
+            newLines[idx] = {
+              ...newLines[idx],
+              quantity: shortage
+            };
+          }
+        });
+      });
+      return newLines;
+    });
   };
 
   const handleAddBatchSubmit = async () => {
@@ -281,8 +455,25 @@ export default function PurchaseBatchModal({
   if (!show) return null;
 
   return (
-    <div id="purchase-batch-modal" style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div className="card" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#fff' }}>
+    <div id="purchase-batch-modal" style={{ 
+      position: 'fixed', 
+      inset: 0, 
+      backgroundColor: 'rgba(0,0,0,0.4)', 
+      display: 'flex', 
+      alignItems: isMobile ? 'flex-start' : 'center', 
+      justifyContent: 'center', 
+      zIndex: 1000,
+      overflowY: 'auto',
+      padding: isMobile ? '12px 0' : '0'
+    }}>
+      <div className="card" style={{ 
+        width: isMobile ? '95vw' : '600px', 
+        maxHeight: isMobile ? '80vh' : '90vh', 
+        overflowY: 'auto', 
+        backgroundColor: '#fff',
+        marginTop: isMobile ? '12px' : '0',
+        marginBottom: isMobile ? '12px' : '0'
+      }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
           <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{editingBatchId ? '編輯採購批次' : '新增採購批次'}</h2>
           <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={onClose}><X size={20} /></button>
@@ -292,20 +483,61 @@ export default function PurchaseBatchModal({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>批次名稱 *</label>
-              <input className="input" type="text" value={batchForm.name} onChange={e => setBatchForm({...batchForm, name: e.target.value})} placeholder="例如：2023-11-20 安利美特採購" style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px' }} />
+              <input className="input" type="text" value={batchForm.name} onChange={e => setBatchForm({...batchForm, name: e.target.value})} placeholder="例如：2023-11-20 安利美特採購" style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px', fontSize: isMobile ? '16px' : '14px' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>採購日期</label>
-              <input className="input" type="date" value={batchForm.date} onChange={e => setBatchForm({...batchForm, date: e.target.value})} style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px' }} />
+              <input 
+                className="input" 
+                type="date" 
+                value={batchForm.date} 
+                onChange={e => setBatchForm({...batchForm, date: e.target.value})} 
+                style={{ 
+                  width: '100%', 
+                  height: '36px', 
+                  border: '1px solid #cbd5e1', 
+                  borderRadius: '6px', 
+                  padding: '0 12px', 
+                  fontSize: isMobile ? '16px' : '14px',
+                  backgroundColor: '#fff',
+                  color: '#0f172a',
+                  WebkitAppearance: 'none',
+                  appearance: 'none',
+                  boxSizing: 'border-box',
+                  lineHeight: 'normal'
+                }} 
+              />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>備註</label>
-              <input className="input" type="text" value={batchForm.note} onChange={e => setBatchForm({...batchForm, note: e.target.value})} style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px' }} />
+              <input className="input" type="text" value={batchForm.note} onChange={e => setBatchForm({...batchForm, note: e.target.value})} style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px', fontSize: isMobile ? '16px' : '14px' }} />
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>採購明細</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontWeight: 600, fontSize: '14px', color: '#1e293b' }}>採購明細</div>
+              {isMobile && (
+                <button
+                  type="button"
+                  onClick={fillAllShortages}
+                  style={{
+                    backgroundColor: '#3b82f6',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none'
+                  }}
+                >
+                  全部補齊
+                </button>
+              )}
+            </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
               <input 
                 type="checkbox" 
@@ -316,142 +548,430 @@ export default function PurchaseBatchModal({
               <span>只顯示有缺口商品</span>
             </label>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
-                <th style={{ padding: '8px', textAlign: 'left', fontWeight: 500 }}>商品規格</th>
-                <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>缺口</th>
-                <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>數量</th>
-                <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '120px' }}>{isDaili ? '成本（台幣）' : '實支單價（日幣）'}</th>
-              </tr>
-            </thead>
-            <tbody>
+
+          {isMobile ? (
+            <div 
+              onContextMenu={(e) => e.preventDefault()}
+              style={{ 
+                marginBottom: '24px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                gap: '12px',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none',
+                touchAction: 'manipulation'
+              }}
+            >
               {(() => {
-                const rows: React.ReactNode[] = [];
-                let hasAnyVisible = false;
-                
-                variants.forEach((v, idx) => {
-                  const shortage = getVariantShortageForModal(v);
-                  const isHidden = onlyShowShortage && shortage <= 0;
-                  if (isHidden) return;
-                  
-                  hasAnyVisible = true;
-                  const lineData = batchLines[idx];
-                  
-                  rows.push(
-                    <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '8px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <div style={{ fontWeight: 600, color: '#1e293b' }}>
-                            {getDisplayProductName(v)}
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                            SKU: {v.myacg_item_code}
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>
-                        {(() => {
-                          const remainingGap = shortage - (lineData?.quantity || 0);
-                          if (remainingGap > 0) {
-                            return (
-                              <span style={{
-                                backgroundColor: '#FEE2E2',
-                                color: '#DC2626',
-                                border: '1px solid #fecaca',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap'
-                              }}>
-                                缺 {remainingGap}
-                              </span>
-                            );
-                          } else if (remainingGap === 0) {
-                            return (
-                              <span style={{
-                                backgroundColor: '#DCFCE7',
-                                color: '#16a34a',
-                                border: '1px solid #bbf7d0',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap'
-                              }}>
-                                已補齊
-                              </span>
-                            );
-                          } else {
-                            return (
-                              <span style={{
-                                backgroundColor: '#FFEDD5',
-                                color: '#EA580C',
-                                border: '1px solid #fed7aa',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                fontSize: '12px',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap'
-                              }}>
-                                多買 {Math.abs(remainingGap)}
-                              </span>
-                            );
-                          }
-                        })()}
-                      </td>
-                      <td style={{ padding: '8px', textAlign: 'center' }}>
-                        <input 
-                          className="input" 
-                          type="text" 
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={lineData?.quantity === 0 ? '' : (lineData?.quantity || '')} 
-                          onChange={e => {
-                            const val = e.target.value.replace(/[^0-9]/g, '');
-                            updateBatchLine(idx, 'quantity', val === '' ? 0 : parseInt(val));
-                          }} 
-                          style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
-                        />
-                      </td>
-                      <td style={{ padding: '8px', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
-                          {!isDaili && <span style={{ color: '#64748b' }}>¥</span>}
-                          <input 
-                            className="input" 
-                            type="text" 
-                            inputMode="decimal"
-                            pattern="[0-9]*\.?[0-9]*" 
-                            value={lineData?.cost === 0 ? '' : (lineData?.cost ?? '')} 
-                            onChange={e => {
-                              const valStr = e.target.value.replace(/[^0-9.]/g, '');
-                              const parts = valStr.split('.');
-                              const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
-                              updateBatchLine(idx, 'cost', cleanVal);
-                            }} 
-                            style={{ width: '80px', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                });
-                
-                if (!hasAnyVisible) {
+                if (mobileGroups.length === 0) {
                   return (
-                    <tr>
-                      <td colSpan={4} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
-                        目前無任何缺口商品
-                      </td>
-                    </tr>
+                    <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '14px', backgroundColor: '#f8fafc', borderRadius: '8px' }}>
+                      目前無任何缺口商品
+                    </div>
                   );
                 }
                 
-                return rows;
+                const categoryMap = new Map<string, any>(categories.map(c => [c.id, c]));
+
+                return mobileGroups.map(cg => {
+                  const isExpanded = !!expandedGroups[cg.title];
+                  return (
+                    <div key={cg.title} style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                      {/* Group Header */}
+                      <div 
+                        onClick={() => toggleGroup(cg.title)}
+                        style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between', 
+                          alignItems: 'center', 
+                          padding: '10px 14px', 
+                          backgroundColor: '#f1f5f9', 
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '13px',
+                          color: '#1e293b',
+                          userSelect: 'none'
+                        }}
+                      >
+                        <span>
+                          {isExpanded ? '▼' : '▶'} {cg.title} ({cg.totalShortage})
+                        </span>
+                      </div>
+                      
+                      {/* Group Items */}
+                      {isExpanded && (
+                        <div style={{ padding: '0 12px', backgroundColor: '#fff', display: 'flex', flexDirection: 'column' }}>
+                          {cg.items.map(item => {
+                            const v = item.variant;
+                            const idx = item.originalIndex;
+                            const shortage = getVariantShortageForModal(v);
+                            const lineData = batchLines[idx];
+                            const parsed = parseVariantFallback(v, categoryMap);
+                            const displayName = isDaili ? getDisplayProductName(v) : parsed.variantDisplayName;
+
+                            return (
+                              <div key={v.id} style={{ 
+                                padding: '8px 0', 
+                                borderBottom: '1px solid #f1f5f9',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px'
+                              }}>
+                                {/* Row 1: Name and Shortage Badge */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                  <div style={{ fontWeight: 500, color: '#0f172a', fontSize: '13px', lineHeight: 1.25 }}>
+                                    {displayName}
+                                  </div>
+                                  
+                                  <div>
+                                    {(() => {
+                                      const remainingGap = shortage - (lineData?.quantity || 0);
+                                      if (remainingGap > 0) {
+                                        return (
+                                          <span style={{
+                                            backgroundColor: '#FEE2E2',
+                                            color: '#DC2626',
+                                            border: '1px solid #fecaca',
+                                            padding: '1px 6px',
+                                            borderRadius: '4px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            whiteSpace: 'nowrap'
+                                          }}>
+                                            缺 {remainingGap}
+                                          </span>
+                                        );
+                                      } else if (remainingGap === 0) {
+                                        return (
+                                          <span style={{
+                                            backgroundColor: '#DCFCE7',
+                                            color: '#16a34a',
+                                            border: '1px solid #bbf7d0',
+                                            padding: '1px 6px',
+                                            borderRadius: '4px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            whiteSpace: 'nowrap'
+                                          }}>
+                                            已補齊
+                                          </span>
+                                        );
+                                      } else {
+                                        return (
+                                          <span style={{
+                                            backgroundColor: '#FFEDD5',
+                                            color: '#EA580C',
+                                            border: '1px solid #fed7aa',
+                                            padding: '1px 6px',
+                                            borderRadius: '4px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            whiteSpace: 'nowrap'
+                                          }}>
+                                            多買 {Math.abs(remainingGap)}
+                                          </span>
+                                        );
+                                      }
+                                    })()}
+                                  </div>
+                                </div>
+
+                                {/* Row 2: Selector and Price */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  {/* Quantity Selector: [-] [ quantity ] [+] */}
+                                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                                    <button 
+                                      type="button"
+                                      onMouseDown={() => startContinuousPress(idx, -1)}
+                                      onMouseUp={stopContinuousPress}
+                                      onMouseLeave={stopContinuousPress}
+                                      onTouchStart={(e) => {
+                                        e.preventDefault();
+                                        startContinuousPress(idx, -1);
+                                      }}
+                                      onTouchEnd={(e) => {
+                                        e.preventDefault();
+                                        stopContinuousPress();
+                                      }}
+                                      onTouchCancel={(e) => {
+                                        e.preventDefault();
+                                        stopContinuousPress();
+                                      }}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                      }}
+                                      style={{
+                                        width: '44px',
+                                        height: '44px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        border: '1px solid #cbd5e1',
+                                        borderTopLeftRadius: '6px',
+                                        borderBottomLeftRadius: '6px',
+                                        backgroundColor: '#f8fafc',
+                                        cursor: 'pointer',
+                                        fontWeight: 700,
+                                        fontSize: '18px',
+                                        color: '#475569',
+                                        userSelect: 'none',
+                                        WebkitUserSelect: 'none',
+                                        WebkitTouchCallout: 'none',
+                                        touchAction: 'manipulation'
+                                      }}
+                                    >
+                                      -
+                                    </button>
+                                    <input 
+                                      className="input" 
+                                      type="text" 
+                                      inputMode="numeric"
+                                      pattern="[0-9]*"
+                                      value={lineData?.quantity === 0 ? '' : (lineData?.quantity || '')} 
+                                      onChange={e => {
+                                        const val = e.target.value.replace(/[^0-9]/g, '');
+                                        updateBatchLine(idx, 'quantity', val === '' ? 0 : parseInt(val));
+                                      }} 
+                                      style={{ 
+                                        width: '54px', 
+                                        height: '44px', 
+                                        padding: '0', 
+                                        textAlign: 'center', 
+                                        borderTop: '1px solid #cbd5e1', 
+                                        borderBottom: '1px solid #cbd5e1',
+                                        borderLeft: 'none',
+                                        borderRight: 'none',
+                                        borderRadius: '0',
+                                        fontSize: '16px',
+                                        fontWeight: 600,
+                                        color: '#0f172a'
+                                      }} 
+                                    />
+                                    <button 
+                                      type="button"
+                                      onMouseDown={() => startContinuousPress(idx, 1)}
+                                      onMouseUp={stopContinuousPress}
+                                      onMouseLeave={stopContinuousPress}
+                                      onTouchStart={(e) => {
+                                        e.preventDefault();
+                                        startContinuousPress(idx, 1);
+                                      }}
+                                      onTouchEnd={(e) => {
+                                        e.preventDefault();
+                                        stopContinuousPress();
+                                      }}
+                                      onTouchCancel={(e) => {
+                                        e.preventDefault();
+                                        stopContinuousPress();
+                                      }}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                      }}
+                                      style={{
+                                        width: '44px',
+                                        height: '44px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        border: '1px solid #cbd5e1',
+                                        borderTopRightRadius: '6px',
+                                        borderBottomRightRadius: '6px',
+                                        backgroundColor: '#f8fafc',
+                                        cursor: 'pointer',
+                                        fontWeight: 700,
+                                        fontSize: '18px',
+                                        color: '#475569',
+                                        userSelect: 'none',
+                                        WebkitUserSelect: 'none',
+                                        WebkitTouchCallout: 'none',
+                                        touchAction: 'manipulation'
+                                      }}
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+
+                                  {/* Price selector */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 500 }}>單價</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '2px', position: 'relative' }}>
+                                      {!isDaili && <span style={{ color: '#64748b', fontSize: '11px' }}>¥</span>}
+                                      <input 
+                                        className="input" 
+                                        type="text" 
+                                        inputMode="decimal"
+                                        pattern="[0-9]*\.?[0-9]*" 
+                                        value={lineData?.cost === 0 ? '' : (lineData?.cost ?? '')} 
+                                        onChange={e => {
+                                          const valStr = e.target.value.replace(/[^0-9.]/g, '');
+                                          const parts = valStr.split('.');
+                                          const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
+                                          updateBatchLine(idx, 'cost', cleanVal);
+                                        }} 
+                                        style={{ 
+                                          width: '64px', 
+                                          height: '32px', 
+                                          padding: '0 4px', 
+                                          textAlign: 'right', 
+                                          border: '1px solid #cbd5e1', 
+                                          borderRadius: '4px',
+                                          fontSize: '16px',
+                                          color: '#0f172a',
+                                          fontWeight: 500
+                                        }} 
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
               })()}
-            </tbody>
-          </table>
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '24px' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f8fafc', color: '#64748b' }}>
+                  <th style={{ padding: '8px', textAlign: 'left', fontWeight: 500 }}>商品規格</th>
+                  <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>缺口</th>
+                  <th style={{ padding: '8px', textAlign: 'center', fontWeight: 500, width: '80px' }}>數量</th>
+                  <th style={{ padding: '8px', textAlign: 'right', fontWeight: 500, width: '120px' }}>{isDaili ? '成本（台幣）' : '實支單價（日幣）'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const rows: React.ReactNode[] = [];
+                  let hasAnyVisible = false;
+                  
+                  variants.forEach((v, idx) => {
+                    const shortage = getVariantShortageForModal(v);
+                    const isHidden = onlyShowShortage && shortage <= 0;
+                    if (isHidden) return;
+                    
+                    hasAnyVisible = true;
+                    const lineData = batchLines[idx];
+                    
+                    rows.push(
+                      <tr key={v.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ fontWeight: 600, color: '#1e293b' }}>
+                              {getDisplayProductName(v)}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                              SKU: {v.myacg_item_code}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                          {(() => {
+                            const remainingGap = shortage - (lineData?.quantity || 0);
+                            if (remainingGap > 0) {
+                              return (
+                                <span style={{
+                                  backgroundColor: '#FEE2E2',
+                                  color: '#DC2626',
+                                  border: '1px solid #fecaca',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  缺 {remainingGap}
+                                </span>
+                              );
+                            } else if (remainingGap === 0) {
+                              return (
+                                <span style={{
+                                  backgroundColor: '#DCFCE7',
+                                  color: '#16a34a',
+                                  border: '1px solid #bbf7d0',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  已補齊
+                                </span>
+                              );
+                            } else {
+                              return (
+                                <span style={{
+                                  backgroundColor: '#FFEDD5',
+                                  color: '#EA580C',
+                                  border: '1px solid #fed7aa',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  多買 {Math.abs(remainingGap)}
+                                </span>
+                              );
+                            }
+                          })()}
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'center' }}>
+                          <input 
+                            className="input" 
+                            type="text" 
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={lineData?.quantity === 0 ? '' : (lineData?.quantity || '')} 
+                            onChange={e => {
+                              const val = e.target.value.replace(/[^0-9]/g, '');
+                              updateBatchLine(idx, 'quantity', val === '' ? 0 : parseInt(val));
+                            }} 
+                            style={{ width: '100%', padding: '4px 8px', textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                          />
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
+                            {!isDaili && <span style={{ color: '#64748b' }}>¥</span>}
+                            <input 
+                              className="input" 
+                              type="text" 
+                              inputMode="decimal"
+                              pattern="[0-9]*\.?[0-9]*" 
+                              value={lineData?.cost === 0 ? '' : (lineData?.cost ?? '')} 
+                              onChange={e => {
+                                const valStr = e.target.value.replace(/[^0-9.]/g, '');
+                                const parts = valStr.split('.');
+                                const cleanVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : valStr;
+                                updateBatchLine(idx, 'cost', cleanVal);
+                              }} 
+                              style={{ width: '80px', padding: '4px 8px', textAlign: 'right', border: '1px solid #cbd5e1', borderRadius: '4px' }} 
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  });
+                  
+                  if (!hasAnyVisible) {
+                    return (
+                      <tr>
+                        <td colSpan={4} style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
+                          目無任何缺口商品
+                        </td>
+                      </tr>
+                    );
+                  }
+                  
+                  return rows;
+                })()}
+              </tbody>
+            </table>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

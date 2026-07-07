@@ -5,6 +5,7 @@ import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, I
 import { calculateVariantDemandAndPurchased } from '../lib/db';
 import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, ExternalLink, Plus } from 'lucide-react';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
+import { useViewport } from '../contexts/ViewportContext';
 
 interface VariantDetail {
   id: string;
@@ -141,6 +142,7 @@ const cleanDailiTitle = (title: string): string => {
 };
 
 export default function Purchasing() {
+  const { isMobile } = useViewport();
   const navigate = useNavigate();
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -154,6 +156,40 @@ export default function Purchasing() {
   
   const [loading, setLoading] = useState(true);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedGroupId) {
+      if (window.location.hash !== '#detail') {
+        window.history.pushState({ type: 'purchasing-detail' }, '', '#detail');
+      }
+    }
+  }, [selectedGroupId]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (window.location.hash !== '#detail') {
+        setSelectedGroupId(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedGroupId && window.location.hash === '#detail') {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, [selectedGroupId]);
+
+  const handleBack = () => {
+    if (window.location.hash === '#detail') {
+      window.history.back();
+    } else {
+      setSelectedGroupId(null);
+    }
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
 
@@ -1235,84 +1271,178 @@ export default function Purchasing() {
         </div>
       ) : (
         // Detail View
-        <div className="detail-view">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <button className="btn-back" onClick={() => setSelectedGroupId(null)} style={{ marginBottom: 0 }}>
-              <ArrowLeft size={16} />
-              <span>返回清單</span>
-            </button>
-            <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="detail-view" style={{ padding: isMobile ? '12px' : undefined }}>
+          {isMobile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+              <div>
+                <button className="btn-back" type="button" onClick={handleBack} style={{ margin: 0, height: '44px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <ArrowLeft size={16} />
+                  <span>返回清單</span>
+                </button>
+              </div>
               <button
-                onClick={() => {
-                  setShowBatchModal(true);
-                }}
+                type="button"
+                onClick={() => setShowBatchModal(true)}
                 style={{
-                  padding: '6px 12px',
+                  width: '100%',
+                  height: '44px',
                   backgroundColor: '#f0fdf4',
                   color: '#166534',
                   border: '1px solid #bbf7d0',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   fontWeight: 600,
-                  fontSize: '13px',
+                  fontSize: '14px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  transition: 'all 0.2s'
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none'
                 }}
               >
-                <Plus size={14} />
+                <Plus size={16} />
                 <span>新增採購批次</span>
               </button>
-              <button
-                onClick={() => {
-                  navigate(`/purchase-records/${selectedGroup.id}`, { state: { from: '/purchasing' } });
-                }}
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: '#eff6ff',
-                  color: '#2563eb',
-                  border: '1px solid #bfdbfe',
-                  borderRadius: '6px',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  transition: 'all 0.2s'
-                }}
-              >
-                <ExternalLink size={14} />
-                <span>前往訂購紀錄</span>
-              </button>
-              <button
-                onClick={() => {
-                  handleSingleRemove(selectedGroup.id);
-                  setSelectedGroupId(null);
-                }}
-                style={{
-                  padding: '6px 12px',
-                  backgroundColor: '#ffffff',
-                  color: '#ef4444',
-                  border: '1px solid #fee2e2',
-                  borderRadius: '6px',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  transition: 'all 0.2s'
-                }}
-              >
-                <Trash2 size={14} />
-                <span>移出採購總表</span>
-              </button>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/purchase-records/${selectedGroup.id}`, { state: { from: '/purchasing' } })}
+                  style={{
+                    flex: 1,
+                    height: '44px',
+                    backgroundColor: '#eff6ff',
+                    color: '#2563eb',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none'
+                  }}
+                >
+                  <ExternalLink size={14} />
+                  <span>前往訂購紀錄</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSingleRemove(selectedGroup.id);
+                    setSelectedGroupId(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    height: '44px',
+                    backgroundColor: '#ffffff',
+                    color: '#ef4444',
+                    border: '1px solid #fee2e2',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none'
+                  }}
+                >
+                  <Trash2 size={14} />
+                  <span>移出採購總表</span>
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <button className="btn-back" type="button" onClick={handleBack} style={{ marginBottom: 0 }}>
+                <ArrowLeft size={16} />
+                <span>返回清單</span>
+              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBatchModal(true);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    backgroundColor: '#f0fdf4',
+                    color: '#166534',
+                    border: '1px solid #bbf7d0',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <Plus size={14} />
+                  <span>新增採購批次</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate(`/purchase-records/${selectedGroup.id}`, { state: { from: '/purchasing' } });
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    backgroundColor: '#eff6ff',
+                    color: '#2563eb',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <ExternalLink size={14} />
+                  <span>前往訂購紀錄</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSingleRemove(selectedGroup.id);
+                    setSelectedGroupId(null);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    backgroundColor: '#ffffff',
+                    color: '#ef4444',
+                    border: '1px solid #fee2e2',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <Trash2 size={14} />
+                  <span>移出採購總表</span>
+                </button>
+              </div>
+            </div>
+          )}
           
-          <h2 className="detail-title">{selectedGroup.title}</h2>
+          <h2 className="detail-title" style={{ fontSize: isMobile ? '18px' : '22px', fontWeight: 600, marginTop: isMobile ? '12px' : '0', marginBottom: '16px', color: '#0f172a' }}>{selectedGroup.title}</h2>
           
           <div className="detail-summary-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '24px' }}>
             <div className="detail-stat-card">
