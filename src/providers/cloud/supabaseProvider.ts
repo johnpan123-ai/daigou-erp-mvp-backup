@@ -165,11 +165,23 @@ const fetchAll = async <T>(
   let allData: T[] = [];
   let page = 0;
   const size = 1000;
+  const seen = new Set<string>();
   while (true) {
     const { data, error } = await fetchFn(page * size, (page + 1) * size - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
-    allData = allData.concat(data);
+    for (const item of data) {
+      const anyItem = item as any;
+      const key = anyItem.id || anyItem.inventory_key || anyItem.category_key;
+      if (key) {
+        if (!seen.has(key)) {
+          seen.add(key);
+          allData.push(item);
+        }
+      } else {
+        allData.push(item);
+      }
+    }
     if (data.length < size) break;
     page++;
   }
@@ -279,15 +291,15 @@ export class SupabaseProvider implements IDataProvider {
           
           // 1. 同時從 Supabase 抓取未刪除的資料，並支援分頁處理
           const [groups, categories, variants, batches, batchItems, po, poi, jp, jpi] = await Promise.all([
-            fetchAll<any>(async (from, to) => supabase.from('product_groups').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('product_categories').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('product_variants').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('purchase_batches').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('purchase_batch_items').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('private_orders').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('private_order_items').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('japan_packages').select('*').is('deleted_at', null).range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('japan_package_items').select('*').is('deleted_at', null).range(from, to))
+            fetchAll<any>(async (from, to) => supabase.from('product_groups').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('product_categories').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('product_variants').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('purchase_batches').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('purchase_batch_items').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('private_orders').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('private_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('japan_packages').select('*').is('deleted_at', null).order('id').range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('japan_package_items').select('*').is('deleted_at', null).order('id').range(from, to))
           ]);
 
           const gLen = groups.length;
@@ -434,7 +446,7 @@ export class SupabaseProvider implements IDataProvider {
           // 2.5 Pull and save bundle components (gracefully handle missing table)
           let bcData: any[] = [];
           try {
-            bcData = await fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').range(from, to));
+            bcData = await fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').order('id').range(from, to));
             console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
           } catch (e: any) {
             console.warn('[Sync WARNING] 抓取 bundle_components 發生異常:', e.message || e);
@@ -1241,6 +1253,7 @@ export class SupabaseProvider implements IDataProvider {
           .from('sales_orders')
           .select('*')
           .is('deleted_at', null)
+          .order('id')
           .range(from, to)
       );
 
@@ -1286,6 +1299,7 @@ export class SupabaseProvider implements IDataProvider {
           .from('sales_order_items')
           .select('*')
           .is('deleted_at', null)
+          .order('id')
           .range(from, to)
       );
 
@@ -1346,6 +1360,7 @@ export class SupabaseProvider implements IDataProvider {
           .from('inventory_items')
           .select('*')
           .is('deleted_at', null)
+          .order('inventory_key')
           .range(from, to)
       );
 
@@ -2216,6 +2231,7 @@ export class SupabaseProvider implements IDataProvider {
           .from('dashboard_category_images')
           .select('category_key, image_url, storage_path')
           .is('deleted_at', null)
+          .order('category_key')
           .range(from, to)
       );
 
@@ -2303,7 +2319,7 @@ export class SupabaseProvider implements IDataProvider {
       // 1. Helper to fetch all column values from a table with pagination
       const fetchCloudKeys = async (tableName: string, colName: string): Promise<any[]> => {
         const data = await fetchAll<any>(async (from, to) => {
-          let query = supabase.from(tableName).select(colName).range(from, to);
+          let query = supabase.from(tableName).select(colName).order(colName).range(from, to);
           if (tableName !== 'sales_orders' && tableName !== 'sales_order_items') {
             query = query.is('deleted_at', null);
           }
@@ -2319,11 +2335,11 @@ export class SupabaseProvider implements IDataProvider {
       const cloudPoIds = await fetchCloudKeys('private_orders', 'id');
       
       const cloudSoi = await fetchAll<any>(async (from, to) =>
-        supabase.from('sales_order_items').select('id, local_id').range(from, to)
+        supabase.from('sales_order_items').select('id, local_id').order('id').range(from, to)
       );
 
       const cloudSo = await fetchAll<any>(async (from, to) =>
-        supabase.from('sales_orders').select('id, local_id').range(from, to)
+        supabase.from('sales_orders').select('id, local_id').order('id').range(from, to)
       );
 
       const cloudPvIds = await fetchCloudKeys('product_variants', 'id');
