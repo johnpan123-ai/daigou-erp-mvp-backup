@@ -159,6 +159,22 @@ function isSchemaMissingError(err: any): boolean {
   const code = err.code || '';
   return code === '42P01' || msg.includes('could not find the table') || msg.includes('relation') || msg.includes('does not exist');
 }
+const fetchAll = async <T>(
+  fetchFn: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>
+): Promise<T[]> => {
+  let allData: T[] = [];
+  let page = 0;
+  const size = 1000;
+  while (true) {
+    const { data, error } = await fetchFn(page * size, (page + 1) * size - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allData = allData.concat(data);
+    if (data.length < size) break;
+    page++;
+  }
+  return allData;
+};
 
 
 export class SupabaseProvider implements IDataProvider {
@@ -230,7 +246,16 @@ export class SupabaseProvider implements IDataProvider {
    * 已修正：增加等待 Supabase Auth 驗證狀態初始化，避免未載入 Session 即以匿名 (anon) 身份拉取空資料。
    */
   async pullCoreProductData(force = false): Promise<void> {
-    if (force) {
+    const SYNC_VERSION = 'v2_pagination';
+    const currentSyncVer = localStorage.getItem('erp_sync_version');
+    let shouldForce = force;
+    if (currentSyncVer !== SYNC_VERSION) {
+      console.log(`[Sync] Sync version mismatch (found ${currentSyncVer || 'none'}, expected ${SYNC_VERSION}). Forcing full pull...`);
+      shouldForce = true;
+      localStorage.setItem('erp_sync_version', SYNC_VERSION);
+    }
+
+    if (shouldForce) {
       this.isPulled = false;
       this.pullPromise = null;
     }
@@ -252,42 +277,32 @@ export class SupabaseProvider implements IDataProvider {
 
           console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
           
-          // 1. 同時從 Supabase 抓取未刪除的資料
-          const [groupsRes, categoriesRes, variantsRes, batchesRes, batchItemsRes, poRes, poiRes, jpRes, jpiRes] = await Promise.all([
-            supabase.from('product_groups').select('*').is('deleted_at', null),
-            supabase.from('product_categories').select('*').is('deleted_at', null),
-            supabase.from('product_variants').select('*').is('deleted_at', null),
-            supabase.from('purchase_batches').select('*').is('deleted_at', null),
-            supabase.from('purchase_batch_items').select('*').is('deleted_at', null),
-            supabase.from('private_orders').select('*').is('deleted_at', null),
-            supabase.from('private_order_items').select('*').is('deleted_at', null),
-            supabase.from('japan_packages').select('*').is('deleted_at', null),
-            supabase.from('japan_package_items').select('*').is('deleted_at', null)
+          // 1. 同時從 Supabase 抓取未刪除的資料，並支援分頁處理
+          const [groups, categories, variants, batches, batchItems, po, poi, jp, jpi] = await Promise.all([
+            fetchAll<any>(async (from, to) => supabase.from('product_groups').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('product_categories').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('product_variants').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('purchase_batches').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('purchase_batch_items').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('private_orders').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('private_order_items').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('japan_packages').select('*').is('deleted_at', null).range(from, to)),
+            fetchAll<any>(async (from, to) => supabase.from('japan_package_items').select('*').is('deleted_at', null).range(from, to))
           ]);
 
-          if (groupsRes.error) throw groupsRes.error;
-          if (categoriesRes.error) throw categoriesRes.error;
-          if (variantsRes.error) throw variantsRes.error;
-          if (batchesRes.error) throw batchesRes.error;
-          if (batchItemsRes.error) throw batchItemsRes.error;
-          if (poRes.error) throw poRes.error;
-          if (poiRes.error) throw poiRes.error;
-          if (jpRes.error) throw jpRes.error;
-          if (jpiRes.error) throw jpiRes.error;
-
-          const gLen = groupsRes.data?.length || 0;
-          const cLen = categoriesRes.data?.length || 0;
-          const vLen = variantsRes.data?.length || 0;
-          const bLen = batchesRes.data?.length || 0;
-          const biLen = batchItemsRes.data?.length || 0;
-          const poLen = poRes.data?.length || 0;
-          const poiLen = poiRes.data?.length || 0;
+          const gLen = groups.length;
+          const cLen = categories.length;
+          const vLen = variants.length;
+          const bLen = batches.length;
+          const biLen = batchItems.length;
+          const poLen = po.length;
+          const poiLen = poi.length;
 
           console.log(`[Sync] 從 Supabase 成功拉取到資料：product_groups = ${gLen} 筆, product_categories = ${cLen} 筆, product_variants = ${vLen} 筆, purchase_batches = ${bLen} 筆, purchase_batch_items = ${biLen} 筆, private_orders = ${poLen} 筆, private_order_items = ${poiLen} 筆`);
           console.log(`[Cloud Pull] pulled groups count: ${gLen}`);
           console.log(`[Cloud Pull] pulled variants count: ${vLen}`);
-          console.log('[Cloud Pull] variants sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
-          console.log('[Default Cost Sync] cloud pulled sample:', variantsRes.data && variantsRes.data.length > 0 ? JSON.stringify(variantsRes.data[0]) : 'empty');
+          console.log('[Cloud Pull] variants sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
+          console.log('[Default Cost Sync] cloud pulled sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
           console.log(`[Private Order Sync] cloud pulled orders count: ${poLen}`);
           console.log(`[Private Order Sync] cloud pulled items count: ${poiLen}`);
 
@@ -342,13 +357,13 @@ export class SupabaseProvider implements IDataProvider {
           // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
           console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆, privateOrders: ${poLen} 筆, privateOrderItems: ${poiLen} 筆`);
           
-          await db.saveProductGroups(groupsRes.data || []);
-          await db.saveProductCategories(categoriesRes.data || []);
-          console.log(`[Before IndexedDB Save Variants] count: ${(variantsRes.data || []).length}`);
-          console.log('[Before IndexedDB Save Variants] sample:', (variantsRes.data || []).length > 0 ? JSON.stringify((variantsRes.data || [])[0]) : 'empty');
-          await db.saveProductVariants(variantsRes.data || []);
-          await db.savePurchaseBatches(batchesRes.data || []);
-          const mappedBatchItems = (batchItemsRes.data || []).map((r: any) => ({
+          await db.saveProductGroups(groups);
+          await db.saveProductCategories(categories);
+          console.log(`[Before IndexedDB Save Variants] count: ${variants.length}`);
+          console.log('[Before IndexedDB Save Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
+          await db.saveProductVariants(variants);
+          await db.savePurchaseBatches(batches);
+          const mappedBatchItems = batchItems.map((r: any) => ({
             id: r.local_id || r.id,
             purchase_batch_id: r.purchase_batch_id,
             product_variant_id: r.product_variant_id,
@@ -358,7 +373,7 @@ export class SupabaseProvider implements IDataProvider {
           }));
           await db.savePurchaseBatchItems(mappedBatchItems);
 
-          const mappedOrders: PrivateOrder[] = (poRes.data || []).map(r => ({
+          const mappedOrders: PrivateOrder[] = po.map(r => ({
             id: r.local_id || r.id,
             product_group_id: r.product_group_id,
             customer_name: r.customer_name,
@@ -367,7 +382,7 @@ export class SupabaseProvider implements IDataProvider {
             created_at: r.created_at
           }));
 
-          const mappedItems: PrivateOrderItem[] = (poiRes.data || []).map(r => ({
+          const mappedItems: PrivateOrderItem[] = poi.map(r => ({
             id: r.local_id || r.id,
             private_order_id: r.private_order_id,
             product_variant_id: r.product_variant_id,
@@ -376,11 +391,11 @@ export class SupabaseProvider implements IDataProvider {
             note: r.note || ''
           }));
 
-           await db.savePrivateOrders(mappedOrders);
+          await db.savePrivateOrders(mappedOrders);
           await db.savePrivateOrderItems(mappedItems);
 
           // Japan Packages Sync
-          const mappedPackages = (jpRes.data || []).map((r: any) => ({
+          const mappedPackages = jp.map((r: any) => ({
             id: r.id,
             title: r.title,
             vendor_name: r.vendor_name || '',
@@ -396,7 +411,7 @@ export class SupabaseProvider implements IDataProvider {
           }));
           await db.saveJapanPackages(mappedPackages);
 
-          const mappedPackageItems = (jpiRes.data || []).map((r: any) => ({
+          const mappedPackageItems = jpi.map((r: any) => ({
             id: r.id,
             japan_package_id: r.japan_package_id,
             product_group_id: r.product_group_id || null,
@@ -416,26 +431,21 @@ export class SupabaseProvider implements IDataProvider {
           }));
           await db.saveJapanPackageItems(mappedPackageItems);
 
-           // 2.5 Pull and save bundle components (gracefully handle missing table)
-           let bcData: any[] = [];
-           try {
-             const bcRes = await supabase.from('bundle_components').select('*');
-             if (!bcRes.error && bcRes.data) {
-               bcData = bcRes.data;
-               console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
-             } else if (bcRes.error) {
-               console.warn('[Sync WARNING] 抓取 bundle_components 失敗 (可能資料表尚未建立):', bcRes.error.message);
-             }
-           } catch (e: any) {
-             console.warn('[Sync WARNING] 抓取 bundle_components 發生異常:', e.message || e);
-           }
-           const mappedBundleComponents: BundleComponent[] = bcData.map(r => ({
-             id: r.id,
-             bundle_variant_id: r.bundle_variant_id,
-             component_variant_id: r.component_variant_id,
-             created_at: r.created_at
-           }));
-           await db.saveBundleComponents(mappedBundleComponents);
+          // 2.5 Pull and save bundle components (gracefully handle missing table)
+          let bcData: any[] = [];
+          try {
+            bcData = await fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').range(from, to));
+            console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
+          } catch (e: any) {
+            console.warn('[Sync WARNING] 抓取 bundle_components 發生異常:', e.message || e);
+          }
+          const mappedBundleComponents: BundleComponent[] = bcData.map(r => ({
+            id: r.id,
+            bundle_variant_id: r.bundle_variant_id,
+            component_variant_id: r.component_variant_id,
+            created_at: r.created_at
+          }));
+          await db.saveBundleComponents(mappedBundleComponents);
 
           // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
           await this.pullSalesOrders();
@@ -1226,14 +1236,13 @@ export class SupabaseProvider implements IDataProvider {
 
   async pullSalesOrders(): Promise<void> {
     try {
-      const { data, error } = await supabase
-        .from('sales_orders')
-        .select('*')
-        .is('deleted_at', null);
-
-      if (error) {
-        throw error;
-      }
+      const data = await fetchAll<any>(async (from, to) =>
+        supabase
+          .from('sales_orders')
+          .select('*')
+          .is('deleted_at', null)
+          .range(from, to)
+      );
 
       const localOrders = await db.getSalesOrders();
       const lso = localOrders.length;
@@ -1272,14 +1281,13 @@ export class SupabaseProvider implements IDataProvider {
 
   async pullSalesOrderItems(): Promise<void> {
     try {
-      const { data, error } = await supabase
-        .from('sales_order_items')
-        .select('*')
-        .is('deleted_at', null);
-
-      if (error) {
-        throw error;
-      }
+      const data = await fetchAll<any>(async (from, to) =>
+        supabase
+          .from('sales_order_items')
+          .select('*')
+          .is('deleted_at', null)
+          .range(from, to)
+      );
 
       const localItems = await db.getSalesOrderItems();
       const lsoi = localItems.length;
@@ -1333,14 +1341,13 @@ export class SupabaseProvider implements IDataProvider {
 
   async pullInventory(): Promise<void> {
     try {
-      const { data, error } = await supabase
-        .from('inventory_items')
-        .select('*')
-        .is('deleted_at', null);
-
-      if (error) {
-        throw error;
-      }
+      const data = await fetchAll<any>(async (from, to) =>
+        supabase
+          .from('inventory_items')
+          .select('*')
+          .is('deleted_at', null)
+          .range(from, to)
+      );
 
       const localInv = await db.getInventory();
       const linv = localInv.length;
@@ -2204,12 +2211,13 @@ export class SupabaseProvider implements IDataProvider {
 
   async pullDashboardCategoryImages(): Promise<void> {
     try {
-      const { data, error } = await supabase
-        .from('dashboard_category_images')
-        .select('category_key, image_url, storage_path')
-        .is('deleted_at', null);
-
-      if (error) throw error;
+      const data = await fetchAll<any>(async (from, to) =>
+        supabase
+          .from('dashboard_category_images')
+          .select('category_key, image_url, storage_path')
+          .is('deleted_at', null)
+          .range(from, to)
+      );
 
       if (data) {
         data.forEach(item => {
@@ -2292,18 +2300,16 @@ export class SupabaseProvider implements IDataProvider {
     try {
       console.log('[Restore Backup] Starting cloud rollback process...');
 
-      // 1. Helper to fetch all column values from a table
+      // 1. Helper to fetch all column values from a table with pagination
       const fetchCloudKeys = async (tableName: string, colName: string): Promise<any[]> => {
-        let query = supabase.from(tableName).select(colName);
-        if (tableName !== 'sales_orders' && tableName !== 'sales_order_items') {
-          query = query.is('deleted_at', null);
-        }
-        const { data, error } = await query;
-        if (error) {
-          console.error(`[Restore Backup] Fetching ${tableName} keys failed:`, error.message);
-          throw error;
-        }
-        return (data || []).map(r => (r as any)[colName]);
+        const data = await fetchAll<any>(async (from, to) => {
+          let query = supabase.from(tableName).select(colName).range(from, to);
+          if (tableName !== 'sales_orders' && tableName !== 'sales_order_items') {
+            query = query.is('deleted_at', null);
+          }
+          return query;
+        });
+        return data.map(r => (r as any)[colName]);
       };
 
       // 2. Fetch existing keys from cloud
@@ -2312,13 +2318,13 @@ export class SupabaseProvider implements IDataProvider {
       const cloudPoiIds = await fetchCloudKeys('private_order_items', 'id');
       const cloudPoIds = await fetchCloudKeys('private_orders', 'id');
       
-      const { data: cloudSoiData, error: soiErr } = await supabase.from('sales_order_items').select('id, local_id');
-      if (soiErr) throw soiErr;
-      const cloudSoi = cloudSoiData || [];
+      const cloudSoi = await fetchAll<any>(async (from, to) =>
+        supabase.from('sales_order_items').select('id, local_id').range(from, to)
+      );
 
-      const { data: cloudSoData, error: soErr } = await supabase.from('sales_orders').select('id, local_id');
-      if (soErr) throw soErr;
-      const cloudSo = cloudSoData || [];
+      const cloudSo = await fetchAll<any>(async (from, to) =>
+        supabase.from('sales_orders').select('id, local_id').range(from, to)
+      );
 
       const cloudPvIds = await fetchCloudKeys('product_variants', 'id');
       const cloudPcIds = await fetchCloudKeys('product_categories', 'id');
