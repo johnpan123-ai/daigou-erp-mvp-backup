@@ -314,7 +314,11 @@ export default function PurchaseRecords() {
     return (localStorage.getItem('erp_active_tab') as 'all' | 'hololive' | 'vspo' | 'proxy' | 'other') || 'all';
   });
 
-  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'to_purchase' | 'all'>('progress');
+  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'to_purchase' | 'all'>(() => {
+    const saved = localStorage.getItem('erp_active_secondary_tab');
+    if (saved === 'progress' || saved === 'closed' || saved === 'to_purchase' || saved === 'all') return saved;
+    return 'progress';
+  });
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
 
   const normalizeDate = (dateStr: string | undefined | null): string | null => {
@@ -385,6 +389,33 @@ export default function PurchaseRecords() {
   useEffect(() => {
     localStorage.setItem('erp_active_tab', activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('erp_active_secondary_tab', secondaryTab);
+  }, [secondaryTab]);
+
+  // Restore scroll position saved by navigateToDetail() when returning via the browser Back
+  // button. Waits for groups to actually be loaded (and one more frame for the list to paint)
+  // before scrolling, and only runs once per mount so later data refreshes don't re-trigger it.
+  const scrollRestoredRef = useRef(false);
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    if (groups.length === 0) return;
+
+    const saved = sessionStorage.getItem('erp_purchase_records_scroll');
+    sessionStorage.removeItem('erp_purchase_records_scroll');
+    scrollRestoredRef.current = true;
+
+    if (saved) {
+      const y = parseInt(saved, 10);
+      if (!isNaN(y)) {
+        requestAnimationFrame(() => {
+          const scrollEl = document.querySelector('.main-area');
+          if (scrollEl) scrollEl.scrollTop = y;
+        });
+      }
+    }
+  }, [groups]);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -1296,17 +1327,28 @@ export default function PurchaseRecords() {
   };
 
 
+  // Save the scroll position of the actual scrolling container (.main-area, see layout.css —
+  // the window itself doesn't scroll) right before leaving for a detail page, so we can
+  // restore it if the user comes back via the browser Back button.
+  const navigateToDetail = (id: string) => {
+    const scrollEl = document.querySelector('.main-area');
+    if (scrollEl) {
+      sessionStorage.setItem('erp_purchase_records_scroll', String(scrollEl.scrollTop));
+    }
+    navigate(`/purchase-records/${id}`);
+  };
+
   const handleRowClick = (id: string, e: React.MouseEvent) => {
     // Don't navigate if clicking inputs/buttons or selecting product name text
-    if ((e.target as HTMLElement).tagName === 'INPUT' || 
-        (e.target as HTMLElement).tagName === 'SELECT' || 
+    if ((e.target as HTMLElement).tagName === 'INPUT' ||
+        (e.target as HTMLElement).tagName === 'SELECT' ||
         (e.target as HTMLElement).tagName === 'BUTTON' ||
         (e.target as HTMLElement).closest('button') ||
         (e.target as HTMLElement).closest('.product-name-text')) {
       return;
     }
     if (editMode) return;
-    navigate(`/purchase-records/${id}`);
+    navigateToDetail(id);
   };
 
 
@@ -2450,7 +2492,7 @@ export default function PurchaseRecords() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigate(`/purchase-records/${g.id}`);
+                                  navigateToDetail(g.id);
                                 }}
                                 style={{
                                   background: 'none',
@@ -2922,7 +2964,7 @@ export default function PurchaseRecords() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigate(`/purchase-records/${g.id}`);
+                                  navigateToDetail(g.id);
                                 }}
                                 style={{
                                   background: 'none',
