@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo, Fragment } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateGroupDemandAndPurchased, normalizeProductTitle } from '../lib/db';
-import { useResizableColumns } from '../hooks/useResizableColumns';
 
 interface UnlistedItemSku {
   sku: string;
@@ -25,28 +24,77 @@ interface UnlistedItem {
   gap: number;
 }
 
-const DEFAULT_COL_WIDTHS = {
-  closingDate: 130,
-  daysOverdue: 110,
-  source: 100,
-  category: 120
+// Local-only "已處理/已下架" marking. Deliberately NOT synced to Supabase or routed through
+// dataProvider/db.ts -- this is a single-browser scratchpad, not core synced data. Bound to a
+// specific catalog_import_id so that once a newer Catalog import happens, stale marks are
+// dropped and everything gets re-evaluated fresh instead of silently hiding items forever.
+interface UnlistedProcessedData {
+  catalog_import_id: string;
+  processed_group_ids: string[];
+  processed_at_map: Record<string, string>;
+}
+
+const UNLISTED_PROCESSED_STORAGE_KEY = 'erp_unlisted_processed_local';
+
+const loadUnlistedProcessedData = (): UnlistedProcessedData => {
+  try {
+    const raw = localStorage.getItem(UNLISTED_PROCESSED_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed.catalog_import_id === 'string' &&
+        Array.isArray(parsed.processed_group_ids) &&
+        parsed.processed_at_map && typeof parsed.processed_at_map === 'object'
+      ) {
+        return parsed as UnlistedProcessedData;
+      }
+    }
+  } catch (e) {
+    console.warn('[Unlisted Processed] Failed to parse local storage, resetting.', e);
+  }
+  return { catalog_import_id: '', processed_group_ids: [], processed_at_map: {} };
 };
+
+const saveUnlistedProcessedData = (data: UnlistedProcessedData) => {
+  localStorage.setItem(UNLISTED_PROCESSED_STORAGE_KEY, JSON.stringify(data));
+};
+
+// Shared capsule style so every info badge on a row has identical height/radius/font size --
+// only color/icon/label differ. Keeps the row reading as one consistent strip instead of
+// several differently-styled bits of text.
+const unlistedBadgeBaseStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '4px',
+  fontSize: '12px',
+  fontWeight: 600,
+  padding: '2px 10px',
+  borderRadius: '999px',
+  whiteSpace: 'nowrap' as const,
+  lineHeight: 1.4
+};
+
+function UnlistedBadge({ icon, children, color, bg, border }: { icon: string; children: React.ReactNode; color: string; bg: string; border: string }) {
+  return (
+    <span style={{ ...unlistedBadgeBaseStyle, color, backgroundColor: bg, border: `1px solid ${border}` }}>
+      <span aria-hidden="true">{icon}</span>
+      <span>{children}</span>
+    </span>
+  );
+}
 
 export default function UnlistedItems() {
   const { isMobile } = useViewport();
-  
+
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<UnlistedItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [copied, setCopied] = useState(false);
   const [catalogImportTime, setCatalogImportTime] = useState<string | null>(null);
-  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
-
-  const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
-    'erp_unlisted_col_widths',
-    DEFAULT_COL_WIDTHS
-  );
+  const [processedData, setProcessedData] = useState<UnlistedProcessedData>(() => loadUnlistedProcessedData());
+  const [viewMode, setViewMode] = useState<'pending' | 'processed'>('pending');
 
   // Load and process data
   const loadData = async () => {
@@ -78,6 +126,17 @@ export default function UnlistedItems() {
       }
 
       setCatalogImportTime(latestImportTime);
+
+      // Reconcile local "已處理" marks against the current latest catalog import batch. If a
+      // newer Catalog import has happened since the marks were made, they're stale -- reset
+      // so every item gets re-evaluated fresh instead of staying hidden forever.
+      const currentImportKey = latestImportId || '';
+      let currentProcessed = loadUnlistedProcessedData();
+      if (currentProcessed.catalog_import_id !== currentImportKey) {
+        currentProcessed = { catalog_import_id: currentImportKey, processed_group_ids: [], processed_at_map: {} };
+        saveUnlistedProcessedData(currentProcessed);
+      }
+      setProcessedData(currentProcessed);
 
       // Filter inventory to only items from the latest import batch (fallback to all if none have timestamps)
       const latestInventory = latestImportId
@@ -178,7 +237,6 @@ export default function UnlistedItems() {
       unlistedList.sort((a, b) => b.daysOverdue - a.daysOverdue);
       setItems(unlistedList);
       setSelectedIds(new Set()); // Reset selections
-      setExpandedGroupIds(new Set()); // Reset expand states
     } catch (err) {
       console.error('[UnlistedItems Load Error]:', err);
     } finally {
@@ -210,29 +268,65 @@ export default function UnlistedItems() {
     return `${year}-${month}-${day}`;
   };
 
-  const toggleExpandGroup = (groupId: string) => {
-    setExpandedGroupIds(prev => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
-    });
-  };
+  const processedGroupIdSet = useMemo(() => new Set(processedData.processed_group_ids), [processedData]);
+
+  // Split the live-computed list by local "已處理" marks. Pending = what still needs action;
+  // Processed = the "已處理紀錄" view. Both re-derive from the same live `items`, so a group
+  // that genuinely drops out of the live computation (e.g. truly delisted in a later Catalog
+  // import) simply stops appearing in either view -- there's no separate stored snapshot here.
+  const pendingItems = useMemo(() => items.filter(item => !processedGroupIdSet.has(item.id)), [items, processedGroupIdSet]);
+  const processedItems = useMemo(() => items.filter(item => processedGroupIdSet.has(item.id)), [items, processedGroupIdSet]);
+  const activeViewItems = viewMode === 'pending' ? pendingItems : processedItems;
 
   // Filter items by search
   const filteredItems = useMemo(() => {
-    if (!searchTerm.trim()) return items;
+    if (!searchTerm.trim()) return activeViewItems;
     const lower = searchTerm.toLowerCase();
-    return items.filter(item => 
-      item.name.toLowerCase().includes(lower) || 
+    return activeViewItems.filter(item =>
+      item.name.toLowerCase().includes(lower) ||
       item.category.toLowerCase().includes(lower) ||
       item.source.toLowerCase().includes(lower) ||
       item.hitSkus.some(sku => sku.sku.toLowerCase().includes(lower) || sku.variantName.toLowerCase().includes(lower))
     );
-  }, [items, searchTerm]);
+  }, [activeViewItems, searchTerm]);
+
+  const handleSwitchView = (mode: 'pending' | 'processed') => {
+    setViewMode(mode);
+    setSelectedIds(new Set());
+  };
+
+  const handleMarkProcessed = () => {
+    if (selectedIds.size === 0) return;
+    const nowIso = new Date().toISOString();
+    setProcessedData(prev => {
+      const idSet = new Set(prev.processed_group_ids);
+      const nextMap = { ...prev.processed_at_map };
+      selectedIds.forEach(id => {
+        idSet.add(id);
+        nextMap[id] = nowIso;
+      });
+      const next: UnlistedProcessedData = { ...prev, processed_group_ids: Array.from(idSet), processed_at_map: nextMap };
+      saveUnlistedProcessedData(next);
+      return next;
+    });
+    setSelectedIds(new Set());
+  };
+
+  const handleUnmarkProcessed = () => {
+    if (selectedIds.size === 0) return;
+    setProcessedData(prev => {
+      const idSet = new Set(prev.processed_group_ids);
+      const nextMap = { ...prev.processed_at_map };
+      selectedIds.forEach(id => {
+        idSet.delete(id);
+        delete nextMap[id];
+      });
+      const next: UnlistedProcessedData = { ...prev, processed_group_ids: Array.from(idSet), processed_at_map: nextMap };
+      saveUnlistedProcessedData(next);
+      return next;
+    });
+    setSelectedIds(new Set());
+  };
 
   // Checkbox functions
   const handleToggleSelect = (id: string) => {
@@ -274,8 +368,8 @@ export default function UnlistedItems() {
   // Copy selected to clipboard
   const handleCopySelected = async () => {
     if (selectedIds.size === 0) return;
-    const selectedItems = items.filter(item => selectedIds.has(item.id));
-    
+    const selectedItems = activeViewItems.filter(item => selectedIds.has(item.id));
+
     // Format: Product Name (Group Title)
     const textToCopy = selectedItems.map(item => normalizeProductTitle(item.name)).join('\n');
 
@@ -289,13 +383,13 @@ export default function UnlistedItems() {
     }
   };
 
-  // Stats
+  // Stats reflect the pending (still-actionable) set, not items already marked processed.
   const stats = useMemo(() => {
-    const total = items.length;
-    const myacg = items.filter(item => item.source === '買動漫').length;
-    const waca = items.filter(item => item.source === 'WACA').length;
+    const total = pendingItems.length;
+    const myacg = pendingItems.filter(item => item.source === '買動漫').length;
+    const waca = pendingItems.filter(item => item.source === 'WACA').length;
     return { total, myacg, waca };
-  }, [items]);
+  }, [pendingItems]);
 
   return (
     <div className="unlisted-container">
@@ -562,32 +656,13 @@ export default function UnlistedItems() {
         </div>
         
         <div className="unlisted-actions" style={{ display: 'flex', gap: '8px' }}>
-          {!isMobile && (
-            <button
-              className="btn btn-ghost flex items-center gap-xs"
-              onClick={resetWidths}
-              style={{
-                height: '38px',
-                fontSize: '13px',
-                padding: '0 12px',
-                border: '1px solid #cbd5e1',
-                borderRadius: '6px',
-                color: '#64748b',
-                backgroundColor: '#fff',
-                cursor: 'pointer'
-              }}
-            >
-              <RotateCcw size={16} />
-              重設欄寬
-            </button>
-          )}
-          <button 
+          <button
             className="btn btn-primary flex items-center gap-xs"
             onClick={handleCopySelected}
             disabled={selectedIds.size === 0}
-            style={{ 
-              height: '38px', 
-              fontSize: '13px', 
+            style={{
+              height: '38px',
+              fontSize: '13px',
               padding: '0 16px',
               backgroundColor: selectedIds.size === 0 ? '#cbd5e1' : undefined,
               borderColor: selectedIds.size === 0 ? '#cbd5e1' : undefined,
@@ -595,8 +670,49 @@ export default function UnlistedItems() {
             }}
           >
             {copied ? <Check size={16} /> : <Copy size={16} />}
-            {copied ? '已複製！' : `複製下架清單 (${selectedIds.size})`}
+            {copied ? '已複製！' : `複製${viewMode === 'pending' ? '下架' : ''}清單 (${selectedIds.size})`}
           </button>
+          {viewMode === 'pending' ? (
+            <button
+              className="flex items-center gap-xs"
+              onClick={handleMarkProcessed}
+              disabled={selectedIds.size === 0}
+              style={{
+                height: '38px',
+                fontSize: '13px',
+                padding: '0 16px',
+                border: '1px solid #16a34a',
+                borderRadius: '6px',
+                color: selectedIds.size === 0 ? '#94a3b8' : '#16a34a',
+                backgroundColor: '#fff',
+                borderColor: selectedIds.size === 0 ? '#cbd5e1' : '#16a34a',
+                cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer'
+              }}
+            >
+              <Check size={16} />
+              標記已處理 ({selectedIds.size})
+            </button>
+          ) : (
+            <button
+              className="flex items-center gap-xs"
+              onClick={handleUnmarkProcessed}
+              disabled={selectedIds.size === 0}
+              style={{
+                height: '38px',
+                fontSize: '13px',
+                padding: '0 16px',
+                border: '1px solid #dc2626',
+                borderRadius: '6px',
+                color: selectedIds.size === 0 ? '#94a3b8' : '#dc2626',
+                backgroundColor: '#fff',
+                borderColor: selectedIds.size === 0 ? '#cbd5e1' : '#dc2626',
+                cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer'
+              }}
+            >
+              <RotateCcw size={16} />
+              取消已處理 ({selectedIds.size})
+            </button>
+          )}
         </div>
       </div>
 
@@ -616,9 +732,41 @@ export default function UnlistedItems() {
       </div>
 
       <div className="filter-bar">
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => handleSwitchView('pending')}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (viewMode === 'pending' ? '#2563eb' : '#cbd5e1'),
+              backgroundColor: viewMode === 'pending' ? '#eff6ff' : '#ffffff',
+              color: viewMode === 'pending' ? '#2563eb' : '#475569'
+            }}
+          >
+            待下架 ({pendingItems.length})
+          </button>
+          <button
+            onClick={() => handleSwitchView('processed')}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (viewMode === 'processed' ? '#16a34a' : '#cbd5e1'),
+              backgroundColor: viewMode === 'processed' ? '#f0fdf4' : '#ffffff',
+              color: viewMode === 'processed' ? '#16a34a' : '#475569'
+            }}
+          >
+            已處理紀錄 ({processedItems.length})
+          </button>
+        </div>
         <div className="search-box">
           <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
-          <input 
+          <input
             type="text"
             className="search-input"
             placeholder="搜尋商品名稱 / SKU / 分類 / 來源..."
@@ -636,7 +784,7 @@ export default function UnlistedItems() {
       ) : filteredItems.length === 0 ? (
         <div className="table-card flex flex-col items-center justify-center" style={{ height: '200px', backgroundColor: '#fff' }}>
           <Archive size={40} style={{ color: '#cbd5e1', marginBottom: '8px' }} />
-          <span className="text-sm text-secondary font-medium">沒有符合條件的待下架商品</span>
+          <span className="text-sm text-secondary font-medium">{viewMode === 'pending' ? '沒有符合條件的待下架商品' : '目前沒有已處理紀錄'}</span>
         </div>
       ) : isMobile ? (
         <div className="mobile-card-list">
@@ -731,50 +879,13 @@ export default function UnlistedItems() {
                       需求{item.totalDemand} │ 已採購{item.purchased} │ 缺<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
                     </span>
                   </div>
-                </div>
-
-                <div className="mobile-card-detail-item" style={{ gridColumn: 'span 2' }}>
-                  <button 
-                    onClick={() => toggleExpandGroup(item.id)}
-                    style={{ 
-                      width: '100%', 
-                      padding: '6px 12px', 
-                      backgroundColor: '#f1f5f9', 
-                      border: '1px solid #cbd5e1', 
-                      borderRadius: '6px', 
-                      fontSize: '12px', 
-                      fontWeight: 600, 
-                      color: '#475569', 
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      gap: '4px',
-                      marginTop: '4px'
-                    }}
-                  >
-                    {expandedGroupIds.has(item.id) ? '收合規格明細 ▲' : `查看命中規格 (${item.hitSkus.length}) ▼`}
-                  </button>
-                  {expandedGroupIds.has(item.id) && (
-                    <div style={{ 
-                      marginTop: '8px', 
-                      padding: '8px 12px', 
-                      backgroundColor: '#fff', 
-                      border: '1px solid #e2e8f0', 
-                      borderRadius: '6px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px'
-                    }}>
-                      {item.hitSkus.map(sku => (
-                        <div key={sku.sku} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'monospace' }}>
-                          <span style={{ color: '#2563eb', fontWeight: 600 }}>{sku.sku}</span>
-                          <span style={{ color: '#64748b' }}>{sku.variantName}</span>
-                        </div>
-                      ))}
+                  {viewMode === 'processed' && processedData.processed_at_map[item.id] && (
+                    <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '4px' }}>
+                      ✓ 已處理於 {new Date(processedData.processed_at_map[item.id]).toLocaleString('zh-TW', { hour12: false })}
                     </div>
                   )}
                 </div>
+
               </div>
             </div>
           ))}
@@ -796,42 +907,16 @@ export default function UnlistedItems() {
                     onChange={e => handleSelectAll(e.target.checked)}
                   />
                 </th>
-                <th style={{ width: colWidths.name ? `${colWidths.name}px` : undefined }}>
+                <th>
                   <div className="th-inner">
                     <span>商品名稱</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('name', e)} />
-                  </div>
-                </th>
-                <th style={{ width: `${colWidths.closingDate}px` }}>
-                  <div className="th-inner">
-                    <span>官方結單日</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('closingDate', e)} />
-                  </div>
-                </th>
-                <th style={{ width: `${colWidths.daysOverdue}px` }}>
-                  <div className="th-inner">
-                    <span>已逾期天數</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('daysOverdue', e)} />
-                  </div>
-                </th>
-                <th style={{ width: `${colWidths.source}px`, textAlign: 'center' }}>
-                  <div className="th-inner justify-center">
-                    <span>商品來源</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('source', e)} />
-                  </div>
-                </th>
-                <th style={{ width: `${colWidths.category}px` }}>
-                  <div className="th-inner">
-                    <span>分類</span>
-                    <div className="resizer-handle" onMouseDown={e => handleMouseDown('category', e)} />
                   </div>
                 </th>
               </tr>
             </thead>
             <tbody>
               {filteredItems.map(item => (
-                <Fragment key={item.id}>
-                  <tr>
+                  <tr key={item.id}>
                     <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                       <input 
                         type="checkbox"
@@ -839,25 +924,10 @@ export default function UnlistedItems() {
                         onChange={() => handleToggleSelect(item.id)}
                       />
                     </td>
-                    <td style={{ fontWeight: 600, color: '#0f172a', verticalAlign: 'middle' }}>
+                    <td style={{ color: '#0f172a', verticalAlign: 'middle', padding: '9px 16px' }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <button 
-                            onClick={() => toggleExpandGroup(item.id)}
-                            style={{ 
-                              border: 'none', 
-                              background: 'none', 
-                              cursor: 'pointer', 
-                              padding: '4px',
-                              color: '#64748b', 
-                              fontSize: '11px',
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}
-                          >
-                            {expandedGroupIds.has(item.id) ? '▼' : '▶'}
-                          </button>
-                          <span>{normalizeProductTitle(item.name)}</span>
+                          <span style={{ fontSize: '16px', fontWeight: 700 }}>{normalizeProductTitle(item.name)}</span>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
                             <button
                               onClick={() => handleCopyItemName(item.id, item.name)}
@@ -888,63 +958,39 @@ export default function UnlistedItems() {
                             </Link>
                           </div>
                         </div>
-                        
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', fontSize: '12px', fontWeight: 500 }}>
-                          <span style={{ 
-                            fontSize: '11px', 
-                            fontWeight: 600, 
-                            color: item.gap === 0 ? '#15803d' : item.purchased > 0 ? '#b45309' : '#b91c1c', 
-                            backgroundColor: item.gap === 0 ? '#f0fdf4' : item.purchased > 0 ? '#fef3c7' : '#fef2f2', 
-                            padding: '2px 8px', 
-                            borderRadius: '4px',
-                            border: `1px solid ${item.gap === 0 ? '#bbf7d0' : item.purchased > 0 ? '#fde68a' : '#fecaca'}`,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}>
-                            {item.gap === 0 ? '已採購完成' : item.purchased > 0 ? '部分採購' : '尚未採購'}
-                          </span>
-                          <span style={{ color: '#64748b' }}>
-                            需求{item.totalDemand} │ 已採購{item.purchased} │ 缺<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
-                          </span>
+
+                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '7px', marginTop: '12px' }}>
+                          <UnlistedBadge icon="🔴" color="#b91c1c" bg="#fef2f2" border="#fecaca">
+                            逾期 {item.daysOverdue} 天
+                          </UnlistedBadge>
+                          <UnlistedBadge icon="📅" color="#64748b" bg="#f1f5f9" border="#e2e8f0">
+                            結單：{item.closingDate.replace(/-/g, '/')}
+                          </UnlistedBadge>
+                          <UnlistedBadge icon="📦" color="#2563eb" bg="#eff6ff" border="#bfdbfe">
+                            需求 {item.totalDemand}
+                          </UnlistedBadge>
+                          <UnlistedBadge
+                            icon="✅"
+                            color={item.gap === 0 ? '#15803d' : '#475569'}
+                            bg={item.gap === 0 ? '#f0fdf4' : '#f1f5f9'}
+                            border={item.gap === 0 ? '#bbf7d0' : '#e2e8f0'}
+                          >
+                            已採購 {item.purchased}
+                          </UnlistedBadge>
+                          {item.gap > 0 && (
+                            <UnlistedBadge icon="⚠️" color="#c2410c" bg="#fff7ed" border="#fed7aa">
+                              尚缺 {item.gap}
+                            </UnlistedBadge>
+                          )}
+                          {viewMode === 'processed' && processedData.processed_at_map[item.id] && (
+                            <UnlistedBadge icon="✓" color="#16a34a" bg="#f0fdf4" border="#bbf7d0">
+                              已處理於 {new Date(processedData.processed_at_map[item.id]).toLocaleString('zh-TW', { hour12: false })}
+                            </UnlistedBadge>
+                          )}
                         </div>
                       </div>
                     </td>
-                    <td style={{ verticalAlign: 'middle' }}>{item.closingDate}</td>
-                    <td style={{ verticalAlign: 'middle' }}>
-                      <span className="badge-overdue">
-                        <AlertTriangle size={12} />
-                        逾期 {item.daysOverdue} 天
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                      <span className={`badge-source ${item.source === 'WACA' ? 'badge-waca' : item.source === '買動漫' ? 'badge-myacg' : 'badge-other'}`} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {item.source}
-                      </span>
-                    </td>
-                    <td style={{ verticalAlign: 'middle' }}>{item.category}</td>
                   </tr>
-                  {expandedGroupIds.has(item.id) && (
-                    <tr style={{ backgroundColor: '#f8fafc' }}>
-                      <td></td>
-                      <td colSpan={5} style={{ padding: '8px 16px' }}>
-                        <div style={{ padding: '12px 16px', borderLeft: '3px solid #2563eb', backgroundColor: '#fff', borderRadius: '0 4px 4px 0', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)' }}>
-                          <div style={{ fontWeight: 600, fontSize: '12px', color: '#475569', marginBottom: '6px' }}>
-                            🔍 命中最新 Catalog 規格清單：
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {item.hitSkus.map(sku => (
-                              <div key={sku.sku} style={{ display: 'flex', gap: '16px', fontSize: '12px', fontFamily: 'monospace' }}>
-                                <span style={{ color: '#2563eb', fontWeight: 600, width: '150px' }}>{sku.sku}</span>
-                                <span style={{ color: '#334155' }}>{sku.variantName}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
               ))}
             </tbody>
           </table>
