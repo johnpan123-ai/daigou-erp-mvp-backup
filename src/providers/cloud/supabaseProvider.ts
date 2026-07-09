@@ -546,7 +546,10 @@ export class SupabaseProvider implements IDataProvider {
         if (childCats.length > 0) {
           childCats.forEach(c => c.product_group_id = newId);
           await db.saveProductCategories(cats);
-          await this.saveProductCategories(childCats);
+          // Push the FULL category set, not just childCats: saveProductCategories() now
+          // does delete-detection by diffing against local storage, so pushing a subset
+          // here would make every other category look "removed" and get soft-deleted.
+          await this.saveProductCategories(cats);
         }
 
         // Update any child variants in IndexedDB
@@ -625,6 +628,13 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
+    // Identify deleted ones by comparing with current local storage records, BEFORE it gets
+    // overwritten below. Without this, a caller that just omits a category from the array
+    // (e.g. reparseProductVariants()'s empty-category cleanup) only ever removes it locally --
+    // product_categories.deleted_at is never set in Supabase, so the next pullCoreProductData()
+    // pulls it right back.
+    const currentLocalCategories = await db.getProductCategories();
+
     const sanitizedCategories = [];
     const groups = await db.getProductGroups();
     const vars = await db.getProductVariants();
@@ -685,15 +695,34 @@ export class SupabaseProvider implements IDataProvider {
       return;
     }
 
-    // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
     const finalCategories = categoriesChanged ? sanitizedCategories : categories;
-    if (finalCategories.length === 0) {
-      return;
-    }
 
     try {
+      // (A) Handle soft deletion of categories removed from the incoming set
+      const finalIds = new Set(finalCategories.map(c => c.id));
+      const removedCategories = currentLocalCategories.filter(c => !finalIds.has(c.id));
+      if (removedCategories.length > 0) {
+        const removedIds = removedCategories.map(c => c.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          console.log(`[Sync Push] product_categories marking deleted_at: ${removedIds.length} rows`);
+          const { error: delError } = await supabase
+            .from('product_categories')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds);
+          if (delError) {
+            console.error('[Sync Push] product_categories delete update failed:', delError);
+          }
+        }
+      }
+
+      // (B) 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
+      if (finalCategories.length === 0) {
+        return;
+      }
+
       // 篩選出具備合法 UUID 之 id 與 product_group_id 的分類資料
-      const validCategories = finalCategories.filter(c => 
+      const validCategories = finalCategories.filter(c =>
         isValidUuid(c.id) && isValidUuid(c.product_group_id)
       );
 
@@ -1543,10 +1572,18 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {
-    // 1. 本地儲存
+    // 1. Identify deleted ones by comparing with current local storage records (must read
+    // BEFORE overwriting local storage below). Without this, a UI delete that just omits a
+    // row from the array only ever removes it locally -- private_orders.deleted_at is never
+    // set in Supabase, so the next pullCoreProductData() (e.g. after F5) pulls it right back.
+    const currentLocal = await db.getPrivateOrders();
+    const incomingIds = new Set(orders.map(o => o.id));
+    const removedOrders = currentLocal.filter(o => !incomingIds.has(o.id));
+
+    // 2. 本地儲存
     await db.savePrivateOrders(orders);
 
-    // 2. 判斷是否為唯讀 Viewer/Helper
+    // 3. 判斷是否為唯讀 Viewer/Helper
     if (!(await this.canWriteCloud())) {
       const mode = getProviderMode();
       const role = await this.getRole();
@@ -1558,14 +1595,30 @@ export class SupabaseProvider implements IDataProvider {
       throw new Error(msg);
     }
 
-    // 3. 防呆與空陣列檢查 (若 orders.length === 0，直接 skip 雲端 upsert)
-    if (!orders || orders.length === 0) {
-      console.log('[Private Order Sync] skip empty cloud upsert for private_orders');
-      return;
-    }
-
     try {
-      // 4. 僅過濾出合法 UUID 的 active orders 進行 upsert
+      // (A) Handle soft deletion of removed orders in Supabase
+      if (removedOrders.length > 0) {
+        const removedIds = removedOrders.map(o => o.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          console.log(`[Sync Push] private_orders marking deleted_at: ${removedIds.length} rows`);
+          const { error: delError } = await supabase
+            .from('private_orders')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds);
+          if (delError) {
+            console.error('[Sync Push] private_orders delete update failed:', delError);
+          }
+        }
+      }
+
+      // (B) 防呆與空陣列檢查 (若 orders.length === 0，直接 skip 雲端 upsert)
+      if (!orders || orders.length === 0) {
+        console.log('[Private Order Sync] skip empty cloud upsert for private_orders');
+        return;
+      }
+
+      // 僅過濾出合法 UUID 的 active orders 進行 upsert
       const activeOrders = orders.filter(o => isValidUuid(o.id) && isValidUuid(o.product_group_id));
       if (activeOrders.length === 0) {
         console.log('[Private Order Sync] skip empty active cloud upsert for private_orders');

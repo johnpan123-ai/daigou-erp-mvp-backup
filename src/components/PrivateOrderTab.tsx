@@ -26,13 +26,20 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
 
   const handleDeleteOrder = async (order: PrivateOrder) => {
     if (!window.confirm(`確定刪除此私下登記？底下明細也會一起刪除。`)) return;
-    
+
     const allOrders = await dataProvider.getPrivateOrders();
     const allItems = await dataProvider.getPrivateOrderItems();
-    
+    const itemIdsToDelete = allItems.filter(i => i.private_order_id === order.id).map(i => i.id);
+
+    // Reuse deletePrivateOrderItems (already correctly deletes from Supabase, not just
+    // local) instead of savePrivateOrderItems, which is upsert-only and never removes rows
+    // from the cloud -- previously the item rows would silently survive on Supabase and get
+    // pulled back on the next sync/refresh even after this "deletion".
+    if (itemIdsToDelete.length > 0) {
+      await dataProvider.deletePrivateOrderItems(itemIdsToDelete);
+    }
     await dataProvider.savePrivateOrders(allOrders.filter(o => o.id !== order.id));
-    await dataProvider.savePrivateOrderItems(allItems.filter(i => i.private_order_id !== order.id));
-    
+
     onRefresh();
   };
 
