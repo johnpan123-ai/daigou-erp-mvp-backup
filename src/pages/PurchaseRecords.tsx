@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, calculateGroupDemandAndPurchased, normalizeDateInput } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -192,89 +192,97 @@ export default function PurchaseRecords() {
     });
   };
 
-  const getDynamicGap = (groupId: string, originalGap: number) => {
-    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
-    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
-    if (groupVars.length === 0) return originalGap;
+  // getDynamicGap() used to re-filter categories/variants (O(variants) work) on every single
+  // call, and it's called once per visible row per render. The only part that genuinely needs
+  // to be live on every render is the small arithmetic override from `draftDemands` (which
+  // changes on every keystroke while inline-editing a demand field) — the underlying "first
+  // variant of the group" baseline numbers (myacg/waca/private/purchased/original gap) don't
+  // depend on draftDemands at all, so they're precomputed once per group here and only
+  // recomputed when the underlying data actually changes.
+  const groupV0BaseMap = useMemo(() => {
+    const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
+    const map = new Map<string, { v0: ProductVariant; v0Myacg: number; v0Waca: number; v0Private: number; v0Purchased: number; v0OriginalGap: number }>();
 
-    const v0 = groupVars[0];
-    
-    // Calculate original computed values for v0
-    // MyACG
-    const rawMyacgQty = calculateFinalMyacgDemand(v0.myacg_item_code, inventory, salesOrderItems);
-    const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v0.myacg_manual_adjustment ?? 0);
-    const autoMyacg = (v0.myacg_auto_quantity !== null && v0.myacg_auto_quantity !== undefined && v0.myacg_auto_quantity >= 0)
-      ? v0.myacg_auto_quantity + (v0.myacg_manual_adjustment ?? 0)
-      : null;
-    const rawMyacg = (v0.effective_myacg_quantity !== null && v0.effective_myacg_quantity !== undefined && v0.effective_myacg_quantity >= 0)
-      ? v0.effective_myacg_quantity + (v0.myacg_manual_adjustment ?? 0)
-      : (autoMyacg ?? (v0 as any).myacg_quantity ?? localMyacg);
-    const v0_Myacg = rawMyacg >= 0 ? rawMyacg : 0;
+    for (const v of variants) {
+      const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
+      if (!groupId || map.has(groupId)) continue; // keep only the first variant per group (matches groupVars[0])
 
-    // WACA
-    const localWaca = (v0.waca_auto_quantity ?? 0) + (v0.waca_manual_adjustment ?? 0);
-    const autoWaca = (v0.waca_auto_quantity !== null && v0.waca_auto_quantity !== undefined && v0.waca_auto_quantity >= 0)
-      ? v0.waca_auto_quantity + (v0.waca_manual_adjustment ?? 0)
-      : null;
-    const rawWaca = autoWaca ?? (v0 as any).waca_quantity ?? localWaca;
-    const v0_Waca = rawWaca >= 0 ? rawWaca : 0;
+      const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
+      const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
+        ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+        : null;
+      const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+        ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
+        : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+      const v0Myacg = rawMyacg >= 0 ? rawMyacg : 0;
 
-    // Private
-    const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v0.id).reduce((sum, item) => sum + item.quantity, 0);
-    const rawPrivate = v0.private_manual_adjustment ?? (v0 as any).private_quantity ?? localPrivate;
-    const v0_Private = rawPrivate >= 0 ? rawPrivate : 0;
+      const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
+        ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+        : null;
+      const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+      const v0Waca = rawWaca >= 0 ? rawWaca : 0;
 
-    // Purchased
-    const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v0.id).reduce((sum, item) => sum + item.quantity, 0);
+      const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+      const v0Private = rawPrivate >= 0 ? rawPrivate : 0;
 
-    const manualPurchased = v0.purchased_manual_adjustment;
-    const legacyPurchased = (v0 as any).ordered_quantity ?? (v0 as any).ordered_qty;
+      const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
+      const manualPurchased = v.purchased_manual_adjustment;
+      const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
+      let rawPurchased = 0;
+      if (typeof manualPurchased === 'number' && manualPurchased > 0) {
+        rawPurchased = manualPurchased;
+      } else if (localPurchased > 0) {
+        rawPurchased = localPurchased;
+      } else if (typeof legacyPurchased === 'number' && legacyPurchased > 0) {
+        rawPurchased = legacyPurchased;
+      }
+      const v0Purchased = rawPurchased;
 
-    let rawPurchased = 0;
-    if (typeof manualPurchased === 'number' && manualPurchased > 0) {
-      rawPurchased = manualPurchased;
-    } else if (localPurchased > 0) {
-      rawPurchased = localPurchased;
-    } else if (typeof legacyPurchased === 'number' && legacyPurchased > 0) {
-      rawPurchased = legacyPurchased;
+      const v0OriginalDemand = v0Myacg + v0Waca + v0Private;
+      const v0OriginalGap = Math.max(v0OriginalDemand - v0Purchased, 0);
+
+      map.set(groupId, { v0: v, v0Myacg, v0Waca, v0Private, v0Purchased, v0OriginalGap });
     }
 
-    const v0_Purchased = rawPurchased;
+    return map;
+  }, [categories, variants, inventory, salesOrderItems, privateOrderItems, batchItems]);
 
-    const v0_OriginalDemand = v0_Myacg + v0_Waca + v0_Private;
-    const v0_OriginalGap = Math.max(v0_OriginalDemand - v0_Purchased, 0);
+  const getDynamicGap = (groupId: string, originalGap: number) => {
+    const base = groupV0BaseMap.get(groupId);
+    if (!base) return originalGap;
+    const { v0, v0Myacg, v0Waca, v0Private, v0Purchased, v0OriginalGap } = base;
 
-    // Apply draft overrides to v0
+    // Apply draft overrides to v0 (the only part that needs to be live per-render)
     const draftMyacgKey = `${groupId}_myacg`;
     const draftWacaKey = `${groupId}_waca`;
     const draftPurchasedKey = `${groupId}_purchased`;
 
-    // For myacg: draft value overrides v0.myacg_manual_adjustment
-    let new_v0_Myacg = v0_Myacg;
+    let new_v0_Myacg = v0Myacg;
     if (draftDemands[draftMyacgKey] !== undefined) {
       const draftMyacgVal = parseInt(draftDemands[draftMyacgKey], 10) || 0;
-      const myacgWithoutManual = v0_Myacg - (v0.myacg_manual_adjustment ?? 0);
+      const myacgWithoutManual = v0Myacg - (v0.myacg_manual_adjustment ?? 0);
       new_v0_Myacg = Math.max(myacgWithoutManual + draftMyacgVal, 0);
     }
 
-    // For waca: draft value overrides v0.waca_manual_adjustment
-    let new_v0_Waca = v0_Waca;
+    let new_v0_Waca = v0Waca;
     if (draftDemands[draftWacaKey] !== undefined) {
       const draftWacaManual = parseInt(draftDemands[draftWacaKey], 10) || 0;
-      const wacaWithoutManual = v0_Waca - (v0.waca_manual_adjustment ?? 0);
+      const wacaWithoutManual = v0Waca - (v0.waca_manual_adjustment ?? 0);
       new_v0_Waca = Math.max(wacaWithoutManual + draftWacaManual, 0);
     }
 
-    // For purchased: draft value overrides v0.purchased_manual_adjustment
-    let new_v0_Purchased = v0_Purchased;
+    let new_v0_Purchased = v0Purchased;
     if (draftDemands[draftPurchasedKey] !== undefined) {
       new_v0_Purchased = parseInt(draftDemands[draftPurchasedKey], 10) || 0;
     }
 
-    const new_v0_Demand = new_v0_Myacg + new_v0_Waca + v0_Private;
+    const new_v0_Demand = new_v0_Myacg + new_v0_Waca + v0Private;
     const new_v0_Gap = Math.max(new_v0_Demand - new_v0_Purchased, 0);
 
-    return Math.max(originalGap - v0_OriginalGap + new_v0_Gap, 0);
+    return Math.max(originalGap - v0OriginalGap + new_v0_Gap, 0);
   };
 
   const [isStale, setIsStale] = useState<boolean>(false);
@@ -431,13 +439,6 @@ export default function PurchaseRecords() {
 
   const getGroupStatus = (g: ProductGroup) => {
     const isClosed = checkIsGroupClosed(g);
-    console.log({
-      title: g.normalized_title || g.title,
-      status: (g as any).status,
-      closing_date: g.closing_date,
-      today: getTodayStr(),
-      computedStatus: isClosed ? '已結單' : '開單中'
-    });
     if (isClosed) {
       return { text: '⚫ 已結單', active: false };
     }
@@ -524,66 +525,106 @@ export default function PurchaseRecords() {
     return !isProxyProduct(g) && !isHololiveProduct(g) && !isVspoProduct(g);
   };
 
-  const getGroupPlatformDetails = (groupId: string) => {
-    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
-    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
-    
-    let myacg = 0;
-    let waca = 0;
-    let privateOrder = 0;
-    let purchased = 0;
-    let myacgManual = 0;
-    let wacaManual = 0;
-    let totalGap = 0;
-    
-    groupVars.forEach(v => {
+  // Both getGroupPlatformDetails() and getGroupDemandAndPurchased() used to re-filter/re-sum
+  // the full variants array from scratch on every single call (once per group in filtering
+  // logic, once per row per render in every table). With hundreds of groups/variants and
+  // several call sites per render, this was O(groups x variants) work repeated on every
+  // re-render (including the ~60/sec re-renders a column-resize drag used to trigger).
+  // Precompute all groups' aggregates in a single O(variants) pass here, memoized on the
+  // underlying data, so both helpers below become plain O(1) map lookups.
+  const groupPlatformDetailsMap = useMemo(() => {
+    const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
+    type Agg = { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean };
+    const acc = new Map<string, Agg>();
+
+    for (const v of variants) {
+      const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
+      if (!groupId) continue;
+
+      let entry = acc.get(groupId);
+      if (!entry) {
+        entry = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
+        acc.set(groupId, entry);
+      }
+
       const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
-      myacg += res.myacg;
-      waca += res.waca;
-      privateOrder += res.privateOrder;
-      purchased += res.purchased;
-      myacgManual += (v.myacg_manual_adjustment ?? 0);
-      wacaManual += (v.waca_manual_adjustment ?? 0);
-      totalGap += res.gap;
-    });
-    
-    const hasCatalogMissing = groupVars.some(v => v.catalog_missing === true);
-    return { myacg, waca, privateOrder, purchased, gap: totalGap, myacgManual, wacaManual, hasCatalogMissing };
+      entry.myacg += res.myacg;
+      entry.waca += res.waca;
+      entry.privateOrder += res.privateOrder;
+      entry.purchased += res.purchased;
+      entry.myacgManual += (v.myacg_manual_adjustment ?? 0);
+      entry.wacaManual += (v.waca_manual_adjustment ?? 0);
+      entry.gap += res.gap;
+      if (v.catalog_missing === true) entry.hasCatalogMissing = true;
+    }
+
+    return acc;
+  }, [categories, variants, privateOrderItems, batchItems, inventory, salesOrderItems]);
+
+  const EMPTY_GROUP_DETAILS = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
+
+  const getGroupPlatformDetails = (groupId: string) => {
+    return groupPlatformDetailsMap.get(groupId) || EMPTY_GROUP_DETAILS;
   };
 
   const getGroupDemandAndPurchased = (groupId: string) => {
-    return calculateGroupDemandAndPurchased(
-      groupId,
-      categories,
-      variants,
-      privateOrderItems,
-      batchItems,
-      inventory,
-      salesOrderItems
-    );
+    const d = getGroupPlatformDetails(groupId);
+    return { demand: d.myacg + d.waca + d.privateOrder, purchased: d.purchased, gap: d.gap, hasCatalogMissing: d.hasCatalogMissing };
   };
 
-  const getGroupSkuAndPriceRange = (groupId: string) => {
-    const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
-    const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
-    
-    const skus = Array.from(new Set(groupVars.map(v => v.myacg_item_code).filter(Boolean)));
-    const baseSkus = Array.from(new Set(skus.map(code => getBaseSku(code))));
-    const skuDisplay = baseSkus.length > 0 ? baseSkus.slice(0, 2).join(', ') + (baseSkus.length > 2 ? '...' : '') : '無SKU';
-
-    const itemCodes = groupVars.map(v => v.myacg_item_code);
-    const matchedInventoryItems = inventory.filter(item => itemCodes.includes(item.myacg_item_code));
-    const prices = matchedInventoryItems.map(item => item.final_price).filter(p => p !== undefined && p !== null);
-    let priceDisplay = '';
-    if (prices.length > 0) {
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      priceDisplay = minPrice === maxPrice ? `¥${minPrice.toLocaleString()}` : `¥${minPrice.toLocaleString()} - ¥${maxPrice.toLocaleString()}`;
-    } else {
-      priceDisplay = '無價格';
+  // Same story as above: this used to re-filter categories/variants/inventory from scratch
+  // on every call. Precompute per group once; inventory is bucketed by SKU up front so the
+  // price lookup is O(matches) instead of O(inventory) per group.
+  const groupSkuAndPriceRangeMap = useMemo(() => {
+    const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
+    const groupVarsMap = new Map<string, ProductVariant[]>();
+    for (const v of variants) {
+      const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
+      if (!groupId) continue;
+      const arr = groupVarsMap.get(groupId);
+      if (arr) arr.push(v); else groupVarsMap.set(groupId, [v]);
     }
 
-    return { skuDisplay, priceDisplay, count: groupVars.length };
+    const inventoryByCode = new Map<string, InventoryItem[]>();
+    for (const item of inventory) {
+      const arr = inventoryByCode.get(item.myacg_item_code);
+      if (arr) arr.push(item); else inventoryByCode.set(item.myacg_item_code, [item]);
+    }
+
+    const map = new Map<string, { skuDisplay: string; priceDisplay: string; count: number }>();
+    for (const [groupId, groupVars] of groupVarsMap.entries()) {
+      const skus = Array.from(new Set(groupVars.map(v => v.myacg_item_code).filter(Boolean)));
+      const baseSkus = Array.from(new Set(skus.map(code => getBaseSku(code))));
+      const skuDisplay = baseSkus.length > 0 ? baseSkus.slice(0, 2).join(', ') + (baseSkus.length > 2 ? '...' : '') : '無SKU';
+
+      // Matches the original's unfiltered/undeduped itemCodes.includes(...) semantics.
+      const codesToCheck = Array.from(new Set(groupVars.map(v => v.myacg_item_code)));
+      const prices: number[] = [];
+      for (const code of codesToCheck) {
+        const items = inventoryByCode.get(code);
+        if (!items) continue;
+        for (const item of items) {
+          if (item.final_price !== undefined && item.final_price !== null) prices.push(item.final_price);
+        }
+      }
+      let priceDisplay = '';
+      if (prices.length > 0) {
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+        priceDisplay = minPrice === maxPrice ? `¥${minPrice.toLocaleString()}` : `¥${minPrice.toLocaleString()} - ¥${maxPrice.toLocaleString()}`;
+      } else {
+        priceDisplay = '無價格';
+      }
+
+      map.set(groupId, { skuDisplay, priceDisplay, count: groupVars.length });
+    }
+    return map;
+  }, [categories, variants, inventory]);
+
+  const EMPTY_SKU_PRICE_RANGE = { skuDisplay: '無SKU', priceDisplay: '無價格', count: 0 };
+
+  const getGroupSkuAndPriceRange = (groupId: string) => {
+    return groupSkuAndPriceRangeMap.get(groupId) || EMPTY_SKU_PRICE_RANGE;
   };
 
   const getClosingDateStyle = (closingDate: string | undefined | null) => {
@@ -1662,7 +1703,7 @@ export default function PurchaseRecords() {
         flexWrap: 'wrap',
         gap: '12px'
       }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           <button
             onClick={() => { setSecondaryTab('progress'); }}
             style={{
@@ -2254,9 +2295,9 @@ export default function PurchaseRecords() {
                       />
                     </th>
                     {editMode && <th style={{ width: '60px', textAlign: 'center' }}>刪除</th>}
-                    <th style={{ width: '90px' }}>
+                    <th style={{ width: '128px' }}>
                       <div className="th-inner justify-center">
-                        <span>狀態</span>
+                        <span style={{ whiteSpace: 'nowrap' }}>狀態</span>
                       </div>
                     </th>
                     <th style={{ width: `${colWidths.title}px` }}>
@@ -2384,7 +2425,7 @@ export default function PurchaseRecords() {
                             </button>
                           </td>
                         )}
-                        <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                        <td style={{ textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap', paddingRight: '20px' }}>
                           {status.text}
                         </td>
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
@@ -2720,9 +2761,9 @@ export default function PurchaseRecords() {
                       />
                     </th>
                     {editMode && <th style={{ width: '60px', textAlign: 'center' }}>刪除</th>}
-                    <th style={{ width: '90px' }}>
+                    <th style={{ width: '128px' }}>
                       <div className="th-inner justify-center">
-                        <span>狀態</span>
+                        <span style={{ whiteSpace: 'nowrap' }}>狀態</span>
                       </div>
                     </th>
                     <th style={{ width: `${colWidths.title}px` }}>
@@ -2837,7 +2878,7 @@ export default function PurchaseRecords() {
                             </button>
                           </td>
                         )}
-                        <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                        <td style={{ textAlign: 'center', fontWeight: 600, whiteSpace: 'nowrap', paddingRight: '20px' }}>
                           {editMode ? (
                             status.text
                           ) : (

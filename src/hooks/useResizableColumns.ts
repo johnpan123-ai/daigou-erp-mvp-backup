@@ -26,24 +26,32 @@ export function useResizableColumns(
     const renderedWidth = th ? th.offsetWidth : 0;
 
     const startWidth = colWidths[colKey] || defaultWidths[colKey] || renderedWidth || 150;
+    let currentWidth = startWidth;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const dx = moveEvent.clientX - startX;
-      const newWidth = Math.max(50, startWidth + dx);
+      currentWidth = Math.max(50, startWidth + dx);
 
-      setColWidths(prev => ({
-        ...prev,
-        [colKey]: newWidth
-      }));
+      // Visual-only update while dragging: mutate the header cell's DOM width directly
+      // instead of calling setColWidths on every mousemove. Going through React state here
+      // used to trigger a full re-render (and all the per-row recomputation that comes with
+      // it) dozens of times per second during a drag. With table-layout: fixed, resizing the
+      // header <th> alone resizes the whole column for every row, so this is visually
+      // identical without the render cost.
+      if (th) {
+        th.style.width = `${currentWidth}px`;
+      }
     };
 
     const handleMouseUp = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      
-      setColWidths(current => {
-        localStorage.setItem(storageKey, JSON.stringify(current));
-        return current;
+
+      // Commit to React state (and persist) exactly once, at the end of the drag.
+      setColWidths(prev => {
+        const next = { ...prev, [colKey]: currentWidth };
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        return next;
       });
     };
 
