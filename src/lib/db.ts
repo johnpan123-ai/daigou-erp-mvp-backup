@@ -2615,23 +2615,187 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     await this.set('erp_product_categories', categories);
   }
 
+  // Cache for computeVariantDedupe(): the dedupe/alias computation is O(n) work that was
+  // previously re-run on every getProductVariants/getPurchaseBatchItems/getPrivateOrderItems
+  // call (several times per page load), which showed up as noticeable lag. variantVersion is
+  // bumped only by saveProductVariants (the sole writer of 'erp_product_variants'), so the
+  // cached result stays valid across calls until the underlying data actually changes.
+  private variantVersion = 0;
+  private variantDedupeCache: { canonical: ProductVariant[]; aliasMap: Map<string, string> } | null = null;
+  private variantDedupeCacheVersion = -1;
+
+  private getCachedVariantDedupe(rawVariants: ProductVariant[]): { canonical: ProductVariant[]; aliasMap: Map<string, string> } {
+    if (this.variantDedupeCache && this.variantDedupeCacheVersion === this.variantVersion) {
+      return this.variantDedupeCache;
+    }
+    const result = this.computeVariantDedupe(rawVariants);
+    this.variantDedupeCache = result;
+    this.variantDedupeCacheVersion = this.variantVersion;
+    return result;
+  }
+
+  private computeVariantDedupe(variants: ProductVariant[]): { canonical: ProductVariant[]; aliasMap: Map<string, string> } {
+    // Duplicate detection key: same product group + same SKU + same spec name + same
+    // product title. Manual (user-created) variants are never merged, since they aren't
+    // tied to the myacg catalog. A variant with a blank SKU or blank product_group_id is
+    // also treated as always-unique (keyed by its own id) rather than grouped under a
+    // shared empty-string bucket — prize/景品-style listings frequently have no real SKU,
+    // and two different products both having a blank SKU must never be merged just because
+    // they share that blank value. product_title is included so that two variants with the
+    // same SKU/spec text but a different product title (a different actual product) are
+    // never collapsed into one row either.
+    const keyOf = (v: ProductVariant) => {
+      if (v.source === 'manual') return `unique::${v.id}`;
+
+      const sku = (v.myacg_item_code || '').trim().toUpperCase();
+      const groupId = (v.product_group_id || '').trim();
+      if (!sku || !groupId) return `unique::${v.id}`;
+
+      const spec = (v.raw_variant_name || v.variant_name || '').trim();
+      const title = (v.product_title || '').trim();
+      return `${groupId}::${sku}::${spec}::${title}`;
+    };
+
+    const groups = new Map<string, ProductVariant[]>();
+    for (const v of variants) {
+      if (!v) continue;
+      const key = keyOf(v);
+      const arr = groups.get(key);
+      if (arr) arr.push(v); else groups.set(key, [v]);
+    }
+
+    const aliasMap = new Map<string, string>();
+    const canonical: ProductVariant[] = [];
+
+    for (const group of groups.values()) {
+      if (group.length === 1) {
+        canonical.push(group[0]);
+        continue;
+      }
+
+      // Same product group + SKU + spec name appears more than once: merge into a single
+      // row so the UI stops showing the same product spec twice, while recording an alias
+      // so any purchase/private order item pointing at a merged-away row still resolves to
+      // a real product instead of "未知商品".
+      //
+      // The primary (the row whose fields "win" for anything that isn't explicitly summed
+      // below, e.g. waca_auto_quantity / myacg_auto_quantity / effective_myacg_quantity) is
+      // chosen by most-recent updated_at first — these are computed/synced values, not meant
+      // to be summed across duplicates, so we want whichever row was most recently
+      // recalculated/pushed rather than an arbitrary sort_order/id pick.
+      const updatedAtMs = (v: ProductVariant): number => {
+        const t = v.updated_at ? Date.parse(v.updated_at) : NaN;
+        return Number.isFinite(t) ? t : 0;
+      };
+      const sorted = [...group].sort((a, b) => {
+        const aTime = updatedAtMs(a);
+        const bTime = updatedAtMs(b);
+        if (aTime !== bTime) return bTime - aTime; // newest updated_at first
+        const aSort = a.sort_order ?? 999999;
+        const bSort = b.sort_order ?? 999999;
+        if (aSort !== bSort) return aSort - bSort;
+        return (a.id || '').localeCompare(b.id || '');
+      });
+
+      const [primary, ...dupes] = sorted;
+      const merged: ProductVariant = { ...primary };
+
+      for (const dup of dupes) {
+        merged.myacg_manual_adjustment = (merged.myacg_manual_adjustment ?? 0) + (dup.myacg_manual_adjustment ?? 0);
+        merged.waca_manual_adjustment = (merged.waca_manual_adjustment ?? 0) + (dup.waca_manual_adjustment ?? 0);
+        if (dup.private_manual_adjustment != null) {
+          merged.private_manual_adjustment = (merged.private_manual_adjustment ?? 0) + dup.private_manual_adjustment;
+        }
+        if (dup.purchased_manual_adjustment != null) {
+          merged.purchased_manual_adjustment = (merged.purchased_manual_adjustment ?? 0) + dup.purchased_manual_adjustment;
+        }
+        if (merged.default_jpy_cost == null && dup.default_jpy_cost != null) merged.default_jpy_cost = dup.default_jpy_cost;
+        if (merged.default_twd_cost == null && dup.default_twd_cost != null) merged.default_twd_cost = dup.default_twd_cost;
+        if (!merged.note && dup.note) merged.note = dup.note;
+        aliasMap.set(dup.id, primary.id);
+      }
+
+      canonical.push(merged);
+    }
+
+    return { canonical, aliasMap };
+  }
+
+  private remapVariantIds<T extends { product_variant_id: string }>(items: T[], aliasMap: Map<string, string>): T[] {
+    if (aliasMap.size === 0) return items;
+    return items.map(item => {
+      const canonicalId = aliasMap.get(item.product_variant_id);
+      return canonicalId ? { ...item, product_variant_id: canonicalId } : item;
+    });
+  }
+
+  // Diagnostic only (not auto-logged): lists product_variants that were merged as
+  // duplicates so an operator can decide whether to clean them up in Supabase later.
+  // Call from a browser console via `await window.db.getVariantDuplicateReport()`.
+  async getVariantDuplicateReport(): Promise<Array<{
+    product_group_id?: string;
+    myacg_item_code: string;
+    spec: string;
+    product_title?: string;
+    count: number;
+    ids: string[];
+  }>> {
+    const rawVariants = await this.get<ProductVariant[]>('erp_product_variants', []);
+    const { aliasMap } = this.getCachedVariantDedupe(rawVariants);
+    if (aliasMap.size === 0) return [];
+
+    const byId = new Map(rawVariants.map(v => [v.id, v]));
+    const dupIdsByPrimary = new Map<string, string[]>();
+    for (const [dupId, primaryId] of aliasMap.entries()) {
+      const arr = dupIdsByPrimary.get(primaryId);
+      if (arr) arr.push(dupId); else dupIdsByPrimary.set(primaryId, [dupId]);
+    }
+
+    const report: Array<{
+      product_group_id?: string;
+      myacg_item_code: string;
+      spec: string;
+      product_title?: string;
+      count: number;
+      ids: string[];
+    }> = [];
+
+    for (const [primaryId, dupIds] of dupIdsByPrimary.entries()) {
+      const primary = byId.get(primaryId);
+      if (!primary) continue;
+      report.push({
+        product_group_id: primary.product_group_id,
+        myacg_item_code: primary.myacg_item_code,
+        spec: primary.raw_variant_name || primary.variant_name || '',
+        product_title: primary.product_title,
+        count: dupIds.length + 1,
+        ids: [primaryId, ...dupIds]
+      });
+    }
+    return report;
+  }
+
   async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
-    const variants = await this.get<ProductVariant[]>('erp_product_variants', []);
-    console.log(`[IndexedDB Read Variants] count: ${variants.length}`);
-    console.log('[IndexedDB Read Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
-    
+    const rawVariants = await this.get<ProductVariant[]>('erp_product_variants', []);
+    console.log(`[IndexedDB Read Variants] count: ${rawVariants.length}`);
+    console.log('[IndexedDB Read Variants] sample:', rawVariants.length > 0 ? JSON.stringify(rawVariants[0]) : 'empty');
+
     const recalc = options?.recalc ?? false;
     const inventory = await this.getInventory();
-    
+
     if (!recalc || inventory.length === 0) {
       console.log(`[getProductVariants IndexedDB] Skipping recalculation. recalc=${recalc}, inventory=${inventory.length}`);
-      return variants;
+      const { canonical, aliasMap } = this.getCachedVariantDedupe(rawVariants);
+      if (import.meta.env.DEV && aliasMap.size > 0) {
+        console.log(`[Variant Dedupe][DEV] merged ${aliasMap.size} duplicate variant row(s) at read time`);
+      }
+      return canonical;
     }
-    
+
     const salesOrderItems = await this.getSalesOrderItems();
     const orders = await this.getSalesOrders();
     const orderMap = new Map(orders.map(o => [o.id, o]));
-    
+
     // 1. Calculate orders demand for myacg
     const myacgOrderDemandMap = new Map<string, number>();
     // 2. Calculate orders demand for waca
@@ -2652,14 +2816,14 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
     const getOrderDemandForVariant = (variantCode: string, demandMap: Map<string, number>): number => {
       const cleanCode = variantCode.trim().toUpperCase();
-      
+
       // 1. Exact match (case-insensitive)
       for (const [code, qty] of demandMap.entries()) {
         if (code.trim().toUpperCase() === cleanCode) {
           return qty;
         }
       }
-      
+
       // 2. Fuzzy base SKU match
       const baseVariant = getBaseSku(cleanCode);
       let sum = 0;
@@ -2667,7 +2831,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       for (const [code, qty] of demandMap.entries()) {
         const normCode = code.trim().toUpperCase();
         const baseNorm = getBaseSku(normCode);
-        if (baseNorm === baseVariant && 
+        if (baseNorm === baseVariant &&
             (normCode === baseNorm || cleanCode === baseVariant)) {
           sum += qty;
           matched = true;
@@ -2687,7 +2851,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     };
 
     let changed = false;
-    for (const v of variants) {
+    for (const v of rawVariants) {
       // Find matching inventory item using fuzzy matching helpers
       const invItem = findMatchingInventoryItem(v, inventory);
 
@@ -2707,8 +2871,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       const newWacaAuto = getOrderDemandForVariant(v.myacg_item_code, wacaOrderDemandMap);
 
       if (
-        v.effective_myacg_quantity !== effectiveMyacg || 
-        v.myacg_auto_quantity !== autoMyacg || 
+        v.effective_myacg_quantity !== effectiveMyacg ||
+        v.myacg_auto_quantity !== autoMyacg ||
         v.waca_auto_quantity !== newWacaAuto
       ) {
         v.effective_myacg_quantity = effectiveMyacg;
@@ -2719,9 +2883,13 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
 
     if (changed) {
-      await this.saveProductVariants(variants);
+      await this.saveProductVariants(rawVariants);
     }
-    return variants;
+    const { canonical, aliasMap } = this.getCachedVariantDedupe(rawVariants);
+    if (import.meta.env.DEV && aliasMap.size > 0) {
+      console.log(`[Variant Dedupe][DEV] merged ${aliasMap.size} duplicate variant row(s) at read time`);
+    }
+    return canonical;
   }
 
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
@@ -2729,10 +2897,33 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       console.warn("[IndexedDB Save Variants] SKIP empty variants save");
       return;
     }
-    console.log(`[IndexedDB Save Variants] count: ${variants.length}`);
-    await this.set('erp_product_variants', variants);
+
+    // Safety net: some callers (e.g. the cloud sync's "recalculate then save back" step)
+    // read via getProductVariants() — which returns the deduped/canonical view — and pass
+    // that straight back into saveProductVariants(). Without this guard, any row that was
+    // merged away purely as a duplicate would be permanently dropped from raw storage on
+    // every such round-trip. Here we detect exactly that case using the CURRENT raw
+    // storage's own alias map: a raw row is only restored if it's a known duplicate of an
+    // id that's present in the incoming array — this never resurrects a variant that was
+    // genuinely deleted/soft-deleted (those aren't in the alias map at all), it only
+    // prevents dedupe from silently shrinking what's actually stored.
+    const currentRaw = await this.get<ProductVariant[]>('erp_product_variants', []);
+    const { aliasMap } = this.getCachedVariantDedupe(currentRaw);
+    const incomingIds = new Set(variants.map(v => v.id));
+    const restoredDupes = currentRaw.filter(v => {
+      const primaryId = aliasMap.get(v.id);
+      return primaryId !== undefined && incomingIds.has(primaryId) && !incomingIds.has(v.id);
+    });
+    const finalVariants = restoredDupes.length > 0 ? [...variants, ...restoredDupes] : variants;
+    if (restoredDupes.length > 0) {
+      console.log(`[IndexedDB Save Variants] restored ${restoredDupes.length} duplicate row(s) that the incoming save would have dropped`);
+    }
+
+    console.log(`[IndexedDB Save Variants] count: ${finalVariants.length}`);
+    await this.set('erp_product_variants', finalVariants);
+    this.variantVersion++;
   }
-  
+
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
     const whitelist = new Set([
       'myacg_manual_adjustment',
@@ -2812,7 +3003,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 
   async getPurchaseBatchItems(): Promise<PurchaseBatchItem[]> {
-    return this.get<PurchaseBatchItem[]>('erp_purchase_batch_items', []);
+    const items = await this.get<PurchaseBatchItem[]>('erp_purchase_batch_items', []);
+    const rawVariants = await this.get<ProductVariant[]>('erp_product_variants', []);
+    const { aliasMap } = this.getCachedVariantDedupe(rawVariants);
+    return this.remapVariantIds(items, aliasMap);
   }
 
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
@@ -2828,7 +3022,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 
   async getPrivateOrderItems(): Promise<PrivateOrderItem[]> {
-    return this.get<PrivateOrderItem[]>('erp_private_order_items', []);
+    const items = await this.get<PrivateOrderItem[]>('erp_private_order_items', []);
+    const rawVariants = await this.get<ProductVariant[]>('erp_product_variants', []);
+    const { aliasMap } = this.getCachedVariantDedupe(rawVariants);
+    return this.remapVariantIds(items, aliasMap);
   }
 
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
@@ -2999,3 +3196,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 }
 
 export const db: DatabaseAdapter = new IndexedDbAdapter();
+if (typeof window !== 'undefined') {
+  // Diagnostic only: lets an operator run `await window.db.getVariantDuplicateReport()`
+  // in the browser console to see which product_variants rows were merged as duplicates.
+  (window as any).db = db;
+}
