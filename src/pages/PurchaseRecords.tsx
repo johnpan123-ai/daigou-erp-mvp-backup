@@ -374,16 +374,16 @@ export default function PurchaseRecords() {
     if (!closing) return false;
     const todayStr = getTodayStr();
     if (closing > todayStr) return false;
-    
-    const details = getGroupPlatformDetails(g.id);
-    const demandAndPurchased = getGroupDemandAndPurchased(g.id);
-    const isProxy = isProxyProduct(g);
-    const totalDemand = isProxy 
-      ? (details.myacg + details.wacaManual + details.privateOrder) 
-      : demandAndPurchased.demand;
-    const purchased = isProxy ? details.purchased : demandAndPurchased.purchased;
 
-    return purchased < totalDemand;
+    // Must match the same per-variant-clamped-then-summed gap logic the UI's own "缺口"
+    // column uses (details.gap / details.proxyGap), NOT a sum-then-compare of raw totals --
+    // comparing raw totals lets one variant's surplus silently cancel another variant's
+    // shortage within the same group, hiding items that still genuinely need purchasing.
+    const details = getGroupPlatformDetails(g.id);
+    const isProxy = isProxyProduct(g);
+    const gap = isProxy ? details.proxyGap : details.gap;
+
+    return gap > 0;
   };
 
   useEffect(() => {
@@ -572,7 +572,7 @@ export default function PurchaseRecords() {
   // underlying data, so both helpers below become plain O(1) map lookups.
   const groupPlatformDetailsMap = useMemo(() => {
     const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
-    type Agg = { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean };
+    type Agg = { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; proxyGap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean };
     const acc = new Map<string, Agg>();
 
     for (const v of variants) {
@@ -581,7 +581,7 @@ export default function PurchaseRecords() {
 
       let entry = acc.get(groupId);
       if (!entry) {
-        entry = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
+        entry = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, proxyGap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
         acc.set(groupId, entry);
       }
 
@@ -593,13 +593,21 @@ export default function PurchaseRecords() {
       entry.myacgManual += (v.myacg_manual_adjustment ?? 0);
       entry.wacaManual += (v.waca_manual_adjustment ?? 0);
       entry.gap += res.gap;
+
+      // Proxy-product demand uses wacaManual instead of the full waca figure. This must be
+      // clamped PER VARIANT (like res.gap above) and then summed -- not summed-then-clamped --
+      // otherwise a variant bought in excess silently cancels out another variant's shortage
+      // within the same group when they're netted together as raw totals.
+      const proxyDemand = res.myacg + (v.waca_manual_adjustment ?? 0) + res.privateOrder;
+      entry.proxyGap += Math.max(proxyDemand - res.purchased, 0);
+
       if (v.catalog_missing === true) entry.hasCatalogMissing = true;
     }
 
     return acc;
   }, [categories, variants, privateOrderItems, batchItems, inventory, salesOrderItems]);
 
-  const EMPTY_GROUP_DETAILS = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
+  const EMPTY_GROUP_DETAILS = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, proxyGap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
 
   const getGroupPlatformDetails = (groupId: string) => {
     return groupPlatformDetailsMap.get(groupId) || EMPTY_GROUP_DETAILS;
