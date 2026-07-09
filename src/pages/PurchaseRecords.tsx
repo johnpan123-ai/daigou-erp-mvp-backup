@@ -3,7 +3,7 @@ import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchas
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink } from 'lucide-react';
+import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
@@ -321,9 +321,9 @@ export default function PurchaseRecords() {
     return (localStorage.getItem('erp_active_tab') as 'all' | 'hololive' | 'vspo' | 'proxy' | 'other') || 'all';
   });
 
-  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'to_purchase' | 'all'>(() => {
+  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'no_closing_date' | 'to_purchase' | 'all'>(() => {
     const saved = localStorage.getItem('erp_active_secondary_tab');
-    if (saved === 'progress' || saved === 'closed' || saved === 'to_purchase' || saved === 'all') return saved;
+    if (saved === 'progress' || saved === 'closed' || saved === 'no_closing_date' || saved === 'to_purchase' || saved === 'all') return saved;
     return 'progress';
   });
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
@@ -367,6 +367,10 @@ export default function PurchaseRecords() {
     if (!closing) return false;
     const todayStr = getTodayStr();
     return closing < todayStr;
+  };
+
+  const checkHasNoClosingDate = (g: ProductGroup): boolean => {
+    return !g.closing_date || g.closing_date.trim() === '';
   };
 
   const checkIsToPurchase = (g: ProductGroup): boolean => {
@@ -764,12 +768,13 @@ export default function PurchaseRecords() {
     return result;
   }, [groups, searchTerm, filterSource, filterType, activeTab, variants, categories, inventory]);
 
-  const { progressCount, closedCount, allCount, toPurchaseCount } = useMemo(() => {
+  const { progressCount, closedCount, noClosingDateCount, allCount, toPurchaseCount } = useMemo(() => {
     const progress = baseGroups.filter(g => !checkIsGroupClosed(g)).length;
     const closed = baseGroups.filter(g => checkIsGroupClosed(g)).length;
+    const noClosingDate = baseGroups.filter(g => checkHasNoClosingDate(g)).length;
     const total = baseGroups.length;
     const toPurchase = baseGroups.filter(g => checkIsToPurchase(g)).length;
-    return { progressCount: progress, closedCount: closed, allCount: total, toPurchaseCount: toPurchase };
+    return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, allCount: total, toPurchaseCount: toPurchase };
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
@@ -830,6 +835,8 @@ export default function PurchaseRecords() {
       });
     } else if (secondaryTab === 'closed') {
       result = result.filter(g => checkIsGroupClosed(g));
+    } else if (secondaryTab === 'no_closing_date') {
+      result = result.filter(g => checkHasNoClosingDate(g));
     } else if (secondaryTab === 'to_purchase') {
       result = result.filter(g => checkIsToPurchase(g));
     }
@@ -1882,6 +1889,26 @@ export default function PurchaseRecords() {
             }}
           >
             已結單 ({closedCount})
+          </button>
+          <button
+            onClick={() => { setSecondaryTab('no_closing_date'); }}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (secondaryTab === 'no_closing_date' ? '#f59e0b' : (noClosingDateCount > 0 ? '#fcd34d' : '#cbd5e1')),
+              backgroundColor: secondaryTab === 'no_closing_date' ? '#fffbeb' : (noClosingDateCount > 0 ? '#fffdf5' : '#ffffff'),
+              color: secondaryTab === 'no_closing_date' ? '#d97706' : (noClosingDateCount > 0 ? '#b45309' : '#475569'),
+              transition: 'all 0.15s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <AlertTriangle size={14} />
+            未設定結單日 ({noClosingDateCount})
           </button>
           <button
             onClick={() => { setSecondaryTab('to_purchase'); }}
