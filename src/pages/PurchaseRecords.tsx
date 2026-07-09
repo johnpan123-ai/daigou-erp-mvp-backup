@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -61,6 +61,13 @@ export default function PurchaseRecords() {
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
+
+  // isInitialLoading: true until we have SOMETHING to show (either local cache or the fresh
+  // cloud fetch) — blocks the table so we never render a misleading "0 筆" while data is still
+  // in flight. isSyncing: true only while showing stale local cache and waiting for the real
+  // cloud sync to confirm/replace it — shows a small non-blocking indicator instead.
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [editMode, setEditMode] = useState<boolean>(false);
 
@@ -910,6 +917,52 @@ export default function PurchaseRecords() {
   }, []);
 
   const loadData = async () => {
+    // Stale-while-revalidate: if the local IndexedDB cache already has data (from a previous
+    // visit), show it immediately instead of a blank "0 筆" table while the real cloud sync —
+    // which can take several seconds — is still in flight. This reads straight from the local
+    // adapter (no Supabase call), so it resolves near-instantly. The real fetch below always
+    // still runs afterwards and is what actually gets persisted into state/localStorage as
+    // before; this is purely an early, possibly-stale preview.
+    try {
+      const cachedGroups = await db.getProductGroups();
+      if (cachedGroups.length > 0) {
+        const [cachedVars, cachedCats, cachedBatchItems, cachedPrivateItems, cachedInventory, cachedOrderItems] = await Promise.all([
+          db.getProductVariants(),
+          db.getProductCategories(),
+          db.getPurchaseBatchItems(),
+          db.getPrivateOrderItems(),
+          db.getInventory(),
+          db.getSalesOrderItems()
+        ]);
+        const cachedMeta = cachedGroups.find(g => g.id === WACA_META_ID) || null;
+        setWacaMeta(cachedMeta);
+        setGroups(cachedGroups.filter(g => g.id !== WACA_META_ID));
+        setVariants(cachedVars);
+        setCategories(cachedCats);
+        setBatchItems(cachedBatchItems);
+        setPrivateOrderItems(cachedPrivateItems);
+        setInventory(cachedInventory);
+        setSalesOrderItems(cachedOrderItems);
+        setIsInitialLoading(false);
+        setIsSyncing(true);
+      }
+    } catch (e) {
+      console.warn('[UI Load] Failed to read local cache for instant preview, falling back to normal load', e);
+    }
+
+    // Guaranteed cleanup: even if the real fetch below throws, we must clear the loading
+    // flags so the UI never gets stuck showing the loading screen (or the "syncing" badge)
+    // forever. The error itself is intentionally NOT swallowed here — it still propagates
+    // as an unhandled rejection afterwards, same as before this change.
+    try {
+      await loadFreshData();
+    } finally {
+      setIsInitialLoading(false);
+      setIsSyncing(false);
+    }
+  };
+
+  const loadFreshData = async () => {
     const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
       dataProvider.getProductGroups(),
       dataProvider.getProductVariants(),
@@ -1351,10 +1404,54 @@ export default function PurchaseRecords() {
     navigateToDetail(id);
   };
 
-
+  if (isInitialLoading) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        padding: '80px 24px',
+        color: '#64748b',
+        fontSize: '14px'
+      }}>
+        <div style={{
+          width: '28px',
+          height: '28px',
+          border: '3px solid #e2e8f0',
+          borderTopColor: '#2563eb',
+          borderRadius: '50%',
+          animation: 'erp-spin 0.8s linear infinite'
+        }} />
+        <span>正在同步雲端資料...</span>
+        <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '180px' : '0px' }}>
+      {isSyncing && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '12px',
+          color: '#64748b'
+        }}>
+          <div style={{
+            width: '12px',
+            height: '12px',
+            border: '2px solid #e2e8f0',
+            borderTopColor: '#2563eb',
+            borderRadius: '50%',
+            animation: 'erp-spin 0.8s linear infinite'
+          }} />
+          <span>同步中，顯示的是上次載入的資料...</span>
+          <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
       <style>{`
         .erp-table th {
           padding: 0 !important;
