@@ -2700,15 +2700,15 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       const [primary, ...dupes] = sorted;
       const merged: ProductVariant = { ...primary };
 
+      // Manual adjustment fields (waca/myacg/private/purchased) are NOT summed across
+      // duplicates — only the primary's own value is kept, same as the auto-computed
+      // quantity fields above. Summing used to cause a specific bug: editing the canonical
+      // row's value would still leave the untouched duplicate row's stale value in raw
+      // storage (kept alive by saveProductVariants' restoredDupes safety net so "未知商品"
+      // stays fixed), and the next merge would silently add that stale value back on top of
+      // the freshly-edited one. Reading only primary's value means an edit takes effect
+      // immediately on the next read, with no write needed anywhere (including Supabase).
       for (const dup of dupes) {
-        merged.myacg_manual_adjustment = (merged.myacg_manual_adjustment ?? 0) + (dup.myacg_manual_adjustment ?? 0);
-        merged.waca_manual_adjustment = (merged.waca_manual_adjustment ?? 0) + (dup.waca_manual_adjustment ?? 0);
-        if (dup.private_manual_adjustment != null) {
-          merged.private_manual_adjustment = (merged.private_manual_adjustment ?? 0) + dup.private_manual_adjustment;
-        }
-        if (dup.purchased_manual_adjustment != null) {
-          merged.purchased_manual_adjustment = (merged.purchased_manual_adjustment ?? 0) + dup.purchased_manual_adjustment;
-        }
         if (merged.default_jpy_cost == null && dup.default_jpy_cost != null) merged.default_jpy_cost = dup.default_jpy_cost;
         if (merged.default_twd_cost == null && dup.default_twd_cost != null) merged.default_twd_cost = dup.default_twd_cost;
         if (!merged.note && dup.note) merged.note = dup.note;
