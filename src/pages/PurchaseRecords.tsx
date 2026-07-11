@@ -23,15 +23,21 @@ const DEFAULT_COL_WIDTHS = {
 };
 
 
-const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) => {
-  if (isMobile) {
-    return (
-      <div className="mobile-scroll-wrapper" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        {children}
-      </div>
-    );
-  }
-  return <>{children}</>;
+const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
+  return (
+    <div
+      className="mobile-scroll-wrapper"
+      style={{
+        width: '100%',
+        overflowX: 'auto',
+        overflowY: 'auto',
+        maxHeight: 'calc(100vh - 320px)',
+        WebkitOverflowScrolling: 'touch'
+      }}
+    >
+      {children}
+    </div>
+  );
 };
 
 const WACA_META_ID = '00000000-0000-4000-a000-000000000000';
@@ -1329,8 +1335,13 @@ export default function PurchaseRecords() {
         patch = { purchased_manual_adjustment: totalValue };
       }
       patch.updated_at = new Date().toISOString();
-      await dataProvider.updateProductVariantPatch(targetVar.id, patch);
-      setVariants(variants.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
+      try {
+        await dataProvider.updateProductVariantPatch(targetVar.id, patch);
+        setVariants(variants.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
+      } catch (e) {
+        console.error(e);
+        alert('手動調整儲存失敗，請確認網路連線後重新輸入一次。畫面已還原為儲存前的數值。');
+      }
     }
   };
 
@@ -2448,7 +2459,7 @@ export default function PurchaseRecords() {
             <>
               {activeTab === 'proxy' ? (
               <ScrollWrapper isMobile={isMobile}>
-                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: isMobile ? '1200px' : undefined }}>
+                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -2844,14 +2855,14 @@ export default function PurchaseRecords() {
                           <>
                             <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                               {editMode ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                                  <input 
-                                    className="input" 
-                                    type="text" 
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
+                                  <input
+                                    className="input"
+                                    type="text"
                                     placeholder="YYYY/MM/DD"
-                                    style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                    value={getClosingDateInputVal(g)} 
-                                    onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))} 
+                                    style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }}
+                                    value={getClosingDateInputVal(g)}
+                                    onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))}
                                     onClick={e => e.stopPropagation()}
                                     onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
                                     onKeyDown={e => {
@@ -2868,9 +2879,9 @@ export default function PurchaseRecords() {
                                     data-row={idx}
                                     data-field="closing_date"
                                   />
-                                  <Calendar 
-                                    size={14} 
-                                    style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                  <Calendar
+                                    size={14}
+                                    style={{ flexShrink: 0, color: '#64748b', cursor: 'pointer' }}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       datePickerRefs.current[g.id]?.showPicker();
@@ -2914,7 +2925,7 @@ export default function PurchaseRecords() {
               </ScrollWrapper>
             ) : (
               <ScrollWrapper isMobile={isMobile}>
-                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: isMobile ? '1200px' : undefined }}>
+                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -3247,14 +3258,14 @@ export default function PurchaseRecords() {
                           <>
                             <td style={{ textAlign: 'center', color: editMode ? 'inherit' : closingDateStyle.color, fontWeight: editMode ? 'inherit' : closingDateStyle.fontWeight }}>
                               {editMode ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
-                                  <input 
-                                    className="input" 
-                                    type="text" 
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
+                                  <input
+                                    className="input"
+                                    type="text"
                                     placeholder="YYYY/MM/DD"
-                                    style={{ width: '100%', height: '32px', padding: '0 24px 0 8px', fontSize: '13px' }} 
-                                    value={getClosingDateInputVal(g)} 
-                                    onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))} 
+                                    style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }}
+                                    value={getClosingDateInputVal(g)}
+                                    onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))}
                                     onClick={e => e.stopPropagation()}
                                     onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
                                     onKeyDown={e => {
@@ -3271,9 +3282,9 @@ export default function PurchaseRecords() {
                                     data-row={idx}
                                     data-field="closing_date"
                                   />
-                                  <Calendar 
-                                    size={14} 
-                                    style={{ position: 'absolute', right: '8px', color: '#64748b', cursor: 'pointer' }}
+                                  <Calendar
+                                    size={14}
+                                    style={{ flexShrink: 0, color: '#64748b', cursor: 'pointer' }}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       datePickerRefs.current[g.id]?.showPicker();

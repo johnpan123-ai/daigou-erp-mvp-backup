@@ -8,12 +8,12 @@ export function useResizableColumns(
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
-        return { ...JSON.parse(saved) };
+        return { ...defaultWidths, ...JSON.parse(saved) };
       } catch (e) {
         // ignore
       }
     }
-    return {};
+    return { ...defaultWidths };
   });
 
   const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
@@ -60,7 +60,7 @@ export function useResizableColumns(
   };
 
   const resetWidths = () => {
-    setColWidths({});
+    setColWidths({ ...defaultWidths });
     localStorage.removeItem(storageKey);
   };
 

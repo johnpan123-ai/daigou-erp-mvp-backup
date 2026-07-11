@@ -95,15 +95,21 @@ const renderStatusBadge = (needToBuy: number, excessBuy: number, totalDemand: nu
   );
 };
 
-const ScrollWrapper = ({ children, isMobile }: { children: React.ReactNode; isMobile: boolean }) => {
-  if (isMobile) {
-    return (
-      <div className="mobile-scroll-wrapper" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        {children}
-      </div>
-    );
-  }
-  return <>{children}</>;
+const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
+  return (
+    <div
+      className="mobile-scroll-wrapper"
+      style={{
+        width: '100%',
+        overflowX: 'auto',
+        overflowY: 'auto',
+        maxHeight: 'calc(100vh - 320px)',
+        WebkitOverflowScrolling: 'touch'
+      }}
+    >
+      {children}
+    </div>
+  );
 };
 
 interface MobilePurchaseBatchTabProps {
@@ -2595,7 +2601,7 @@ export default function PurchaseManagement() {
                 return (
                   <div key={v.id} className="card shadow-sm rounded-lg overflow-hidden bg-white" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden', borderTop: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', borderLeft: `4px solid ${borderColor}` }}>
                     <ScrollWrapper isMobile={isMobile}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: '800px' }}>
                       {isDaili ? (
                         <>
                           <colgroup>
@@ -3141,7 +3147,7 @@ export default function PurchaseManagement() {
                         </div>
                       ) : (
                         <ScrollWrapper isMobile={isMobile}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: isMobile ? '800px' : undefined }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed', minWidth: '800px' }}>
                         {isDaili ? (
                           <>
                             <colgroup>
