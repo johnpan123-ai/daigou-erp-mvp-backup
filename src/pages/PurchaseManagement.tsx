@@ -502,6 +502,16 @@ export default function PurchaseManagement() {
     });
   };
 
+  const handleSelectAllComponents = () => {
+    if (!activeBundleVariant) return;
+    const allIds = variants.filter(v => v.id !== activeBundleVariant.id).map(v => v.id);
+    setSelectedComponentVariantIds(new Set(allIds));
+  };
+
+  const handleDeselectAllComponents = () => {
+    setSelectedComponentVariantIds(new Set());
+  };
+
   const handleSaveBundleComponents = async () => {
     if (!activeBundleVariant) return;
     setIsSavingBundle(true);
@@ -4053,14 +4063,43 @@ export default function PurchaseManagement() {
             </div>
 
             {/* Description (fixed below header) */}
-            <div style={{ 
-              padding: '16px 20px 8px 20px', 
-              fontSize: '13px', 
-              color: '#475569', 
-              lineHeight: 1.4, 
-              flexShrink: 0 
+            <div style={{
+              padding: '16px 20px 8px 20px',
+              fontSize: '13px',
+              color: '#475569',
+              lineHeight: 1.4,
+              flexShrink: 0
             }}>
               請勾選此商品包含的其他單品規格（同群組商品）：
+            </div>
+
+            {/* Select all / deselect all toolbar */}
+            <div style={{
+              padding: '0 20px 12px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={handleSelectAllComponents}
+                  className="btn btn-ghost"
+                  style={{ height: '28px', padding: '0 10px', fontSize: '12px', fontWeight: 600 }}
+                >
+                  全選
+                </button>
+                <button
+                  onClick={handleDeselectAllComponents}
+                  className="btn btn-ghost"
+                  style={{ height: '28px', padding: '0 10px', fontSize: '12px', fontWeight: 600 }}
+                >
+                  全部取消
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>
+                已選擇 {selectedComponentVariantIds.size} / {variants.filter(v => v.id !== activeBundleVariant.id).length} 項
+              </div>
             </div>
 
             {/* Content list (scrollable area) */}
