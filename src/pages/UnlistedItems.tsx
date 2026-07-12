@@ -67,7 +67,7 @@ const unlistedBadgeBaseStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: '4px',
-  fontSize: '12px',
+  fontSize: '18px',
   fontWeight: 600,
   padding: '2px 10px',
   borderRadius: '999px',
@@ -95,6 +95,7 @@ export default function UnlistedItems() {
   const [catalogImportTime, setCatalogImportTime] = useState<string | null>(null);
   const [processedData, setProcessedData] = useState<UnlistedProcessedData>(() => loadUnlistedProcessedData());
   const [viewMode, setViewMode] = useState<'pending' | 'processed'>('pending');
+  const [showOnlyGap, setShowOnlyGap] = useState<boolean>(false);
 
   // Load and process data
   const loadData = async () => {
@@ -278,17 +279,21 @@ export default function UnlistedItems() {
   const processedItems = useMemo(() => items.filter(item => processedGroupIdSet.has(item.id)), [items, processedGroupIdSet]);
   const activeViewItems = viewMode === 'pending' ? pendingItems : processedItems;
 
-  // Filter items by search
+  // Filter items by search + optional gap-only toggle
   const filteredItems = useMemo(() => {
-    if (!searchTerm.trim()) return activeViewItems;
+    let result = activeViewItems;
+    if (showOnlyGap) {
+      result = result.filter(item => item.gap > 0);
+    }
+    if (!searchTerm.trim()) return result;
     const lower = searchTerm.toLowerCase();
-    return activeViewItems.filter(item =>
+    return result.filter(item =>
       item.name.toLowerCase().includes(lower) ||
       item.category.toLowerCase().includes(lower) ||
       item.source.toLowerCase().includes(lower) ||
       item.hitSkus.some(sku => sku.sku.toLowerCase().includes(lower) || sku.variantName.toLowerCase().includes(lower))
     );
-  }, [activeViewItems, searchTerm]);
+  }, [activeViewItems, searchTerm, showOnlyGap]);
 
   const handleSwitchView = (mode: 'pending' | 'processed') => {
     setViewMode(mode);
@@ -763,6 +768,21 @@ export default function UnlistedItems() {
           >
             已處理紀錄 ({processedItems.length})
           </button>
+          <button
+            onClick={() => setShowOnlyGap(prev => !prev)}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (showOnlyGap ? '#c2410c' : '#cbd5e1'),
+              backgroundColor: showOnlyGap ? '#fff7ed' : '#ffffff',
+              color: showOnlyGap ? '#c2410c' : '#475569'
+            }}
+          >
+            ⚠️ 只看有尚缺 ({activeViewItems.filter(item => item.gap > 0).length})
+          </button>
         </div>
         <div className="search-box">
           <Search size={16} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
@@ -924,10 +944,10 @@ export default function UnlistedItems() {
                         onChange={() => handleToggleSelect(item.id)}
                       />
                     </td>
-                    <td style={{ color: '#0f172a', verticalAlign: 'middle', padding: '9px 16px' }}>
+                    <td style={{ color: '#0f172a', verticalAlign: 'middle', padding: '16px 16px' }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '16px', fontWeight: 700 }}>{normalizeProductTitle(item.name)}</span>
+                          <span style={{ fontSize: '20px', fontWeight: 700 }}>{normalizeProductTitle(item.name)}</span>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
                             <button
                               onClick={() => handleCopyItemName(item.id, item.name)}
