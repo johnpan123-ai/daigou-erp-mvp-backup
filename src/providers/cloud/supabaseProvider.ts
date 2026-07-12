@@ -1418,7 +1418,9 @@ export class SupabaseProvider implements IDataProvider {
         myacg_sold_quantity: r.myacg_sold_quantity || 0,
         myacg_demand_quantity: r.myacg_demand_quantity || undefined,
         myacg_listed_at: r.myacg_listed_at || '',
-        import_sort_index: r.import_sort_index || undefined
+        import_sort_index: r.import_sort_index || undefined,
+        latest_catalog_import_id: r.latest_catalog_import_id || undefined,
+        catalog_last_seen_at: r.catalog_last_seen_at || undefined
       }));
 
       await db.saveInventory(mappedItems);
