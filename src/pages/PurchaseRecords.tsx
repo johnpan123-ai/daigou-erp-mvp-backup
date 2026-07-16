@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 
@@ -320,6 +320,10 @@ export default function PurchaseRecords() {
 
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
+  // The heavy group filtering reads this deferred copy instead of searchTerm itself, so the
+  // keystroke's own render (which repaints the input) stays cheap and the table catches up in
+  // a lower-priority render right after.
+  const deferredSearchTerm = useDeferredValue(searchTerm);
   const [filterSource, setFilterSource] = useState(() => localStorage.getItem('erp_filter_source') || 'all');
   const [filterType, setFilterType] = useState(() => localStorage.getItem('erp_filter_type') || 'all');
   const [sortMode, setSortMode] = useState(() => localStorage.getItem('erp_sort_mode') || 'closing_urgent');
@@ -493,15 +497,24 @@ export default function PurchaseRecords() {
     return { text: '🟢 開單中', active: true };
   };
 
-  const checkIsProxyProduct = (g: ProductGroup) => {
+  // Same story as groupPlatformDetailsMap below: checkIsProxyProduct() used to re-scan the
+  // full variants array plus do linear inventory.find()s on every single call, and it's called
+  // one-to-several times per group inside baseGroups filtering and the tab counts — i.e.
+  // O(groups x variants x inventory) on every search keystroke. The verdict only depends on
+  // groups/variants/inventory, so precompute it for every group in one pass (identical logic)
+  // and make the check an O(1) map lookup.
+  const computeIsProxyProduct = (
+    g: ProductGroup,
+    groupVars: ProductVariant[],
+    findInventoryItem: (code: ProductVariant['myacg_item_code']) => InventoryItem | undefined
+  ) => {
     // 1. 優先讀 ProductGroup.listing_type
     if (g.listing_type === '代理版') return true;
     if (g.source_type === '代理版') return true;
 
     // 2. 如果沒有，從該 ProductGroup 底下的 ProductVariant 對應 InventoryItem 讀 InventoryItem.listing_type
-    const groupVars = variants.filter(v => v.product_group_id === g.id);
     const hasProxySku = groupVars.some(v => {
-      const invItem = inventory.find(i => i.myacg_item_code === v.myacg_item_code);
+      const invItem = findInventoryItem(v.myacg_item_code);
       return invItem?.listing_type === '代理版';
     });
     if (hasProxySku) return true;
@@ -536,11 +549,45 @@ export default function PurchaseRecords() {
     if (matchVar) return true;
 
     const matchInv = groupVars.some(v => {
-      const invItem = inventory.find(i => i.myacg_item_code === v.myacg_item_code);
+      const invItem = findInventoryItem(v.myacg_item_code);
       return matchText(invItem?.product_title) || matchText(invItem?.raw_variant_name);
     });
     if (matchInv) return true;
 
+  };
+
+  const isProxyProductMap = useMemo(() => {
+    // groupVars here intentionally uses product_group_id only (no category mapping), matching
+    // the original variants.filter() inside checkIsProxyProduct. Inventory is indexed by item
+    // code keeping the FIRST item per code, mirroring inventory.find()'s first-match semantics.
+    const varsByGroup = new Map<string, ProductVariant[]>();
+    for (const v of variants) {
+      if (!v.product_group_id) continue;
+      const arr = varsByGroup.get(v.product_group_id);
+      if (arr) arr.push(v); else varsByGroup.set(v.product_group_id, [v]);
+    }
+    const invByCode = new Map<InventoryItem['myacg_item_code'], InventoryItem>();
+    for (const item of inventory) {
+      if (!invByCode.has(item.myacg_item_code)) invByCode.set(item.myacg_item_code, item);
+    }
+    const map = new Map<string, boolean>();
+    for (const g of groups) {
+      map.set(g.id, !!computeIsProxyProduct(g, varsByGroup.get(g.id) ?? [], code => invByCode.get(code)));
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, variants, inventory]);
+
+  const checkIsProxyProduct = (g: ProductGroup) => {
+    const cached = isProxyProductMap.get(g.id);
+    if (cached !== undefined) return cached;
+    // Group not in the memoized list (e.g. freshly created and not yet in `groups`) — fall
+    // back to the original direct scan so behavior is identical.
+    return !!computeIsProxyProduct(
+      g,
+      variants.filter(v => v.product_group_id === g.id),
+      code => inventory.find(i => i.myacg_item_code === code)
+    );
   };
 
   const normalizeForMatch = (text: string | undefined | null): string => {
@@ -706,6 +753,32 @@ export default function PurchaseRecords() {
     return { text: closingDate, color: '#334155', fontWeight: 500 };
   };
 
+  // The search filter used to rebuild catIds (categories.filter) and groupVars
+  // (variants.filter) from scratch per group per keystroke. Precompute the same group →
+  // variants mapping (including the category → group indirection) and a first-match-wins
+  // categories-by-id index (mirroring categories.find()) once, memoized on the data.
+  const searchIndex = useMemo(() => {
+    const catToGroup = new Map<string, string>();
+    for (const c of categories) {
+      if (c.product_group_id) catToGroup.set(c.id, c.product_group_id);
+    }
+    const varsByGroup = new Map<string, ProductVariant[]>();
+    for (const v of variants) {
+      const direct = v.product_group_id;
+      const viaCat = v.product_category_id ? catToGroup.get(v.product_category_id) : undefined;
+      for (const gid of direct === viaCat ? [direct] : [direct, viaCat]) {
+        if (!gid) continue;
+        const arr = varsByGroup.get(gid);
+        if (arr) arr.push(v); else varsByGroup.set(gid, [v]);
+      }
+    }
+    const categoriesById = new Map<string, ProductCategory>();
+    for (const c of categories) {
+      if (!categoriesById.has(c.id)) categoriesById.set(c.id, c);
+    }
+    return { varsByGroup, categoriesById };
+  }, [variants, categories]);
+
   const baseGroups = useMemo(() => {
     let result = [...groups];
 
@@ -739,21 +812,20 @@ export default function PurchaseRecords() {
     }
 
     // 3. Search
-    if (searchTerm.trim()) {
-      const lowerTerm = searchTerm.toLowerCase();
+    if (deferredSearchTerm.trim()) {
+      const lowerTerm = deferredSearchTerm.toLowerCase();
       result = result.filter(g => {
         const isProxy = checkIsProxyProduct(g);
         const effectiveListingType = isProxy ? '代理版' : (g.listing_type || '');
-        
+
         // Find variants in this group (including categories mapped to this group)
-        const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
-        const groupVars = variants.filter(v => v.product_group_id === g.id || (v.product_category_id && catIds.has(v.product_category_id)));
-        
+        const groupVars = searchIndex.varsByGroup.get(g.id) ?? [];
+
         const hasMatchingVariantOrCategory = groupVars.some(v => {
           if (v.variant_name && v.variant_name.toLowerCase().includes(lowerTerm)) return true;
           if (v.raw_variant_name && v.raw_variant_name.toLowerCase().includes(lowerTerm)) return true;
           if (v.product_category_id) {
-            const cat = categories.find(c => c.id === v.product_category_id);
+            const cat = searchIndex.categoriesById.get(v.product_category_id);
             if (cat && cat.title && cat.title.toLowerCase().includes(lowerTerm)) return true;
           }
           return false;
@@ -772,7 +844,7 @@ export default function PurchaseRecords() {
     }
 
     return result;
-  }, [groups, searchTerm, filterSource, filterType, activeTab, variants, categories, inventory]);
+  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, variants, categories, inventory, isProxyProductMap, searchIndex]);
 
   const { progressCount, closedCount, noClosingDateCount, allCount, toPurchaseCount } = useMemo(() => {
     const progress = baseGroups.filter(g => !checkIsGroupClosed(g)).length;

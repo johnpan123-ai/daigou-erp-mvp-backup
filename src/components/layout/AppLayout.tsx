@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive } from 'lucide-react';
+import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
@@ -180,6 +180,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <SidebarItem to="/japan-packages" icon={<Truck size={20} />} label="日本包裹管理" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           <SidebarItem to="/unlisted-items" icon={<Archive size={20} />} label="待下架商品" onClick={() => setIsMobileMenuOpen(false)} />
+          {canViewPage('/duplicate-variants') && (
+            <SidebarItem to="/duplicate-variants" icon={<Layers size={20} />} label="重複品項管理" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
           {canViewPage('/settings') && (
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
           )}
