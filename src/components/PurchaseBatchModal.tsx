@@ -185,6 +185,19 @@ export default function PurchaseBatchModal({
 
   const batchMap = useMemo(() => new Map(purchaseBatches.map(b => [b.id, b])), [purchaseBatches]);
 
+  const getAutoBatchName = (batches: PurchaseBatch[]): string => {
+    const groupBatches = batches.filter(b => b.product_group_id === group?.id && b.id !== editingBatchId);
+    const existingNames = new Set(groupBatches.map(b => (b.name || '').trim()));
+    let n = groupBatches.length + 1;
+    while (existingNames.has(`第${n}批下單`)) n++;
+    return `第${n}批下單`;
+  };
+
+  const autoBatchNamePreview = useMemo(
+    () => getAutoBatchName(purchaseBatches),
+    [purchaseBatches, group?.id, editingBatchId]
+  );
+
   const getLatestBatchCost = (variantId: string): number | null => {
     const items = purchaseBatchItems.filter(item => item.product_variant_id === variantId && item.cost > 0);
     if (items.length === 0) return null;
@@ -387,8 +400,9 @@ export default function PurchaseBatchModal({
 
   const handleAddBatchSubmit = async () => {
     const validLines = batchLines.filter(l => l.quantity > 0);
-    if (!group || !batchForm.name.trim() || validLines.length === 0) return;
-    
+    if (!group || validLines.length === 0) return;
+    if (editingBatchId && !batchForm.name.trim()) return;
+
     try {
       const allBatches = await dataProvider.getPurchaseBatches();
       const allBatchItems = await dataProvider.getPurchaseBatchItems();
@@ -411,10 +425,11 @@ export default function PurchaseBatchModal({
         await dataProvider.savePurchaseBatchItems([...newItems, ...updatedItems]);
       } else {
         const newBatchId = crypto.randomUUID();
+        const finalName = batchForm.name.trim() || getAutoBatchName(allBatches);
         const newBatch: PurchaseBatch = {
           id: newBatchId,
           product_group_id: group.id,
-          name: batchForm.name,
+          name: finalName,
           date: batchForm.date,
           note: batchForm.note,
           created_at: new Date().toISOString()
@@ -482,8 +497,8 @@ export default function PurchaseBatchModal({
         <div style={{ padding: '16px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>批次名稱 *</label>
-              <input className="input" type="text" value={batchForm.name} onChange={e => setBatchForm({...batchForm, name: e.target.value})} placeholder="例如：2023-11-20 安利美特採購" style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px', fontSize: isMobile ? '16px' : '14px' }} />
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>批次名稱{editingBatchId ? ' *' : ''}</label>
+              <input className="input" type="text" value={batchForm.name} onChange={e => setBatchForm({...batchForm, name: e.target.value})} placeholder={editingBatchId ? '例如：2023-11-20 安利美特採購' : `（留空將自動命名為：${autoBatchNamePreview}）`} style={{ width: '100%', height: '36px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 12px', fontSize: isMobile ? '16px' : '14px' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>採購日期</label>
@@ -980,7 +995,7 @@ export default function PurchaseBatchModal({
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={onClose}>取消</button>
-                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={!batchForm.name.trim()}>儲存</button>
+                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={!!editingBatchId && !batchForm.name.trim()}>儲存</button>
               </div>
             </div>
             {(() => {

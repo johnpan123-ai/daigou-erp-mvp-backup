@@ -57,6 +57,21 @@ const formatWacaDate = (dateStr: string) => {
   return dateStr.replace(/-/g, '/');
 };
 
+// release_month 為人工輸入的自由文字，僅在排序時解析成年月，不寫回資料。
+// tier 0: 在庫/現貨/即納；tier 1: 可辨識出「年+月」(上旬/下旬/底等後綴一律視為同月)；tier 2: 未定/空白/無法辨識
+const parseReleaseYm = (raw: string | undefined | null): { tier: 0 | 1 | 2; ym: number } => {
+  const v = (raw || '')
+    .replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0))
+    .trim();
+  if (/在庫|現貨|即納/.test(v)) return { tier: 0, ym: 0 };
+  const m = v.match(/(\d{4})\s*[/\-年.]\s*(\d{1,2})/);
+  if (m) {
+    const mo = Number(m[2]);
+    if (mo >= 1 && mo <= 12) return { tier: 1, ym: Number(m[1]) * 12 + mo };
+  }
+  return { tier: 2, ym: 0 };
+};
+
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
 
@@ -864,7 +879,19 @@ export default function PurchaseRecords() {
     });
 
     result.sort((a, b) => {
-      if (sortMode === 'closing_urgent') {
+      if (sortMode === 'release_asc') {
+        const ra = parseReleaseYm(a.release_month);
+        const rb = parseReleaseYm(b.release_month);
+        if (ra.tier !== rb.tier) return ra.tier - rb.tier;
+        if (ra.tier === 1 && ra.ym !== rb.ym) return ra.ym - rb.ym;
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateComp = dateA.localeCompare(dateB);
+        if (dateComp !== 0) return dateComp;
+        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
+        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
+        return titleA.localeCompare(titleB);
+      } else if (sortMode === 'closing_urgent') {
         const activeA = !checkIsGroupClosed(a);
         const activeB = !checkIsGroupClosed(b);
         if (activeA !== activeB) return activeA ? -1 : 1;
@@ -921,7 +948,19 @@ export default function PurchaseRecords() {
 
     // Sort
     result.sort((a, b) => {
-      if (sortMode === 'closing_urgent') {
+      if (sortMode === 'release_asc') {
+        const ra = parseReleaseYm(a.release_month);
+        const rb = parseReleaseYm(b.release_month);
+        if (ra.tier !== rb.tier) return ra.tier - rb.tier;
+        if (ra.tier === 1 && ra.ym !== rb.ym) return ra.ym - rb.ym;
+        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
+        const dateComp = dateA.localeCompare(dateB);
+        if (dateComp !== 0) return dateComp;
+        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
+        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
+        return titleA.localeCompare(titleB);
+      } else if (sortMode === 'closing_urgent') {
         const activeA = !checkIsGroupClosed(a);
         const activeB = !checkIsGroupClosed(b);
         
@@ -2094,6 +2133,7 @@ export default function PurchaseRecords() {
                 <option value="closing_name">結單日近 ＋ 名稱相近</option>
                 <option value="created_desc">建立時間 (新到舊)</option>
                 <option value="closing_asc">結單日 (近到遠)</option>
+                <option value="release_asc">發售月份 (近到遠)</option>
               </select>
             </div>
           </div>
@@ -2131,6 +2171,7 @@ export default function PurchaseRecords() {
                 <option value="closing_name">結單日近 ＋ 名稱相近</option>
                 <option value="created_desc">建立時間 (新到舊)</option>
                 <option value="closing_asc">結單日 (近到遠)</option>
+                <option value="release_asc">發售月份 (近到遠)</option>
               </select>
               <button
                 onClick={() => {
