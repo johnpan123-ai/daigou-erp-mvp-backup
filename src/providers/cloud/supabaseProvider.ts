@@ -159,6 +159,51 @@ function isSchemaMissingError(err: any): boolean {
   const code = err.code || '';
   return code === '42P01' || msg.includes('could not find the table') || msg.includes('relation') || msg.includes('does not exist');
 }
+async function retrySupabase(
+  fn: () => PromiseLike<{ data: any; error: any }>,
+  maxRetries = 3,
+  baseDelay = 500,
+): Promise<void> {
+  let lastError: any;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const { error } = await fn();
+    if (!error) return;
+    lastError = error;
+    if (isSchemaMissingError(error)) throw error;
+    if (attempt < maxRetries - 1) {
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.warn(`[retrySupabase] attempt ${attempt + 1} failed, retrying in ${delay}ms...`, error.message || error);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
+const DATA_SIZE_THRESHOLDS: Record<string, number> = {
+  product_variants: 3000,
+  purchase_batch_items: 5000,
+  private_order_items: 3000,
+  sales_order_items: 5000,
+};
+
+let dataSizeWarningShown = false;
+
+function checkDataSizeWarnings(counts: Record<string, number>) {
+  if (dataSizeWarningShown) return;
+  const warnings: string[] = [];
+  for (const [table, count] of Object.entries(counts)) {
+    const threshold = DATA_SIZE_THRESHOLDS[table];
+    if (threshold && count >= threshold) {
+      warnings.push(`${table}: ${count} 筆 (閾值 ${threshold})`);
+    }
+  }
+  if (warnings.length > 0) {
+    dataSizeWarningShown = true;
+    console.warn(`[Data Size Warning] 以下表格資料量接近效能瓶頸:\n${warnings.join('\n')}`);
+    alert(`⚠️ 資料量警告\n\n以下表格的資料筆數已超過建議上限，可能影響頁面載入速度：\n\n${warnings.join('\n')}\n\n建議聯絡管理員評估是否需要優化。`);
+  }
+}
+
 const fetchAll = async <T>(
   fetchFn: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>
 ): Promise<T[]> => {
@@ -473,6 +518,12 @@ export class SupabaseProvider implements IDataProvider {
 
           this.isPulled = true;
           console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
+
+          checkDataSizeWarnings({
+            product_variants: vLen,
+            purchase_batch_items: biLen,
+            private_order_items: poiLen,
+          });
         } catch (err: any) {
           console.error('[Sync] 商品核心主檔同步失敗:', err);
           if (isSchemaMissingError(err)) {
@@ -607,16 +658,11 @@ export class SupabaseProvider implements IDataProvider {
         show_in_purchase_list: g.show_in_purchase_list ?? false
       }));
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('product_groups')
-        .upsert(upsertData);
+        .upsert(upsertData));
 
-      if (error) {
-        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
-        await this.pullCoreProductData(true);
-        alert(`雲端同步商品群組失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料，請重試！`);
-        throw error;
-      } else {
+      {
         console.log(`[Sync Push] product_groups upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
@@ -706,13 +752,12 @@ export class SupabaseProvider implements IDataProvider {
         if (removedIds.length > 0) {
           const nowStr = new Date().toISOString();
           console.log(`[Sync Push] product_categories marking deleted_at: ${removedIds.length} rows`);
-          const { error: delError } = await supabase
+          await retrySupabase(() => supabase
             .from('product_categories')
             .update({ deleted_at: nowStr })
-            .in('id', removedIds);
-          if (delError) {
+            .in('id', removedIds)).catch(delError => {
             console.error('[Sync Push] product_categories delete update failed:', delError);
-          }
+          });
         }
       }
 
@@ -741,16 +786,11 @@ export class SupabaseProvider implements IDataProvider {
         sort_order: c.sort_order || 0
       }));
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('product_categories')
-        .upsert(upsertData);
+        .upsert(upsertData));
 
-      if (error) {
-        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
-        await this.pullCoreProductData(true);
-        alert(`雲端同步商品分類失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
-        throw error;
-      } else {
+      {
         console.log(`[Sync Push] product_categories upsert success: ${upsertData.length} rows`);
       }
     } catch (err: any) {
@@ -892,18 +932,11 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log('[Default Cost Sync] save payload sample:', upsertData.length > 0 ? JSON.stringify(upsertData[0]) : 'empty');
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('product_variants')
-        .upsert(upsertData);
+        .upsert(upsertData));
 
-      if (error) {
-        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
-        await this.pullCoreProductData(true);
-        alert(`雲端同步商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
-        throw error;
-      } else {
-        console.log(`[Sync Push] product_variants upsert success: ${upsertData.length} rows`);
-      }
+      console.log(`[Sync Push] product_variants upsert success: ${upsertData.length} rows`);
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
       await this.pullCoreProductData(true);
@@ -949,19 +982,12 @@ export class SupabaseProvider implements IDataProvider {
         updated_at: patch.updated_at || new Date().toISOString()
       };
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('product_variants')
         .update(finalPatch)
-        .eq('id', id);
+        .eq('id', id));
 
-      if (error) {
-        console.error(`[Cloud Patch ERROR] Supabase error message: ${error.message}`);
-        await this.pullCoreProductData(true);
-        alert(`雲端局部更新商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
-        throw error;
-      } else {
-        console.log(`[Sync Patch] product_variants update success for id: ${id}`);
-      }
+      console.log(`[Sync Patch] product_variants update success for id: ${id}`);
     } catch (err: any) {
       console.error(`[Cloud Patch ERROR] Supabase error message: ${err.message || err}`);
       await this.pullCoreProductData(true);
@@ -1007,7 +1033,7 @@ export class SupabaseProvider implements IDataProvider {
       console.log(`[Cloud Patch Bulk] product_variants target count: ${patches.length}`);
       
       const allLocalVars = await db.getProductVariants();
-      const upsertData = [];
+      const upsertData: any[] = [];
       for (const item of patches) {
         const v = allLocalVars.find(x => x.id === item.id);
         if (v) {
@@ -1038,18 +1064,11 @@ export class SupabaseProvider implements IDataProvider {
         }
       }
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('product_variants')
-        .upsert(upsertData);
+        .upsert(upsertData));
 
-      if (error) {
-        console.error(`[Cloud Patch Bulk ERROR] Supabase error message: ${error.message}`);
-        await this.pullCoreProductData(true);
-        alert(`雲端批量局部更新商品規格失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
-        throw error;
-      } else {
-        console.log(`[Sync Patch Bulk] product_variants bulk update success for count: ${patches.length}`);
-      }
+      console.log(`[Sync Patch Bulk] product_variants bulk update success for count: ${patches.length}`);
     } catch (err: any) {
       console.error(`[Cloud Patch Bulk ERROR] Supabase error message: ${err.message || err}`);
       await this.pullCoreProductData(true);
@@ -1142,17 +1161,11 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log('[Inventory Sync] actual upsert payload sample', JSON.stringify(upsertData[0]));
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('inventory_items')
-        .upsert(upsertData, { onConflict: 'inventory_key' });
+        .upsert(upsertData, { onConflict: 'inventory_key' }));
 
-      if (error) {
-        console.error('[Inventory Sync ERROR] push failed:', error);
-        alert(`雲端同步庫存失敗：${error.message || JSON.stringify(error)}`);
-        throw error;
-      } else {
-        console.log(`[Inventory Sync] push success: ${upsertData.length} rows`);
-      }
+      console.log(`[Inventory Sync] push success: ${upsertData.length} rows`);
     } catch (err: any) {
       console.error('[Inventory Sync ERROR] push failed:', err.message || err);
       throw err;
@@ -1191,18 +1204,11 @@ export class SupabaseProvider implements IDataProvider {
         created_at: o.created_at || new Date().toISOString()
       }));
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('sales_orders')
-        .upsert(upsertData, { onConflict: 'order_number' });
+        .upsert(upsertData, { onConflict: 'order_number' }));
 
-      if (error) {
-        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
-        await this.pullSalesOrders();
-        alert(`雲端同步銷售訂單失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
-        throw error;
-      } else {
-        console.log(`[Sync Push] sales_orders upsert success: ${upsertData.length} rows`);
-      }
+      console.log(`[Sync Push] sales_orders upsert success: ${upsertData.length} rows`);
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
       await this.pullSalesOrders();
@@ -1255,18 +1261,11 @@ export class SupabaseProvider implements IDataProvider {
         };
       });
 
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('sales_order_items')
-        .upsert(upsertData);
+        .upsert(upsertData));
 
-      if (error) {
-        console.error(`[Cloud Push ERROR] Supabase error message: ${error.message}`);
-        await this.pullSalesOrderItems();
-        alert(`雲端同步訂單明細失敗：${error.message || JSON.stringify(error)}。已回復本地快取資料！`);
-        throw error;
-      } else {
-        console.log(`[Sync Push] sales_order_items upsert success: ${upsertData.length} rows`);
-      }
+      console.log(`[Sync Push] sales_order_items upsert success: ${upsertData.length} rows`);
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
       await this.pullSalesOrderItems();
@@ -1459,13 +1458,12 @@ export class SupabaseProvider implements IDataProvider {
         if (removedIds.length > 0) {
           const nowStr = new Date().toISOString();
           console.log(`[Sync Push] purchase_batches marking deleted_at: ${removedIds.length} rows`);
-          const { error: delError } = await supabase
+          await retrySupabase(() => supabase
             .from('purchase_batches')
             .update({ deleted_at: nowStr })
-            .in('id', removedIds);
-          if (delError) {
+            .in('id', removedIds)).catch(delError => {
             console.error('[Sync Push] purchase_batches delete update failed:', delError);
-          }
+          });
         }
       }
 
@@ -1483,15 +1481,9 @@ export class SupabaseProvider implements IDataProvider {
           currency: 'JPY'
         }));
 
-        const { error: upsertError } = await supabase
+        await retrySupabase(() => supabase
           .from('purchase_batches')
-          .upsert(upsertData);
-        if (upsertError) {
-          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
-          await this.pullCoreProductData(true);
-          alert(`雲端同步採購批次失敗：${upsertError.message}。已回復本地快取資料！`);
-          throw upsertError;
-        }
+          .upsert(upsertData));
       }
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
@@ -1527,13 +1519,12 @@ export class SupabaseProvider implements IDataProvider {
         if (removedIds.length > 0) {
           const nowStr = new Date().toISOString();
           console.log(`[Sync Push] purchase_batch_items marking deleted_at: ${removedIds.length} rows`);
-          const { error: delError } = await supabase
+          await retrySupabase(() => supabase
             .from('purchase_batch_items')
             .update({ deleted_at: nowStr })
-            .in('id', removedIds);
-          if (delError) {
+            .in('id', removedIds)).catch(delError => {
             console.error('[Sync Push] purchase_batch_items delete update failed:', delError);
-          }
+          });
         }
       }
 
@@ -1551,15 +1542,9 @@ export class SupabaseProvider implements IDataProvider {
           note: i.note || null
         }));
 
-        const { error: upsertError } = await supabase
+        await retrySupabase(() => supabase
           .from('purchase_batch_items')
-          .upsert(upsertData);
-        if (upsertError) {
-          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
-          await this.pullCoreProductData(true);
-          alert(`雲端同步採購批次明細失敗：${upsertError.message}。已回復本地快取資料！`);
-          throw upsertError;
-        }
+          .upsert(upsertData));
       }
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
@@ -1604,13 +1589,12 @@ export class SupabaseProvider implements IDataProvider {
         if (removedIds.length > 0) {
           const nowStr = new Date().toISOString();
           console.log(`[Sync Push] private_orders marking deleted_at: ${removedIds.length} rows`);
-          const { error: delError } = await supabase
+          await retrySupabase(() => supabase
             .from('private_orders')
             .update({ deleted_at: nowStr })
-            .in('id', removedIds);
-          if (delError) {
+            .in('id', removedIds)).catch(delError => {
             console.error('[Sync Push] private_orders delete update failed:', delError);
-          }
+          });
         }
       }
 
@@ -1638,16 +1622,9 @@ export class SupabaseProvider implements IDataProvider {
         status: 'pending'
       }));
 
-      const { error: upsertError } = await supabase
+      await retrySupabase(() => supabase
         .from('private_orders')
-        .upsert(upsertData);
-
-      if (upsertError) {
-        console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
-        await this.pullCoreProductData(true); // 發生錯誤，將本地快取回滾至雲端最新狀態
-        alert(`雲端同步私下訂單失敗：${upsertError.message}。已回復本地快取資料！`);
-        throw upsertError;
-      }
+        .upsert(upsertData));
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
       await this.pullCoreProductData(true); // 發生錯誤，將本地快取回滾至雲端最新狀態
@@ -1726,16 +1703,9 @@ export class SupabaseProvider implements IDataProvider {
         note: i.note || null
       }));
 
-      const { error: upsertError } = await supabase
+      await retrySupabase(() => supabase
         .from('private_order_items')
-        .upsert(upsertData);
-
-      if (upsertError) {
-        console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
-        await this.pullCoreProductData(true);
-        alert(`雲端同步私下訂單項目失敗：${upsertError.message}。已回復本地快取資料！`);
-        throw upsertError;
-      }
+        .upsert(upsertData));
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
       await this.pullCoreProductData(true);
@@ -1775,17 +1745,10 @@ export class SupabaseProvider implements IDataProvider {
       }
 
       console.log(`[Private Order Sync] delete items count: ${validIds.length}`);
-      const { error: deleteError } = await supabase
+      await retrySupabase(() => supabase
         .from('private_order_items')
         .delete()
-        .in('id', validIds);
-
-      if (deleteError) {
-        console.error('[Cloud Push ERROR] Supabase delete error message:', deleteError.message);
-        await this.pullCoreProductData(true);
-        alert(`雲端刪除私下訂單項目失敗：${deleteError.message}。已回復本地快取資料！`);
-        throw deleteError;
-      }
+        .in('id', validIds));
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase delete error message:', err.message || err);
       await this.pullCoreProductData(true);
@@ -1811,18 +1774,14 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     try {
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('bundle_components')
         .upsert(components.map(c => ({
           id: c.id,
           bundle_variant_id: c.bundle_variant_id,
           component_variant_id: c.component_variant_id,
           created_at: c.created_at || new Date().toISOString()
-        })));
-
-      if (error) {
-        console.warn('[Cloud Push WARNING] bundle_components sync failed:', error.message);
-      }
+        }))));
     } catch (err: any) {
       console.warn('[Cloud Push WARNING] bundle_components sync exception:', err.message || err);
     }
@@ -1897,13 +1856,12 @@ export class SupabaseProvider implements IDataProvider {
         if (removedIds.length > 0) {
           const nowStr = new Date().toISOString();
           console.log(`[Sync Push] japan_packages marking deleted_at: ${removedIds.length} rows`);
-          const { error: delError } = await supabase
+          await retrySupabase(() => supabase
             .from('japan_packages')
             .update({ deleted_at: nowStr })
-            .in('id', removedIds);
-          if (delError) {
+            .in('id', removedIds)).catch(delError => {
             console.error('[Sync Push] japan_packages delete update failed:', delError);
-          }
+          });
         }
       }
 
@@ -1924,15 +1882,9 @@ export class SupabaseProvider implements IDataProvider {
           note: p.note || null
         }));
 
-        const { error: upsertError } = await supabase
+        await retrySupabase(() => supabase
           .from('japan_packages')
-          .upsert(upsertData);
-        if (upsertError) {
-          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
-          await this.pullCoreProductData(true);
-          alert(`雲端同步日本包裹失敗：${upsertError.message}。已回復本地快取資料！`);
-          throw upsertError;
-        }
+          .upsert(upsertData));
       }
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
@@ -1967,13 +1919,12 @@ export class SupabaseProvider implements IDataProvider {
         if (removedIds.length > 0) {
           const nowStr = new Date().toISOString();
           console.log(`[Sync Push] japan_package_items marking deleted_at: ${removedIds.length} rows`);
-          const { error: delError } = await supabase
+          await retrySupabase(() => supabase
             .from('japan_package_items')
             .update({ deleted_at: nowStr })
-            .in('id', removedIds);
-          if (delError) {
+            .in('id', removedIds)).catch(delError => {
             console.error('[Sync Push] japan_package_items delete update failed:', delError);
-          }
+          });
         }
       }
 
@@ -1998,15 +1949,9 @@ export class SupabaseProvider implements IDataProvider {
           checked_at: i.checked_at || null
         }));
 
-        const { error: upsertError } = await supabase
+        await retrySupabase(() => supabase
           .from('japan_package_items')
-          .upsert(upsertData);
-        if (upsertError) {
-          console.error('[Cloud Push ERROR] Supabase error message:', upsertError.message);
-          await this.pullCoreProductData(true);
-          alert(`雲端同步日本包裹明細失敗：${upsertError.message}。已回復本地快取資料！`);
-          throw upsertError;
-        }
+          .upsert(upsertData));
       }
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
@@ -2168,33 +2113,20 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     const nowStr = new Date().toISOString();
-    const { error: groupError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_groups')
       .update({ deleted_at: nowStr })
-      .eq('id', groupId);
+      .eq('id', groupId));
 
-    if (groupError) {
-      console.error('[Supabase] Failed to soft delete group:', groupError);
-      throw groupError;
-    }
-
-    const { error: catError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_categories')
       .update({ deleted_at: nowStr })
-      .eq('product_group_id', groupId);
-    if (catError) {
-      console.error('[Supabase] Failed to soft delete categories:', catError);
-      throw catError;
-    }
+      .eq('product_group_id', groupId));
 
-    const { error: varError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_variants')
       .update({ deleted_at: nowStr })
-      .eq('product_group_id', groupId);
-    if (varError) {
-      console.error('[Supabase] Failed to soft delete variants:', varError);
-      throw varError;
-    }
+      .eq('product_group_id', groupId));
 
     // Only update local DB cache if Supabase soft delete succeeded
     const groups = await db.getProductGroups();
@@ -2216,15 +2148,10 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     const nowStr = new Date().toISOString();
-    const { error: varError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_variants')
       .update({ deleted_at: nowStr })
-      .eq('id', id);
-
-    if (varError) {
-      console.error('[Supabase] Failed to soft delete variant:', varError);
-      throw varError;
-    }
+      .eq('id', id));
 
     await db.deleteProductVariant(id);
   }
@@ -2237,33 +2164,20 @@ export class SupabaseProvider implements IDataProvider {
     if (!groupIds || groupIds.length === 0) return;
 
     const nowStr = new Date().toISOString();
-    const { error: groupError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_groups')
       .update({ deleted_at: nowStr })
-      .in('id', groupIds);
+      .in('id', groupIds));
 
-    if (groupError) {
-      console.error('[Supabase] Failed to soft delete groups:', groupError);
-      throw groupError;
-    }
-
-    const { error: catError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_categories')
       .update({ deleted_at: nowStr })
-      .in('product_group_id', groupIds);
-    if (catError) {
-      console.error('[Supabase] Failed to soft delete categories:', catError);
-      throw catError;
-    }
+      .in('product_group_id', groupIds));
 
-    const { error: varError } = await supabase
+    await retrySupabase(() => supabase
       .from('product_variants')
       .update({ deleted_at: nowStr })
-      .in('product_group_id', groupIds);
-    if (varError) {
-      console.error('[Supabase] Failed to soft delete variants:', varError);
-      throw varError;
-    }
+      .in('product_group_id', groupIds));
 
     // Only update local DB cache if Supabase soft delete succeeded
     const groups = await db.getProductGroups();
@@ -2335,7 +2249,7 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     try {
-      const { error } = await supabase
+      await retrySupabase(() => supabase
         .from('dashboard_category_images')
         .upsert({
           category_key: categoryKey,
@@ -2344,9 +2258,7 @@ export class SupabaseProvider implements IDataProvider {
           updated_at: new Date().toISOString()
         }, {
           onConflict: 'category_key'
-        });
-
-      if (error) throw error;
+        }));
       console.log(`[Sync Push] 首頁大類圖片已儲存並推送雲端: ${categoryKey}`);
     } catch (err: any) {
       console.error(`[Sync Push] 推送首頁大類圖片失敗 (${categoryKey}):`, err.message || err);

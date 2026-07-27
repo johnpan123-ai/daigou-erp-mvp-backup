@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ViewportProvider } from './contexts/ViewportContext';
 import { AuthProvider } from './auth/AuthProvider';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AppLayout } from './components/layout/AppLayout';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
@@ -17,6 +18,7 @@ import DuplicateVariants from './pages/DuplicateVariants';
 
 function App() {
   return (
+    <ErrorBoundary>
     <ViewportProvider>
       <AuthProvider>
         <BrowserRouter>
@@ -44,6 +46,7 @@ function App() {
         </BrowserRouter>
       </AuthProvider>
     </ViewportProvider>
+    </ErrorBoundary>
   );
 }
 
