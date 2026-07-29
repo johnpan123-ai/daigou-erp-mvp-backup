@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { dataProvider } from '../providers/dataProvider';
 
-export async function exportSimplifiedExcel(currentUserEmail?: string): Promise<string> {
+export async function exportSimplifiedExcel(_currentUserEmail?: string): Promise<string> {
   const [groups, categories, variants, batches, batchItems] = await Promise.all([
     dataProvider.getProductGroups(),
     dataProvider.getProductCategories(),

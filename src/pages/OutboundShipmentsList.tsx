@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PackageOpen, Plus, Search, Truck, PackageCheck, Archive, FileEdit, ChevronRight } from 'lucide-react';
+import { PackageOpen, Plus, Search, ChevronRight } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
 import type { OutboundShipment, OutboundShipmentItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';

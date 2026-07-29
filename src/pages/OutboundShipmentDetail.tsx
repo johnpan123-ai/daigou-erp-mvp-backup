@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Minus, Trash2, Check, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
 import type { OutboundShipment, OutboundShipmentItem, JapanPackage, JapanPackageItem, InventoryItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
