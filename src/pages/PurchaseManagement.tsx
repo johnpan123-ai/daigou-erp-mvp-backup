@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getBaseSku, calculateFinalMyacgDemand, calculateVariantDemandAndPurchased } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
-import type { 
+import type {
   ProductGroup, ProductVariant, InventoryItem, ProductCategory,
-  PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, BundleComponent 
+  PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, BundleComponent,
+  JapanPackage, JapanPackageItem
 } from '../lib/db';
 import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy, Trash2, Edit2 } from 'lucide-react';
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
@@ -118,11 +119,37 @@ interface MobilePurchaseBatchTabProps {
   variants: ProductVariant[];
   categoryMap: Map<string, ProductCategory>;
   groups?: ProductGroup[];
+  japanPackages?: JapanPackage[];
+  japanPackageItems?: JapanPackageItem[];
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
   getDisplayProductName: (v: ProductVariant) => string;
   canWrite?: boolean;
   isDaili?: boolean;
+}
+
+function getShipStatusPriority(status: string): number {
+  switch (status) {
+    case 'confirmed': return 3;
+    case 'arrived': return 2;
+    case 'registered': return 1;
+    default: return 0;
+  }
+}
+
+function MobileShipBadge({ info }: { info: { status: string; packageTitle: string } }) {
+  let bg: string, color: string, label: string;
+  switch (info.status) {
+    case 'confirmed': bg = '#dcfce7'; color = '#15803d'; label = '已點收'; break;
+    case 'arrived': bg = '#dbeafe'; color = '#1e40af'; label = '已到貨'; break;
+    case 'registered': bg = '#fef3c7'; color = '#92400e'; label = '已寄出'; break;
+    default: bg = '#f1f5f9'; color = '#475569'; label = info.status;
+  }
+  return (
+    <span style={{ fontSize: '11px', fontWeight: 600, padding: '1px 6px', borderRadius: '10px', backgroundColor: bg, color, whiteSpace: 'nowrap' }}>
+      {label}
+    </span>
+  );
 }
 
 function MobilePurchaseBatchTab({
@@ -131,6 +158,8 @@ function MobilePurchaseBatchTab({
   variants,
   categoryMap,
   groups = [],
+  japanPackages = [],
+  japanPackageItems = [],
   onRefresh,
   onEditBatch,
   getDisplayProductName,
@@ -140,6 +169,21 @@ function MobilePurchaseBatchTab({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
   const currencySymbol = isDaili ? 'NT$ ' : '¥ ';
+
+  const batchShipStatus = useMemo(() => {
+    const pkgMap = new Map(japanPackages.map(p => [p.id, p]));
+    const m = new Map<string, { status: string; packageTitle: string }>();
+    for (const jpi of japanPackageItems) {
+      if (!jpi.purchase_batch_id) continue;
+      const pkg = pkgMap.get(jpi.japan_package_id);
+      if (!pkg) continue;
+      const existing = m.get(jpi.purchase_batch_id);
+      if (!existing || getShipStatusPriority(pkg.status) > getShipStatusPriority(existing.status)) {
+        m.set(jpi.purchase_batch_id, { status: pkg.status, packageTitle: pkg.title });
+      }
+    }
+    return m;
+  }, [japanPackageItems, japanPackages]);
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedIds);
@@ -309,8 +353,9 @@ function MobilePurchaseBatchTab({
                     <Copy size={13} />
                   </button>
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>
-                  {batch.date}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{batch.date}</span>
+                  {batchShipStatus.has(batch.id) ? <MobileShipBadge info={batchShipStatus.get(batch.id)!} /> : <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>未出貨</span>}
                 </div>
               </div>
 
@@ -916,6 +961,8 @@ export default function PurchaseManagement() {
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [purchaseBatches, setPurchaseBatches] = useState<PurchaseBatch[]>([]);
   const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
+  const [japanPackages, setJapanPackages] = useState<JapanPackage[]>([]);
+  const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>([]);
   
   // UI States
   const [activeTab, setActiveTab] = useState<'worksheet' | 'purchase_batches' | 'private_orders'>('worksheet');
@@ -1082,6 +1129,15 @@ export default function PurchaseManagement() {
     
     setPurchaseBatches(groupBatches);
     setPurchaseBatchItems(groupBatchItems);
+
+    const [allJP, allJPI] = await Promise.all([
+      dataProvider.getJapanPackages(),
+      dataProvider.getJapanPackageItems(),
+    ]);
+    const relevantJPI = allJPI.filter(jpi => jpi.purchase_batch_id && groupBatchIds.has(jpi.purchase_batch_id));
+    const relevantJPIds = new Set(relevantJPI.map(jpi => jpi.japan_package_id));
+    setJapanPackages(allJP.filter(p => relevantJPIds.has(p.id)));
+    setJapanPackageItems(relevantJPI);
 
     const allSOI = await dataProvider.getSalesOrderItems();
     const groupSOI = allSOI.filter(i => {
@@ -3826,6 +3882,8 @@ export default function PurchaseManagement() {
               variants={variants}
               categoryMap={categoryMap}
               groups={groups}
+              japanPackages={japanPackages}
+              japanPackageItems={japanPackageItems}
               onRefresh={loadData}
               onEditBatch={handleEditBatch}
               getDisplayProductName={getDisplayProductName}
@@ -3833,13 +3891,15 @@ export default function PurchaseManagement() {
               isDaili={isDaili}
             />
           ) : (
-            <PurchaseBatchTab 
-              batches={purchaseBatches} 
-              batchItems={purchaseBatchItems} 
-              variants={variants} 
+            <PurchaseBatchTab
+              batches={purchaseBatches}
+              batchItems={purchaseBatchItems}
+              variants={variants}
               categoryMap={categoryMap}
               groups={groups}
-              onRefresh={loadData} 
+              japanPackages={japanPackages}
+              japanPackageItems={japanPackageItems}
+              onRefresh={loadData}
               onEditBatch={handleEditBatch}
               getDisplayProductName={getDisplayProductName}
               canWrite={canWrite}

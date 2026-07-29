@@ -1,8 +1,49 @@
-import { useState } from 'react';
-import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory, ProductGroup } from '../lib/db';
+import { useState, useMemo } from 'react';
+import type { PurchaseBatch, PurchaseBatchItem, ProductVariant, ProductCategory, ProductGroup, JapanPackage, JapanPackageItem } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2, Copy } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
+import { Package } from 'lucide-react';
+
+function getStatusPriority(status: string): number {
+  switch (status) {
+    case 'confirmed': return 3;
+    case 'arrived': return 2;
+    case 'registered': return 1;
+    default: return 0;
+  }
+}
+
+function ShipmentBadge({ info }: { info: { status: string; packageTitle: string; trackingNumber?: string } }) {
+  let bg: string, color: string, label: string;
+  switch (info.status) {
+    case 'confirmed':
+      bg = '#dcfce7'; color = '#15803d'; label = '已點收';
+      break;
+    case 'arrived':
+      bg = '#dbeafe'; color = '#1e40af'; label = '已到貨';
+      break;
+    case 'registered':
+      bg = '#fef3c7'; color = '#92400e'; label = '已寄出';
+      break;
+    default:
+      bg = '#f1f5f9'; color = '#475569'; label = info.status;
+  }
+  return (
+    <span
+      title={`包裹: ${info.packageTitle}${info.trackingNumber ? ` (${info.trackingNumber})` : ''}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '4px',
+        fontSize: '11px', fontWeight: 600, padding: '2px 8px',
+        borderRadius: '12px', backgroundColor: bg, color,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <Package size={11} />
+      {label}
+    </span>
+  );
+}
 
 interface PurchaseBatchTabProps {
   batches: PurchaseBatch[];
@@ -10,6 +51,8 @@ interface PurchaseBatchTabProps {
   variants: ProductVariant[];
   categoryMap: Map<string, ProductCategory>;
   groups?: ProductGroup[];
+  japanPackages?: JapanPackage[];
+  japanPackageItems?: JapanPackageItem[];
   onRefresh: () => void;
   onEditBatch: (batch: PurchaseBatch) => void;
   getDisplayProductName: (v: ProductVariant) => string;
@@ -17,11 +60,30 @@ interface PurchaseBatchTabProps {
   isDaili?: boolean;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, groups = [], onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, groups = [], japanPackages = [], japanPackageItems = [], onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
   const currencySymbol = isDaili ? 'NT$ ' : '¥ ';
+
+  const batchShipmentStatus = useMemo(() => {
+    const pkgMap = new Map(japanPackages.map(p => [p.id, p]));
+    const statusMap = new Map<string, { status: string; packageTitle: string; trackingNumber?: string }>();
+    for (const jpi of japanPackageItems) {
+      if (!jpi.purchase_batch_id) continue;
+      const pkg = pkgMap.get(jpi.japan_package_id);
+      if (!pkg) continue;
+      const existing = statusMap.get(jpi.purchase_batch_id);
+      if (!existing || getStatusPriority(pkg.status) > getStatusPriority(existing.status)) {
+        statusMap.set(jpi.purchase_batch_id, {
+          status: pkg.status,
+          packageTitle: pkg.title,
+          trackingNumber: pkg.tracking_number,
+        });
+      }
+    }
+    return statusMap;
+  }, [japanPackageItems, japanPackages]);
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedIds);
@@ -202,7 +264,10 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                         </button>
                       </div>
                     </div>
-                    <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '12px' }}>{batch.date}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '12px' }}>{batch.date}</div>
+                      {batchShipmentStatus.has(batch.id) ? <ShipmentBadge info={batchShipmentStatus.get(batch.id)!} /> : <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>未出貨</span>}
+                    </div>
                   </div>
                   {batch.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', paddingLeft: '26px' }}>({batch.note})</div>}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: '26px', fontSize: '14px', borderTop: '1px dashed #e2e8f0', paddingTop: '8px' }}>
@@ -256,8 +321,10 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                     </div>
                     <div style={{ fontSize: '13px', color: '#64748b', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '12px' }}>{batch.date}</div>
                     {batch.note && <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic' }}>({batch.note})</div>}
+                    {batchShipmentStatus.has(batch.id) && <ShipmentBadge info={batchShipmentStatus.get(batch.id)!} />}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '24px', fontSize: '14px' }}>
+                    {!batchShipmentStatus.has(batch.id) && <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>未出貨</span>}
                     <div><span style={{ color: '#94a3b8' }}>款數:</span> <span style={{ fontWeight: 500 }}>{items.length} 款</span></div>
                     <div><span style={{ color: '#94a3b8' }}>總件數:</span> <span style={{ fontWeight: 600, color: '#2563eb' }}>{totalQty} 件</span></div>
                     <div style={{ width: '150px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>{currencySymbol}{totalCost.toLocaleString()}</span></div>
