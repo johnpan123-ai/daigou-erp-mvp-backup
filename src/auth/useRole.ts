@@ -53,7 +53,7 @@ export function useRole(): UserRole {
       }
       // Viewer
       if (role === 'viewer') {
-        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/purchasing' || path === '/login' || path === '/japan-packages' || path.startsWith('/japan-packages/') || path === '/unlisted-items';
+        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/purchasing' || path === '/login' || path === '/japan-packages' || path.startsWith('/japan-packages/') || path === '/unlisted-items' || path === '/outbound-shipments' || path.startsWith('/outbound-shipments/');
       }
       // Helper (cannot view settings)
       if (role === 'helper') {

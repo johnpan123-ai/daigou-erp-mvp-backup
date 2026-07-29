@@ -1339,6 +1339,271 @@ export default function PurchaseRecords() {
     }
   };
 
+  const [isLookingUpDeadlines, setIsLookingUpDeadlines] = useState(false);
+
+  const handleAutoLookupDeadlines = async () => {
+    if (guardAgainstStaleWrite()) return;
+
+    type ProductSource = 'proxy' | 'hololive' | 'vspo';
+    const getSource = (g: ProductGroup): ProductSource | null => {
+      if (isProxyProduct(g)) return 'proxy';
+      if (isHololiveProduct(g)) return 'hololive';
+      if (isVspoProduct(g)) return 'vspo';
+      return null;
+    };
+
+    const targetGroups = groups.filter(g =>
+      selectedGroupIds.has(g.id) &&
+      getSource(g) !== null &&
+      (!g.closing_date || (getSource(g) !== 'proxy' && !g.product_url))
+    );
+
+    if (targetGroups.length === 0) {
+      alert('選取的商品中沒有需要查詢結單日的商品（已有結單日且官網網址的會跳過）。');
+      return;
+    }
+
+    setIsLookingUpDeadlines(true);
+    let matched = 0;
+    let failed = 0;
+    const details: string[] = [];
+    const updatedGroups = [...groups];
+
+    const stripProxyTitle = (t: string) => t
+      .replace(/代理版\s*/g, '')
+      .replace(/(GSC|MF|BANDAI|壽屋|Kotobukiya|ALTER|FREEing|Phat|WAVE|Aniplex|SEGA|Taito|Furyu|Myethos|Union Creative|Kadokawa|Medicom|Kaiyodo|Sentinel|Di molto bene|Hobby Max|eStream|BINDing|Ques Q|B-style|PLUM|AMAKUNI|AmiAmi|Chara-Ani|Broccoli|Megahouse|POP UP PARADE)\s*/gi, '')
+      .replace(/(Chocopuni|Nendoroid|figma|ARTFX|S\.H\.Figuarts)\s*/gi, '')
+      .replace(/(玩偶|黏土人|黏土娃|模型|景品)\s*/g, '')
+      .replace(/[！!？?/／《》「」【】\(\)（）]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const stripShopTitle = (t: string) => t
+      .replace(/^(在庫|通販)\s*/g, '')
+      .replace(/^(Hololive|hololive|VSPO|ぶいすぽっ！?)\s*/gi, '')
+      .replace(/(合作|原創|透明|文件夾|兩款一套|兩款|一套|全套|套裝|追加販售|販售|周邊|假期周邊|第[一二三四五六七八九十]彈)\s*/g, '')
+      .replace(/\s*商品$/g, '')
+      .replace(/[【】「」《》（）\(\)！!？?×]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const matchScore = (catalogName: string, originalTitle: string, strippedSegments: string[]) => {
+      const cn = catalogName.toLowerCase();
+      const ot = originalTitle.toLowerCase();
+      const cnCompact = cn.replace(/\s+/g, '');
+
+      if (strippedSegments.length === 0) return 0;
+      let hits = 0;
+      for (const w of strippedSegments) {
+        const wl = w.toLowerCase();
+        const wc = wl.replace(/\s+/g, '');
+        if (cn.includes(wl) || cnCompact.includes(wc)) hits++;
+      }
+      let score = hits / strippedSegments.length;
+
+      const scaleRe = /(\d\/\d+)/;
+      const origScale = ot.match(scaleRe)?.[1];
+      const catScale = cn.match(scaleRe)?.[1];
+      if (origScale && catScale && origScale !== catScale) return 0;
+      if (origScale && !catScale) score *= 0.3;
+      if (!origScale && catScale) score *= 0.7;
+
+      const mismatchTypes = ['泡麵蓋', '絨毛', '胸針', '鍵帽', '盲盒', '抱枕', '壓克力', '掛件', '徽章', '公仔', '吊飾'];
+      for (const pt of mismatchTypes) {
+        if (cn.includes(pt) && !ot.includes(pt)) { score *= 0.3; break; }
+      }
+
+      const tail = strippedSegments.slice(Math.max(0, strippedSegments.length - 2));
+      const tailHits = tail.filter(w => {
+        const wl = w.toLowerCase();
+        return cn.includes(wl) || cnCompact.includes(wl.replace(/\s+/g, ''));
+      }).length;
+      if (tail.length > 0 && tailHits === 0) score *= 0.4;
+
+      return score;
+    };
+
+    // --- Proxy (代理版) catalog lookup ---
+    const searchCatalog = async (query: string) => {
+      const resp = await fetch(`/api/catalog/search?q=${encodeURIComponent(query)}&pageSize=8`);
+      return resp.json();
+    };
+
+    const lookupProxy = async (group: ProductGroup): Promise<{ closing_date?: string; release_month?: string; matchName?: string; score: number }> => {
+      const originalTitle = group.normalized_title || group.title;
+      const cleaned = stripProxyTitle(originalTitle);
+      if (cleaned.length < 2) return { score: 0 };
+      const segments = cleaned.split(/\s+/).filter(w => w.length >= 2);
+      const queries: string[] = [];
+      if (segments.length >= 3) queries.push(segments.slice(0, 3).join(' '));
+      if (segments.length >= 2) queries.push(segments.slice(0, 2).join(' '));
+      for (const seg of segments) {
+        if (seg.length >= 2 && !queries.includes(seg)) queries.push(seg);
+      }
+      let bestMatch: any = null;
+      let bestScore = 0;
+      for (const q of queries) {
+        const data = await searchCatalog(q);
+        if (!data.products || data.products.length === 0) continue;
+        for (const p of data.products) {
+          if (!p.catalog?.deadlineAt) continue;
+          const score = matchScore(p.name || '', originalTitle, segments);
+          if (score > bestScore) { bestScore = score; bestMatch = p; }
+        }
+        if (bestScore >= 0.5) break;
+      }
+      if (bestMatch?.catalog?.deadlineAt && bestScore >= 0.4) {
+        const deadline = new Date(bestMatch.catalog.deadlineAt);
+        deadline.setDate(deadline.getDate() - 2);
+        const dateStr = `${deadline.getFullYear()}/${String(deadline.getMonth() + 1).padStart(2, '0')}/${String(deadline.getDate()).padStart(2, '0')}`;
+        return { closing_date: dateStr, matchName: bestMatch.name, score: bestScore };
+      }
+      return { matchName: bestMatch?.name, score: bestScore };
+    };
+
+    // --- Shopify store lookup (Hololive / VSPO) ---
+    const shopifyCache: Record<string, any[]> = {};
+
+    const fetchShopifyProducts = async (apiBase: string): Promise<any[]> => {
+      if (shopifyCache[apiBase]) return shopifyCache[apiBase];
+      const all: any[] = [];
+      let page = 1;
+      while (page <= 4) {
+        const resp = await fetch(`${apiBase}/products.json?limit=250&page=${page}`);
+        const data = await resp.json();
+        if (!data.products || data.products.length === 0) break;
+        all.push(...data.products);
+        if (data.products.length < 250) break;
+        page++;
+      }
+      shopifyCache[apiBase] = all;
+      return all;
+    };
+
+    const parseShopifyPageDates = async (apiBase: string, handle: string): Promise<{ deadline?: string; shippingMonth?: string }> => {
+      const resp = await fetch(`${apiBase}/products/${handle}`);
+      const html = await resp.text();
+      const text = html.replace(/<[^>]*>/g, '');
+      let deadline: string | undefined;
+      const dlMatch = text.match(/(?:受注受付期間|販売期間)[^〜～~]*[〜～~]\s*(\d{4})年(\d{1,2})月(\d{1,2})日/);
+      if (dlMatch) {
+        const d = new Date(parseInt(dlMatch[1]), parseInt(dlMatch[2]) - 1, parseInt(dlMatch[3]));
+        d.setDate(d.getDate() - 4);
+        deadline = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+      }
+      let shippingMonth: string | undefined;
+      const smMatch = text.match(/(?:発送予定日|配送予定日|お届け予定)[：:]*\s*(\d{4})年(\d{1,2})月/);
+      if (smMatch) {
+        shippingMonth = `${smMatch[1]}-${smMatch[2].padStart(2, '0')}`;
+      }
+      return { deadline, shippingMonth };
+    };
+
+    const lookupShopify = async (group: ProductGroup, apiBase: string): Promise<{ closing_date?: string; release_month?: string; productUrl?: string; matchName?: string; score: number }> => {
+      const originalTitle = group.normalized_title || group.title;
+      const cleaned = stripShopTitle(originalTitle);
+      if (cleaned.length < 2) return { score: 0 };
+      const stopWords = new Set(['pop', 'up', 'in', 'at', 'of', 'the', 'and', 'or', 'for', 'to', 'vs', 'vol', 'ver', 'no']);
+      const segments = cleaned.split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w.toLowerCase()));
+      const products = await fetchShopifyProducts(apiBase);
+      const otLower = originalTitle.toLowerCase();
+      const otCompact = otLower.replace(/\s+/g, '');
+
+      let bestMatch: any = null;
+      let bestScore = 0;
+      for (const p of products) {
+        const fwd = matchScore(p.title || '', originalTitle, segments);
+        const shopSegs = (p.title || '').replace(/^(hololive|VSPO|ぶいすぽっ！?)\s*/gi, '').split(/[\s「」【】（）]+/).filter((w: string) => w.length >= 2);
+        let revHits = 0;
+        for (const w of shopSegs) {
+          const wl = w.toLowerCase();
+          if (otLower.includes(wl) || otCompact.includes(wl.replace(/\s+/g, ''))) revHits++;
+        }
+        const rev = shopSegs.length > 0 ? revHits / shopSegs.length : 0;
+        const score = Math.max(fwd, rev * 0.6);
+        if (score > bestScore) { bestScore = score; bestMatch = p; }
+      }
+      const storeOrigin = apiBase === '/api/hololive' ? 'https://shop.hololivepro.com' : 'https://store.vspo.jp';
+      if (!bestMatch || bestScore < 0.4) {
+        return { matchName: bestMatch?.title, score: bestScore };
+      }
+      const dates = await parseShopifyPageDates(apiBase, bestMatch.handle);
+      return {
+        closing_date: dates.deadline,
+        release_month: dates.shippingMonth,
+        productUrl: `${storeOrigin}/products/${bestMatch.handle}`,
+        matchName: bestMatch.title,
+        score: bestScore,
+      };
+    };
+
+    // --- Main loop ---
+    for (const group of targetGroups) {
+      try {
+        const source = getSource(group)!;
+        const originalTitle = (group.normalized_title || group.title).slice(0, 35);
+        let result: { closing_date?: string; release_month?: string; productUrl?: string; matchName?: string; score: number };
+
+        if (source === 'proxy') {
+          result = await lookupProxy(group);
+        } else {
+          const apiBase = source === 'hololive' ? '/api/hololive' : '/api/vspo';
+          result = await lookupShopify(group, apiBase);
+        }
+
+        if (result.closing_date && result.score >= 0.4) {
+          const idx = updatedGroups.findIndex(g => g.id === group.id);
+          if (idx !== -1) {
+            const updates: Partial<ProductGroup> = {};
+            if (!updatedGroups[idx].closing_date) {
+              updates.closing_date = result.closing_date;
+            }
+            if (result.release_month && !updatedGroups[idx].release_month) {
+              updates.release_month = result.release_month;
+            }
+            if (result.productUrl && !updatedGroups[idx].product_url) {
+              updates.product_url = result.productUrl;
+            }
+            updatedGroups[idx] = { ...updatedGroups[idx], ...updates };
+            matched++;
+            const extra = result.release_month ? ` 發售:${result.release_month}` : '';
+            details.push(`✅ ${originalTitle}… → ${result.matchName?.slice(0, 25)} (${Math.round(result.score * 100)}%) → ${result.closing_date}${extra}`);
+          }
+        } else {
+          failed++;
+          const pct = result.score > 0 ? ` (${Math.round(result.score * 100)}%)` : '';
+          if (result.matchName && result.score >= 0.4) {
+            details.push(`❌ ${originalTitle}… — 無結單日${pct}: ${result.matchName.slice(0, 20)}`);
+          } else {
+            details.push(`❌ ${originalTitle}… — ${result.matchName ? `配對度不足${pct}: ${result.matchName.slice(0, 20)}` : '未找到'}`);
+          }
+        }
+      } catch (err) {
+        failed++;
+        console.error('[AutoLookup] Error:', err);
+      }
+    }
+
+    if (matched > 0) {
+      setGroups(updatedGroups);
+      try {
+        await dataProvider.saveProductGroups(updatedGroups);
+      } catch (err) {
+        if (err instanceof StaleDataError) {
+          alert(err.message);
+          setIsStale(true);
+          await loadData();
+          setIsLookingUpDeadlines(false);
+          return;
+        }
+      }
+    }
+
+    setIsLookingUpDeadlines(false);
+    console.log('[AutoLookup] Results:', details.join('\n'));
+    alert(`自動查詢結單日完成！\n\n✅ 成功：${matched} 筆\n❌ 未找到：${failed} 筆\n\n${details.join('\n')}\n\n代理版 = 目錄 - 2天 / Hololive·VSPO = 官方 - 4天`);
+  };
+
   const handlePaste = async (
     e: React.ClipboardEvent<HTMLInputElement>,
     startRowIndex: number,
@@ -2294,6 +2559,26 @@ export default function PurchaseRecords() {
               }}
             >
               套用至勾選商品
+            </button>
+
+            <button
+              onClick={handleAutoLookupDeadlines}
+              disabled={selectedGroupIds.size === 0 || isLookingUpDeadlines}
+              style={{
+                padding: '0 16px',
+                height: '36px',
+                backgroundColor: selectedGroupIds.size > 0 ? '#059669' : '#9ca3af',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 600,
+                fontSize: '13px',
+                cursor: selectedGroupIds.size > 0 ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s',
+                opacity: isLookingUpDeadlines ? 0.7 : 1,
+              }}
+            >
+              {isLookingUpDeadlines ? '查詢中...' : '🔍 自動查詢結單日'}
             </button>
           </div>
         </div>

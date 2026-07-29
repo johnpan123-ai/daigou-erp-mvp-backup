@@ -13,7 +13,9 @@ import type {
   ImportStats,
   JapanPackage,
   JapanPackageItem,
-  BundleComponent
+  BundleComponent,
+  OutboundShipment,
+  OutboundShipmentItem
 } from '../lib/db';
 
 export interface IDataProvider {
@@ -50,6 +52,11 @@ export interface IDataProvider {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+
+  getOutboundShipments(): Promise<OutboundShipment[]>;
+  saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;
+  getOutboundShipmentItems(): Promise<OutboundShipmentItem[]>;
+  saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void>;
 
   getBundleComponents(): Promise<BundleComponent[]>;
   saveBundleComponents(components: BundleComponent[]): Promise<void>;

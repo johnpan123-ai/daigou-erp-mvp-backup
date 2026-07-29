@@ -17,7 +17,9 @@ import type {
   ImportStats,
   JapanPackage,
   JapanPackageItem,
-  BundleComponent
+  BundleComponent,
+  OutboundShipment,
+  OutboundShipmentItem
 } from '../lib/db';
 
 export class StaleDataError extends Error {
@@ -202,6 +204,22 @@ class DynamicDataProvider implements IDataProvider {
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     this.guardStale();
     await this.getActiveProvider().saveJapanPackageItems(items);
+    this.registerWrite();
+  }
+  async getOutboundShipments(): Promise<OutboundShipment[]> {
+    return this.getActiveProvider().getOutboundShipments();
+  }
+  async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
+    this.guardStale();
+    await this.getActiveProvider().saveOutboundShipments(shipments);
+    this.registerWrite();
+  }
+  async getOutboundShipmentItems(): Promise<OutboundShipmentItem[]> {
+    return this.getActiveProvider().getOutboundShipmentItems();
+  }
+  async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
+    this.guardStale();
+    await this.getActiveProvider().saveOutboundShipmentItems(items);
     this.registerWrite();
   }
   async getBundleComponents(): Promise<BundleComponent[]> {

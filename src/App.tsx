@@ -15,6 +15,8 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import UnlistedItems from './pages/UnlistedItems';
 import DuplicateVariants from './pages/DuplicateVariants';
+import OutboundShipmentsList from './pages/OutboundShipmentsList';
+import OutboundShipmentDetail from './pages/OutboundShipmentDetail';
 
 function App() {
   return (
@@ -37,6 +39,8 @@ function App() {
               <Route path="/purchasing" element={<Purchasing />} />
               <Route path="/japan-packages" element={<JapanPackagesList />} />
               <Route path="/japan-packages/:id" element={<JapanPackageDetail />} />
+              <Route path="/outbound-shipments" element={<OutboundShipmentsList />} />
+              <Route path="/outbound-shipments/:id" element={<OutboundShipmentDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/unlisted-items" element={<UnlistedItems />} />
               <Route path="/duplicate-variants" element={<DuplicateVariants />} />

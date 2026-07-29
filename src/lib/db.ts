@@ -94,6 +94,38 @@ export interface JapanPackageItem {
   updated_at?: string;
 }
 
+export interface OutboundShipment {
+  id: string;
+  title: string;
+  status: string;
+  carrier?: string;
+  tracking_number?: string;
+  weight_kg?: number;
+  shipping_cost?: number;
+  shipped_at?: string;
+  received_at?: string;
+  note?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface OutboundShipmentItem {
+  id: string;
+  outbound_shipment_id: string;
+  japan_package_item_id?: string;
+  product_group_id?: string;
+  product_variant_id?: string;
+  product_title?: string;
+  variant_name?: string;
+  sku?: string;
+  quantity: number;
+  checked: boolean;
+  checked_at?: string;
+  note?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface PrivateOrder {
   id: string; // PK
   product_group_id: string; // FK
@@ -437,6 +469,11 @@ export interface DatabaseAdapter {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+
+  getOutboundShipments(): Promise<OutboundShipment[]>;
+  saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;
+  getOutboundShipmentItems(): Promise<OutboundShipmentItem[]>;
+  saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void>;
 
   getBundleComponents(): Promise<BundleComponent[]>;
   saveBundleComponents(components: BundleComponent[]): Promise<void>;
@@ -1723,6 +1760,22 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     saveData('erp_japan_package_items', items);
+  }
+
+  async getOutboundShipments(): Promise<OutboundShipment[]> {
+    return loadData<OutboundShipment[]>('erp_outbound_shipments', []);
+  }
+
+  async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
+    saveData('erp_outbound_shipments', shipments);
+  }
+
+  async getOutboundShipmentItems(): Promise<OutboundShipmentItem[]> {
+    return loadData<OutboundShipmentItem[]>('erp_outbound_shipment_items', []);
+  }
+
+  async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
+    saveData('erp_outbound_shipment_items', items);
   }
 
   async getBundleComponents(): Promise<BundleComponent[]> {
@@ -3068,6 +3121,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       privateOrderItems: await this.getPrivateOrderItems(),
       japanPackages: await this.getJapanPackages(),
       japanPackageItems: await this.getJapanPackageItems(),
+      outboundShipments: await this.getOutboundShipments(),
+      outboundShipmentItems: await this.getOutboundShipmentItems(),
       bundleComponents: await this.getBundleComponents(),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -3096,6 +3151,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       if (data.privateOrderItems) await this.savePrivateOrderItems(data.privateOrderItems);
       if (data.japanPackages) await this.saveJapanPackages(data.japanPackages);
       if (data.japanPackageItems) await this.saveJapanPackageItems(data.japanPackageItems);
+      if (data.outboundShipments) await this.saveOutboundShipments(data.outboundShipments);
+      if (data.outboundShipmentItems) await this.saveOutboundShipmentItems(data.outboundShipmentItems);
       if (data.bundleComponents) await this.saveBundleComponents(data.bundleComponents);
       if (data.importBatches) await this.saveImportBatches(data.importBatches);
       return true;
@@ -3184,6 +3241,22 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     await this.set('erp_japan_package_items', items);
+  }
+
+  async getOutboundShipments(): Promise<OutboundShipment[]> {
+    return this.get<OutboundShipment[]>('erp_outbound_shipments', []);
+  }
+
+  async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
+    await this.set('erp_outbound_shipments', shipments);
+  }
+
+  async getOutboundShipmentItems(): Promise<OutboundShipmentItem[]> {
+    return this.get<OutboundShipmentItem[]>('erp_outbound_shipment_items', []);
+  }
+
+  async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
+    await this.set('erp_outbound_shipment_items', items);
   }
 
   async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {

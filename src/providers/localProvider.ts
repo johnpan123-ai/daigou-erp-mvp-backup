@@ -15,7 +15,9 @@ import type {
   ImportStats,
   JapanPackage,
   JapanPackageItem,
-  BundleComponent
+  BundleComponent,
+  OutboundShipment,
+  OutboundShipmentItem
 } from '../lib/db';
 
 export class LocalProvider implements IDataProvider {
@@ -113,6 +115,18 @@ export class LocalProvider implements IDataProvider {
   }
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     return db.saveJapanPackageItems(items);
+  }
+  async getOutboundShipments(): Promise<OutboundShipment[]> {
+    return db.getOutboundShipments();
+  }
+  async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
+    return db.saveOutboundShipments(shipments);
+  }
+  async getOutboundShipmentItems(): Promise<OutboundShipmentItem[]> {
+    return db.getOutboundShipmentItems();
+  }
+  async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
+    return db.saveOutboundShipmentItems(items);
   }
   async getBundleComponents(): Promise<BundleComponent[]> {
     return db.getBundleComponents();

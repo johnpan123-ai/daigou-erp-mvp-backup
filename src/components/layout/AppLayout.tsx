@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers } from 'lucide-react';
+import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers, PackageOpen } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
@@ -178,6 +178,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )}
           {canViewPage('/japan-packages') && (
             <SidebarItem to="/japan-packages" icon={<Truck size={20} />} label="日本包裹管理" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
+          {canViewPage('/outbound-shipments') && (
+            <SidebarItem to="/outbound-shipments" icon={<PackageOpen size={20} />} label="出庫管理" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           <SidebarItem to="/unlisted-items" icon={<Archive size={20} />} label="待下架商品" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/duplicate-variants') && (
@@ -535,7 +538,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className={`page-content ${location.pathname.startsWith('/japan-packages') ? 'page-content-full' : ''}`}>
+        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''}`}>
           {getProviderMode() === 'local' && location.pathname !== '/login' && (
             <div style={{
               backgroundColor: '#fffbeb',

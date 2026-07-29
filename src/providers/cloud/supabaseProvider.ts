@@ -101,7 +101,9 @@ import type {
   ImportStats,
   JapanPackage,
   JapanPackageItem,
-  BundleComponent
+  BundleComponent,
+  OutboundShipment,
+  OutboundShipmentItem
 } from '../../lib/db';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -503,6 +505,37 @@ export class SupabaseProvider implements IDataProvider {
             created_at: r.created_at
           }));
           await db.saveBundleComponents(mappedBundleComponents);
+
+          // 2.6 Pull and save outbound shipments (gracefully handle missing table)
+          let osData: any[] = [];
+          let osiData: any[] = [];
+          try {
+            osData = await fetchAll<any>(async (from, to) => supabase.from('outbound_shipments').select('*').is('deleted_at', null).order('id').range(from, to));
+            osiData = await fetchAll<any>(async (from, to) => supabase.from('outbound_shipment_items').select('*').is('deleted_at', null).order('id').range(from, to));
+            console.log(`[Sync] 從 Supabase 成功拉取到 outbound_shipments = ${osData.length} 筆, outbound_shipment_items = ${osiData.length} 筆`);
+          } catch (e: any) {
+            console.warn('[Sync WARNING] 抓取 outbound_shipments 發生異常:', e.message || e);
+          }
+          const mappedShipments: OutboundShipment[] = osData.map(r => ({
+            id: r.id, title: r.title, status: r.status || 'draft',
+            carrier: r.carrier || '', tracking_number: r.tracking_number || '',
+            weight_kg: r.weight_kg ? Number(r.weight_kg) : undefined,
+            shipping_cost: r.shipping_cost ? Number(r.shipping_cost) : undefined,
+            shipped_at: r.shipped_at || '', received_at: r.received_at || '',
+            note: r.note || '', created_at: r.created_at, updated_at: r.updated_at
+          }));
+          await db.saveOutboundShipments(mappedShipments);
+          const mappedShipmentItems: OutboundShipmentItem[] = osiData.map(r => ({
+            id: r.id, outbound_shipment_id: r.outbound_shipment_id,
+            japan_package_item_id: r.japan_package_item_id || null,
+            product_group_id: r.product_group_id || null,
+            product_variant_id: r.product_variant_id || null,
+            product_title: r.product_title || '', variant_name: r.variant_name || '',
+            sku: r.sku || '', quantity: Number(r.quantity ?? 1),
+            checked: Boolean(r.checked ?? false), checked_at: r.checked_at || null,
+            note: r.note || '', created_at: r.created_at, updated_at: r.updated_at
+          }));
+          await db.saveOutboundShipmentItems(mappedShipmentItems);
 
           // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
           await this.pullSalesOrders();
@@ -1957,6 +1990,117 @@ export class SupabaseProvider implements IDataProvider {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
       await this.pullCoreProductData(true);
       alert(`雲端同步日本包裹明細發生異常：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
+  async getOutboundShipments(): Promise<OutboundShipment[]> {
+    return db.getOutboundShipments();
+  }
+
+  async getOutboundShipmentItems(): Promise<OutboundShipmentItem[]> {
+    return db.getOutboundShipmentItems();
+  }
+
+  async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
+    const currentLocal = await db.getOutboundShipments();
+    const incomingIds = new Set(shipments.map(s => s.id));
+    const removedShipments = currentLocal.filter(s => !incomingIds.has(s.id));
+
+    await db.saveOutboundShipments(shipments);
+
+    if (!(await this.canWriteCloud())) {
+      return;
+    }
+
+    try {
+      if (removedShipments.length > 0) {
+        const removedIds = removedShipments.map(s => s.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          await retrySupabase(() => supabase
+            .from('outbound_shipments')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds)).catch(e => {
+            console.error('[Sync Push] outbound_shipments delete update failed:', e);
+          });
+        }
+      }
+
+      const active = shipments.filter(s => isValidUuid(s.id));
+      if (active.length > 0) {
+        const upsertData = active.map(s => ({
+          id: s.id, title: s.title, status: s.status || 'draft',
+          carrier: s.carrier || null, tracking_number: s.tracking_number || null,
+          weight_kg: s.weight_kg ?? null, shipping_cost: s.shipping_cost ?? null,
+          shipped_at: s.shipped_at || null, received_at: s.received_at || null,
+          note: s.note || null
+        }));
+        await retrySupabase(() => supabase
+          .from('outbound_shipments')
+          .upsert(upsertData));
+      }
+    } catch (err: any) {
+      if (isSchemaMissingError(err)) {
+        console.warn('[Cloud Push] outbound_shipments table not found, skipping cloud sync');
+        return;
+      }
+      console.error('[Cloud Push ERROR] outbound_shipments:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步出庫單失敗：${err.message || err}。已回復本地快取資料！`);
+      throw err;
+    }
+  }
+
+  async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
+    const currentLocal = await db.getOutboundShipmentItems();
+    const incomingIds = new Set(items.map(i => i.id));
+    const removedItems = currentLocal.filter(i => !incomingIds.has(i.id));
+
+    await db.saveOutboundShipmentItems(items);
+
+    if (!(await this.canWriteCloud())) {
+      return;
+    }
+
+    try {
+      if (removedItems.length > 0) {
+        const removedIds = removedItems.map(i => i.id).filter(isValidUuid);
+        if (removedIds.length > 0) {
+          const nowStr = new Date().toISOString();
+          await retrySupabase(() => supabase
+            .from('outbound_shipment_items')
+            .update({ deleted_at: nowStr })
+            .in('id', removedIds)).catch(e => {
+            console.error('[Sync Push] outbound_shipment_items delete update failed:', e);
+          });
+        }
+      }
+
+      const active = items.filter(i => isValidUuid(i.id) && isValidUuid(i.outbound_shipment_id));
+      if (active.length > 0) {
+        const upsertData = active.map(i => ({
+          id: i.id, outbound_shipment_id: i.outbound_shipment_id,
+          japan_package_item_id: i.japan_package_item_id || null,
+          product_group_id: i.product_group_id || null,
+          product_variant_id: i.product_variant_id || null,
+          product_title: i.product_title || null, variant_name: i.variant_name || null,
+          sku: i.sku || null, quantity: i.quantity || 1,
+          checked: i.checked || false, checked_at: i.checked_at || null,
+          note: i.note || null
+        }));
+        await retrySupabase(() => supabase
+          .from('outbound_shipment_items')
+          .upsert(upsertData));
+      }
+    } catch (err: any) {
+      if (isSchemaMissingError(err)) {
+        console.warn('[Cloud Push] outbound_shipment_items table not found, skipping cloud sync');
+        return;
+      }
+      console.error('[Cloud Push ERROR] outbound_shipment_items:', err.message || err);
+      await this.pullCoreProductData(true);
+      alert(`雲端同步出庫明細失敗：${err.message || err}。已回復本地快取資料！`);
       throw err;
     }
   }

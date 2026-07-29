@@ -129,6 +129,17 @@ export default function Settings() {
     }
   };
 
+  const handleExportSimple = async () => {
+    try {
+      const { exportSimplifiedExcel } = await import('../utils/excelExportSimple');
+      await exportSimplifiedExcel(user?.email);
+      alert('簡易匯出完成');
+    } catch (err: any) {
+      console.error('Simple export failed:', err);
+      alert('簡易匯出失敗，請查看 Console');
+    }
+  };
+
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -269,6 +280,16 @@ export default function Settings() {
               </div>
               <button className="btn btn-outline" onClick={handleExportExcel}>
                 <Download size={16} /> 匯出 Excel
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+              <div>
+                <div className="font-medium" style={{ marginBottom: '4px' }}>簡易匯出 Excel</div>
+                <div className="text-xs text-muted">3 頁精簡報表：商品總覽（可點入查看規格）、數量核對、採購批次。</div>
+              </div>
+              <button className="btn btn-outline" onClick={handleExportSimple}>
+                <Download size={16} /> 簡易匯出
               </button>
             </div>
 
