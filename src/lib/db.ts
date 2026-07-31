@@ -1867,6 +1867,26 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 }
 
 // Singleton export
+const INDEXED_DB_BACKED_STORAGE_KEYS = [
+  'erp_inventory',
+  'erp_sales_orders',
+  'erp_sales_order_items',
+  'erp_product_groups',
+  'erp_product_categories',
+  'erp_product_variants',
+  'erp_purchase_batches',
+  'erp_purchase_batch_items',
+  'erp_private_orders',
+  'erp_private_order_items',
+  'erp_import_batches',
+  'erp_bundle_components',
+  'erp_japan_packages',
+  'erp_japan_package_items',
+  'erp_outbound_shipments',
+  'erp_outbound_shipment_items',
+  'erp_last_import_backup',
+] as const;
+
 export class IndexedDbAdapter implements DatabaseAdapter {
   private dbPromise: Promise<IDBDatabase>;
 
@@ -1889,6 +1909,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
       request.onsuccess = () => {
         console.log('[IndexedDB Open Success]');
+        this.removeRedundantLocalStorageBackups(request.result);
         resolve(request.result);
       };
 
@@ -1897,6 +1918,25 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         reject(request.error);
       };
     });
+  }
+
+  private removeRedundantLocalStorageBackups(db: IDBDatabase): void {
+    try {
+      const transaction = db.transaction('kv', 'readonly');
+      const store = transaction.objectStore('kv');
+
+      INDEXED_DB_BACKED_STORAGE_KEYS.forEach((key) => {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          // Only remove the duplicate after confirming IndexedDB has a copy.
+          if (request.result !== undefined) {
+            localStorage.removeItem(key);
+          }
+        };
+      });
+    } catch {
+      // Keep existing localStorage fallbacks when IndexedDB cannot be read.
+    }
   }
 
   private async get<T>(key: string, defaultValue: T): Promise<T> {
@@ -1961,9 +2001,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         const request = store.put(value, key);
 
         request.onsuccess = () => {
-          // Keep localStorage in sync as backup
+          // IndexedDB is the primary store. Remove any old duplicate instead
+          // of filling localStorage and blocking Supabase Auth persistence.
           try {
-            localStorage.setItem(key, JSON.stringify(value));
+            localStorage.removeItem(key);
           } catch (e) {}
           resolve();
         };
