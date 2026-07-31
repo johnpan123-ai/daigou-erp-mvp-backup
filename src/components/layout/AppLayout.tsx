@@ -287,17 +287,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                         </span>
                         <div style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
                           {displayName || user.email?.split('@')[0] || '已登入'}
-                          <span className="badge" style={{ 
-                            backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : '#e2e8f0', 
-                            color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : '#4a5568', 
-                            border: '1px solid currentColor', 
-                            padding: '2px 6px', 
-                            borderRadius: '6px', 
+                          <span className="badge" style={{
+                            backgroundColor: isProfileLoading ? '#f1f5f9' : role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : '#e2e8f0',
+                            color: isProfileLoading ? '#94a3b8' : role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : '#4a5568',
+                            border: '1px solid currentColor',
+                            padding: '2px 6px',
+                            borderRadius: '6px',
                             fontSize: '10px',
                             textTransform: 'uppercase',
                             fontWeight: 700
                           }}>
-                            {role || 'viewer'}
+                            {isProfileLoading ? '...' : (role || 'viewer')}
                           </span>
                         </div>
                         <div style={{ fontSize: '12px', color: '#64748b', wordBreak: 'break-all', opacity: 0.8, marginTop: '2px' }}>
@@ -485,15 +485,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       </span>
                     </div>
                     <span className="badge" style={{ 
-                      backgroundColor: role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
-                      color: role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
-                      border: '1px solid currentColor', 
-                      padding: '1px 6px', 
-                      borderRadius: '4px', 
+                      backgroundColor: isProfileLoading ? '#f1f5f9' : role === 'owner' ? '#fed7d7' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa',
+                      color: isProfileLoading ? '#94a3b8' : role === 'owner' ? '#9b2c2c' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52',
+                      border: '1px solid currentColor',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
                       fontSize: '10px',
                       textTransform: 'uppercase'
                     }}>
-                      {role || 'viewer'}
+                      {isProfileLoading ? '...' : (role || 'viewer')}
                     </span>
                     <button 
                       onClick={signOut} 

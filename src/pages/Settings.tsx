@@ -8,7 +8,7 @@ import { supabase } from '../providers/cloud/supabaseClient';
 
 export default function Settings() {
   const { user, signOut } = useAuth();
-  const { role, displayName } = useRole();
+  const { role, displayName, isProfileLoading } = useRole();
   const currentMode = getProviderMode();
 
   const [newPassword, setNewPassword] = useState('');
@@ -647,19 +647,19 @@ export default function Settings() {
             <div>
               <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>目前角色 (Role)</span>
               <div>
-                <span className="badge" style={{ 
-                  backgroundColor: role === 'owner' ? '#ebf8ff' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa', 
-                  color: role === 'owner' ? '#2b6cb0' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52', 
-                  border: '1px solid currentColor', 
-                  padding: '2px 8px', 
-                  borderRadius: '4px', 
+                <span className="badge" style={{
+                  backgroundColor: isProfileLoading ? '#f1f5f9' : role === 'owner' ? '#ebf8ff' : role === 'staff' ? '#feebc8' : role === 'helper' ? '#e2e8f0' : '#e6fffa',
+                  color: isProfileLoading ? '#94a3b8' : role === 'owner' ? '#2b6cb0' : role === 'staff' ? '#9c4221' : role === 'helper' ? '#4a5568' : '#234e52',
+                  border: '1px solid currentColor',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
                   fontSize: '12px',
                   fontWeight: 600,
                   textTransform: 'uppercase',
                   display: 'inline-block',
                   marginTop: '2px'
                 }}>
-                  {role || 'viewer'}
+                  {isProfileLoading ? '...' : (role || 'viewer')}
                 </span>
               </div>
             </div>

@@ -122,15 +122,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setLoading(false);
-
       if (currentUser) {
         setAuthPending(false);
-        fetchProfile(currentUser.id);
+        await fetchProfile(currentUser.id);
       } else {
         setProfile(null);
         setProfileLoading(false);
       }
+      setLoading(false);
     };
 
     initSession();
@@ -151,8 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (currentUser) {
         setUser(currentUser);
         setAuthPending(false);
-        setLoading(false);
-        fetchProfile(currentUser.id);
+        fetchProfile(currentUser.id).then(() => setLoading(false));
         return;
       }
 
