@@ -95,25 +95,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Check active sessions on load
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const initSession = async () => {
+      let { data: { session } } = await supabase.auth.getSession();
+
+      // If getSession returns null but we have a stored token, try refreshing
+      if (!session?.user && hasStoredSupabaseSession()) {
+        console.log('[Auth] getSession returned null, attempting refreshSession...');
+        const refreshResult = await supabase.auth.refreshSession();
+        if (refreshResult.data?.session) {
+          session = refreshResult.data.session;
+          console.log('[Auth] refreshSession succeeded');
+        } else {
+          console.warn('[Auth] refreshSession failed:', refreshResult.error?.message);
+        }
+      }
+
       const currentUser = session?.user ?? null;
       setUser(currentUser);
 
       const currentMode = getProviderMode();
       if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
-        if (hasStoredSupabaseSession()) {
-          console.log('[Provider Mode] auth pending, do not fallback local');
-          setAuthPending(true);
-          setLoading(true); // Keep loading spinner active
-          return;
-        } else {
-          console.log('[Provider Mode] no stored session, staying in cloud read-only mode');
-          setLoading(false);
-          setProfile(null);
-          setProfileLoading(false);
-          return;
-        }
+        console.log('[Auth] no valid session on load, staying in cloud read-only mode');
+        setLoading(false);
+        setProfile(null);
+        setProfileLoading(false);
+        return;
       }
 
       setLoading(false);
@@ -125,7 +131,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
         setProfileLoading(false);
       }
-    });
+    };
+
+    initSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const currentUser = session?.user ?? null;
