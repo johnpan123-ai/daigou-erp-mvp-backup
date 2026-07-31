@@ -276,7 +276,7 @@ export class SupabaseProvider implements IDataProvider {
 
   async canWriteCloud(): Promise<boolean> {
     const role = await this.getRole();
-    return role === 'owner' || role === 'staff';
+    return role === 'owner' || role === 'staff' || role === 'helper';
   }
 
   async testConnection(): Promise<string> {

@@ -19,60 +19,18 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function hasStoredSupabaseSession(): boolean {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return false;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
-        return true;
-      }
-    }
-  } catch (e) {
-    console.error('Error checking localStorage:', e);
-  }
-  return false;
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [authPending, setAuthPending] = useState(false);
 
-  useEffect(() => {
-    if (authPending) {
-      const timer = setTimeout(() => {
-        console.warn('[Auth] token refresh timed out after 2h, staying in cloud read-only');
-        setAuthPending(false);
-        setLoading(false);
-      }, 2 * 60 * 60 * 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [authPending]);
-
-  // Safety timeout: Ensure loading is set to false after 4 seconds regardless of auth status
-  useEffect(() => {
-    if (loading) {
-      const timer = setTimeout(() => {
-        console.warn('[AuthProvider] Safety timeout: Force loading to false to prevent page hang');
-        setLoading(false);
-        setAuthPending(false);
-      }, 4000); // 4 seconds safety timeout
-      return () => clearTimeout(timer);
-    }
-  }, [loading]);
-
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
     // Only query database if not in pure local mode
     if (getProviderMode() === 'local') {
-      setProfile(null);
-      setProfileLoading(false);
-      return;
+      return null;
     }
 
-    setProfileLoading(true);
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -82,95 +40,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (error) {
         console.error('Error fetching user profile:', error);
-        setProfile(null);
+        return null;
       } else {
-        setProfile(data as UserProfile);
+        return data as UserProfile;
       }
     } catch (err) {
       console.error('Failed to load profile:', err);
-      setProfile(null);
-    } finally {
-      setProfileLoading(false);
+      return null;
     }
   };
 
   useEffect(() => {
-    const initSession = async () => {
-      let { data: { session } } = await supabase.auth.getSession();
-
-      // If getSession returns null but we have a stored token, try refreshing
-      if (!session?.user && hasStoredSupabaseSession()) {
-        console.log('[Auth] getSession returned null, attempting refreshSession...');
-        const refreshResult = await supabase.auth.refreshSession();
-        if (refreshResult.data?.session) {
-          session = refreshResult.data.session;
-          console.log('[Auth] refreshSession succeeded');
-        } else {
-          console.warn('[Auth] refreshSession failed:', refreshResult.error?.message);
-        }
-      }
-
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-
-      const currentMode = getProviderMode();
-      if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
-        console.log('[Auth] no valid session on load, staying in cloud read-only mode');
-        setLoading(false);
-        setProfile(null);
-        setProfileLoading(false);
-        return;
-      }
-
-      if (currentUser) {
-        setAuthPending(false);
-        await fetchProfile(currentUser.id);
-      } else {
-        setProfile(null);
-        setProfileLoading(false);
-      }
-      setLoading(false);
-    };
-
-    initSession();
+    let active = true;
+    let profileRequestId = 0;
+    let initialAuthResolved = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      const currentUser = session?.user ?? null;
+      if (!active) return;
 
-      if (event === 'SIGNED_OUT') {
-        console.log('[Auth] explicit SIGNED_OUT event');
+      const currentUser = session?.user ?? null;
+      const isInitialResolution = !initialAuthResolved;
+      initialAuthResolved = true;
+
+      if (!currentUser) {
+        profileRequestId++;
         setUser(null);
         setProfile(null);
         setProfileLoading(false);
-        setAuthPending(false);
         setLoading(false);
         return;
       }
 
-      if (currentUser) {
-        setUser(currentUser);
-        setAuthPending(false);
-        fetchProfile(currentUser.id).then(() => setLoading(false));
-        return;
-      }
+      setUser(currentUser);
+      setProfileLoading(true);
+      if (isInitialResolution) setLoading(true);
 
-      // null session on a non-SIGNED_OUT event (e.g. TOKEN_REFRESHED failure,
-      // network hiccup while tab is in background). Keep the previous user state
-      // so the UI doesn't flash to logged-out during transient failures.
-      const currentMode = getProviderMode();
-      if (currentMode === 'cloud' || currentMode === 'fallback') {
-        if (hasStoredSupabaseSession()) {
-          console.log(`[Auth] ${event} with null session but stored token exists, keeping current state`);
-          return;
-        }
-        console.log(`[Auth] ${event} with null session, no stored token, staying cloud read-only`);
-        setLoading(false);
-        setProfile(null);
-        setProfileLoading(false);
+      const requestId = ++profileRequestId;
+      // Supabase auth callbacks run while an auth lock is held. Defer the
+      // profile query until after the callback returns to avoid lock contention.
+      window.setTimeout(() => {
+        void fetchProfile(currentUser.id).then(nextProfile => {
+          if (!active || requestId !== profileRequestId) return;
+          setProfile(nextProfile);
+        }).finally(() => {
+          if (!active || requestId !== profileRequestId) return;
+          setProfileLoading(false);
+          setLoading(false);
+        });
+      }, 0);
+
+      if (import.meta.env.DEV) {
+        console.debug(`[Auth] ${event}: session restored for ${currentUser.id}`);
       }
     });
 
     return () => {
+      active = false;
+      profileRequestId++;
       subscription.unsubscribe();
     };
   }, []);
