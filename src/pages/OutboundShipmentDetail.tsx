@@ -114,7 +114,7 @@ export default function OutboundShipmentDetail() {
   // Build pool: items from arrived packages with available quantity > 0
   const poolItems = useMemo<PoolItem[]>(() => {
     const arrivedPackageIds = new Set(
-      japanPackages.filter(p => p.status === 'arrived' || p.arrived_at).map(p => p.id)
+      japanPackages.filter(p => p.status === 'arrived' || p.status === 'confirmed' || p.arrived_at).map(p => p.id)
     );
 
     // Compute shipped quantities across ALL shipments (except current one for available calc)
@@ -164,7 +164,8 @@ export default function OutboundShipmentDetail() {
         p.displayName.toLowerCase().includes(q) ||
         p.categoryName.toLowerCase().includes(q) ||
         p.variantName.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q)
+        p.sku.toLowerCase().includes(q) ||
+        p.packageTitle.toLowerCase().includes(q)
       );
     }
 
@@ -819,7 +820,7 @@ export default function OutboundShipmentDetail() {
               <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8', fontSize: 14 }}>
                 <PackageOpen size={36} style={{ opacity: 0.3, marginBottom: 8 }} />
                 <p>目前沒有可出庫的商品</p>
-                <p style={{ fontSize: 12 }}>請確認日本包裹的狀態為「已到貨」</p>
+                <p style={{ fontSize: 12 }}>請確認日本包裹的狀態為「已到貨」或「已點收」</p>
               </div>
             ) : (
               Array.from(groupedPool.entries()).map(([groupName, items]) => {

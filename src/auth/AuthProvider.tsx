@@ -44,10 +44,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (authPending) {
       const timer = setTimeout(() => {
-        console.warn('[Auth] token refresh timed out, staying in cloud read-only');
+        console.warn('[Auth] token refresh timed out after 2h, staying in cloud read-only');
         setAuthPending(false);
         setLoading(false);
-      }, 30000);
+      }, 2 * 60 * 60 * 1000);
       return () => clearTimeout(timer);
     }
   }, [authPending]);
@@ -140,33 +140,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setUser(currentUser);
-
-      const currentMode = getProviderMode();
-      if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
-        if (event === 'TOKEN_REFRESHED') {
-          console.log('[Auth] TOKEN_REFRESHED with null session, keeping cloud mode');
-        }
-        if (hasStoredSupabaseSession()) {
-          console.log('[Auth] auth pending, keeping cloud mode during refresh');
-          setAuthPending(true);
-          setLoading(true);
-          return;
-        } else {
-          console.log('[Auth] no stored session, staying in cloud read-only mode');
-          setLoading(false);
-          setProfile(null);
-          setProfileLoading(false);
-          return;
-        }
+      if (currentUser) {
+        setUser(currentUser);
+        setAuthPending(false);
+        setLoading(false);
+        fetchProfile(currentUser.id);
+        return;
       }
 
-      setLoading(false);
-
-      if (currentUser) {
-        setAuthPending(false);
-        fetchProfile(currentUser.id);
-      } else {
+      // null session on a non-SIGNED_OUT event (e.g. TOKEN_REFRESHED failure,
+      // network hiccup while tab is in background). Keep the previous user state
+      // so the UI doesn't flash to logged-out during transient failures.
+      const currentMode = getProviderMode();
+      if (currentMode === 'cloud' || currentMode === 'fallback') {
+        if (hasStoredSupabaseSession()) {
+          console.log(`[Auth] ${event} with null session but stored token exists, keeping current state`);
+          return;
+        }
+        console.log(`[Auth] ${event} with null session, no stored token, staying cloud read-only`);
+        setLoading(false);
         setProfile(null);
         setProfileLoading(false);
       }

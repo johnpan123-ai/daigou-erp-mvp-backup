@@ -40,6 +40,18 @@ const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: bool
   );
 };
 
+const logCrash = (context: string, err: unknown) => {
+  const entry = { time: new Date().toISOString(), error: String(err), stack: (err as any)?.stack, context };
+  window.__erpCrashLog = window.__erpCrashLog || [];
+  window.__erpCrashLog.push(entry);
+  try {
+    const existing = JSON.parse(localStorage.getItem('erp_crash_log') || '[]');
+    existing.push(entry);
+    if (existing.length > 20) existing.splice(0, existing.length - 20);
+    localStorage.setItem('erp_crash_log', JSON.stringify(existing));
+  } catch { /* ignore */ }
+};
+
 const WACA_META_ID = '00000000-0000-4000-a000-000000000000';
 
 const formatWacaDate = (dateStr: string) => {
@@ -228,54 +240,60 @@ export default function PurchaseRecords() {
   // depend on draftDemands at all, so they're precomputed once per group here and only
   // recomputed when the underlying data actually changes.
   const groupV0BaseMap = useMemo(() => {
-    const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
-    const map = new Map<string, { v0: ProductVariant; v0Myacg: number; v0Waca: number; v0Private: number; v0Purchased: number; v0OriginalGap: number }>();
+    try {
+      const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
+      const map = new Map<string, { v0: ProductVariant; v0Myacg: number; v0Waca: number; v0Private: number; v0Purchased: number; v0OriginalGap: number }>();
 
-    for (const v of variants) {
-      const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
-      if (!groupId || map.has(groupId)) continue; // keep only the first variant per group (matches groupVars[0])
+      for (const v of variants) {
+        const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
+        if (!groupId || map.has(groupId)) continue;
 
-      const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code, inventory, salesOrderItems);
-      const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
-      const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
-        ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
-        : null;
-      const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
-        ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
-        : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
-      const v0Myacg = rawMyacg >= 0 ? rawMyacg : 0;
+        const rawMyacgQty = calculateFinalMyacgDemand(v.myacg_item_code || '', inventory, salesOrderItems);
+        const localMyacg = (rawMyacgQty >= 0 ? rawMyacgQty : 0) + (v.myacg_manual_adjustment ?? 0);
+        const autoMyacg = (v.myacg_auto_quantity !== null && v.myacg_auto_quantity !== undefined && v.myacg_auto_quantity >= 0)
+          ? v.myacg_auto_quantity + (v.myacg_manual_adjustment ?? 0)
+          : null;
+        const rawMyacg = (v.effective_myacg_quantity !== null && v.effective_myacg_quantity !== undefined && v.effective_myacg_quantity >= 0)
+          ? v.effective_myacg_quantity + (v.myacg_manual_adjustment ?? 0)
+          : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
+        const v0Myacg = rawMyacg >= 0 ? rawMyacg : 0;
 
-      const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-      const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-        ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-        : null;
-      const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-      const v0Waca = rawWaca >= 0 ? rawWaca : 0;
+        const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
+        const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
+          ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
+          : null;
+        const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
+        const v0Waca = rawWaca >= 0 ? rawWaca : 0;
 
-      const localPrivate = privateOrderItems.filter(poi => poi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-      const v0Private = rawPrivate >= 0 ? rawPrivate : 0;
+        const localPrivate = privateOrderItems.filter(poi => poi && poi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
+        const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
+        const v0Private = rawPrivate >= 0 ? rawPrivate : 0;
 
-      const localPurchased = batchItems.filter(pbi => pbi.product_variant_id === v.id).reduce((sum, item) => sum + item.quantity, 0);
-      const manualPurchased = v.purchased_manual_adjustment;
-      const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
-      let rawPurchased = 0;
-      if (typeof manualPurchased === 'number' && manualPurchased > 0) {
-        rawPurchased = manualPurchased;
-      } else if (localPurchased > 0) {
-        rawPurchased = localPurchased;
-      } else if (typeof legacyPurchased === 'number' && legacyPurchased > 0) {
-        rawPurchased = legacyPurchased;
+        const localPurchased = batchItems.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
+        const manualPurchased = v.purchased_manual_adjustment;
+        const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
+        let rawPurchased = 0;
+        if (typeof manualPurchased === 'number' && manualPurchased > 0) {
+          rawPurchased = manualPurchased;
+        } else if (localPurchased > 0) {
+          rawPurchased = localPurchased;
+        } else if (typeof legacyPurchased === 'number' && legacyPurchased > 0) {
+          rawPurchased = legacyPurchased;
+        }
+        const v0Purchased = rawPurchased;
+
+        const v0OriginalDemand = v0Myacg + v0Waca + v0Private;
+        const v0OriginalGap = Math.max(v0OriginalDemand - v0Purchased, 0);
+
+        map.set(groupId, { v0: v, v0Myacg, v0Waca, v0Private, v0Purchased, v0OriginalGap });
       }
-      const v0Purchased = rawPurchased;
 
-      const v0OriginalDemand = v0Myacg + v0Waca + v0Private;
-      const v0OriginalGap = Math.max(v0OriginalDemand - v0Purchased, 0);
-
-      map.set(groupId, { v0: v, v0Myacg, v0Waca, v0Private, v0Purchased, v0OriginalGap });
+      return map;
+    } catch (err) {
+      console.error('[PurchaseRecords] groupV0BaseMap failed:', err);
+      logCrash('groupV0BaseMap useMemo', err);
+      return new Map<string, { v0: ProductVariant; v0Myacg: number; v0Waca: number; v0Private: number; v0Purchased: number; v0OriginalGap: number }>();
     }
-
-    return map;
   }, [categories, variants, inventory, salesOrderItems, privateOrderItems, batchItems]);
 
   const getDynamicGap = (groupId: string, originalGap: number) => {
@@ -643,40 +661,42 @@ export default function PurchaseRecords() {
   // Precompute all groups' aggregates in a single O(variants) pass here, memoized on the
   // underlying data, so both helpers below become plain O(1) map lookups.
   const groupPlatformDetailsMap = useMemo(() => {
-    const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
-    type Agg = { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; proxyGap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean };
-    const acc = new Map<string, Agg>();
+    try {
+      const catGroupMap = new Map(categories.map(c => [c.id, c.product_group_id]));
+      type Agg = { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; proxyGap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean };
+      const acc = new Map<string, Agg>();
 
-    for (const v of variants) {
-      const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
-      if (!groupId) continue;
+      for (const v of variants) {
+        const groupId = v.product_group_id || (v.product_category_id ? catGroupMap.get(v.product_category_id) : undefined);
+        if (!groupId) continue;
 
-      let entry = acc.get(groupId);
-      if (!entry) {
-        entry = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, proxyGap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
-        acc.set(groupId, entry);
+        let entry = acc.get(groupId);
+        if (!entry) {
+          entry = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, proxyGap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
+          acc.set(groupId, entry);
+        }
+
+        const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
+        entry.myacg += res.myacg;
+        entry.waca += res.waca;
+        entry.privateOrder += res.privateOrder;
+        entry.purchased += res.purchased;
+        entry.myacgManual += (v.myacg_manual_adjustment ?? 0);
+        entry.wacaManual += (v.waca_manual_adjustment ?? 0);
+        entry.gap += res.gap;
+
+        const proxyDemand = res.myacg + (v.waca_manual_adjustment ?? 0) + res.privateOrder;
+        entry.proxyGap += Math.max(proxyDemand - res.purchased, 0);
+
+        if (v.catalog_missing === true) entry.hasCatalogMissing = true;
       }
 
-      const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
-      entry.myacg += res.myacg;
-      entry.waca += res.waca;
-      entry.privateOrder += res.privateOrder;
-      entry.purchased += res.purchased;
-      entry.myacgManual += (v.myacg_manual_adjustment ?? 0);
-      entry.wacaManual += (v.waca_manual_adjustment ?? 0);
-      entry.gap += res.gap;
-
-      // Proxy-product demand uses wacaManual instead of the full waca figure. This must be
-      // clamped PER VARIANT (like res.gap above) and then summed -- not summed-then-clamped --
-      // otherwise a variant bought in excess silently cancels out another variant's shortage
-      // within the same group when they're netted together as raw totals.
-      const proxyDemand = res.myacg + (v.waca_manual_adjustment ?? 0) + res.privateOrder;
-      entry.proxyGap += Math.max(proxyDemand - res.purchased, 0);
-
-      if (v.catalog_missing === true) entry.hasCatalogMissing = true;
+      return acc;
+    } catch (err) {
+      console.error('[PurchaseRecords] groupPlatformDetailsMap build failed:', err);
+      logCrash('groupPlatformDetailsMap useMemo', err);
+      return new Map<string, { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; proxyGap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean }>();
     }
-
-    return acc;
   }, [categories, variants, privateOrderItems, batchItems, inventory, salesOrderItems]);
 
   const EMPTY_GROUP_DETAILS = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, proxyGap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
@@ -773,92 +793,107 @@ export default function PurchaseRecords() {
   // variants mapping (including the category → group indirection) and a first-match-wins
   // categories-by-id index (mirroring categories.find()) once, memoized on the data.
   const searchIndex = useMemo(() => {
-    const catToGroup = new Map<string, string>();
-    for (const c of categories) {
-      if (c.product_group_id) catToGroup.set(c.id, c.product_group_id);
-    }
-    const varsByGroup = new Map<string, ProductVariant[]>();
-    for (const v of variants) {
-      const direct = v.product_group_id;
-      const viaCat = v.product_category_id ? catToGroup.get(v.product_category_id) : undefined;
-      for (const gid of direct === viaCat ? [direct] : [direct, viaCat]) {
-        if (!gid) continue;
-        const arr = varsByGroup.get(gid);
-        if (arr) arr.push(v); else varsByGroup.set(gid, [v]);
+    try {
+      const catToGroup = new Map<string, string>();
+      for (const c of categories) {
+        if (c.product_group_id) catToGroup.set(c.id, c.product_group_id);
       }
+      const varsByGroup = new Map<string, ProductVariant[]>();
+      for (const v of variants) {
+        const direct = v.product_group_id;
+        const viaCat = v.product_category_id ? catToGroup.get(v.product_category_id) : undefined;
+        for (const gid of direct === viaCat ? [direct] : [direct, viaCat]) {
+          if (!gid) continue;
+          const arr = varsByGroup.get(gid);
+          if (arr) arr.push(v); else varsByGroup.set(gid, [v]);
+        }
+      }
+      const categoriesById = new Map<string, ProductCategory>();
+      for (const c of categories) {
+        if (!categoriesById.has(c.id)) categoriesById.set(c.id, c);
+      }
+      return { varsByGroup, categoriesById };
+    } catch (err) {
+      console.error('[PurchaseRecords] searchIndex build failed:', err);
+      logCrash('searchIndex useMemo', err);
+      return { varsByGroup: new Map<string, ProductVariant[]>(), categoriesById: new Map<string, ProductCategory>() };
     }
-    const categoriesById = new Map<string, ProductCategory>();
-    for (const c of categories) {
-      if (!categoriesById.has(c.id)) categoriesById.set(c.id, c);
-    }
-    return { varsByGroup, categoriesById };
   }, [variants, categories]);
 
   const baseGroups = useMemo(() => {
-    let result = [...groups];
+    try {
+      let result = [...groups];
 
-    // Filter by activeTab
-    if (activeTab === 'hololive') {
-      result = result.filter(g => isHololiveProduct(g));
-    } else if (activeTab === 'vspo') {
-      result = result.filter(g => isVspoProduct(g));
-    } else if (activeTab === 'proxy') {
-      result = result.filter(g => isProxyProduct(g));
-    } else if (activeTab === 'other') {
-      result = result.filter(g => isOtherProduct(g));
-    }
+      // Filter by activeTab
+      if (activeTab === 'hololive') {
+        result = result.filter(g => isHololiveProduct(g));
+      } else if (activeTab === 'vspo') {
+        result = result.filter(g => isVspoProduct(g));
+      } else if (activeTab === 'proxy') {
+        result = result.filter(g => isProxyProduct(g));
+      } else if (activeTab === 'other') {
+        result = result.filter(g => isOtherProduct(g));
+      }
 
-    // 1. Filter Source
-    if (filterSource !== 'all') {
-      result = result.filter(g => {
-        if (filterSource === '代理商品') return isProxyProduct(g);
-        if (filterSource === 'Hololive') return isHololiveProduct(g);
-        if (filterSource === 'VSPO') return isVspoProduct(g);
-        return false;
-      });
-    }
-
-    // 2. Filter Type
-    if (filterType !== 'all') {
-      result = result.filter(g => {
-        if (filterType === '代理版') return checkIsProxyProduct(g);
-        return (g.listing_type || '一般預購') === filterType;
-      });
-    }
-
-    // 3. Search
-    if (deferredSearchTerm.trim()) {
-      const lowerTerm = deferredSearchTerm.toLowerCase();
-      result = result.filter(g => {
-        const isProxy = checkIsProxyProduct(g);
-        const effectiveListingType = isProxy ? '代理版' : (g.listing_type || '');
-
-        // Find variants in this group (including categories mapped to this group)
-        const groupVars = searchIndex.varsByGroup.get(g.id) ?? [];
-
-        const hasMatchingVariantOrCategory = groupVars.some(v => {
-          if (v.variant_name && v.variant_name.toLowerCase().includes(lowerTerm)) return true;
-          if (v.raw_variant_name && v.raw_variant_name.toLowerCase().includes(lowerTerm)) return true;
-          if (v.product_category_id) {
-            const cat = searchIndex.categoriesById.get(v.product_category_id);
-            if (cat && cat.title && cat.title.toLowerCase().includes(lowerTerm)) return true;
-          }
+      // 1. Filter Source
+      if (filterSource !== 'all') {
+        result = result.filter(g => {
+          if (filterSource === '代理商品') return isProxyProduct(g);
+          if (filterSource === 'Hololive') return isHololiveProduct(g);
+          if (filterSource === 'VSPO') return isVspoProduct(g);
           return false;
         });
+      }
 
-        return (
-          (g.title && g.title.toLowerCase().includes(lowerTerm)) ||
-          (g.normalized_title && g.normalized_title.toLowerCase().includes(lowerTerm)) ||
-          (g.release_month && g.release_month.toLowerCase().includes(lowerTerm)) ||
-          (g.closing_date && g.closing_date.toLowerCase().includes(lowerTerm)) ||
-          effectiveListingType.includes(lowerTerm) ||
-          (g.product_url && g.product_url.toLowerCase().includes(lowerTerm)) ||
-          hasMatchingVariantOrCategory
-        );
-      });
+      // 2. Filter Type
+      if (filterType !== 'all') {
+        result = result.filter(g => {
+          if (filterType === '代理版') return checkIsProxyProduct(g);
+          return (g.listing_type || '一般預購') === filterType;
+        });
+      }
+
+      // 3. Search
+      if (deferredSearchTerm.trim()) {
+        const lowerTerm = deferredSearchTerm.toLowerCase();
+        result = result.filter(g => {
+          try {
+            const isProxy = checkIsProxyProduct(g);
+            const effectiveListingType = isProxy ? '代理版' : (g.listing_type || '');
+
+            const groupVars = searchIndex.varsByGroup.get(g.id) ?? [];
+
+            const hasMatchingVariantOrCategory = groupVars.some(v => {
+              if (v.variant_name && v.variant_name.toLowerCase().includes(lowerTerm)) return true;
+              if (v.raw_variant_name && v.raw_variant_name.toLowerCase().includes(lowerTerm)) return true;
+              if (v.product_category_id) {
+                const cat = searchIndex.categoriesById.get(v.product_category_id);
+                if (cat && cat.title && cat.title.toLowerCase().includes(lowerTerm)) return true;
+              }
+              return false;
+            });
+
+            return (
+              (g.title && g.title.toLowerCase().includes(lowerTerm)) ||
+              (g.normalized_title && g.normalized_title.toLowerCase().includes(lowerTerm)) ||
+              (g.release_month && g.release_month.toLowerCase().includes(lowerTerm)) ||
+              (g.closing_date && g.closing_date.toLowerCase().includes(lowerTerm)) ||
+              effectiveListingType.includes(lowerTerm) ||
+              (g.product_url && g.product_url.toLowerCase().includes(lowerTerm)) ||
+              hasMatchingVariantOrCategory
+            );
+          } catch {
+            return true;
+          }
+        });
+      }
+
+      return result;
+    } catch (err) {
+      console.error('[PurchaseRecords] baseGroups filter failed:', err);
+      logCrash('baseGroups useMemo', err);
+      return [...groups];
     }
-
-    return result;
   }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, variants, categories, inventory, isProxyProductMap, searchIndex]);
 
   const { progressCount, closedCount, noClosingDateCount, allCount, toPurchaseCount } = useMemo(() => {
@@ -871,10 +906,11 @@ export default function PurchaseRecords() {
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
+    try {
     if (secondaryTab !== 'progress') return [];
 
     let result = baseGroups.filter(g => {
-      if (checkIsGroupClosed(g)) return false; // Must be in-progress
+      if (checkIsGroupClosed(g)) return false;
       return checkIsGroupOverdue(g);
     });
 
@@ -920,9 +956,15 @@ export default function PurchaseRecords() {
     });
 
     return result;
+    } catch (err) {
+      console.error('[PurchaseRecords] completedGroups failed:', err);
+      logCrash('completedGroups useMemo', err);
+      return [];
+    }
   }, [baseGroups, secondaryTab, sortMode]);
 
   const filteredAndSortedGroups = useMemo(() => {
+    try {
     let result = [...baseGroups];
 
     // Filter by progress/closed tab
@@ -992,6 +1034,11 @@ export default function PurchaseRecords() {
     });
 
     return result;
+    } catch (err) {
+      console.error('[PurchaseRecords] filteredAndSortedGroups failed:', err);
+      logCrash('filteredAndSortedGroups useMemo', err);
+      return [];
+    }
   }, [baseGroups, secondaryTab, sortMode]);
 
   const [stableEditOrder, setStableEditOrder] = useState<string[] | null>(null);
@@ -2688,6 +2735,22 @@ export default function PurchaseRecords() {
       {/* Table section */}
       {(() => {
         const renderGroupsTable = (list: ProductGroup[], tableId: string) => {
+          try {
+            return renderGroupsTableInner(list, tableId);
+          } catch (err) {
+            console.error('[PurchaseRecords] renderGroupsTable crashed:', err);
+            logCrash(`renderGroupsTable(${tableId})`, err);
+            return (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#ef4444' }}>
+                <p style={{ fontWeight: 600 }}>表格渲染發生錯誤</p>
+                <p style={{ fontSize: '13px', color: '#64748b' }}>請嘗試清除搜尋關鍵字或重新整理頁面</p>
+                <pre style={{ fontSize: '11px', color: '#94a3b8', maxWidth: '600px', margin: '8px auto', overflow: 'auto', textAlign: 'left' }}>{String(err)}</pre>
+              </div>
+            );
+          }
+        };
+
+        const renderGroupsTableInner = (list: ProductGroup[], tableId: string) => {
           if (isMobile) {
             return (
               <div className="mobile-card-list">
