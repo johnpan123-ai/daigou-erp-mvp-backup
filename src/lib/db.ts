@@ -1,3 +1,5 @@
+import { reportStorageWriteFailure } from './storageGuard';
+
 export interface InventoryItem {
   import_sort_index?: number;
   myacg_item_code: string; // PK
@@ -2017,7 +2019,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       console.warn(`[IndexedDB Write Fallback] Writing to localStorage for ${key}`, e);
       try {
         localStorage.setItem(key, JSON.stringify(value));
-      } catch (err) {}
+      } catch (err) {
+        reportStorageWriteFailure(key, err);
+        throw err;
+      }
     }
   }
 

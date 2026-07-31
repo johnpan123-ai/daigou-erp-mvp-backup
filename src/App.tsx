@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ViewportProvider } from './contexts/ViewportContext';
 import { AuthProvider } from './auth/AuthProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { StorageWarningBanner } from './components/StorageWarningBanner';
 import { AppLayout } from './components/layout/AppLayout';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
@@ -24,6 +25,7 @@ function App() {
     <ViewportProvider>
       <AuthProvider>
         <BrowserRouter>
+          <StorageWarningBanner />
           <AppLayout>
             <div style={{ position: 'fixed', bottom: 10, right: 10, fontSize: '12px', color: '#64748b', zIndex: 9999, pointerEvents: 'none' }}>
               Hotfix H-2 display v2
