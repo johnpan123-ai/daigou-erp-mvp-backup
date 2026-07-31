@@ -41,14 +41,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [authPending, setAuthPending] = useState(false);
 
-  // Fallback timeout for when refresh fails permanently or offline too long
   useEffect(() => {
     if (authPending) {
       const timer = setTimeout(() => {
-        console.log('[Provider Mode] auth refresh timed out, falling back to local');
-        setProviderMode('local');
-        window.location.reload();
-      }, 15000); // 15 seconds timeout
+        console.warn('[Auth] token refresh timed out, staying in cloud read-only');
+        setAuthPending(false);
+        setLoading(false);
+      }, 30000);
       return () => clearTimeout(timer);
     }
   }, [authPending]);
@@ -128,20 +127,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Listen for authentication changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const currentUser = session?.user ?? null;
+
+      if (event === 'SIGNED_OUT') {
+        console.log('[Auth] explicit SIGNED_OUT event');
+        setUser(null);
+        setProfile(null);
+        setProfileLoading(false);
+        setAuthPending(false);
+        setLoading(false);
+        return;
+      }
+
       setUser(currentUser);
 
       const currentMode = getProviderMode();
       if (!currentUser && (currentMode === 'cloud' || currentMode === 'fallback')) {
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('[Auth] TOKEN_REFRESHED with null session, keeping cloud mode');
+        }
         if (hasStoredSupabaseSession()) {
-          console.log('[Provider Mode] keep cloud mode during auth refresh');
+          console.log('[Auth] auth pending, keeping cloud mode during refresh');
           setAuthPending(true);
-          setLoading(true); // Keep loading spinner active
+          setLoading(true);
           return;
         } else {
-          console.log('[Provider Mode] no stored session, staying in cloud read-only mode');
+          console.log('[Auth] no stored session, staying in cloud read-only mode');
           setLoading(false);
           setProfile(null);
           setProfileLoading(false);
