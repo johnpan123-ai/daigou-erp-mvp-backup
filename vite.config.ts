@@ -8,7 +8,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api/catalog': {
-        target: 'https://xiaohebo-catalog-beta.onrender.com',
+        target: 'https://xiaohebo-catalog-beta.comiindex-hippo.workers.dev',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/catalog/, '/api'),
       },
