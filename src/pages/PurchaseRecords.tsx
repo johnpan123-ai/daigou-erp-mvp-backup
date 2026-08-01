@@ -360,8 +360,10 @@ export default function PurchaseRecords() {
   const [filterSource, setFilterSource] = useState(() => localStorage.getItem('erp_filter_source') || 'all');
   const [filterType, setFilterType] = useState(() => localStorage.getItem('erp_filter_type') || 'all');
   const [sortMode, setSortMode] = useState(() => localStorage.getItem('erp_sort_mode') || 'closing_urgent');
-  const [activeTab, setActiveTab] = useState<'all' | 'hololive' | 'vspo' | 'proxy' | 'other'>(() => {
-    return (localStorage.getItem('erp_active_tab') as 'all' | 'hololive' | 'vspo' | 'proxy' | 'other') || 'all';
+  const [activeTab, setActiveTab] = useState<'all' | 'c108' | 'hololive' | 'vspo' | 'proxy' | 'other'>(() => {
+    const saved = localStorage.getItem('erp_active_tab');
+    if (saved === 'all' || saved === 'c108' || saved === 'hololive' || saved === 'vspo' || saved === 'proxy' || saved === 'other') return saved;
+    return 'all';
   });
 
   const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'no_closing_date' | 'to_purchase' | 'all'>(() => {
@@ -476,6 +478,7 @@ export default function PurchaseRecords() {
     const tabParam = searchParams.get('tab');
     if (tabParam) {
       if (tabParam === 'all') setActiveTab('all');
+      else if (tabParam === 'c108') setActiveTab('c108');
       else if (tabParam === 'hololive') setActiveTab('hololive');
       else if (tabParam === 'vspo') setActiveTab('vspo');
       else if (tabParam === 'agency') setActiveTab('proxy');
@@ -634,15 +637,27 @@ export default function PurchaseRecords() {
     return !!checkIsProxyProduct(g);
   };
 
+  const isC108Product = (g: ProductGroup) => {
+    const titleNorm = normalizeForMatch(g.title?.normalize('NFKC'));
+    const normTitleNorm = normalizeForMatch(g.normalized_title?.normalize('NFKC'));
+    return titleNorm.includes('c108') || normTitleNorm.includes('c108');
+  };
+
+  // C108 is the highest-priority display category. A C108 group must not also
+  // appear under Hololive, VSPO, proxy, or other category tabs.
+  const isProxyCategoryProduct = (g: ProductGroup) => {
+    return !isC108Product(g) && isProxyProduct(g);
+  };
+
   const isHololiveProduct = (g: ProductGroup) => {
-    if (isProxyProduct(g)) return false;
+    if (isC108Product(g) || isProxyProduct(g)) return false;
     const titleNorm = normalizeForMatch(g.title);
     const normTitleNorm = normalizeForMatch(g.normalized_title);
     return titleNorm.includes('hololive') || normTitleNorm.includes('hololive');
   };
 
   const isVspoProduct = (g: ProductGroup) => {
-    if (isProxyProduct(g)) return false;
+    if (isC108Product(g) || isProxyProduct(g)) return false;
     const titleNorm = normalizeForMatch(g.title);
     const normTitleNorm = normalizeForMatch(g.normalized_title);
     return titleNorm.includes('vspo') || titleNorm.includes('ぶいすぽ') || 
@@ -650,7 +665,7 @@ export default function PurchaseRecords() {
   };
 
   const isOtherProduct = (g: ProductGroup) => {
-    return !isProxyProduct(g) && !isHololiveProduct(g) && !isVspoProduct(g);
+    return !isC108Product(g) && !isProxyProduct(g) && !isHololiveProduct(g) && !isVspoProduct(g);
   };
 
   // Both getGroupPlatformDetails() and getGroupDemandAndPurchased() used to re-filter/re-sum
@@ -825,12 +840,14 @@ export default function PurchaseRecords() {
       let result = [...groups];
 
       // Filter by activeTab
-      if (activeTab === 'hololive') {
+      if (activeTab === 'c108') {
+        result = result.filter(g => isC108Product(g));
+      } else if (activeTab === 'hololive') {
         result = result.filter(g => isHololiveProduct(g));
       } else if (activeTab === 'vspo') {
         result = result.filter(g => isVspoProduct(g));
       } else if (activeTab === 'proxy') {
-        result = result.filter(g => isProxyProduct(g));
+        result = result.filter(g => isProxyCategoryProduct(g));
       } else if (activeTab === 'other') {
         result = result.filter(g => isOtherProduct(g));
       }
@@ -2151,6 +2168,25 @@ export default function PurchaseRecords() {
         >
           全部商品 ({groups.length})
         </button>
+        <button
+          onClick={() => { setActiveTab('c108'); setSearchTerm(''); }}
+          style={{
+            padding: '8px 16px',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: 'none',
+            background: 'none',
+            borderBottom: activeTab === 'c108' ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === 'c108' ? '#2563eb' : '#64748b',
+            transition: 'all 0.2s',
+            marginBottom: '-1px',
+            whiteSpace: 'nowrap',
+            flex: isMobile ? '0 0 auto' : undefined
+          }}
+        >
+          C108專區 ({groups.filter(isC108Product).length})
+        </button>
         <button 
           onClick={() => { setActiveTab('hololive'); setSearchTerm(''); }}
           style={{
@@ -2206,7 +2242,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          代理版商品 ({groups.filter(isProxyProduct).length})
+          代理版商品 ({groups.filter(isProxyCategoryProduct).length})
         </button>
         <button 
           onClick={() => { setActiveTab('other'); setSearchTerm(''); }}
