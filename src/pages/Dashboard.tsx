@@ -7,6 +7,7 @@ import { ClipboardList, AlertTriangle, Clock, CheckCircle2, ChevronRight, Refres
 import { supabase } from '../providers/cloud/supabaseClient';
 import { supabaseProvider } from '../providers/cloud/supabaseProvider';
 import { getProviderMode } from '../providers/providerMode';
+import { getAllDashboardCategoryImages, migrateLegacyDashboardImages, saveDashboardCategoryImage } from '../lib/dashboardImageStore';
 
 export default function Dashboard() {
   const [groups, setGroups] = useState<ProductGroup[]>([]);
@@ -39,9 +40,14 @@ export default function Dashboard() {
     other: '/images/other.png'
   };
 
-  const refreshCategoryImages = () => {
+  // Fallback mode still routes every read/write through SupabaseProvider, so it must
+  // use the cloud image URLs too -- treating it as local made it write megabyte Base64
+  // blobs into localStorage exactly when cloud sync was already struggling.
+  const usesCloudImages = (mode: ReturnType<typeof getProviderMode>) => mode === 'cloud' || mode === 'fallback';
+
+  const refreshCategoryImages = async () => {
     const mode = getProviderMode();
-    if (mode === 'cloud') {
+    if (usesCloudImages(mode)) {
       setCategoryImages({
         all: localStorage.getItem('dashboard_cloud_img_all') || '',
         hololive: localStorage.getItem('dashboard_cloud_img_hololive') || '',
@@ -50,13 +56,9 @@ export default function Dashboard() {
         other: localStorage.getItem('dashboard_cloud_img_other') || ''
       });
     } else {
-      setCategoryImages({
-        all: localStorage.getItem('dashboard_category_img_all') || '',
-        hololive: localStorage.getItem('dashboard_category_img_hololive') || '',
-        vspo: localStorage.getItem('dashboard_category_img_vspo') || '',
-        agency: localStorage.getItem('dashboard_category_img_agency') || '',
-        other: localStorage.getItem('dashboard_category_img_other') || ''
-      });
+      // IndexedDB-first; the store falls back to any legacy localStorage copy
+      // that has not been migrated yet.
+      setCategoryImages(await getAllDashboardCategoryImages());
     }
   };
 
@@ -75,7 +77,7 @@ export default function Dashboard() {
 
     const mode = getProviderMode();
 
-    if (mode === 'cloud') {
+    if (usesCloudImages(mode)) {
       try {
         setIsLoading(true);
         // 1. 刪除舊圖片 (若有)
@@ -111,7 +113,7 @@ export default function Dashboard() {
 
         // 4. 更新雲端資料庫與本地 localStorage 快取
         await supabaseProvider.saveDashboardCategoryImage(activeCategoryForUpload, publicUrl, newPath);
-        refreshCategoryImages();
+        await refreshCategoryImages();
         alert('雲端圖片上傳成功！');
       } catch (err: any) {
         console.error('上傳圖片至雲端失敗:', err);
@@ -120,25 +122,46 @@ export default function Dashboard() {
         setIsLoading(false);
       }
     } else {
-      // Local Mode: 舊有 localStorage 儲存 Data URL 方式
+      // Local Mode: Data URL 存入 IndexedDB（不再寫入 localStorage，避免擠壓登入狀態）
+      const categoryKey = activeCategoryForUpload;
       const reader = new FileReader();
+
+      reader.onerror = () => {
+        console.error('[DashboardImage] 讀取圖片檔案失敗', reader.error);
+        alert('讀取圖片檔案失敗，原本的圖片維持不變。');
+      };
+
       reader.onload = (event) => {
         const dataUrl = event.target?.result as string;
-        if (dataUrl) {
-          localStorage.setItem(`dashboard_category_img_${activeCategoryForUpload}`, dataUrl);
-          setCategoryImages(prev => ({
-            ...prev,
-            [activeCategoryForUpload]: dataUrl
-          }));
+        if (!dataUrl) {
+          alert('讀取圖片檔案失敗，原本的圖片維持不變。');
+          return;
         }
+
+        void saveDashboardCategoryImage(categoryKey, dataUrl)
+          .then(() => {
+            setCategoryImages(prev => ({ ...prev, [categoryKey]: dataUrl }));
+          })
+          .catch(err => {
+            // Storage failed -- keep the previously displayed image and say so
+            // rather than reporting a save that did not happen.
+            console.error('[DashboardImage] 儲存圖片失敗', err);
+            alert('儲存圖片失敗：瀏覽器儲存空間不足或無法使用，原本的圖片維持不變。');
+          });
       };
+
       reader.readAsDataURL(file);
     }
   };
 
   useEffect(() => {
     loadData();
-    refreshCategoryImages();
+    // Legacy Base64 images can be sitting in localStorage in any provider mode, so
+    // reclaim that space first, then read. Migration never deletes on failure, and
+    // the read path falls back to localStorage for anything left behind.
+    void migrateLegacyDashboardImages()
+      .catch(err => console.error('[DashboardImage] Migration pass failed', err))
+      .then(() => refreshCategoryImages());
   }, []);
 
   const loadData = async () => {
