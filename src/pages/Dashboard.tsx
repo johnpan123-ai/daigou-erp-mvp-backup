@@ -19,6 +19,11 @@ export default function Dashboard() {
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
   const [refreshTime, setRefreshTime] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Distinguishes "load failed and we have nothing to show" from "load failed but
+  // the previous numbers are still on screen", which need different wording.
+  const hasLoadedData = groups.length > 0;
 
   const navigate = useNavigate();
 
@@ -167,15 +172,21 @@ export default function Dashboard() {
   const loadData = async () => {
     setIsLoading(true);
     try {
+      // No per-call .catch fallbacks here: swallowing a failed fetch into [] made a
+      // total sync failure render as "0 項" plus "太棒了！目前沒有需要處理的商品",
+      // which is indistinguishable from a genuinely clear day.
       const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
-        dataProvider.getProductGroups().catch(() => []),
-        dataProvider.getProductVariants().catch(() => []),
-        dataProvider.getProductCategories().catch(() => []),
-        dataProvider.getPurchaseBatchItems().catch(() => []),
-        dataProvider.getPrivateOrderItems().catch(() => []),
-        dataProvider.getInventory().catch(() => []),
-        dataProvider.getSalesOrderItems().catch(() => [])
+        dataProvider.getProductGroups(),
+        dataProvider.getProductVariants(),
+        dataProvider.getProductCategories(),
+        dataProvider.getPurchaseBatchItems(),
+        dataProvider.getPrivateOrderItems(),
+        dataProvider.getInventory(),
+        dataProvider.getSalesOrderItems()
       ]);
+
+      // Commit only after every fetch resolved, so a partial failure can never
+      // blank out numbers that are already on screen.
       setGroups(fetchedGroups || []);
       setVariants(fetchedVars || []);
       setCategories(fetchedCats || []);
@@ -183,15 +194,23 @@ export default function Dashboard() {
       setPrivateOrderItems(fetchedPrivateItems || []);
       setInventory(fetchedInventory || []);
       setSalesOrderItems(fetchedOrderItems || []);
-    } catch (e) {
-      console.error('Failed to load data on Dashboard', e);
-    }
+      setLoadError(null);
 
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
-    refreshCategoryImages();
-    setIsLoading(false);
+      // Only stamp a fresh "更新時間" when the data behind it is actually fresh.
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
+    } catch (e) {
+      // Existing data state is left untouched on purpose -- stale numbers with a
+      // visible warning beat wrong numbers presented as current.
+      console.error('Failed to load data on Dashboard', e);
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      void refreshCategoryImages().catch(err =>
+        console.error('[DashboardImage] Failed to refresh category images', err)
+      );
+      setIsLoading(false);
+    }
   };
 
   // --- Classification logic (Strictly matched with PurchaseRecords.tsx, with safety guards) ---
@@ -1114,6 +1133,50 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {loadError && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          flexWrap: 'wrap',
+          padding: '12px 16px',
+          marginBottom: '16px',
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fca5a5',
+          borderRadius: '12px',
+          color: '#991b1b',
+          fontSize: '14px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+            <span>
+              資料載入失敗，請重新整理或重試。
+              {hasLoadedData && '（以下顯示的是上次成功載入的資料，可能不是最新狀態）'}
+            </span>
+          </div>
+          <button
+            onClick={loadData}
+            disabled={isLoading}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              border: '1px solid #dc2626',
+              borderRadius: '8px',
+              backgroundColor: '#fff',
+              color: '#991b1b',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.6 : 1,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            {isLoading ? '重新載入中…' : '重新載入'}
+          </button>
+        </div>
+      )}
+
       {/* 第一區：營運摘要 */}
       <div className="kpi-grid">
         {/* 開單中商品數 */}
@@ -1374,7 +1437,12 @@ export default function Dashboard() {
             查看全部提醒 &gt;
           </a>
         </div>
-        {urgentGroups.length === 0 ? (
+        {urgentGroups.length === 0 && loadError ? (
+          // An empty list after a failed load means "we don't know", not "nothing to do".
+          <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fef2f2', borderRadius: '16px', border: '1px dashed #fca5a5', color: '#991b1b', fontSize: '14px', boxSizing: 'border-box', textAlign: 'center', padding: '0 16px' }}>
+            資料載入失敗，無法確認是否有即將結單的商品，請重新載入。
+          </div>
+        ) : urgentGroups.length === 0 ? (
           <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', borderRadius: '16px', border: '1px dashed #e2e8f0', color: '#64748b', fontSize: '14px', boxSizing: 'border-box' }}>
             🎉 太棒了！目前沒有即將結單或需要處理的商品。
           </div>
