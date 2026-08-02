@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
+import { mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrderItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 
@@ -184,6 +185,10 @@ export default function PurchaseBatchModal({
   };
 
   const batchMap = useMemo(() => new Map(purchaseBatches.map(b => [b.id, b])), [purchaseBatches]);
+  const groupPurchaseBatchItems = useMemo(() => {
+    if (!group?.id) return [];
+    return mapPurchaseBatchItemsByGroup(purchaseBatches, purchaseBatchItems).get(group.id) ?? [];
+  }, [purchaseBatches, purchaseBatchItems, group?.id]);
 
   const getAutoBatchName = (batches: PurchaseBatch[]): string => {
     const groupBatches = batches.filter(b => b.product_group_id === group?.id && b.id !== editingBatchId);
@@ -199,7 +204,7 @@ export default function PurchaseBatchModal({
   );
 
   const getLatestBatchCost = (variantId: string): number | null => {
-    const items = purchaseBatchItems.filter(item => item.product_variant_id === variantId && item.cost > 0);
+    const items = groupPurchaseBatchItems.filter(item => item.product_variant_id === variantId && item.cost > 0);
     if (items.length === 0) return null;
     
     items.sort((a, b) => {
@@ -217,7 +222,7 @@ export default function PurchaseBatchModal({
     const res = calculateVariantDemandAndPurchased(
       v,
       privateOrderItems,
-      purchaseBatchItems,
+      groupPurchaseBatchItems,
       inventory,
       salesOrderItems
     );
@@ -233,7 +238,7 @@ export default function PurchaseBatchModal({
 
   const getVariantShortageForModal = (v: ProductVariant) => {
     const { totalDemand } = getVariantDemands(v);
-    const purchased = purchaseBatchItems
+    const purchased = groupPurchaseBatchItems
       .filter(pbi => pbi.product_variant_id === v.id && pbi.purchase_batch_id !== editingBatchId)
       .reduce((sum, item) => sum + item.quantity, 0);
 

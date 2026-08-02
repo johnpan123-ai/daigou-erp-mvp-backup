@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { calculateGroupDemandAndPurchased } from '../lib/db';
+import { mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import { dataProvider } from '../providers/dataProvider';
-import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
+import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { ClipboardList, AlertTriangle, Clock, CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react';
 import { supabase } from '../providers/cloud/supabaseClient';
 import { supabaseProvider } from '../providers/cloud/supabaseProvider';
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [batches, setBatches] = useState<PurchaseBatch[]>([]);
   const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -20,6 +22,10 @@ export default function Dashboard() {
   const [refreshTime, setRefreshTime] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const batchItemsByGroupId = useMemo(
+    () => mapPurchaseBatchItemsByGroup(batches, batchItems),
+    [batches, batchItems]
+  );
 
   // Distinguishes "load failed and we have nothing to show" from "load failed but
   // the previous numbers are still on screen", which need different wording.
@@ -175,10 +181,11 @@ export default function Dashboard() {
       // No per-call .catch fallbacks here: swallowing a failed fetch into [] made a
       // total sync failure render as "0 項" plus "太棒了！目前沒有需要處理的商品",
       // which is indistinguishable from a genuinely clear day.
-      const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
+      const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
         dataProvider.getProductCategories(),
+        dataProvider.getPurchaseBatches(),
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getPrivateOrderItems(),
         dataProvider.getInventory(),
@@ -190,6 +197,7 @@ export default function Dashboard() {
       setGroups(fetchedGroups || []);
       setVariants(fetchedVars || []);
       setCategories(fetchedCats || []);
+      setBatches(fetchedBatches || []);
       setBatchItems(fetchedBatchItems || []);
       setPrivateOrderItems(fetchedPrivateItems || []);
       setInventory(fetchedInventory || []);
@@ -298,7 +306,7 @@ export default function Dashboard() {
       categories || [],
       variants || [],
       privateOrderItems || [],
-      batchItems || [],
+      batchItemsByGroupId.get(groupId) || [],
       inventory || [],
       salesOrderItems || []
     );
@@ -390,7 +398,7 @@ export default function Dashboard() {
       urgent3Count,
       closedCount
     };
-  }, [groups, variants, inventory, salesOrderItems, batchItems, privateOrderItems, today]);
+  }, [groups, variants, inventory, salesOrderItems, batchItemsByGroupId, privateOrderItems, today]);
 
   // Categories count
   const categoryCounts = useMemo(() => {
@@ -477,7 +485,7 @@ export default function Dashboard() {
     });
 
     return eligibleList.slice(0, 10);
-  }, [groups, today, variants, inventory, salesOrderItems, batchItems, privateOrderItems]);
+  }, [groups, today, variants, inventory, salesOrderItems, batchItemsByGroupId, privateOrderItems]);
 
   return (
     <div className="dashboard-container">

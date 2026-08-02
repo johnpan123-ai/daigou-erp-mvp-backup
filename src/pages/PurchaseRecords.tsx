@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
+import { mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 
-import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
+import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -90,10 +91,15 @@ export default function PurchaseRecords() {
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [batches, setBatches] = useState<PurchaseBatch[]>([]);
   const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
+  const batchItemsByGroupId = useMemo(
+    () => mapPurchaseBatchItemsByGroup(batches, batchItems),
+    [batches, batchItems]
+  );
 
   // isInitialLoading: true until we have SOMETHING to show (either local cache or the fresh
   // cloud fetch) — blocks the table so we never render a misleading "0 筆" while data is still
@@ -269,7 +275,8 @@ export default function PurchaseRecords() {
         const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
         const v0Private = rawPrivate >= 0 ? rawPrivate : 0;
 
-        const localPurchased = batchItems.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
+        const groupBatchItems = batchItemsByGroupId.get(groupId) ?? [];
+        const localPurchased = groupBatchItems.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
         const manualPurchased = v.purchased_manual_adjustment;
         const legacyPurchased = (v as any).ordered_quantity ?? (v as any).ordered_qty;
         let rawPurchased = 0;
@@ -294,7 +301,7 @@ export default function PurchaseRecords() {
       logCrash('groupV0BaseMap useMemo', err);
       return new Map<string, { v0: ProductVariant; v0Myacg: number; v0Waca: number; v0Private: number; v0Purchased: number; v0OriginalGap: number }>();
     }
-  }, [categories, variants, inventory, salesOrderItems, privateOrderItems, batchItems]);
+  }, [categories, variants, inventory, salesOrderItems, privateOrderItems, batchItemsByGroupId]);
 
   const getDynamicGap = (groupId: string, originalGap: number) => {
     const base = groupV0BaseMap.get(groupId);
@@ -691,7 +698,8 @@ export default function PurchaseRecords() {
           acc.set(groupId, entry);
         }
 
-        const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
+        const groupBatchItems = batchItemsByGroupId.get(groupId) ?? [];
+        const res = calculateVariantDemandAndPurchased(v, privateOrderItems, groupBatchItems, inventory, salesOrderItems);
         entry.myacg += res.myacg;
         entry.waca += res.waca;
         entry.privateOrder += res.privateOrder;
@@ -712,7 +720,7 @@ export default function PurchaseRecords() {
       logCrash('groupPlatformDetailsMap useMemo', err);
       return new Map<string, { myacg: number; waca: number; privateOrder: number; purchased: number; gap: number; proxyGap: number; myacgManual: number; wacaManual: number; hasCatalogMissing: boolean }>();
     }
-  }, [categories, variants, privateOrderItems, batchItems, inventory, salesOrderItems]);
+  }, [categories, variants, privateOrderItems, batchItemsByGroupId, inventory, salesOrderItems]);
 
   const EMPTY_GROUP_DETAILS = { myacg: 0, waca: 0, privateOrder: 0, purchased: 0, gap: 0, proxyGap: 0, myacgManual: 0, wacaManual: 0, hasCatalogMissing: false };
 
@@ -1122,9 +1130,10 @@ export default function PurchaseRecords() {
     try {
       const cachedGroups = await db.getProductGroups();
       if (cachedGroups.length > 0) {
-        const [cachedVars, cachedCats, cachedBatchItems, cachedPrivateItems, cachedInventory, cachedOrderItems] = await Promise.all([
+        const [cachedVars, cachedCats, cachedBatches, cachedBatchItems, cachedPrivateItems, cachedInventory, cachedOrderItems] = await Promise.all([
           db.getProductVariants(),
           db.getProductCategories(),
+          db.getPurchaseBatches(),
           db.getPurchaseBatchItems(),
           db.getPrivateOrderItems(),
           db.getInventory(),
@@ -1135,6 +1144,7 @@ export default function PurchaseRecords() {
         setGroups(cachedGroups.filter(g => g.id !== WACA_META_ID));
         setVariants(cachedVars);
         setCategories(cachedCats);
+        setBatches(cachedBatches);
         setBatchItems(cachedBatchItems);
         setPrivateOrderItems(cachedPrivateItems);
         setInventory(cachedInventory);
@@ -1159,10 +1169,11 @@ export default function PurchaseRecords() {
   };
 
   const loadFreshData = async () => {
-    const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
+    const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
       dataProvider.getProductGroups(),
       dataProvider.getProductVariants(),
       dataProvider.getProductCategories(),
+      dataProvider.getPurchaseBatches(),
       dataProvider.getPurchaseBatchItems(),
       dataProvider.getPrivateOrderItems(),
       dataProvider.getInventory(),
@@ -1224,6 +1235,7 @@ export default function PurchaseRecords() {
     setGroups(regularGroups);
     setVariants(fetchedVars);
     setCategories(fetchedCats);
+    setBatches(fetchedBatches);
     setBatchItems(fetchedBatchItems);
     setPrivateOrderItems(fetchedPrivateItems);
     setInventory(fetchedInventory);
