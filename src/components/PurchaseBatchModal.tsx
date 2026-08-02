@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
-import { mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
-import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrderItem } from '../lib/db';
+import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
+import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrder, PrivateOrderItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 
 interface PurchaseBatchModalProps {
@@ -13,6 +13,7 @@ interface PurchaseBatchModalProps {
   variants: ProductVariant[];
   inventory: InventoryItem[];
   salesOrderItems: any[];
+  privateOrders: PrivateOrder[];
   privateOrderItems: PrivateOrderItem[];
   purchaseBatchItems: PurchaseBatchItem[];
   purchaseBatches: PurchaseBatch[];
@@ -129,6 +130,7 @@ export default function PurchaseBatchModal({
   variants,
   inventory,
   salesOrderItems,
+  privateOrders,
   privateOrderItems,
   purchaseBatchItems,
   purchaseBatches,
@@ -189,6 +191,10 @@ export default function PurchaseBatchModal({
     if (!group?.id) return [];
     return mapPurchaseBatchItemsByGroup(purchaseBatches, purchaseBatchItems).get(group.id) ?? [];
   }, [purchaseBatches, purchaseBatchItems, group?.id]);
+  const groupPrivateOrderItems = useMemo(() => {
+    if (!group?.id) return [];
+    return mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems).get(group.id) ?? [];
+  }, [privateOrders, privateOrderItems, group?.id]);
 
   const getAutoBatchName = (batches: PurchaseBatch[]): string => {
     const groupBatches = batches.filter(b => b.product_group_id === group?.id && b.id !== editingBatchId);
@@ -221,7 +227,7 @@ export default function PurchaseBatchModal({
   const getVariantDemands = (v: ProductVariant) => {
     const res = calculateVariantDemandAndPurchased(
       v,
-      privateOrderItems,
+      groupPrivateOrderItems,
       groupPurchaseBatchItems,
       inventory,
       salesOrderItems

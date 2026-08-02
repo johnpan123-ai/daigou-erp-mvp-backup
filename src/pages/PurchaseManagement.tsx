@@ -4020,6 +4020,7 @@ export default function PurchaseManagement() {
           variants={orderedVariants}
           inventory={Array.from(inventoryMap.values())}
           salesOrderItems={salesOrderItems}
+          privateOrders={privateOrders}
           privateOrderItems={privateOrderItems}
           purchaseBatchItems={purchaseBatchItems}
           purchaseBatches={purchaseBatches}

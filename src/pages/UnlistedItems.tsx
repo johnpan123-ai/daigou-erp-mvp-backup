@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateGroupDemandAndPurchased, normalizeProductTitle } from '../lib/db';
-import { mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
+import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 
 interface UnlistedItemSku {
   sku: string;
@@ -102,17 +102,19 @@ export default function UnlistedItems() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [inventory, groups, variants, categories, privateOrderItems, batches, batchItems, salesOrderItems] = await Promise.all([
+      const [inventory, groups, variants, categories, privateOrders, privateOrderItems, batches, batchItems, salesOrderItems] = await Promise.all([
         dataProvider.getInventory(),
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
         dataProvider.getProductCategories(),
+        dataProvider.getPrivateOrders(),
         dataProvider.getPrivateOrderItems(),
         dataProvider.getPurchaseBatches(),
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getSalesOrderItems()
       ]);
       const batchItemsByGroupId = mapPurchaseBatchItemsByGroup(batches, batchItems);
+      const privateOrderItemsByGroupId = mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems);
 
       const todayStr = getTodayStr();
 
@@ -215,7 +217,7 @@ export default function UnlistedItems() {
             group.id,
             categories,
             variants,
-            privateOrderItems,
+            privateOrderItemsByGroupId.get(group.id) || [],
             batchItemsByGroupId.get(group.id) || [],
             inventory,
             salesOrderItems

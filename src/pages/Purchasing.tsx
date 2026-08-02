@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
-import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
+import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrder, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
+import { mapPrivateOrderItemsByGroup } from '../lib/purchaseBatchScope';
 import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, ExternalLink, Plus } from 'lucide-react';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useViewport } from '../contexts/ViewportContext';
@@ -147,6 +148,7 @@ export default function Purchasing() {
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [privateOrders, setPrivateOrders] = useState<PrivateOrder[]>([]);
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
@@ -297,6 +299,7 @@ export default function Purchasing() {
         fetchedGroups,
         fetchedVars,
         fetchedCats,
+        fetchedPrivateOrders,
         fetchedPrivateItems,
         fetchedInventory,
         fetchedBatchItems,
@@ -306,6 +309,7 @@ export default function Purchasing() {
         dataProvider.getProductGroups().catch(() => []),
         dataProvider.getProductVariants().catch(() => []),
         dataProvider.getProductCategories().catch(() => []),
+        dataProvider.getPrivateOrders().catch(() => []),
         dataProvider.getPrivateOrderItems().catch(() => []),
         dataProvider.getInventory().catch(() => []),
         dataProvider.getPurchaseBatchItems().catch(() => []),
@@ -316,6 +320,7 @@ export default function Purchasing() {
       setGroups(fetchedGroups);
       setVariants(fetchedVars);
       setCategories(fetchedCats);
+      setPrivateOrders(fetchedPrivateOrders);
       setPrivateOrderItems(fetchedPrivateItems);
       setInventory(fetchedInventory);
       setPurchaseBatchItems(fetchedBatchItems);
@@ -407,6 +412,7 @@ export default function Purchasing() {
 
     const categoryMap = new Map(categories.map(c => [c.id, c]));
     const inventoryMap = new Map(inventory.map(inv => [inv.myacg_item_code, inv]));
+    const privateOrderItemsByGroupId = mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems);
 
     const variantDefaultJpyCosts = (() => {
       try {
@@ -426,6 +432,7 @@ export default function Purchasing() {
       const groupBatchItems = purchaseBatchItems.filter(item =>
         groupBatchIds.has(item.purchase_batch_id)
       );
+      const groupPrivateOrderItems = privateOrderItemsByGroupId.get(g.id) ?? [];
 
       // Find all variants of this group
       const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
@@ -462,7 +469,7 @@ export default function Purchasing() {
       groupVars.forEach(v => {
         const res = calculateVariantDemandAndPurchased(
           v,
-          privateOrderItems,
+          groupPrivateOrderItems,
           groupBatchItems,
           inventory,
           salesOrderItems
@@ -584,7 +591,7 @@ export default function Purchasing() {
     })
     .filter(g => g.demand > 0) // Only show items with actual demand
     .sort((a, b) => b.demand - a.demand); // Sort by demand quantity descending
-  }, [groups, variants, categories, privateOrderItems, inventory, purchaseBatches, purchaseBatchItems, salesOrderItems]);
+  }, [groups, variants, categories, privateOrders, privateOrderItems, inventory, purchaseBatches, purchaseBatchItems, salesOrderItems]);
 
   // Filtered summaries for search
   const filteredSummaries = useMemo(() => {
@@ -1592,6 +1599,7 @@ export default function Purchasing() {
           variants={groupVars}
           inventory={inventory}
           salesOrderItems={salesOrderItems}
+          privateOrders={privateOrders}
           privateOrderItems={privateOrderItems}
           purchaseBatchItems={purchaseBatchItems}
           purchaseBatches={purchaseBatches}
