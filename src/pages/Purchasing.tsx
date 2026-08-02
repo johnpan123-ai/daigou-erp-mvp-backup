@@ -418,6 +418,15 @@ export default function Purchasing() {
     })();
 
     return purchaseGroups.map(g => {
+      const groupBatchIds = new Set(
+        purchaseBatches
+          .filter(batch => batch.product_group_id === g.id)
+          .map(batch => batch.id)
+      );
+      const groupBatchItems = purchaseBatchItems.filter(item =>
+        groupBatchIds.has(item.purchase_batch_id)
+      );
+
       // Find all variants of this group
       const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
       const groupVars = variants.filter(v => v.product_group_id === g.id || (v.product_category_id && catIds.has(v.product_category_id)));
@@ -454,7 +463,7 @@ export default function Purchasing() {
         const res = calculateVariantDemandAndPurchased(
           v,
           privateOrderItems,
-          purchaseBatchItems,
+          groupBatchItems,
           inventory,
           salesOrderItems
         );
@@ -575,7 +584,7 @@ export default function Purchasing() {
     })
     .filter(g => g.demand > 0) // Only show items with actual demand
     .sort((a, b) => b.demand - a.demand); // Sort by demand quantity descending
-  }, [groups, variants, categories, privateOrderItems, inventory, purchaseBatchItems, salesOrderItems]);
+  }, [groups, variants, categories, privateOrderItems, inventory, purchaseBatches, purchaseBatchItems, salesOrderItems]);
 
   // Filtered summaries for search
   const filteredSummaries = useMemo(() => {
