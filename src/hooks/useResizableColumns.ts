@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export function useResizableColumns(
   storageKey: string,
   defaultWidths: Record<string, number>
 ) {
+  const activeDragCleanupRef = useRef<(() => void) | null>(null);
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     const saved = localStorage.getItem(storageKey);
     if (saved) {
@@ -16,8 +17,15 @@ export function useResizableColumns(
     return { ...defaultWidths };
   });
 
+  useEffect(() => () => {
+    activeDragCleanupRef.current?.();
+    activeDragCleanupRef.current = null;
+  }, []);
+
   const handleMouseDown = (colKey: string, e: React.MouseEvent) => {
     e.preventDefault();
+    activeDragCleanupRef.current?.();
+
     const startX = e.clientX;
 
     // Get current rendered width from DOM as fallback
@@ -27,25 +35,42 @@ export function useResizableColumns(
 
     const startWidth = colWidths[colKey] || defaultWidths[colKey] || renderedWidth || 150;
     let currentWidth = startWidth;
+    let animationFrameId: number | null = null;
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const dx = moveEvent.clientX - startX;
-      currentWidth = Math.max(50, startWidth + dx);
-
-      // Visual-only update while dragging: mutate the header cell's DOM width directly
-      // instead of calling setColWidths on every mousemove. Going through React state here
-      // used to trigger a full re-render (and all the per-row recomputation that comes with
-      // it) dozens of times per second during a drag. With table-layout: fixed, resizing the
-      // header <th> alone resizes the whole column for every row, so this is visually
-      // identical without the render cost.
+    const applyPendingWidth = () => {
+      animationFrameId = null;
       if (th) {
         th.style.width = `${currentWidth}px`;
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startX;
+      currentWidth = Math.max(50, startWidth + dx);
+
+      if (animationFrameId === null) {
+        animationFrameId = window.requestAnimationFrame(applyPendingWidth);
+      }
+    };
+
+    const cleanupDrag = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('blur', cleanupDrag);
+
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    const handleMouseUp = () => {
+      cleanupDrag();
+      activeDragCleanupRef.current = null;
+
+      if (th) {
+        th.style.width = `${currentWidth}px`;
+      }
 
       // Commit to React state (and persist) exactly once, at the end of the drag.
       setColWidths(prev => {
@@ -55,8 +80,10 @@ export function useResizableColumns(
       });
     };
 
+    activeDragCleanupRef.current = cleanupDrag;
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('blur', cleanupDrag);
   };
 
   const resetWidths = () => {

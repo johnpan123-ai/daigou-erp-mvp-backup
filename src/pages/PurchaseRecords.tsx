@@ -3037,7 +3037,7 @@ export default function PurchaseRecords() {
                         }}
                       />
                     </th>
-                    {editMode && <th style={{ width: '60px', textAlign: 'center' }}>刪除</th>}
+                    {editMode && <th style={{ width: '60px', textAlign: 'center', whiteSpace: 'nowrap' }}>刪除</th>}
                     <th style={{ width: '128px' }}>
                       <div className="th-inner justify-center">
                         <span style={{ whiteSpace: 'nowrap' }}>狀態</span>
@@ -3472,7 +3472,7 @@ export default function PurchaseRecords() {
                         }}
                       />
                     </th>
-                    {editMode && <th style={{ width: '60px', textAlign: 'center' }}>刪除</th>}
+                    {editMode && <th style={{ width: '60px', textAlign: 'center', whiteSpace: 'nowrap' }}>刪除</th>}
                     <th style={{ width: '128px' }}>
                       <div className="th-inner justify-center">
                         <span style={{ whiteSpace: 'nowrap' }}>狀態</span>
