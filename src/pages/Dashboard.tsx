@@ -23,6 +23,8 @@ export default function Dashboard() {
   const [refreshTime, setRefreshTime] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [urgentView, setUrgentView] = useState<'overdue' | 'upcoming'>('overdue');
+  const [upcomingDays, setUpcomingDays] = useState<3 | 5 | 7>(7);
   const batchItemsByGroupId = useMemo(
     () => mapPurchaseBatchItemsByGroup(batches, batchItems),
     [batches, batchItems]
@@ -491,8 +493,18 @@ export default function Dashboard() {
       return b.gap - a.gap;
     });
 
-    return eligibleList.slice(0, 10);
+    return eligibleList;
   }, [groups, today, variants, inventory, salesOrderItems, batchItemsByGroupId, privateOrderItemsByGroupId]);
+
+  const overdueGroups = useMemo(
+    () => urgentGroups.filter(item => item.diffDays < 0),
+    [urgentGroups]
+  );
+  const upcomingGroups = useMemo(
+    () => urgentGroups.filter(item => item.diffDays >= 0 && item.diffDays <= upcomingDays),
+    [urgentGroups, upcomingDays]
+  );
+  const visibleUrgentGroups = (urgentView === 'overdue' ? overdueGroups : upcomingGroups).slice(0, 10);
 
   return (
     <div className="dashboard-container">
@@ -1445,21 +1457,44 @@ export default function Dashboard() {
       <div className="urgent-section">
         <div className="urgent-section-header">
           <div>
-            <h3>即將結單 / 需要處理</h3>
-            <p>7天內即將結單之採購商品項目及目前缺口</p>
+            <h3>{urgentView === 'overdue' ? '已過期' : '即將到期'}</h3>
+            <p>{urgentView === 'overdue' ? '已超過官方結單日且仍有缺口的商品' : `未來 ${upcomingDays} 天內即將結單且仍有缺口的商品`}</p>
           </div>
           <a href="/purchase-records?tab=all" onClick={(e) => { e.preventDefault(); navigate('/purchase-records?tab=all'); }} className="link-view-all">
             查看全部提醒 &gt;
           </a>
         </div>
-        {urgentGroups.length === 0 && loadError ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <button
+            onClick={() => setUrgentView('overdue')}
+            style={{ padding: '6px 14px', borderRadius: '9999px', border: `1px solid ${urgentView === 'overdue' ? '#ef4444' : '#cbd5e1'}`, backgroundColor: urgentView === 'overdue' ? '#fef2f2' : '#fff', color: urgentView === 'overdue' ? '#dc2626' : '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+          >
+            已過期 ({overdueGroups.length})
+          </button>
+          <button
+            onClick={() => setUrgentView('upcoming')}
+            style={{ padding: '6px 14px', borderRadius: '9999px', border: `1px solid ${urgentView === 'upcoming' ? '#f59e0b' : '#cbd5e1'}`, backgroundColor: urgentView === 'upcoming' ? '#fffbeb' : '#fff', color: urgentView === 'upcoming' ? '#b45309' : '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+          >
+            即將到期 ({upcomingGroups.length})
+          </button>
+          {urgentView === 'upcoming' && ([3, 5, 7] as const).map(days => (
+            <button
+              key={days}
+              onClick={() => setUpcomingDays(days)}
+              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${upcomingDays === days ? '#2563eb' : '#cbd5e1'}`, backgroundColor: upcomingDays === days ? '#eff6ff' : '#fff', color: upcomingDays === days ? '#2563eb' : '#64748b', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              {days} 天
+            </button>
+          ))}
+        </div>
+        {visibleUrgentGroups.length === 0 && loadError ? (
           // An empty list after a failed load means "we don't know", not "nothing to do".
           <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fef2f2', borderRadius: '16px', border: '1px dashed #fca5a5', color: '#991b1b', fontSize: '14px', boxSizing: 'border-box', textAlign: 'center', padding: '0 16px' }}>
             資料載入失敗，無法確認是否有即將結單的商品，請重新載入。
           </div>
-        ) : urgentGroups.length === 0 ? (
+        ) : visibleUrgentGroups.length === 0 ? (
           <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', borderRadius: '16px', border: '1px dashed #e2e8f0', color: '#64748b', fontSize: '14px', boxSizing: 'border-box' }}>
-            🎉 太棒了！目前沒有即將結單或需要處理的商品。
+            {urgentView === 'overdue' ? '目前沒有已過期且仍有缺口的商品。' : `目前沒有未來 ${upcomingDays} 天內即將到期且仍有缺口的商品。`}
           </div>
         ) : (
           <>
@@ -1477,7 +1512,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {urgentGroups.map(item => {
+                  {visibleUrgentGroups.map(item => {
                     const g = item.group;
                     if (!g) return null;
                     const gap = item.gap;
@@ -1567,7 +1602,7 @@ export default function Dashboard() {
             </div>
 
             <div className="urgent-cards-container">
-              {urgentGroups.map(item => {
+              {visibleUrgentGroups.map(item => {
                 const g = item.group;
                 if (!g) return null;
                 const gap = item.gap;

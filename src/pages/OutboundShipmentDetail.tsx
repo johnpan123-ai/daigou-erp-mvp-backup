@@ -61,6 +61,7 @@ export default function OutboundShipmentDetail() {
   const [collapsedSelectedGroups, setCollapsedSelectedGroups] = useState<Set<string>>(new Set());
   const [showHeaderEdit, setShowHeaderEdit] = useState(false);
   const [showManualAdd, setShowManualAdd] = useState(false);
+  const [manualSku, setManualSku] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualVariant, setManualVariant] = useState('');
   const [manualQty, setManualQty] = useState('1');
@@ -287,6 +288,7 @@ export default function OutboundShipmentDetail() {
     const newItem: OutboundShipmentItem = {
       id: crypto.randomUUID(),
       outbound_shipment_id: id!,
+      sku: manualSku.trim() || undefined,
       product_title: name,
       variant_name: manualVariant.trim() || undefined,
       quantity: qty,
@@ -297,11 +299,12 @@ export default function OutboundShipmentDetail() {
     const updated = [...selectedItems, newItem];
     setSelectedItems(updated);
     saveItems(updated);
+    setManualSku('');
     setManualName('');
     setManualVariant('');
     setManualQty('1');
     setShowManualAdd(false);
-  }, [selectedItems, id, manualName, manualVariant, manualQty]);
+  }, [selectedItems, id, manualSku, manualName, manualVariant, manualQty]);
 
   const saveItems = async (items: OutboundShipmentItem[]) => {
     const otherItems = allShipmentItems.filter(i => i.outbound_shipment_id !== id);
@@ -618,6 +621,13 @@ export default function OutboundShipmentDetail() {
           {showManualAdd && (
             <div style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', background: '#fefce8' }}>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'end' }}>
+                <div style={{ flex: 1, minWidth: 110 }}>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>SKU（商品編號）</div>
+                  <input value={manualSku} onChange={e => setManualSku(e.target.value)}
+                    placeholder="例：G01234567"
+                    onKeyDown={e => e.key === 'Enter' && addManualItem()}
+                    style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                </div>
                 <div style={{ flex: 2, minWidth: 120 }}>
                   <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>商品名稱 *</div>
                   <input value={manualName} onChange={e => setManualName(e.target.value)}

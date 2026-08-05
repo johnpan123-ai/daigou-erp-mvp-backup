@@ -4,7 +4,7 @@ import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
@@ -140,7 +140,7 @@ export default function PurchaseRecords() {
       setAnimateWacaDialog(false);
     }
   }, [showWacaDialog]);
-  const [selectedWacaUpdater, setSelectedWacaUpdater] = useState<'小河馬' | 'Flanlove' | '許願'>('小河馬');
+  const [selectedWacaUpdater, setSelectedWacaUpdater] = useState<'小河馬' | 'Flanlove' | '許願' | '江尚恩'>('小河馬');
 
   const handleUpdateAgent = async (groupId: string, agent: string) => {
     if (guardAgainstStaleWrite()) return;
@@ -379,9 +379,9 @@ export default function PurchaseRecords() {
     return 'all';
   });
 
-  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'no_closing_date' | 'to_purchase' | 'all'>(() => {
+  const [secondaryTab, setSecondaryTab] = useState<'progress' | 'closed' | 'no_closing_date' | 'no_jpy_cost' | 'to_purchase' | 'all'>(() => {
     const saved = localStorage.getItem('erp_active_secondary_tab');
-    if (saved === 'progress' || saved === 'closed' || saved === 'no_closing_date' || saved === 'to_purchase' || saved === 'all') return saved;
+    if (saved === 'progress' || saved === 'closed' || saved === 'no_closing_date' || saved === 'no_jpy_cost' || saved === 'to_purchase' || saved === 'all') return saved;
     return 'progress';
   });
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
@@ -928,13 +928,20 @@ export default function PurchaseRecords() {
     }
   }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, variants, categories, inventory, isProxyProductMap, searchIndex]);
 
-  const { progressCount, closedCount, noClosingDateCount, allCount, toPurchaseCount } = useMemo(() => {
+  const checkHasMissingJpyCost = (g: ProductGroup): boolean => {
+    if (isProxyProduct(g)) return false;
+    const groupVars = searchIndex.varsByGroup.get(g.id) ?? [];
+    return groupVars.some(v => v.default_jpy_cost === null || v.default_jpy_cost === undefined);
+  };
+
+  const { progressCount, closedCount, noClosingDateCount, missingJpyCostCount, allCount, toPurchaseCount } = useMemo(() => {
     const progress = baseGroups.filter(g => !checkIsGroupClosed(g)).length;
     const closed = baseGroups.filter(g => checkIsGroupClosed(g)).length;
     const noClosingDate = baseGroups.filter(g => checkHasNoClosingDate(g)).length;
+    const missingJpyCost = baseGroups.filter(g => checkHasMissingJpyCost(g)).length;
     const total = baseGroups.length;
     const toPurchase = baseGroups.filter(g => checkIsToPurchase(g)).length;
-    return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, allCount: total, toPurchaseCount: toPurchase };
+    return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, missingJpyCostCount: missingJpyCost, allCount: total, toPurchaseCount: toPurchase };
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
@@ -1016,6 +1023,8 @@ export default function PurchaseRecords() {
       result = result.filter(g => checkIsGroupClosed(g));
     } else if (secondaryTab === 'no_closing_date') {
       result = result.filter(g => checkHasNoClosingDate(g));
+    } else if (secondaryTab === 'no_jpy_cost') {
+      result = result.filter(g => checkHasMissingJpyCost(g));
     } else if (secondaryTab === 'to_purchase') {
       result = result.filter(g => checkIsToPurchase(g));
     }
@@ -2311,7 +2320,7 @@ export default function PurchaseRecords() {
             onClick={() => {
               if (wacaMeta?.proxy_agent) {
                 const currentAgent = wacaMeta.proxy_agent as any;
-                if (['小河馬', 'Flanlove', '許願'].includes(currentAgent)) {
+                if (['小河馬', 'Flanlove', '許願', '江尚恩'].includes(currentAgent)) {
                   setSelectedWacaUpdater(currentAgent);
                 }
               }
@@ -2402,6 +2411,26 @@ export default function PurchaseRecords() {
           >
             <AlertTriangle size={14} />
             未設定結單日 ({noClosingDateCount})
+          </button>
+          <button
+            onClick={() => { setSecondaryTab('no_jpy_cost'); }}
+            style={{
+              padding: '6px 16px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '20px',
+              cursor: 'pointer',
+              border: '1px solid ' + (secondaryTab === 'no_jpy_cost' ? '#d97706' : (missingJpyCostCount > 0 ? '#fbbf24' : '#cbd5e1')),
+              backgroundColor: secondaryTab === 'no_jpy_cost' ? '#fffbeb' : '#ffffff',
+              color: secondaryTab === 'no_jpy_cost' ? '#b45309' : (missingJpyCostCount > 0 ? '#b45309' : '#475569'),
+              transition: 'all 0.15s ease',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <CircleDollarSign size={14} />
+            未設定日幣金額 ({missingJpyCostCount})
           </button>
           <button
             onClick={() => { setSecondaryTab('to_purchase'); }}
@@ -3944,6 +3973,7 @@ export default function PurchaseRecords() {
                   <option value="小河馬">小河馬</option>
                   <option value="Flanlove">Flanlove</option>
                   <option value="許願">許願</option>
+                  <option value="江尚恩">江尚恩</option>
                 </select>
               </div>
             </div>
