@@ -36,41 +36,63 @@ export function useResizableColumns(
     const startWidth = colWidths[colKey] || defaultWidths[colKey] || renderedWidth || 150;
     let currentWidth = startWidth;
     let animationFrameId: number | null = null;
+    let latestOffset = 0;
 
-    const applyPendingWidth = () => {
+    const scrollContainer = th?.closest('.mobile-scroll-wrapper') as HTMLElement | null;
+    const containerRect = scrollContainer?.getBoundingClientRect();
+    const guideLine = document.createElement('div');
+    Object.assign(guideLine.style, {
+      position: 'fixed',
+      top: `${containerRect?.top ?? 0}px`,
+      left: `${startX}px`,
+      width: '2px',
+      height: `${containerRect?.height ?? window.innerHeight}px`,
+      backgroundColor: '#2563eb',
+      boxShadow: '0 0 0 1px rgba(37, 99, 235, 0.15)',
+      pointerEvents: 'none',
+      zIndex: '10000',
+      transform: 'translate3d(0, 0, 0)'
+    });
+    document.body.appendChild(guideLine);
+
+    const applyPendingGuidePosition = () => {
       animationFrameId = null;
-      if (th) {
-        th.style.width = `${currentWidth}px`;
-      }
+      guideLine.style.transform = `translate3d(${latestOffset}px, 0, 0)`;
     };
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const dx = moveEvent.clientX - startX;
+      latestOffset = dx;
       currentWidth = Math.max(50, startWidth + dx);
 
       if (animationFrameId === null) {
-        animationFrameId = window.requestAnimationFrame(applyPendingWidth);
+        animationFrameId = window.requestAnimationFrame(applyPendingGuidePosition);
       }
     };
 
     const cleanupDrag = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('blur', cleanupDrag);
+      document.documentElement.removeEventListener('mouseleave', handleDragCancel);
+      window.removeEventListener('blur', handleDragCancel);
 
       if (animationFrameId !== null) {
         window.cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
       }
+
+      guideLine.remove();
     };
 
-    const handleMouseUp = () => {
+    const handleDragCancel = () => {
       cleanupDrag();
       activeDragCleanupRef.current = null;
+    };
 
-      if (th) {
-        th.style.width = `${currentWidth}px`;
-      }
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      currentWidth = Math.max(50, startWidth + (upEvent.clientX - startX));
+      cleanupDrag();
+      activeDragCleanupRef.current = null;
 
       // Commit to React state (and persist) exactly once, at the end of the drag.
       setColWidths(prev => {
@@ -83,7 +105,8 @@ export function useResizableColumns(
     activeDragCleanupRef.current = cleanupDrag;
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('blur', cleanupDrag);
+    document.documentElement.addEventListener('mouseleave', handleDragCancel);
+    window.addEventListener('blur', handleDragCancel);
   };
 
   const resetWidths = () => {

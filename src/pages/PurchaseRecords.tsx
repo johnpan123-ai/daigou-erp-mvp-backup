@@ -23,6 +23,8 @@ const DEFAULT_COL_WIDTHS = {
   productUrl: 120
 };
 
+const DELETE_COLUMN_WIDTH = 64;
+
 
 const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
   return (
@@ -3037,7 +3039,7 @@ export default function PurchaseRecords() {
                         }}
                       />
                     </th>
-                    {editMode && <th style={{ width: '60px', textAlign: 'center', whiteSpace: 'nowrap' }}>刪除</th>}
+                    {editMode && <th style={{ width: `${DELETE_COLUMN_WIDTH}px`, minWidth: `${DELETE_COLUMN_WIDTH}px`, textAlign: 'center', whiteSpace: 'nowrap' }}>刪除</th>}
                     <th style={{ width: '128px' }}>
                       <div className="th-inner justify-center">
                         <span style={{ whiteSpace: 'nowrap' }}>狀態</span>
@@ -3130,7 +3132,7 @@ export default function PurchaseRecords() {
                           />
                         </td>
                         {editMode && (
-                          <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <td style={{ width: `${DELETE_COLUMN_WIDTH}px`, minWidth: `${DELETE_COLUMN_WIDTH}px`, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                             <button 
                               onClick={() => handleDeleteGroup(g.id, g.normalized_title || g.title)}
                               style={{
@@ -3472,7 +3474,7 @@ export default function PurchaseRecords() {
                         }}
                       />
                     </th>
-                    {editMode && <th style={{ width: '60px', textAlign: 'center', whiteSpace: 'nowrap' }}>刪除</th>}
+                    {editMode && <th style={{ width: `${DELETE_COLUMN_WIDTH}px`, minWidth: `${DELETE_COLUMN_WIDTH}px`, textAlign: 'center', whiteSpace: 'nowrap' }}>刪除</th>}
                     <th style={{ width: '128px' }}>
                       <div className="th-inner justify-center">
                         <span style={{ whiteSpace: 'nowrap' }}>狀態</span>
@@ -3569,7 +3571,7 @@ export default function PurchaseRecords() {
                           />
                         </td>
                         {editMode && (
-                          <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <td style={{ width: `${DELETE_COLUMN_WIDTH}px`, minWidth: `${DELETE_COLUMN_WIDTH}px`, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                             <button 
                               onClick={() => handleDeleteGroup(g.id, g.normalized_title || g.title)}
                               style={{
