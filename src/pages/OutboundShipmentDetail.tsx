@@ -14,6 +14,14 @@ const cleanProductTitle = (title: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const MANUAL_TWD_PRICE_PREFIX = '台幣單價：';
+
+const getManualTwdPrice = (note?: string) => {
+  if (!note?.startsWith(MANUAL_TWD_PRICE_PREFIX)) return undefined;
+  const price = Number(note.slice(MANUAL_TWD_PRICE_PREFIX.length));
+  return Number.isFinite(price) ? price : undefined;
+};
+
 const STATUS_FLOW = ['draft', 'packing', 'shipped', 'received'] as const;
 const STATUS_LABELS: Record<string, string> = {
   draft: '草稿', packing: '打包中', shipped: '已出貨', received: '已到台灣',
@@ -64,6 +72,7 @@ export default function OutboundShipmentDetail() {
   const [manualSku, setManualSku] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualVariant, setManualVariant] = useState('');
+  const [manualTwdPrice, setManualTwdPrice] = useState('');
   const [manualQty, setManualQty] = useState('1');
   const [editingShipped, setEditingShipped] = useState(false);
 
@@ -285,6 +294,7 @@ export default function OutboundShipmentDetail() {
     const name = manualName.trim();
     if (!name) return;
     const qty = parseInt(manualQty) || 1;
+    const twdPrice = manualTwdPrice.trim() === '' ? undefined : Number(manualTwdPrice);
     const newItem: OutboundShipmentItem = {
       id: crypto.randomUUID(),
       outbound_shipment_id: id!,
@@ -293,6 +303,9 @@ export default function OutboundShipmentDetail() {
       variant_name: manualVariant.trim() || undefined,
       quantity: qty,
       checked: false,
+      note: twdPrice !== undefined && Number.isFinite(twdPrice)
+        ? `${MANUAL_TWD_PRICE_PREFIX}${twdPrice}`
+        : undefined,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -302,9 +315,10 @@ export default function OutboundShipmentDetail() {
     setManualSku('');
     setManualName('');
     setManualVariant('');
+    setManualTwdPrice('');
     setManualQty('1');
     setShowManualAdd(false);
-  }, [selectedItems, id, manualSku, manualName, manualVariant, manualQty]);
+  }, [selectedItems, id, manualSku, manualName, manualVariant, manualTwdPrice, manualQty]);
 
   const saveItems = async (items: OutboundShipmentItem[]) => {
     const otherItems = allShipmentItems.filter(i => i.outbound_shipment_id !== id);
@@ -642,6 +656,13 @@ export default function OutboundShipmentDetail() {
                     onKeyDown={e => e.key === 'Enter' && addManualItem()}
                     style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
                 </div>
+                <div style={{ width: 100 }}>
+                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>台幣單價</div>
+                  <input type="number" value={manualTwdPrice} onChange={e => setManualTwdPrice(e.target.value)} min="0" step="1"
+                    placeholder="選填"
+                    onKeyDown={e => e.key === 'Enter' && addManualItem()}
+                    style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                </div>
                 <div style={{ width: 60 }}>
                   <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>數量</div>
                   <input type="number" value={manualQty} onChange={e => setManualQty(e.target.value)} min="1"
@@ -755,8 +776,13 @@ export default function OutboundShipmentDetail() {
                                   <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800 }}>×{item.quantity}</span>
                                 )}
                               </div>
-                              {item.sku && (
-                                <span style={{ fontSize: 11, color: '#94a3b8' }}>{item.sku}</span>
+                              {(item.sku || getManualTwdPrice(item.note) !== undefined) && (
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#94a3b8' }}>
+                                  {item.sku && <span>{item.sku}</span>}
+                                  {getManualTwdPrice(item.note) !== undefined && (
+                                    <span>台幣單價 NT$ {getManualTwdPrice(item.note)!.toLocaleString()}</span>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </div>
