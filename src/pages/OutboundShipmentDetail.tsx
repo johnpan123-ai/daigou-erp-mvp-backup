@@ -355,6 +355,7 @@ export default function OutboundShipmentDetail() {
 
     const rows = selectedItems.map(item => {
       const inv = item.sku ? inventoryBySku.get(item.sku) : undefined;
+      const manualTwdPrice = getManualTwdPrice(item.note);
       return {
         '主編號(多規格編號)': inv?.myacg_parent_code || '',
         '子編號(商品編號)': item.sku || '',
@@ -362,7 +363,7 @@ export default function OutboundShipmentDetail() {
         '商品名稱': item.product_title || '',
         '規格/項目': item.variant_name || '',
         '商品類型': inv?.listing_type || '',
-        '價格': inv ? `${inv.final_price}元` : '',
+        '價格': manualTwdPrice !== undefined ? manualTwdPrice : inv ? `${inv.final_price}元` : '',
         '庫存': item.quantity,
         '銷售': inv?.myacg_sold_quantity ?? 0,
         '刊登時間': inv?.myacg_listed_at || '',
