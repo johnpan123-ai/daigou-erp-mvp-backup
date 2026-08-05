@@ -1955,6 +1955,15 @@ export default function PurchaseRecords() {
           padding: 0 !important;
         }
 
+        .purchase-records-sticky-header th {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          background-color: #f8fafc !important;
+          background-clip: padding-box;
+          box-shadow: 0 1px 0 #e2e8f0;
+        }
+
         .th-inner {
           position: relative;
           padding: 8px 12px;
@@ -3444,7 +3453,7 @@ export default function PurchaseRecords() {
             ) : (
               <ScrollWrapper isMobile={isMobile}>
                 <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
-                <thead>
+                <thead className="purchase-records-sticky-header">
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
                       <input 
