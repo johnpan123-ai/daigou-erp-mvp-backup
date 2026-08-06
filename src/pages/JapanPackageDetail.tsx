@@ -17,6 +17,47 @@ const cleanDisplayProductTitle = (title: string): string => {
   return cleaned;
 };
 
+const MANUAL_TWD_PRICE_PREFIX = '台幣單價：';
+
+const getManualTwdPrice = (note?: string) => {
+  const match = note?.match(/(?:^|\n)台幣單價：\s*([0-9]+(?:\.[0-9]+)?)(?=\n|$)/);
+  if (!match) return undefined;
+  const price = Number(match[1]);
+  return Number.isFinite(price) ? price : undefined;
+};
+
+const getManualItemNote = (note?: string) =>
+  note
+    ?.split('\n')
+    .filter(line => !line.trim().startsWith(MANUAL_TWD_PRICE_PREFIX))
+    .join('\n')
+    .trim() || '';
+
+const REUSABLE_JAPAN_PACKAGE_STATUSES = new Set(['deleted', 'cancelled', 'canceled']);
+
+const getOccupiedPurchaseBatchIds = (
+  packages: JapanPackage[],
+  items: JapanPackageItem[],
+  currentPackageId?: string
+) => {
+  const occupiedPackageIds = new Set(
+    packages
+      .filter(pkg => (
+        pkg.id !== currentPackageId
+        && !REUSABLE_JAPAN_PACKAGE_STATUSES.has((pkg.status || '').toLowerCase())
+      ))
+      .map(pkg => pkg.id)
+  );
+
+  const occupiedBatchIds = new Set<string>();
+  items.forEach(item => {
+    if (item.purchase_batch_id && occupiedPackageIds.has(item.japan_package_id)) {
+      occupiedBatchIds.add(item.purchase_batch_id);
+    }
+  });
+  return occupiedBatchIds;
+};
+
 export default function JapanPackageDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -24,6 +65,8 @@ export default function JapanPackageDetail() {
 
   const [pkg, setPkg] = useState<JapanPackage | null>(null);
   const [packageItems, setPackageItems] = useState<JapanPackageItem[]>([]);
+  const [allPackages, setAllPackages] = useState<JapanPackage[]>([]);
+  const [allPackageItems, setAllPackageItems] = useState<JapanPackageItem[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -36,6 +79,16 @@ export default function JapanPackageDetail() {
   const existingBatchItemIds = useMemo(() => {
     return new Set(packageItems.map(item => item.purchase_batch_item_id).filter(Boolean));
   }, [packageItems]);
+
+  const occupiedBatchIds = useMemo(
+    () => getOccupiedPurchaseBatchIds(allPackages, allPackageItems, id),
+    [allPackages, allPackageItems, id]
+  );
+
+  const availableBatches = useMemo(
+    () => batches.filter(batch => !occupiedBatchIds.has(batch.id)),
+    [batches, occupiedBatchIds]
+  );
   
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -54,7 +107,7 @@ export default function JapanPackageDetail() {
   });
 
   // Adding Items State
-  const [activeAddTab, setActiveAddTab] = useState<'batch' | 'manual'>('batch');
+  const [activeAddTab, setActiveAddTab] = useState<'batch' | 'manual' | 'custom'>('batch');
   
   // Method A: Batch Import
   const [importGroupId, setImportGroupId] = useState<string>('');
@@ -75,6 +128,17 @@ export default function JapanPackageDetail() {
   const [isSelectedDropdownOpen, setIsSelectedDropdownOpen] = useState<boolean>(false);
   const [variantFilterSearch, setVariantFilterSearch] = useState<string>('');
   const [cardQuantities, setCardQuantities] = useState<Record<string, number>>({});
+
+  // Method C: Direct manual item (not linked to purchase records)
+  const [manualItemForm, setManualItemForm] = useState({
+    sku: '',
+    productTitle: '',
+    variantName: '',
+    twdPrice: '',
+    quantity: '1',
+    note: ''
+  });
+  const [isAddingManualItem, setIsAddingManualItem] = useState<boolean>(false);
 
   // Group collapsing state
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -340,6 +404,7 @@ export default function JapanPackageDetail() {
     setIsLoading(true);
     try {
       const allPkgs = await dataProvider.getJapanPackages();
+      setAllPackages(allPkgs || []);
       const currentPkg = allPkgs.find(p => p.id === pkgId);
       if (!currentPkg) {
         alert('找不到該包裹資料！');
@@ -360,6 +425,7 @@ export default function JapanPackageDetail() {
       });
 
       const allItems = await dataProvider.getJapanPackageItems();
+      setAllPackageItems(allItems || []);
       const currentItems = allItems.filter(item => item.japan_package_id === pkgId);
       setPackageItems(currentItems);
 
@@ -633,7 +699,7 @@ export default function JapanPackageDetail() {
       return;
     }
     // Filter batches that belong to this group
-    const groupBatches = batches.filter(b => b.product_group_id === groupId);
+    const groupBatches = availableBatches.filter(b => b.product_group_id === groupId);
     const groupBatchIds = new Set(groupBatches.map(b => b.id));
 
     // Get all batch items in these batches
@@ -694,7 +760,7 @@ export default function JapanPackageDetail() {
   const handleBatchImportSubmit = async () => {
     if (!id || !pkg) return;
     
-    // Filter to selected lines that are not already imported in this package
+    // Filter to selected lines that are not already imported in this package.
     const selectedLines = batchImportLines.filter(
       l => l.selected && l.quantity > 0 && !existingBatchItemIds.has(l.purchase_batch_item_id)
     );
@@ -705,7 +771,30 @@ export default function JapanPackageDetail() {
     }
 
     try {
-      const allItems = await dataProvider.getJapanPackageItems();
+      // Re-check against fresh package data before saving so a stale/open tab cannot
+      // import a batch that another active package has claimed in the meantime.
+      const [latestPackages, allItems] = await Promise.all([
+        dataProvider.getJapanPackages(),
+        dataProvider.getJapanPackageItems()
+      ]);
+      const latestOccupiedBatchIds = getOccupiedPurchaseBatchIds(latestPackages, allItems, id);
+      const latestExistingBatchItemIds = new Set(
+        allItems
+          .filter(item => item.japan_package_id === id)
+          .map(item => item.purchase_batch_item_id)
+          .filter(Boolean)
+      );
+      const hasUnavailableSelection = selectedLines.some(line => (
+        latestOccupiedBatchIds.has(line.purchase_batch_id)
+        || latestExistingBatchItemIds.has(line.purchase_batch_item_id)
+      ));
+      if (hasUnavailableSelection) {
+        setAllPackages(latestPackages || []);
+        setAllPackageItems(allItems || []);
+        alert('所選採購批次已加入其他日本包裹，或明細已存在於目前包裹。請重新選擇。');
+        return;
+      }
+
       const newItems: JapanPackageItem[] = [];
 
       selectedLines.forEach(line => {
@@ -738,6 +827,8 @@ export default function JapanPackageDetail() {
 
       const updatedAllItems = [...allItems, ...newItems];
       await dataProvider.saveJapanPackageItems(updatedAllItems);
+      setAllPackages(latestPackages || []);
+      setAllPackageItems(updatedAllItems);
 
       // Reload package items
       const updatedPackageItems = [...packageItems, ...newItems];
@@ -815,6 +906,62 @@ export default function JapanPackageDetail() {
       alert('加入商品成功！');
     } catch (err) {
       alert('加入商品失敗！');
+    }
+  };
+
+  const handleAddManualPackageItem = async () => {
+    if (!id || isAddingManualItem) return;
+
+    const productTitle = manualItemForm.productTitle.trim();
+    const quantity = parseInt(manualItemForm.quantity, 10);
+    const twdPrice = manualItemForm.twdPrice.trim() === '' ? undefined : Number(manualItemForm.twdPrice);
+    if (!productTitle) {
+      alert('請輸入商品名稱！');
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      alert('數量必須大於 0！');
+      return;
+    }
+    if (twdPrice !== undefined && (!Number.isFinite(twdPrice) || twdPrice < 0)) {
+      alert('台幣單價必須是 0 以上的數字！');
+      return;
+    }
+
+    const manualNote = manualItemForm.note.trim();
+    const storedNote = [
+      twdPrice !== undefined ? `${MANUAL_TWD_PRICE_PREFIX}${twdPrice}` : '',
+      manualNote
+    ].filter(Boolean).join('\n');
+
+    const newItem: JapanPackageItem = {
+      id: crypto.randomUUID(),
+      japan_package_id: id,
+      product_title: productTitle,
+      variant_name: manualItemForm.variantName.trim() || '',
+      sku: manualItemForm.sku.trim() || '',
+      quantity,
+      note: storedNote,
+      checked: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    setIsAddingManualItem(true);
+    try {
+      const allItems = await dataProvider.getJapanPackageItems();
+      await dataProvider.saveJapanPackageItems([...allItems, newItem]);
+
+      const updatedPackageItems = [...packageItems, newItem];
+      setPackageItems(updatedPackageItems);
+      await checkAndAutoUpdateStatus(updatedPackageItems);
+      setManualItemForm({ sku: '', productTitle: '', variantName: '', twdPrice: '', quantity: '1', note: '' });
+      alert('手動商品已加入包裹！');
+    } catch (e) {
+      console.error(e);
+      alert('手動新增商品失敗！');
+    } finally {
+      setIsAddingManualItem(false);
     }
   };
 
@@ -1248,11 +1395,11 @@ export default function JapanPackageDetail() {
                         }}>
                           📦 {g.title}
                         </span>
-                        <span style={{ 
-                          fontSize: '12px', 
-                          color: '#64748b', 
-                          transition: 'transform 0.2s', 
-                          transform: isExpanded ? 'rotate(90deg)' : 'none', 
+                        <span style={{
+                          fontSize: '12px',
+                          color: '#64748b',
+                          transition: 'transform 0.2s',
+                          transform: isExpanded ? 'rotate(90deg)' : 'none',
                           display: 'inline-block',
                           flexShrink: 0,
                           marginTop: '4px'
@@ -1276,8 +1423,11 @@ export default function JapanPackageDetail() {
                     {isExpanded && (
                       <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '10px', background: '#fafafa' }}>
                         {g.items.map(item => {
-                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ') 
+                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ')
+                            || item.product_title
                             || getBatchItemLabel(item.product_variant_id || '');
+                          const manualTwdPrice = getManualTwdPrice(item.note);
+                          const manualNote = getManualItemNote(item.note);
                           const v = variants.find(x => x.id === item.product_variant_id);
                           const bundleComps = v ? getBundleComponents(v) : [];
                           const isBundleExpanded = expandedBundleItems.has(item.id);
@@ -1396,9 +1546,15 @@ export default function JapanPackageDetail() {
                                   </div>
                                 )}
 
-                                {item.note && (
+                                {manualTwdPrice !== undefined && (
+                                  <div style={{ fontSize: '11.5px', color: '#2563eb', fontWeight: 700, marginTop: '4px' }}>
+                                    台幣單價 NT$ {manualTwdPrice.toLocaleString()}
+                                  </div>
+                                )}
+
+                                {manualNote && (
                                   <div style={{ fontSize: '11.5px', color: '#dc2626', fontWeight: 600, marginTop: '4px', backgroundColor: '#fef2f2', padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', width: 'fit-content' }}>
-                                    備註：{item.note}
+                                    備註：{manualNote}
                                   </div>
                                 )}
 
@@ -2147,6 +2303,12 @@ export default function JapanPackageDetail() {
                 >
                   手動搜尋商品加入
                 </button>
+                <button
+                  className={`tab-btn ${activeAddTab === 'custom' ? 'active' : ''}`}
+                  onClick={() => setActiveAddTab('custom')}
+                >
+                  直接新增商品
+                </button>
               </div>
 
               {activeAddTab === 'batch' ? (
@@ -2248,11 +2410,11 @@ export default function JapanPackageDetail() {
                   </div>
 
                   {importGroupId && (() => {
-                    const groupBatches = batches.filter(b => b.product_group_id === importGroupId);
+                    const groupBatches = availableBatches.filter(b => b.product_group_id === importGroupId);
                     if (groupBatches.length === 0) {
                       return (
                         <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
-                          此商品群組目前無任何採購批次記錄
+                          此商品群組目前無可匯入的採購批次
                         </div>
                       );
                     }
@@ -2413,7 +2575,7 @@ export default function JapanPackageDetail() {
                     );
                   })()}
                 </div>
-              ) : (
+              ) : activeAddTab === 'manual' ? (
                 <div className="import-box">
                   <div className="form-grid">
                     <div className="form-group">
@@ -2593,6 +2755,95 @@ export default function JapanPackageDetail() {
                     </div>
                   )}
                 </div>
+              ) : (
+                <div className="import-box">
+                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px' }}>
+                    適用於私下訂購或尚未建立訂購紀錄的商品；不會建立 Product Group 或 Variant。
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(130px, 0.8fr) minmax(200px, 1.5fr) minmax(160px, 1fr) 110px 80px',
+                      gap: '12px',
+                      alignItems: 'end'
+                    }}
+                  >
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">SKU（選填）</label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="商品編號"
+                        value={manualItemForm.sku}
+                        onChange={e => setManualItemForm(prev => ({ ...prev, sku: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">商品名稱 *</label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="輸入商品名稱"
+                        value={manualItemForm.productTitle}
+                        onChange={e => setManualItemForm(prev => ({ ...prev, productTitle: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">規格（選填）</label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="款式／規格"
+                        value={manualItemForm.variantName}
+                        onChange={e => setManualItemForm(prev => ({ ...prev, variantName: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">台幣單價（選填）</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        className="input"
+                        placeholder="NT$"
+                        value={manualItemForm.twdPrice}
+                        onChange={e => setManualItemForm(prev => ({ ...prev, twdPrice: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">數量 *</label>
+                      <input
+                        type="number"
+                        min={1}
+                        className="input"
+                        value={manualItemForm.quantity}
+                        onChange={e => setManualItemForm(prev => ({ ...prev, quantity: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'end', marginTop: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0, flex: 1 }}>
+                      <label className="form-label">備註（選填）</label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="例如：私下訂購、購買來源"
+                        value={manualItemForm.note}
+                        onChange={e => setManualItemForm(prev => ({ ...prev, note: e.target.value }))}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={handleAddManualPackageItem}
+                      disabled={isAddingManualItem}
+                      style={{ height: '38px', whiteSpace: 'nowrap' }}
+                    >
+                      <Plus size={16} />
+                      {isAddingManualItem ? '加入中…' : '加入包裹'}
+                    </button>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -2654,7 +2905,11 @@ export default function JapanPackageDetail() {
                 const v = variants.find(x => x.id === item.product_variant_id);
                 const bundleComps = v ? getBundleComponents(v) : [];
                 const isBundleExpanded = expandedBundleItems.has(item.id);
-                const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ') || getBatchItemLabel(item.product_variant_id || '');
+                const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ')
+                  || item.product_title
+                  || getBatchItemLabel(item.product_variant_id || '');
+                const manualTwdPrice = getManualTwdPrice(item.note);
+                const manualNote = getManualItemNote(item.note);
                 return (
                   <div 
                     key={item.id} 
@@ -2746,9 +3001,15 @@ export default function JapanPackageDetail() {
                         </div>
                       )}
 
-                      {item.note && (
+                      {manualTwdPrice !== undefined && (
+                        <div style={{ fontSize: '11.5px', color: '#2563eb', fontWeight: 700, marginTop: '4px' }}>
+                          台幣單價 NT$ {manualTwdPrice.toLocaleString()}
+                        </div>
+                      )}
+
+                      {manualNote && (
                         <div style={{ fontSize: '11.5px', color: '#dc2626', fontWeight: 600, marginTop: '4px', backgroundColor: '#fef2f2', padding: '4px 8px', borderRadius: '4px', border: '1px solid #fee2e2', width: 'fit-content' }}>
-                          備註：{item.note}
+                          備註：{manualNote}
                         </div>
                       )}
 
@@ -2828,8 +3089,11 @@ export default function JapanPackageDetail() {
                     {!isCollapsed && (
                       <div className="checklist-group-body">
                         {g.items.map(item => {
-                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join('－') 
+                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join('－')
+                            || item.product_title
                             || getBatchItemLabel(item.product_variant_id || '');
+                          const manualTwdPrice = getManualTwdPrice(item.note);
+                          const manualNote = getManualItemNote(item.note);
                           const v = variants.find(x => x.id === item.product_variant_id);
                           const bundleComps = v ? getBundleComponents(v) : [];
                           const isBundleExpanded = expandedBundleItems.has(item.id);
@@ -2883,10 +3147,16 @@ export default function JapanPackageDetail() {
                                   {/* Line 2: Source Batch and Note */}
                                   <div className="checklist-item-meta-row">
                                     <span>來源：<strong>{getBatchName(item.purchase_batch_id) || '-'}</strong></span>
-                                    {item.note && (
+                                    {manualTwdPrice !== undefined && (
                                       <>
                                         <span style={{ color: '#cbd5e1', margin: '0 4px' }}>｜</span>
-                                        <span style={{ color: '#ef4444', fontWeight: 600 }}>備註：{item.note}</span>
+                                        <span style={{ color: '#2563eb', fontWeight: 700 }}>台幣單價 NT$ {manualTwdPrice.toLocaleString()}</span>
+                                      </>
+                                    )}
+                                    {manualNote && (
+                                      <>
+                                        <span style={{ color: '#cbd5e1', margin: '0 4px' }}>｜</span>
+                                        <span style={{ color: '#ef4444', fontWeight: 600 }}>備註：{manualNote}</span>
                                       </>
                                     )}
                                   </div>

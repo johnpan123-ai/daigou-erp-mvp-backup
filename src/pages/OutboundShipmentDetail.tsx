@@ -17,8 +17,9 @@ const cleanProductTitle = (title: string) =>
 const MANUAL_TWD_PRICE_PREFIX = '台幣單價：';
 
 const getManualTwdPrice = (note?: string) => {
-  if (!note?.startsWith(MANUAL_TWD_PRICE_PREFIX)) return undefined;
-  const price = Number(note.slice(MANUAL_TWD_PRICE_PREFIX.length));
+  const match = note?.match(/(?:^|\n)台幣單價：\s*([0-9]+(?:\.[0-9]+)?)(?=\n|$)/);
+  if (!match) return undefined;
+  const price = Number(match[1]);
   return Number.isFinite(price) ? price : undefined;
 };
 
@@ -44,6 +45,7 @@ interface PoolItem {
   variantName: string;
   displayName: string;
   sku: string;
+  note?: string;
   arrivedQty: number;
   shippedQty: number;
   availableQty: number;
@@ -154,6 +156,7 @@ export default function OutboundShipmentDetail() {
         variantName: varName,
         displayName,
         sku: jpi.sku || '',
+        note: jpi.note || undefined,
         arrivedQty: jpi.quantity,
         shippedQty,
         availableQty,
@@ -222,6 +225,7 @@ export default function OutboundShipmentDetail() {
         product_title: poolItem.productTitle,
         variant_name: poolItem.displayName,
         sku: poolItem.sku,
+        note: poolItem.note,
         quantity: addQty,
         checked: false,
         created_at: new Date().toISOString(),
@@ -252,6 +256,7 @@ export default function OutboundShipmentDetail() {
           product_title: poolItem.productTitle,
           variant_name: poolItem.displayName,
           sku: poolItem.sku,
+          note: poolItem.note,
           quantity: poolItem.availableQty,
           checked: false,
           created_at: new Date().toISOString(),
@@ -265,6 +270,16 @@ export default function OutboundShipmentDetail() {
 
   const removeItem = useCallback((itemId: string) => {
     const updated = selectedItems.filter(i => i.id !== itemId);
+    setSelectedItems(updated);
+    saveItems(updated);
+  }, [selectedItems]);
+
+  const removeGroupItems = useCallback((groupName: string, items: OutboundShipmentItem[]) => {
+    if (items.length === 0) return;
+    if (!confirm(`確認刪除「${groupName}」底下全部 ${items.length} 項商品？`)) return;
+
+    const itemIds = new Set(items.map(item => item.id));
+    const updated = selectedItems.filter(item => !itemIds.has(item.id));
     setSelectedItems(updated);
     saveItems(updated);
   }, [selectedItems]);
@@ -694,6 +709,7 @@ export default function OutboundShipmentDetail() {
                 const isCollapsed = collapsedSelectedGroups.has(groupName);
                 const groupChecked = items.filter(i => i.checked).length;
                 const groupPercent = items.length > 0 ? Math.round((groupChecked / items.length) * 100) : 0;
+                const canEditGroup = shipment.status === 'draft' || shipment.status === 'packing' || (shipment.status === 'shipped' && editingShipped);
                 return (
                   <div key={groupName} style={{ marginBottom: 8 }}>
                     <div
@@ -714,6 +730,26 @@ export default function OutboundShipmentDetail() {
                         <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>
                           {groupName}
                         </span>
+                        {canEditGroup && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeGroupItems(groupName, items);
+                            }}
+                            title="刪除此群組的全部商品"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '4px 8px', borderRadius: 6,
+                              border: '1px solid #fecaca', background: '#fff7f7',
+                              color: '#dc2626', fontSize: 12, fontWeight: 700,
+                              cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                            }}
+                          >
+                            <Trash2 size={13} />
+                            全部刪除
+                          </button>
+                        )}
                       </div>
                       <div style={{ paddingLeft: 22, marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: '#64748b' }}>
