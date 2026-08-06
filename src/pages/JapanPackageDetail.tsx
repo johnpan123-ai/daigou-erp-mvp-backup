@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3 } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
@@ -32,6 +32,13 @@ const getManualItemNote = (note?: string) =>
     .filter(line => !line.trim().startsWith(MANUAL_TWD_PRICE_PREFIX))
     .join('\n')
     .trim() || '';
+
+const isDirectManualPackageItem = (item: JapanPackageItem) => (
+  !item.product_group_id
+  && !item.product_variant_id
+  && !item.purchase_batch_id
+  && !item.purchase_batch_item_id
+);
 
 const REUSABLE_JAPAN_PACKAGE_STATUSES = new Set(['deleted', 'cancelled', 'canceled']);
 
@@ -139,6 +146,15 @@ export default function JapanPackageDetail() {
     note: ''
   });
   const [isAddingManualItem, setIsAddingManualItem] = useState<boolean>(false);
+  const [editingManualItemId, setEditingManualItemId] = useState<string | null>(null);
+  const [isSavingManualEdit, setIsSavingManualEdit] = useState(false);
+  const [manualEditForm, setManualEditForm] = useState({
+    sku: '',
+    productTitle: '',
+    variantName: '',
+    twdPrice: '',
+    quantity: '1'
+  });
 
   // Group collapsing state
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -965,6 +981,102 @@ export default function JapanPackageDetail() {
     }
   };
 
+  const startEditingManualItem = (item: JapanPackageItem) => {
+    if (!isDirectManualPackageItem(item)) return;
+    setEditingManualItemId(item.id);
+    setManualEditForm({
+      sku: item.sku || '',
+      productTitle: item.product_title || '',
+      variantName: item.variant_name || '',
+      twdPrice: getManualTwdPrice(item.note)?.toString() || '',
+      quantity: item.quantity.toString()
+    });
+  };
+
+  const saveManualItemEdit = async () => {
+    if (!editingManualItemId || isSavingManualEdit) return;
+
+    const productTitle = manualEditForm.productTitle.trim();
+    const quantity = Number.parseInt(manualEditForm.quantity, 10);
+    const twdPrice = manualEditForm.twdPrice.trim() === '' ? undefined : Number(manualEditForm.twdPrice);
+    if (!productTitle) {
+      alert('請輸入商品名稱！');
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      alert('數量必須大於 0！');
+      return;
+    }
+    if (twdPrice !== undefined && (!Number.isFinite(twdPrice) || twdPrice < 0)) {
+      alert('台幣單價必須是 0 以上的數字！');
+      return;
+    }
+
+    setIsSavingManualEdit(true);
+    try {
+      const [freshPackageItems, freshOutboundItems] = await Promise.all([
+        dataProvider.getJapanPackageItems(),
+        dataProvider.getOutboundShipmentItems()
+      ]);
+      const original = freshPackageItems.find(item => item.id === editingManualItemId);
+      if (!original || !isDirectManualPackageItem(original)) {
+        alert('此商品已不存在或已有其他資料關聯，無法編輯。');
+        await loadData(id || '');
+        return;
+      }
+
+      const allocatedQuantity = freshOutboundItems
+        .filter(item => item.japan_package_item_id === original.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+      if (quantity < allocatedQuantity) {
+        alert(`此商品已有 ${allocatedQuantity} 件分配至出庫，包裹數量不可低於 ${allocatedQuantity}。`);
+        return;
+      }
+
+      const noteText = getManualItemNote(original.note);
+      const storedNote = [
+        twdPrice !== undefined ? `${MANUAL_TWD_PRICE_PREFIX}${twdPrice}` : '',
+        noteText
+      ].filter(Boolean).join('\n');
+      const now = new Date().toISOString();
+      const updatedItem: JapanPackageItem = {
+        ...original,
+        sku: manualEditForm.sku.trim() || '',
+        product_title: productTitle,
+        variant_name: manualEditForm.variantName.trim() || '',
+        quantity,
+        note: storedNote,
+        updated_at: now
+      };
+      const updatedAllPackageItems = freshPackageItems.map(item => item.id === original.id ? updatedItem : item);
+      const updatedAllOutboundItems = freshOutboundItems.map(item => item.japan_package_item_id === original.id ? {
+        ...item,
+        sku: updatedItem.sku,
+        product_title: updatedItem.product_title,
+        variant_name: updatedItem.variant_name,
+        note: updatedItem.note,
+        updated_at: now
+      } : item);
+
+      await dataProvider.saveJapanPackageItems(updatedAllPackageItems);
+      if (updatedAllOutboundItems.some((item, index) => item !== freshOutboundItems[index])) {
+        await dataProvider.saveOutboundShipmentItems(updatedAllOutboundItems);
+      }
+
+      const updatedCurrentItems = packageItems.map(item => item.id === updatedItem.id ? updatedItem : item);
+      setAllPackageItems(updatedAllPackageItems);
+      setPackageItems(updatedCurrentItems);
+      await checkAndAutoUpdateStatus(updatedCurrentItems);
+      setEditingManualItemId(null);
+    } catch (error) {
+      console.error(error);
+      alert('商品更新失敗，已重新讀取目前資料。');
+      await loadData(id || '');
+    } finally {
+      setIsSavingManualEdit(false);
+    }
+  };
+
 
   const getBatchName = (batchId?: string) => {
     if (!batchId) return '-';
@@ -1017,6 +1129,41 @@ export default function JapanPackageDetail() {
       default: return status;
     }
   };
+
+  const manualEditModal = editingManualItemId ? (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="編輯手動商品"
+      style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(15, 23, 42, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={() => !isSavingManualEdit && setEditingManualItemId(null)}
+    >
+      <div style={{ width: '100%', maxWidth: 520, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 20px 50px rgba(15, 23, 42, 0.25)' }} onClick={event => event.stopPropagation()}>
+        <h3 style={{ margin: '0 0 16px', color: '#1e293b' }}>編輯手動商品</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ fontSize: 13, color: '#475569' }}>SKU
+            <input value={manualEditForm.sku} onChange={event => setManualEditForm(prev => ({ ...prev, sku: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ fontSize: 13, color: '#475569' }}>規格
+            <input value={manualEditForm.variantName} onChange={event => setManualEditForm(prev => ({ ...prev, variantName: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ gridColumn: '1 / -1', fontSize: 13, color: '#475569' }}>商品名稱 *
+            <input value={manualEditForm.productTitle} onChange={event => setManualEditForm(prev => ({ ...prev, productTitle: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ fontSize: 13, color: '#475569' }}>台幣單價
+            <input type="number" min="0" step="1" value={manualEditForm.twdPrice} onChange={event => setManualEditForm(prev => ({ ...prev, twdPrice: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ fontSize: 13, color: '#475569' }}>數量 *
+            <input type="number" min="1" step="1" value={manualEditForm.quantity} onChange={event => setManualEditForm(prev => ({ ...prev, quantity: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button type="button" className="btn btn-outline" disabled={isSavingManualEdit} onClick={() => setEditingManualItemId(null)}>取消</button>
+          <button type="button" className="btn btn-primary" disabled={isSavingManualEdit} onClick={saveManualItemEdit}>{isSavingManualEdit ? '儲存中...' : '儲存修改'}</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (isLoading) {
     return (
@@ -1566,6 +1713,17 @@ export default function JapanPackageDetail() {
                                   </div>
                                 )}
                               </div>
+                              {isDirectManualPackageItem(item) && (
+                                <button
+                                  type="button"
+                                  data-item-id={item.id}
+                                  onClick={event => { event.stopPropagation(); startEditingManualItem(item); }}
+                                  style={{ color: '#2563eb', padding: 4, border: 'none', background: 'transparent', cursor: 'pointer', flexShrink: 0 }}
+                                  title="編輯手動商品"
+                                >
+                                  <Edit3 size={17} />
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -1606,6 +1764,7 @@ export default function JapanPackageDetail() {
             </button>
           </div>
         </div>
+        {manualEditModal}
         <div 
           style={{ 
             position: 'fixed', 
@@ -3021,6 +3180,18 @@ export default function JapanPackageDetail() {
                         </div>
                       )}
                     </div>
+                    {isDirectManualPackageItem(item) && (
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        data-item-id={item.id}
+                        onClick={() => startEditingManualItem(item)}
+                        style={{ color: '#2563eb', padding: '4px', alignSelf: 'flex-start', marginTop: '2px' }}
+                        title="編輯手動商品"
+                      >
+                        <Edit3 size={16} />
+                      </button>
+                    )}
                     <button 
                       className="btn btn-ghost" 
                       onClick={() => handleDeleteItem(item.id)}
@@ -3204,6 +3375,18 @@ export default function JapanPackageDetail() {
                                   )}
                                 </div>
                               </div>
+                              {isDirectManualPackageItem(item) && (
+                                <button
+                                  className="btn btn-ghost"
+                                  type="button"
+                                  data-item-id={item.id}
+                                  onClick={() => startEditingManualItem(item)}
+                                  style={{ color: '#2563eb', padding: '4px', flexShrink: 0, marginTop: '2px' }}
+                                  title="編輯手動商品"
+                                >
+                                  <Edit3 size={16} />
+                                </button>
+                              )}
                               
                               <button 
                                 className="btn btn-ghost" 
@@ -3285,6 +3468,7 @@ export default function JapanPackageDetail() {
           )}
         </div>
       </div>
+      {manualEditModal}
       <div 
         style={{ 
           position: 'fixed', 

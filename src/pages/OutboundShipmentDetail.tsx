@@ -23,6 +23,12 @@ const getManualTwdPrice = (note?: string) => {
   return Number.isFinite(price) ? price : undefined;
 };
 
+const isDirectManualOutboundItem = (item: OutboundShipmentItem) => (
+  !item.japan_package_item_id
+  && !item.product_group_id
+  && !item.product_variant_id
+);
+
 const STATUS_FLOW = ['draft', 'packing', 'shipped', 'received'] as const;
 const STATUS_LABELS: Record<string, string> = {
   draft: '草稿', packing: '打包中', shipped: '已出貨', received: '已到台灣',
@@ -77,6 +83,15 @@ export default function OutboundShipmentDetail() {
   const [manualTwdPrice, setManualTwdPrice] = useState('');
   const [manualQty, setManualQty] = useState('1');
   const [editingShipped, setEditingShipped] = useState(false);
+  const [editingManualItemId, setEditingManualItemId] = useState<string | null>(null);
+  const [isSavingManualEdit, setIsSavingManualEdit] = useState(false);
+  const [manualEditForm, setManualEditForm] = useState({
+    sku: '',
+    productTitle: '',
+    variantName: '',
+    twdPrice: '',
+    quantity: '1'
+  });
 
   // Header form
   const [formTitle, setFormTitle] = useState('');
@@ -342,6 +357,67 @@ export default function OutboundShipmentDetail() {
     await dataProvider.saveOutboundShipmentItems(all);
   };
 
+  const startEditingManualItem = (item: OutboundShipmentItem) => {
+    if (!isDirectManualOutboundItem(item)) return;
+    setEditingManualItemId(item.id);
+    setManualEditForm({
+      sku: item.sku || '',
+      productTitle: item.product_title || '',
+      variantName: item.variant_name || '',
+      twdPrice: getManualTwdPrice(item.note)?.toString() || '',
+      quantity: item.quantity.toString()
+    });
+  };
+
+  const saveManualItemEdit = async () => {
+    if (!editingManualItemId || isSavingManualEdit) return;
+    const productTitle = manualEditForm.productTitle.trim();
+    const quantity = Number.parseInt(manualEditForm.quantity, 10);
+    const twdPrice = manualEditForm.twdPrice.trim() === '' ? undefined : Number(manualEditForm.twdPrice);
+    if (!productTitle) {
+      alert('請輸入商品名稱！');
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      alert('數量必須大於 0！');
+      return;
+    }
+    if (twdPrice !== undefined && (!Number.isFinite(twdPrice) || twdPrice < 0)) {
+      alert('台幣單價必須是 0 以上的數字！');
+      return;
+    }
+
+    const original = selectedItems.find(item => item.id === editingManualItemId);
+    if (!original || !isDirectManualOutboundItem(original)) {
+      alert('此商品已不存在或已有其他資料關聯，無法編輯。');
+      setEditingManualItemId(null);
+      return;
+    }
+
+    const updatedItem: OutboundShipmentItem = {
+      ...original,
+      sku: manualEditForm.sku.trim() || undefined,
+      product_title: productTitle,
+      variant_name: manualEditForm.variantName.trim() || undefined,
+      quantity,
+      note: twdPrice !== undefined ? `${MANUAL_TWD_PRICE_PREFIX}${twdPrice}` : undefined,
+      updated_at: new Date().toISOString()
+    };
+    const updatedItems = selectedItems.map(item => item.id === original.id ? updatedItem : item);
+    setIsSavingManualEdit(true);
+    try {
+      await saveItems(updatedItems);
+      setSelectedItems(updatedItems);
+      setEditingManualItemId(null);
+    } catch (error) {
+      console.error(error);
+      alert('商品更新失敗，已重新讀取目前資料。');
+      await loadData();
+    } finally {
+      setIsSavingManualEdit(false);
+    }
+  };
+
   const clearAllItems = useCallback(() => {
     if (!confirm(`確認清空全部 ${selectedItems.length} 項商品？`)) return;
     setSelectedItems([]);
@@ -444,6 +520,41 @@ export default function OutboundShipmentDetail() {
     setAllShipments(all);
     await dataProvider.saveOutboundShipments(all);
   };
+
+  const manualEditModal = editingManualItemId ? (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="編輯手動商品"
+      style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(15, 23, 42, 0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      onClick={() => !isSavingManualEdit && setEditingManualItemId(null)}
+    >
+      <div style={{ width: '100%', maxWidth: 520, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 20px 50px rgba(15, 23, 42, 0.25)' }} onClick={event => event.stopPropagation()}>
+        <h3 style={{ margin: '0 0 16px', color: '#1e293b' }}>編輯手動商品</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <label style={{ fontSize: 13, color: '#475569' }}>SKU
+            <input value={manualEditForm.sku} onChange={event => setManualEditForm(prev => ({ ...prev, sku: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ fontSize: 13, color: '#475569' }}>規格
+            <input value={manualEditForm.variantName} onChange={event => setManualEditForm(prev => ({ ...prev, variantName: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ gridColumn: '1 / -1', fontSize: 13, color: '#475569' }}>商品名稱 *
+            <input value={manualEditForm.productTitle} onChange={event => setManualEditForm(prev => ({ ...prev, productTitle: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ fontSize: 13, color: '#475569' }}>台幣單價
+            <input type="number" min="0" step="1" value={manualEditForm.twdPrice} onChange={event => setManualEditForm(prev => ({ ...prev, twdPrice: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+          <label style={{ fontSize: 13, color: '#475569' }}>數量 *
+            <input type="number" min="1" step="1" value={manualEditForm.quantity} onChange={event => setManualEditForm(prev => ({ ...prev, quantity: event.target.value }))} style={{ width: '100%', boxSizing: 'border-box', marginTop: 4, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
+          </label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button type="button" disabled={isSavingManualEdit} onClick={() => setEditingManualItemId(null)} style={{ padding: '8px 16px', border: '1px solid #cbd5e1', background: '#fff', borderRadius: 6, cursor: 'pointer' }}>取消</button>
+          <button type="button" disabled={isSavingManualEdit} onClick={saveManualItemEdit} style={{ padding: '8px 16px', border: 'none', background: '#2563eb', color: '#fff', borderRadius: 6, cursor: 'pointer', fontWeight: 700 }}>{isSavingManualEdit ? '儲存中...' : '儲存修改'}</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>載入中...</div>;
   if (!shipment) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>找不到此出庫單</div>;
@@ -846,6 +957,13 @@ export default function OutboundShipmentDetail() {
                                   userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation',
                                 }}><Plus size={16} /></button>
                               </div>
+                              {isDirectManualOutboundItem(item) && (
+                                <button data-item-id={item.id} onClick={() => startEditingManualItem(item)} title="編輯手動商品" style={{
+                                  width: 40, height: 40, borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe',
+                                  color: '#2563eb', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  touchAction: 'manipulation',
+                                }}><Edit3 size={17} /></button>
+                              )}
                               <button onClick={() => removeItem(item.id)} style={{
                                 width: 40, height: 40, borderRadius: 8, background: 'none', border: 'none',
                                 color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -980,6 +1098,7 @@ export default function OutboundShipmentDetail() {
           </div>
         </div>}
       </div>
+      {manualEditModal}
     </div>
   );
 }
