@@ -963,12 +963,16 @@ export default function PurchaseRecords() {
 
   const completedGroups = useMemo(() => {
     try {
-    if (secondaryTab !== 'progress' || needsPurchaseOnly) return [];
+    if (secondaryTab !== 'progress') return [];
 
     let result = baseGroups.filter(g => {
       if (checkIsGroupClosed(g)) return false;
       return checkIsGroupOverdue(g);
     });
+
+    if (needsPurchaseOnly) {
+      result = result.filter(g => checkNeedsPurchase(g));
+    }
 
     result.sort((a, b) => {
       if (sortMode === 'release_asc') {
@@ -1023,11 +1027,7 @@ export default function PurchaseRecords() {
     try {
     let result = [...baseGroups];
 
-    // The quick purchase filter temporarily takes precedence over the status tab. Turning it
-    // off restores the user's existing status tab without changing that saved preference.
-    if (needsPurchaseOnly) {
-      result = result.filter(g => checkNeedsPurchase(g));
-    } else if (secondaryTab === 'progress') {
+    if (secondaryTab === 'progress') {
       result = result.filter(g => {
         if (checkIsGroupClosed(g)) return false;
         
@@ -1047,6 +1047,10 @@ export default function PurchaseRecords() {
       result = result.filter(g => checkHasMissingJpyCost(g));
     } else if (secondaryTab === 'to_purchase') {
       result = result.filter(g => checkIsToPurchase(g));
+    }
+
+    if (needsPurchaseOnly) {
+      result = result.filter(g => checkNeedsPurchase(g));
     }
 
     // Sort
