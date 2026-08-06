@@ -386,6 +386,9 @@ export default function PurchaseRecords() {
     if (saved === 'progress' || saved === 'closed' || saved === 'no_closing_date' || saved === 'no_jpy_cost' || saved === 'to_purchase' || saved === 'all') return saved;
     return 'progress';
   });
+  const [needsPurchaseOnly, setNeedsPurchaseOnly] = useState<boolean>(() => (
+    localStorage.getItem('erp_needs_purchase_only') === 'true'
+  ));
   const [completedExpanded, setCompletedExpanded] = useState<boolean>(false);
 
   const normalizeDate = (dateStr: string | undefined | null): string | null => {
@@ -465,6 +468,10 @@ export default function PurchaseRecords() {
     localStorage.setItem('erp_active_secondary_tab', secondaryTab);
   }, [secondaryTab]);
 
+  useEffect(() => {
+    localStorage.setItem('erp_needs_purchase_only', String(needsPurchaseOnly));
+  }, [needsPurchaseOnly]);
+
   // Restore scroll position saved by navigateToDetail() when returning via the browser Back
   // button. Waits for groups to actually be loaded (and one more frame for the list to paint)
   // before scrolling, and only runs once per mount so later data refreshes don't re-trigger it.
@@ -513,6 +520,7 @@ export default function PurchaseRecords() {
       setFilterType('all');
       setActiveTab('all');
       setSecondaryTab('progress');
+      setNeedsPurchaseOnly(false);
 
       // Clear localStorage so the reset persists
       localStorage.setItem('erp_search_term', '');
@@ -936,19 +944,26 @@ export default function PurchaseRecords() {
     return groupVars.some(v => v.default_jpy_cost === null || v.default_jpy_cost === undefined);
   };
 
-  const { progressCount, closedCount, noClosingDateCount, missingJpyCostCount, allCount, toPurchaseCount } = useMemo(() => {
+  const checkNeedsPurchase = (g: ProductGroup): boolean => {
+    const details = getGroupPlatformDetails(g.id);
+    const existingGap = isProxyProduct(g) ? details.proxyGap : details.gap;
+    return existingGap > 0;
+  };
+
+  const { progressCount, closedCount, noClosingDateCount, missingJpyCostCount, allCount, toPurchaseCount, needsPurchaseCount } = useMemo(() => {
     const progress = baseGroups.filter(g => !checkIsGroupClosed(g)).length;
     const closed = baseGroups.filter(g => checkIsGroupClosed(g)).length;
     const noClosingDate = baseGroups.filter(g => checkHasNoClosingDate(g)).length;
     const missingJpyCost = baseGroups.filter(g => checkHasMissingJpyCost(g)).length;
     const total = baseGroups.length;
     const toPurchase = baseGroups.filter(g => checkIsToPurchase(g)).length;
-    return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, missingJpyCostCount: missingJpyCost, allCount: total, toPurchaseCount: toPurchase };
+    const needsPurchase = baseGroups.filter(g => checkNeedsPurchase(g)).length;
+    return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, missingJpyCostCount: missingJpyCost, allCount: total, toPurchaseCount: toPurchase, needsPurchaseCount: needsPurchase };
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
     try {
-    if (secondaryTab !== 'progress') return [];
+    if (secondaryTab !== 'progress' || needsPurchaseOnly) return [];
 
     let result = baseGroups.filter(g => {
       if (checkIsGroupClosed(g)) return false;
@@ -1002,14 +1017,17 @@ export default function PurchaseRecords() {
       logCrash('completedGroups useMemo', err);
       return [];
     }
-  }, [baseGroups, secondaryTab, sortMode]);
+  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly]);
 
   const filteredAndSortedGroups = useMemo(() => {
     try {
     let result = [...baseGroups];
 
-    // Filter by progress/closed tab
-    if (secondaryTab === 'progress') {
+    // The quick purchase filter temporarily takes precedence over the status tab. Turning it
+    // off restores the user's existing status tab without changing that saved preference.
+    if (needsPurchaseOnly) {
+      result = result.filter(g => checkNeedsPurchase(g));
+    } else if (secondaryTab === 'progress') {
       result = result.filter(g => {
         if (checkIsGroupClosed(g)) return false;
         
@@ -1082,7 +1100,7 @@ export default function PurchaseRecords() {
       logCrash('filteredAndSortedGroups useMemo', err);
       return [];
     }
-  }, [baseGroups, secondaryTab, sortMode]);
+  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly]);
 
   const [stableEditOrder, setStableEditOrder] = useState<string[] | null>(null);
   const [stableCompletedOrder, setStableCompletedOrder] = useState<string[] | null>(null);
@@ -1096,7 +1114,7 @@ export default function PurchaseRecords() {
       setStableEditOrder(null);
       setStableCompletedOrder(null);
     }
-  }, [editMode, searchTerm, filterSource, filterType, activeTab, secondaryTab, sortMode]);
+  }, [editMode, searchTerm, filterSource, filterType, activeTab, secondaryTab, sortMode, needsPurchaseOnly]);
 
 
 
@@ -2374,14 +2392,14 @@ export default function PurchaseRecords() {
           <button
             onClick={() => { setSecondaryTab('progress'); }}
             style={{
-              padding: '6px 16px',
+              padding: secondaryTab === 'progress' ? '5px 15px' : '6px 16px',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: secondaryTab === 'progress' ? 700 : 600,
               borderRadius: '20px',
               cursor: 'pointer',
-              border: '1px solid ' + (secondaryTab === 'progress' ? '#2563eb' : '#cbd5e1'),
-              backgroundColor: secondaryTab === 'progress' ? '#eff6ff' : '#ffffff',
-              color: secondaryTab === 'progress' ? '#2563eb' : '#475569',
+              border: secondaryTab === 'progress' ? '2px solid #1d4ed8' : '1px solid #cbd5e1',
+              backgroundColor: secondaryTab === 'progress' ? '#2563eb' : '#ffffff',
+              color: secondaryTab === 'progress' ? '#ffffff' : '#475569',
               transition: 'all 0.15s ease'
             }}
           >
@@ -2390,14 +2408,14 @@ export default function PurchaseRecords() {
           <button
             onClick={() => { setSecondaryTab('closed'); }}
             style={{
-              padding: '6px 16px',
+              padding: secondaryTab === 'closed' ? '5px 15px' : '6px 16px',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: secondaryTab === 'closed' ? 700 : 600,
               borderRadius: '20px',
               cursor: 'pointer',
-              border: '1px solid ' + (secondaryTab === 'closed' ? '#2563eb' : '#cbd5e1'),
-              backgroundColor: secondaryTab === 'closed' ? '#eff6ff' : '#ffffff',
-              color: secondaryTab === 'closed' ? '#2563eb' : '#475569',
+              border: secondaryTab === 'closed' ? '2px solid #1d4ed8' : '1px solid #cbd5e1',
+              backgroundColor: secondaryTab === 'closed' ? '#2563eb' : '#ffffff',
+              color: secondaryTab === 'closed' ? '#ffffff' : '#475569',
               transition: 'all 0.15s ease'
             }}
           >
@@ -2406,14 +2424,14 @@ export default function PurchaseRecords() {
           <button
             onClick={() => { setSecondaryTab('no_closing_date'); }}
             style={{
-              padding: '6px 16px',
+              padding: secondaryTab === 'no_closing_date' ? '5px 15px' : '6px 16px',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: secondaryTab === 'no_closing_date' ? 700 : 600,
               borderRadius: '20px',
               cursor: 'pointer',
-              border: '1px solid ' + (secondaryTab === 'no_closing_date' ? '#f59e0b' : (noClosingDateCount > 0 ? '#fcd34d' : '#cbd5e1')),
-              backgroundColor: secondaryTab === 'no_closing_date' ? '#fffbeb' : (noClosingDateCount > 0 ? '#fffdf5' : '#ffffff'),
-              color: secondaryTab === 'no_closing_date' ? '#d97706' : (noClosingDateCount > 0 ? '#b45309' : '#475569'),
+              border: secondaryTab === 'no_closing_date' ? '2px solid #9a3412' : `1px solid ${noClosingDateCount > 0 ? '#fcd34d' : '#cbd5e1'}`,
+              backgroundColor: secondaryTab === 'no_closing_date' ? '#c2410c' : (noClosingDateCount > 0 ? '#fffdf5' : '#ffffff'),
+              color: secondaryTab === 'no_closing_date' ? '#ffffff' : (noClosingDateCount > 0 ? '#b45309' : '#475569'),
               transition: 'all 0.15s ease',
               display: 'inline-flex',
               alignItems: 'center',
@@ -2426,14 +2444,14 @@ export default function PurchaseRecords() {
           <button
             onClick={() => { setSecondaryTab('no_jpy_cost'); }}
             style={{
-              padding: '6px 16px',
+              padding: secondaryTab === 'no_jpy_cost' ? '5px 15px' : '6px 16px',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: secondaryTab === 'no_jpy_cost' ? 700 : 600,
               borderRadius: '20px',
               cursor: 'pointer',
-              border: '1px solid ' + (secondaryTab === 'no_jpy_cost' ? '#d97706' : (missingJpyCostCount > 0 ? '#fbbf24' : '#cbd5e1')),
-              backgroundColor: secondaryTab === 'no_jpy_cost' ? '#fffbeb' : '#ffffff',
-              color: secondaryTab === 'no_jpy_cost' ? '#b45309' : (missingJpyCostCount > 0 ? '#b45309' : '#475569'),
+              border: secondaryTab === 'no_jpy_cost' ? '2px solid #9a3412' : `1px solid ${missingJpyCostCount > 0 ? '#fbbf24' : '#cbd5e1'}`,
+              backgroundColor: secondaryTab === 'no_jpy_cost' ? '#c2410c' : '#ffffff',
+              color: secondaryTab === 'no_jpy_cost' ? '#ffffff' : (missingJpyCostCount > 0 ? '#b45309' : '#475569'),
               transition: 'all 0.15s ease',
               display: 'inline-flex',
               alignItems: 'center',
@@ -2446,14 +2464,14 @@ export default function PurchaseRecords() {
           <button
             onClick={() => { setSecondaryTab('to_purchase'); }}
             style={{
-              padding: '6px 16px',
+              padding: secondaryTab === 'to_purchase' ? '5px 15px' : '6px 16px',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: secondaryTab === 'to_purchase' ? 700 : 600,
               borderRadius: '20px',
               cursor: 'pointer',
-              border: '1px solid ' + (secondaryTab === 'to_purchase' ? '#ef4444' : (toPurchaseCount > 0 ? '#fca5a5' : '#cbd5e1')),
-              backgroundColor: secondaryTab === 'to_purchase' ? '#fee2e2' : (toPurchaseCount > 0 ? '#fff5f5' : '#ffffff'),
-              color: secondaryTab === 'to_purchase' ? '#ef4444' : (toPurchaseCount > 0 ? '#dc2626' : '#475569'),
+              border: secondaryTab === 'to_purchase' ? '2px solid #991b1b' : `1px solid ${toPurchaseCount > 0 ? '#fca5a5' : '#cbd5e1'}`,
+              backgroundColor: secondaryTab === 'to_purchase' ? '#dc2626' : (toPurchaseCount > 0 ? '#fff5f5' : '#ffffff'),
+              color: secondaryTab === 'to_purchase' ? '#ffffff' : (toPurchaseCount > 0 ? '#dc2626' : '#475569'),
               transition: 'all 0.15s ease'
             }}
           >
@@ -2462,14 +2480,14 @@ export default function PurchaseRecords() {
           <button
             onClick={() => { setSecondaryTab('all'); }}
             style={{
-              padding: '6px 16px',
+              padding: secondaryTab === 'all' ? '5px 15px' : '6px 16px',
               fontSize: '13px',
-              fontWeight: 600,
+              fontWeight: secondaryTab === 'all' ? 700 : 600,
               borderRadius: '20px',
               cursor: 'pointer',
-              border: '1px solid ' + (secondaryTab === 'all' ? '#2563eb' : '#cbd5e1'),
-              backgroundColor: secondaryTab === 'all' ? '#eff6ff' : '#ffffff',
-              color: secondaryTab === 'all' ? '#2563eb' : '#475569',
+              border: secondaryTab === 'all' ? '2px solid #1d4ed8' : '1px solid #cbd5e1',
+              backgroundColor: secondaryTab === 'all' ? '#2563eb' : '#ffffff',
+              color: secondaryTab === 'all' ? '#ffffff' : '#475569',
               transition: 'all 0.15s ease'
             }}
           >
@@ -2531,6 +2549,16 @@ export default function PurchaseRecords() {
               </div>
             </div>
 
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '36px', fontSize: '13px', fontWeight: 600, color: '#115e59', cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={needsPurchaseOnly}
+                onChange={e => setNeedsPurchaseOnly(e.target.checked)}
+                style={{ width: '17px', height: '17px', margin: 0, accentColor: '#047857', cursor: 'pointer' }}
+              />
+              <span>只看需要採購（{needsPurchaseCount}）</span>
+            </label>
+
             {/* Row 2: Sort select */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
               <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>排序</span>
@@ -2572,6 +2600,16 @@ export default function PurchaseRecords() {
                 <option value="代理版">代理版</option>
               </select>
             </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '36px', fontSize: '13px', fontWeight: 600, color: '#115e59', cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={needsPurchaseOnly}
+                onChange={e => setNeedsPurchaseOnly(e.target.checked)}
+                style={{ width: '17px', height: '17px', margin: 0, accentColor: '#047857', cursor: 'pointer' }}
+              />
+              <span>只看需要採購（{needsPurchaseCount}）</span>
+            </label>
 
             <div style={{ flex: 1 }}></div>
 
@@ -2620,7 +2658,7 @@ export default function PurchaseRecords() {
             {secondaryTab === 'progress' ? filteredAndSortedGroups.length + completedGroups.length : filteredAndSortedGroups.length}
           </span>
           <span>筆商品符合條件</span>
-          {secondaryTab === 'progress' && (
+          {secondaryTab === 'progress' && !needsPurchaseOnly && (
             <span style={{ color: '#64748b', fontSize: '12px' }}>
               (進行中: {filteredAndSortedGroups.length} 筆 / 已過結單日: {completedGroups.length} 筆)
             </span>
