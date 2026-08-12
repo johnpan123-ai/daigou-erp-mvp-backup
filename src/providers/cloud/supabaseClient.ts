@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createGuardedSupabaseFetch } from '../../lib/cloudWriteGuard';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -46,4 +47,8 @@ export const clearStoredSupabaseAuthToken = (): void => {
   window.localStorage.removeItem(`${supabaseAuthStorageKey}-user`);
 };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: {
+    fetch: createGuardedSupabaseFetch(supabaseUrl),
+  },
+});

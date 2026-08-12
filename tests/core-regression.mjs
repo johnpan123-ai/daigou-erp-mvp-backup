@@ -67,7 +67,7 @@ async function waitForServer() {
 async function putFixture(page) {
   await page.evaluate(async ({ data, keys }) => {
     localStorage.clear();
-    localStorage.setItem('erp_provider_mode', 'local');
+    localStorage.setItem('erp_provider_mode', 'test');
     localStorage.setItem('erp_active_tab', 'all');
     localStorage.setItem('erp_active_secondary_tab', 'all');
     localStorage.setItem('erp_search_term', '');
@@ -77,7 +77,7 @@ async function putFixture(page) {
     localStorage.setItem('erp_needs_purchase_only', 'false');
 
     await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-db-test-v1', 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains('kv')) request.result.createObjectStore('kv');
       };
@@ -99,7 +99,7 @@ async function putFixture(page) {
 async function readFixture(page) {
   return page.evaluate(async keys => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-db-test-v1', 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
@@ -238,7 +238,7 @@ async function verifyProxyMigration(page) {
   await page.goto(`${BASE_URL}/purchase-records`, { waitUntil: 'networkidle' });
   await page.waitForFunction(async () => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-db-test-v1', 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });

@@ -5,6 +5,7 @@ import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } fr
 import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
 import { supabase } from '../providers/cloud/supabaseClient';
+import { clearTestSandboxData } from '../lib/testSandboxEnvironment';
 
 export default function Settings() {
   const { user, signOut } = useAuth();
@@ -211,6 +212,19 @@ export default function Settings() {
     }
   };
 
+  const handleClearTestSandbox = async () => {
+    if (currentMode !== 'test') {
+      alert('此操作只能在測試模式執行。');
+      return;
+    }
+    if (!confirm('確定要清空 Test Sandbox 嗎？\n此操作只會清除測試資料，不會影響正式雲端或一般 Local DB。')) return;
+    if (!confirm('請再次確認：要永久清空目前所有 Test Sandbox 資料嗎？')) return;
+
+    await clearTestSandboxData();
+    alert('Test Sandbox 已清空。正式資料未受影響。');
+    window.location.reload();
+  };
+
   return (
     <div className="flex-col gap-lg" style={{ padding: '0 24px', maxWidth: '1200px', margin: '0 auto' }}>
       <div className="flex items-center gap-sm" style={{ padding: '16px 0', borderBottom: '1px solid var(--color-border)' }}>
@@ -394,10 +408,32 @@ export default function Settings() {
           </p>
           
           <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: 'var(--color-text)' }}>
-            目前模式：{getProviderMode() === 'local' ? '本地模式' : getProviderMode() === 'cloud' ? '雲端模式' : '備援模式'}
+            目前模式：{getProviderMode() === 'test' ? 'Test Sandbox' : getProviderMode() === 'local' ? '本地模式' : getProviderMode() === 'cloud' ? '雲端模式' : '備援模式'}
           </div>
 
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <label
+              onClick={() => {
+                if (currentMode !== 'test') {
+                  if (setProviderMode('test')) window.location.reload();
+                }
+              }}
+              style={{
+                border: currentMode === 'test' ? '2px solid #6d28d9' : '1px solid var(--color-border)',
+                borderRadius: '8px',
+                padding: '16px',
+                flex: '1',
+                minWidth: '200px',
+                cursor: 'pointer',
+                position: 'relative',
+                backgroundColor: currentMode === 'test' ? '#f5f3ff' : 'transparent'
+              }}
+            >
+              <input type="radio" checked={currentMode === 'test'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px', color: '#5b21b6' }}>Test Sandbox</div>
+              <div className="text-xs text-muted">使用獨立 Test IndexedDB；程式會硬性阻止 Supabase 資料與 Storage 寫入。</div>
+            </label>
+
             <label 
               onClick={() => {
                 if (currentMode !== 'local') {
@@ -431,8 +467,7 @@ export default function Settings() {
                     }
                     return;
                   }
-                  setProviderMode('cloud');
-                  window.location.reload();
+                  if (setProviderMode('cloud')) window.location.reload();
                 }
               }}
               style={{ 
@@ -469,6 +504,18 @@ export default function Settings() {
               <div className="text-xs text-muted">雲端模式無法連線時，自動切換至本地快取編輯，並在連線後自動同步。</div>
             </label>
           </div>
+
+          {currentMode === 'test' && (
+            <div style={{ marginTop: '16px', padding: '16px', border: '1px solid #c4b5fd', borderRadius: '8px', backgroundColor: '#faf5ff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+              <div>
+                <div style={{ color: '#5b21b6', fontWeight: 700, marginBottom: '4px' }}>清空 Test Sandbox</div>
+                <div className="text-xs text-muted">只清除 daigou-erp-db-test-v1，不會清除正式快取、一般 Local DB 或 Supabase。</div>
+              </div>
+              <button className="btn" style={{ backgroundColor: '#7c3aed', color: '#fff' }} onClick={handleClearTestSandbox}>
+                <Trash2 size={16} /> 清空測試資料
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Supabase 連線測試 */}

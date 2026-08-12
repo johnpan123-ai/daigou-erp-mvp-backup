@@ -1,6 +1,7 @@
 import type { IDataProvider } from './types';
 import { LocalProvider } from './localProvider';
 import { supabaseProvider } from './cloud/supabaseProvider';
+import { testSandboxProvider } from './testSandboxProvider';
 import { getProviderMode } from './providerMode';
 import type { 
   InventoryItem, 
@@ -32,6 +33,7 @@ export class StaleDataError extends Error {
 class DynamicDataProvider implements IDataProvider {
   private localProvider = new LocalProvider();
   private supabaseProvider = supabaseProvider;
+  private testSandboxProvider = testSandboxProvider;
 
   private tabId = Math.random().toString(36).substring(2, 9);
   private lastLoadedTime = Date.now();
@@ -292,6 +294,9 @@ class DynamicDataProvider implements IDataProvider {
 
   private getActiveProvider(): IDataProvider {
     const mode = getProviderMode();
+    if (mode === 'test') {
+      return this.testSandboxProvider;
+    }
     if (mode === 'cloud') {
       return this.supabaseProvider;
     } else if (mode === 'fallback') {

@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
+    "test:sandbox-guard": "node tests/sandbox-guard.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },
   "dependencies": {

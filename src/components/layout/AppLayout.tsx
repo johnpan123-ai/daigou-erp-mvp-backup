@@ -105,6 +105,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const providerMode = getProviderMode();
   const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';
+  const isTestMode = providerMode === 'test';
+
+  useEffect(() => {
+    document.title = isTestMode ? '[TEST] 小河馬 ERP' : '小河馬 ERP';
+  }, [isTestMode]);
 
   if (isCloudOrFallback && loading) {
     return (
@@ -128,7 +133,32 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''}`}>
+    <div
+      className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''}`}
+      style={{ paddingTop: '38px' }}
+    >
+      <div style={{
+        position: 'fixed',
+        inset: '0 0 auto 0',
+        height: '38px',
+        zIndex: 12000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '0 16px',
+        backgroundColor: isTestMode ? '#5b21b6' : isCloudOrFallback ? '#b45309' : '#475569',
+        color: '#fff',
+        fontSize: '14px',
+        fontWeight: 800,
+        letterSpacing: '0.01em',
+        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.22)'
+      }}>
+        {isTestMode
+          ? '測試模式｜所有修改只存在本機，不會寫入正式雲端'
+          : isCloudOrFallback
+            ? '正式模式｜目前操作會修改正式資料'
+            : '本機模式｜資料只保存在目前瀏覽器'}
+      </div>
       
       {/* Backdrop overlay for mobile drawer */}
       {isMobile && (
@@ -218,6 +248,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     } else if (mode === 'fallback') {
                       modeLabel = '備援模式';
                       dotColor = '#3b82f6'; // blue
+                    } else if (mode === 'test') {
+                      modeLabel = 'Test Sandbox';
+                      dotColor = '#7c3aed';
                     }
 
                     return (
@@ -418,6 +451,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 badgeColor = '#3182ce';
                 badgeBg = '#ebf8ff';
                 badgeBorder = '#bee3f8';
+              } else if (mode === 'test') {
+                modeLabel = 'Test Sandbox';
+                badgeColor = '#6d28d9';
+                badgeBg = '#f5f3ff';
+                badgeBorder = '#c4b5fd';
               }
 
               return (
@@ -572,8 +610,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   </div>
                   <button 
                     onClick={() => {
-                      setProviderMode('cloud');
-                      window.location.reload();
+                      if (setProviderMode('cloud')) window.location.reload();
                     }}
                     className="btn btn-primary" 
                     style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', backgroundColor: '#d97706', borderColor: '#d97706', color: '#fff', fontWeight: 600 }}
