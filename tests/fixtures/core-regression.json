@@ -1,0 +1,70 @@
+{
+  "inventory": [
+    {"inventory_key":"inv-holo","myacg_item_code":"SKU-HOLO","product_title":"Hololive Active","normalized_product_title":"hololive active","raw_variant_name":"A","listing_type":"日本代購","final_price":1000,"myacg_available_quantity":0,"myacg_sold_quantity":3,"myacg_demand_quantity":3,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-c108","myacg_item_code":"SKU-C108","product_title":"C108 Closed","normalized_product_title":"c108 closed","raw_variant_name":"A","listing_type":"日本代購","final_price":900,"myacg_available_quantity":0,"myacg_sold_quantity":1,"myacg_demand_quantity":1,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-vspo","myacg_item_code":"SKU-VSPO","product_title":"VSPO Active","normalized_product_title":"vspo active","raw_variant_name":"A","listing_type":"日本代購","final_price":800,"myacg_available_quantity":0,"myacg_sold_quantity":0,"myacg_demand_quantity":0,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-proxy","myacg_item_code":"SKU-PROXY","product_title":"GSC Proxy Active","normalized_product_title":"gsc proxy active","raw_variant_name":"A","listing_type":"代理版","final_price":700,"myacg_available_quantity":0,"myacg_sold_quantity":4,"myacg_demand_quantity":4,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-other-a","myacg_item_code":"SKU-OTHER-A","product_title":"Other Active","normalized_product_title":"other active","raw_variant_name":"A","listing_type":"日本代購","final_price":600,"myacg_available_quantity":0,"myacg_sold_quantity":2,"myacg_demand_quantity":2,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-other-b","myacg_item_code":"SKU-OTHER-B","product_title":"Other Active","normalized_product_title":"other active","raw_variant_name":"B","listing_type":"日本代購","final_price":600,"myacg_available_quantity":0,"myacg_sold_quantity":5,"myacg_demand_quantity":5,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-closed","myacg_item_code":"SKU-CLOSED","product_title":"Other Closed","normalized_product_title":"other closed","raw_variant_name":"A","listing_type":"日本代購","final_price":500,"myacg_available_quantity":0,"myacg_sold_quantity":0,"myacg_demand_quantity":0,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-invalid","myacg_item_code":"SKU-INVALID","product_title":"Invalid Date","normalized_product_title":"invalid date","raw_variant_name":"A","listing_type":"日本代購","final_price":400,"myacg_available_quantity":0,"myacg_sold_quantity":2,"myacg_demand_quantity":2,"myacg_listed_at":"2026-01-01"},
+    {"inventory_key":"inv-today","myacg_item_code":"SKU-TODAY","product_title":"Today Closing","normalized_product_title":"today closing","raw_variant_name":"A","listing_type":"日本代購","final_price":300,"myacg_available_quantity":0,"myacg_sold_quantity":1,"myacg_demand_quantity":1,"myacg_listed_at":"2026-01-01"}
+  ],
+  "salesOrders": [],
+  "salesOrderItems": [],
+  "productGroups": [
+    {"id":"g-holo","purchase_date":"2026-01-01","priority":"Medium","title":"Hololive Active [g-holo]","normalized_title":"hololive active","listing_type":"日本代購","closing_date":"2099-12-31","release_month":"2099-12","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-c108","purchase_date":"2026-01-01","priority":"Medium","title":"C108 Closed [g-c108]","normalized_title":"c108 closed","listing_type":"日本代購","closing_date":"2020-01-01","release_month":"2026-08","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-vspo","purchase_date":"2026-01-01","priority":"Medium","title":"VSPO Active [g-vspo]","normalized_title":"vspo active","listing_type":"日本代購","closing_date":"","release_month":"2026-09","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-proxy","purchase_date":"2026-01-01","priority":"Medium","title":"GSC Proxy Active [g-proxy]","normalized_title":"gsc proxy active","listing_type":"代理版","source_type":"代理版","closing_date":"2099-12-31","release_month":"2099-12","has_official_site":false,"product_url":"","proxy_agent":"鉅霖","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-other","purchase_date":"2026-01-01","priority":"Medium","title":"Other Active [g-other]","normalized_title":"other active","listing_type":"日本代購","closing_date":"2099-12-31","release_month":"2099-12","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-closed","purchase_date":"2026-01-01","priority":"Medium","title":"Other Closed [g-closed]","normalized_title":"other closed","listing_type":"日本代購","closing_date":"2020/01/02","release_month":"2026-01","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-invalid","purchase_date":"2026-01-01","priority":"Medium","title":"Invalid Date [g-invalid]","normalized_title":"invalid date","listing_type":"日本代購","closing_date":"08/30","release_month":"2026-08","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"g-today","purchase_date":"2026-01-01","priority":"Medium","title":"Today Closing [g-today]","normalized_title":"today closing","listing_type":"日本代購","closing_date":"2026-08-12","release_month":"2026-08","has_official_site":false,"product_url":"","created_at":"2026-01-01T00:00:00.000Z","updated_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"00000000-0000-4000-a000-000000000000","purchase_date":"2026-08-12","priority":"Low","title":"WACA_UPDATE_METADATA_DO_NOT_DELETE","closing_date":"2026-08-12","release_month":"","has_official_site":false,"product_url":"","proxy_agent":"江尚恩","show_in_purchase_list":false,"created_at":"2026-08-12T00:00:00.000Z","updated_at":"2026-08-12T00:00:00.000Z"}
+  ],
+  "productCategories": [
+    {"id":"c-holo","product_group_id":"g-holo","title":"General","sort_order":0},
+    {"id":"c-c108","product_group_id":"g-c108","title":"General","sort_order":0},
+    {"id":"c-vspo","product_group_id":"g-vspo","title":"General","sort_order":0},
+    {"id":"c-proxy","product_group_id":"g-proxy","title":"General","sort_order":0},
+    {"id":"c-other","product_group_id":"g-other","title":"General","sort_order":0},
+    {"id":"c-closed","product_group_id":"g-closed","title":"General","sort_order":0},
+    {"id":"c-invalid","product_group_id":"g-invalid","title":"General","sort_order":0},
+    {"id":"c-today","product_group_id":"g-today","title":"General","sort_order":0}
+  ],
+  "productVariants": [
+    {"id":"v-holo","product_group_id":"g-holo","product_category_id":"c-holo","myacg_item_code":"SKU-HOLO","product_title":"Hololive Active","variant_name":"A","waca_auto_quantity":2,"waca_manual_adjustment":0,"note":"","sort_order":0,"default_jpy_cost":1000},
+    {"id":"v-c108","product_group_id":"g-c108","product_category_id":"c-c108","myacg_item_code":"SKU-C108","product_title":"C108 Closed","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":null},
+    {"id":"v-vspo","product_group_id":"g-vspo","product_category_id":"c-vspo","myacg_item_code":"SKU-VSPO","product_title":"VSPO Active","variant_name":"A","waca_auto_quantity":1,"note":"","sort_order":0,"default_jpy_cost":800},
+    {"id":"v-proxy","product_group_id":"g-proxy","product_category_id":"c-proxy","myacg_item_code":"SKU-PROXY","product_title":"GSC Proxy Active","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_twd_cost":700},
+    {"id":"v-other-a","product_group_id":"g-other","product_category_id":"c-other","myacg_item_code":"SKU-OTHER-A","product_title":"Other Active","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":600},
+    {"id":"v-other-b","product_group_id":"g-other","product_category_id":"c-other","myacg_item_code":"SKU-OTHER-B","product_title":"Other Active","variant_name":"B","waca_auto_quantity":0,"note":"","sort_order":1,"default_jpy_cost":600},
+    {"id":"v-closed","product_group_id":"g-closed","product_category_id":"c-closed","myacg_item_code":"SKU-CLOSED","product_title":"Other Closed","variant_name":"A","waca_auto_quantity":3,"private_manual_adjustment":2,"note":"","sort_order":0,"default_jpy_cost":500},
+    {"id":"v-invalid","product_group_id":"g-invalid","product_category_id":"c-invalid","myacg_item_code":"SKU-INVALID","product_title":"Invalid Date","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":null},
+    {"id":"v-today","product_group_id":"g-today","product_category_id":"c-today","myacg_item_code":"SKU-TODAY","product_title":"Today Closing","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":300}
+  ],
+  "purchaseBatches": [
+    {"id":"b-holo","product_group_id":"g-holo","name":"Batch","date":"2026-01-01","note":"","created_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"b-vspo","product_group_id":"g-vspo","name":"Batch","date":"2026-01-01","note":"","created_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"b-proxy","product_group_id":"g-proxy","name":"Batch","date":"2026-01-01","note":"","created_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"b-other","product_group_id":"g-other","name":"Batch","date":"2026-01-01","note":"","created_at":"2026-01-01T00:00:00.000Z"},
+    {"id":"b-closed","product_group_id":"g-closed","name":"Batch","date":"2026-01-01","note":"","created_at":"2026-01-01T00:00:00.000Z"}
+  ],
+  "purchaseBatchItems": [
+    {"id":"bi-holo","purchase_batch_id":"b-holo","product_variant_id":"v-holo","quantity":1,"cost":1000,"note":""},
+    {"id":"bi-vspo","purchase_batch_id":"b-vspo","product_variant_id":"v-vspo","quantity":1,"cost":800,"note":""},
+    {"id":"bi-proxy","purchase_batch_id":"b-proxy","product_variant_id":"v-proxy","quantity":2,"cost":700,"note":""},
+    {"id":"bi-other-a","purchase_batch_id":"b-other","product_variant_id":"v-other-a","quantity":5,"cost":600,"note":""},
+    {"id":"bi-other-b","purchase_batch_id":"b-other","product_variant_id":"v-other-b","quantity":1,"cost":600,"note":""},
+    {"id":"bi-closed","purchase_batch_id":"b-closed","product_variant_id":"v-closed","quantity":6,"cost":500,"note":""}
+  ],
+  "privateOrders": [],
+  "privateOrderItems": [],
+  "japanPackages": [],
+  "japanPackageItems": [],
+  "outboundShipments": [],
+  "outboundShipmentItems": [],
+  "bundleComponents": [],
+  "importBatches": []
+}

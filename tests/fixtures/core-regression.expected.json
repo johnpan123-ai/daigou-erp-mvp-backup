@@ -1,0 +1,42 @@
+{
+  "dashboard": {
+    "kpi": {
+      "active": 6,
+      "unordered": 1,
+      "urgent7": 1,
+      "closed": 3
+    },
+    "categories": {
+      "all": 9,
+      "hololive": 1,
+      "vspo": 1,
+      "proxy": 1,
+      "other": 6
+    }
+  },
+  "purchaseRecords": {
+    "categories": {
+      "all": 8,
+      "c108": 1,
+      "hololive": 1,
+      "vspo": 1,
+      "proxy": 1,
+      "other": 4
+    },
+    "tabs": {
+      "progress": 6,
+      "closed": 2,
+      "noClosingDate": 1,
+      "missingJpy": 2,
+      "toPurchase": 2,
+      "all": 8
+    },
+    "totals": {
+      "myacg": 18,
+      "waca": 6,
+      "privateOrder": 2,
+      "purchased": 16,
+      "gap": 14
+    }
+  }
+}

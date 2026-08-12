@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:core": "node tests/core-regression.mjs",
+    "diagnose:core": "node tests/core-diagnostics.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
