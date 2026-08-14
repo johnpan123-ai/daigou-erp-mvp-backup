@@ -236,26 +236,12 @@ async function verifyProxyMigration(page) {
     localStorage.setItem('erp_proxy_agent_map', JSON.stringify({ 'g-proxy': '萬榮' }));
   });
   await page.goto(`${BASE_URL}/purchase-records`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(async () => {
-    const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db-test-v1', 1);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
-    });
-    const groups = await new Promise((resolve, reject) => {
-      const request = db.transaction('kv', 'readonly').objectStore('kv').get('erp_product_groups');
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result ?? []);
-    });
-    db.close();
-    return groups.find(group => group.id === 'g-proxy')?.proxy_agent === '萬榮';
-  });
   const after = await readFixture(page);
-  const migrated = after.productGroups.find(group => group.id === 'g-proxy');
-  assert.equal(migrated.id, 'g-proxy', 'migration 不得重建 group');
-  assert.equal(migrated.proxy_agent, '萬榮', '舊 localStorage map 應可重現覆蓋現值');
-  assert.equal(await page.evaluate(() => localStorage.getItem('erp_proxy_agent_map')), null,
-    '成功寫回後 migration key 應被移除');
+  const group = after.productGroups.find(candidate => candidate.id === 'g-proxy');
+  assert.equal(group?.proxy_agent, '鉅霖', 'Product Group proxy_agent must remain the source of truth');
+  assert.equal(await page.evaluate(() => localStorage.getItem('erp_proxy_agent_map')),
+    JSON.stringify({ 'g-proxy': '萬榮' }),
+    'Retired proxy-agent map must be ignored and preserved');
 }
 
 let browser;
@@ -291,7 +277,7 @@ try {
 
   console.log('PASS 核心數據固定基準完全一致');
   console.log(JSON.stringify(first, null, 2));
-  console.log('PASS erp_proxy_agent_map 可在隔離 Local 資料重現舊值覆蓋，診斷後已還原');
+  console.log('PASS retired erp_proxy_agent_map is ignored and preserved');
   await context.close();
 } finally {
   if (browser) await browser.close();
