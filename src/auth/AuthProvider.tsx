@@ -7,6 +7,7 @@ import {
 } from '../providers/cloud/supabaseClient';
 import { getProviderMode, setProviderMode } from '../providers/providerMode';
 import type { User } from '@supabase/supabase-js';
+import { TEST_OWNER_PROFILE, TEST_OWNER_USER } from './testOwner';
 
 export interface UserProfile {
   role: 'owner' | 'staff' | 'viewer' | 'helper';
@@ -25,17 +26,18 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const isTestMode = getProviderMode() === 'test';
+  const [user, setUser] = useState<User | null>(() => isTestMode ? TEST_OWNER_USER : null);
+  const [profile, setProfile] = useState<UserProfile | null>(() => isTestMode ? TEST_OWNER_PROFILE : null);
+  const [loading, setLoading] = useState(() => !isTestMode);
   const [profileLoading, setProfileLoading] = useState(false);
   const explicitSignOutRef = useRef(false);
   const sessionRecoveryStartedRef = useRef(false);
   const hadAuthenticatedSessionRef = useRef(false);
 
   const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
-    // Only query database if not in pure local mode
-    if (getProviderMode() === 'local') {
+    // Local and Test modes never read the Production profiles table.
+    if (getProviderMode() === 'local' || getProviderMode() === 'test') {
       return null;
     }
 
@@ -59,6 +61,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // Test Sandbox uses a fully local identity and must never initialize or
+    // subscribe to the Production Supabase Auth session.
+    if (isTestMode) return;
+
     let active = true;
     let profileRequestId = 0;
     let initialAuthResolved = false;
@@ -164,9 +170,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profileRequestId++;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isTestMode]);
 
   const signOut = async () => {
+    if (isTestMode) {
+      console.log('[Provider Mode] leave Test Sandbox, switch to local');
+      setProviderMode('local');
+      window.location.reload();
+      return;
+    }
+
     console.log('[Provider Mode] explicit logout, switch to local');
     explicitSignOutRef.current = true;
     const { error } = await supabase.auth.signOut({ scope: 'local' });

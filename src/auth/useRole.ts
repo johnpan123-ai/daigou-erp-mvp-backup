@@ -18,6 +18,21 @@ export function useRole(): UserRole {
   const { user, profile, loading, profileLoading } = useAuth();
   const mode = getProviderMode();
 
+  if (mode === 'test') {
+    return {
+      role: 'owner',
+      displayName: 'Test Owner',
+      isProfileLoading: false,
+      canViewPage: () => true,
+      canCreate: () => true,
+      canEdit: () => true,
+      canDeleteGroup: () => true,
+      canImportXLS: () => true,
+      canSwitchMode: () => true,
+      canManageUsers: () => true,
+    };
+  }
+
   // Local Mode always returns Owner with full permissions
   if (mode === 'local') {
     return {

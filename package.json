@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
     "test:sandbox-guard": "node tests/sandbox-guard.mjs",
+    "test:sandbox-architecture": "node tests/sandbox-architecture.mjs",
+    "test:test-owner-auth": "node tests/test-owner-auth.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },
   "dependencies": {

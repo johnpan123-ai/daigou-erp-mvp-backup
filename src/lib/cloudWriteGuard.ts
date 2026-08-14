@@ -19,20 +19,16 @@ const getRequestUrl = (input: RequestInfo | URL): string => {
   return input.url;
 };
 
-export function isBlockedSupabaseWrite(method: string, requestUrl: string, supabaseUrl: string): boolean {
+export function isBlockedSupabaseWrite(_method: string, requestUrl: string, supabaseUrl: string): boolean {
   if (getProviderMode() !== 'test') return false;
-  if (!supabaseUrl || !requestUrl.startsWith(supabaseUrl)) return false;
+  if (!supabaseUrl) return false;
 
-  const url = new URL(requestUrl);
-  const normalizedMethod = method.toUpperCase();
-  const isReadMethod = normalizedMethod === 'GET' || normalizedMethod === 'HEAD';
-
-  if (url.pathname.startsWith('/auth/v1/')) return false;
-  if (url.pathname.startsWith('/rest/v1/')) return !isReadMethod;
-  if (url.pathname.startsWith('/storage/v1/')) return !isReadMethod;
-  if (url.pathname.startsWith('/functions/v1/')) return !isReadMethod;
-
-  return false;
+  try {
+    return new URL(requestUrl, window.location.origin).origin === new URL(supabaseUrl).origin;
+  } catch {
+    // An invalid URL cannot be identified as the configured Production host.
+    return false;
+  }
 }
 
 export function createGuardedSupabaseFetch(

@@ -346,7 +346,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                         style={{ 
                           width: '100%', 
                           padding: '12px', 
-                          fontSize: '14px', 
+                          fontSize: '14px',
                           border: '1px solid #fed7d7', 
                           color: 'var(--color-danger)', 
                           backgroundColor: '#fff5f5', 
@@ -355,7 +355,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                           cursor: 'pointer' 
                         }}
                       >
-                        登出
+                        {providerMode === 'test' ? '離開測試模式' : '登出'}
                       </button>
                     </div>
                   );
@@ -538,7 +538,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       className="btn btn-ghost text-danger" 
                       style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5', marginLeft: '8px' }}
                     >
-                      登出
+                      {providerMode === 'test' ? '離開測試模式' : '登出'}
                     </button>
                   </div>
                 );
