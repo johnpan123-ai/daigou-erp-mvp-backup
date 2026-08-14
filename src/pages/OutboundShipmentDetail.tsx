@@ -1,8 +1,21 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3 } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, Copy, Check } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
-import type { OutboundShipment, OutboundShipmentItem, JapanPackage, JapanPackageItem, InventoryItem } from '../lib/db';
+import { calculateVariantDemandAndPurchased } from '../lib/db';
+import type {
+  OutboundShipment,
+  OutboundShipmentItem,
+  JapanPackage,
+  JapanPackageItem,
+  InventoryItem,
+  ProductVariant,
+  ProductCategory,
+  PrivateOrderItem,
+  PurchaseBatchItem,
+  SalesOrderItem,
+  BundleComponent,
+} from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import * as XLSX from 'xlsx';
 
@@ -59,6 +72,28 @@ interface PoolItem {
   productGroupId?: string;
 }
 
+interface GroupSourceSummary {
+  myacg: number;
+  waca: number;
+  privateOrder: number;
+}
+
+interface PhysicalSkuSummary {
+  sku: string;
+  label: string;
+  directQuantity: number;
+  bundleQuantity: number;
+  totalQuantity: number;
+}
+
+interface ReceivedSkuDisplayRow {
+  key: string;
+  sku: string;
+  label: string;
+  totalQuantity: number;
+  sourceItems: OutboundShipmentItem[];
+}
+
 export default function OutboundShipmentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -71,10 +106,20 @@ export default function OutboundShipmentDetail() {
   const [japanPackages, setJapanPackages] = useState<JapanPackage[]>([]);
   const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
+  const [productCategories, setProductCategories] = useState<ProductCategory[]>([]);
+  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
+  const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
+  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [poolSearch, setPoolSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [collapsedSelectedGroups, setCollapsedSelectedGroups] = useState<Set<string>>(new Set());
+  const [expandedBundleItems, setExpandedBundleItems] = useState<Set<string>>(new Set());
+  const [expandedReceivingSources, setExpandedReceivingSources] = useState<Set<string>>(new Set());
+  const [expandedPhysicalSummaries, setExpandedPhysicalSummaries] = useState<Set<string>>(new Set());
+  const [copiedGroupName, setCopiedGroupName] = useState<string | null>(null);
   const [showHeaderEdit, setShowHeaderEdit] = useState(false);
   const [showManualAdd, setShowManualAdd] = useState(false);
   const [manualSku, setManualSku] = useState('');
@@ -108,18 +153,30 @@ export default function OutboundShipmentDetail() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [shipments, items, jp, jpi, inv] = await Promise.all([
+      const [shipments, items, jp, jpi, inv, variants, categories, privateItems, batchItems, salesItems, bundleItems] = await Promise.all([
         dataProvider.getOutboundShipments(),
         dataProvider.getOutboundShipmentItems(),
         dataProvider.getJapanPackages(),
         dataProvider.getJapanPackageItems(),
         dataProvider.getInventory(),
+        dataProvider.getProductVariants(),
+        dataProvider.getProductCategories(),
+        dataProvider.getPrivateOrderItems(),
+        dataProvider.getPurchaseBatchItems(),
+        dataProvider.getSalesOrderItems(),
+        dataProvider.getBundleComponents(),
       ]);
       setAllShipments(shipments);
       setAllShipmentItems(items);
       setJapanPackages(jp);
       setJapanPackageItems(jpi);
       setInventoryItems(inv);
+      setProductVariants(variants);
+      setProductCategories(categories);
+      setPrivateOrderItems(privateItems);
+      setPurchaseBatchItems(batchItems);
+      setSalesOrderItems(salesItems);
+      setBundleComponents(bundleItems);
 
       const current = shipments.find(s => s.id === id);
       setShipment(current || null);
@@ -208,6 +265,229 @@ export default function OutboundShipmentDetail() {
     }
     return groups;
   }, [poolItems, poolSearch]);
+
+  const japanPackageItemById = useMemo(
+    () => new Map(japanPackageItems.map(item => [item.id, item])),
+    [japanPackageItems]
+  );
+
+  const productVariantById = useMemo(
+    () => new Map(productVariants.map(variant => [variant.id, variant])),
+    [productVariants]
+  );
+
+  const categoryGroupById = useMemo(
+    () => new Map(productCategories.map(category => [category.id, category.product_group_id])),
+    [productCategories]
+  );
+
+  const bundleVariantsByParentId = useMemo(() => {
+    const result = new Map<string, ProductVariant[]>();
+    for (const relation of bundleComponents) {
+      const component = productVariantById.get(relation.component_variant_id);
+      if (!component) continue;
+      const components = result.get(relation.bundle_variant_id);
+      if (components) components.push(component);
+      else result.set(relation.bundle_variant_id, [component]);
+    }
+    for (const components of result.values()) {
+      components.sort((a, b) => {
+        const aSku = (a.myacg_item_code || '').trim();
+        const bSku = (b.myacg_item_code || '').trim();
+        if (!aSku && bSku) return 1;
+        if (aSku && !bSku) return -1;
+        return aSku.localeCompare(bSku, 'ja', { numeric: true });
+      });
+    }
+    return result;
+  }, [bundleComponents, productVariantById]);
+
+  const resolveItemVariant = useCallback((item: OutboundShipmentItem) => {
+    const packageItem = item.japan_package_item_id
+      ? japanPackageItemById.get(item.japan_package_item_id)
+      : undefined;
+    const variantId = item.product_variant_id || packageItem?.product_variant_id;
+    return variantId ? productVariantById.get(variantId) : undefined;
+  }, [japanPackageItemById, productVariantById]);
+
+  const resolveItemSku = useCallback((item: OutboundShipmentItem) => {
+    const packageItem = item.japan_package_item_id
+      ? japanPackageItemById.get(item.japan_package_item_id)
+      : undefined;
+    const variant = resolveItemVariant(item);
+    return (item.sku || packageItem?.sku || variant?.myacg_item_code || '').trim();
+  }, [japanPackageItemById, resolveItemVariant]);
+
+  const resolveItemGroupId = useCallback((item: OutboundShipmentItem) => {
+    const packageItem = item.japan_package_item_id
+      ? japanPackageItemById.get(item.japan_package_item_id)
+      : undefined;
+    const variant = resolveItemVariant(item);
+    return item.product_group_id
+      || packageItem?.product_group_id
+      || variant?.product_group_id
+      || (variant?.product_category_id ? categoryGroupById.get(variant.product_category_id) : undefined);
+  }, [categoryGroupById, japanPackageItemById, resolveItemVariant]);
+
+  const sourceSummaryByGroupId = useMemo(() => {
+    const result = new Map<string, GroupSourceSummary>();
+    for (const variant of productVariants) {
+      const groupId = variant.product_group_id
+        || (variant.product_category_id ? categoryGroupById.get(variant.product_category_id) : undefined);
+      if (!groupId) continue;
+
+      const demand = calculateVariantDemandAndPurchased(
+        variant,
+        privateOrderItems,
+        purchaseBatchItems,
+        inventoryItems,
+        salesOrderItems
+      );
+      const current = result.get(groupId) || { myacg: 0, waca: 0, privateOrder: 0 };
+      current.myacg += demand.myacg;
+      current.waca += demand.waca;
+      current.privateOrder += demand.privateOrder;
+      result.set(groupId, current);
+    }
+    return result;
+  }, [categoryGroupById, inventoryItems, privateOrderItems, productVariants, purchaseBatchItems, salesOrderItems]);
+
+  const getGroupSourceSummary = useCallback((items: OutboundShipmentItem[]): GroupSourceSummary => {
+    const groupIds = new Set(items.map(resolveItemGroupId).filter((groupId): groupId is string => !!groupId));
+    const summary = { myacg: 0, waca: 0, privateOrder: 0 };
+    for (const groupId of groupIds) {
+      const groupSummary = sourceSummaryByGroupId.get(groupId);
+      if (!groupSummary) continue;
+      summary.myacg += groupSummary.myacg;
+      summary.waca += groupSummary.waca;
+      summary.privateOrder += groupSummary.privateOrder;
+    }
+    return summary;
+  }, [resolveItemGroupId, sourceSummaryByGroupId]);
+
+  const getPhysicalSkuSummary = useCallback((items: OutboundShipmentItem[]): PhysicalSkuSummary[] => {
+    const summaryBySku = new Map<string, PhysicalSkuSummary>();
+    const addQuantity = (sku: string, label: string, directQuantity: number, bundleQuantity: number) => {
+      const cleanSku = sku.trim();
+      if (!cleanSku) return;
+      const key = cleanSku.toUpperCase();
+      const current = summaryBySku.get(key) || {
+        sku: cleanSku,
+        label,
+        directQuantity: 0,
+        bundleQuantity: 0,
+        totalQuantity: 0,
+      };
+      current.directQuantity += directQuantity;
+      current.bundleQuantity += bundleQuantity;
+      current.totalQuantity = current.directQuantity + current.bundleQuantity;
+      summaryBySku.set(key, current);
+    };
+
+    for (const item of items) {
+      const parentVariant = resolveItemVariant(item);
+      const componentVariants = parentVariant ? (bundleVariantsByParentId.get(parentVariant.id) || []) : [];
+      if (componentVariants.length > 0) {
+        for (const component of componentVariants) {
+          const componentSku = (component.myacg_item_code || '').trim();
+          if (!componentSku) continue;
+          addQuantity(
+            componentSku,
+            component.variant_name || component.product_title || componentSku,
+            0,
+            item.quantity
+          );
+        }
+        continue;
+      }
+
+      const sku = resolveItemSku(item);
+      addQuantity(sku, item.variant_name || item.product_title || sku, item.quantity, 0);
+    }
+
+    return Array.from(summaryBySku.values()).sort((a, b) =>
+      a.sku.localeCompare(b.sku, 'ja', { numeric: true })
+    );
+  }, [bundleVariantsByParentId, resolveItemSku, resolveItemVariant]);
+
+  const resolveItemLabel = useCallback((item: OutboundShipmentItem) => {
+    if (!item.japan_package_item_id) return item.variant_name || '單一規格';
+    const packageItem = japanPackageItemById.get(item.japan_package_item_id);
+    if (!packageItem) return item.variant_name || '單一規格';
+    return [packageItem.category_name, packageItem.variant_name].filter(Boolean).join(' — ') || '單一規格';
+  }, [japanPackageItemById]);
+
+  const getReceivedSkuDisplayRows = useCallback((items: OutboundShipmentItem[]): ReceivedSkuDisplayRow[] => {
+    const rows = new Map<string, ReceivedSkuDisplayRow>();
+    for (const item of items) {
+      const sku = resolveItemSku(item);
+      // 無 SKU 的原始項目不能安全判斷為同一實體商品，維持逐筆顯示。
+      const key = sku ? `sku:${sku.toUpperCase()}` : `item:${item.id}`;
+      const current = rows.get(key);
+      if (current) {
+        current.totalQuantity += item.quantity;
+        current.sourceItems.push(item);
+      } else {
+        rows.set(key, {
+          key,
+          sku,
+          label: resolveItemLabel(item),
+          totalQuantity: item.quantity,
+          sourceItems: [item],
+        });
+      }
+    }
+
+    return Array.from(rows.values()).sort((a, b) => {
+      if (!a.sku && b.sku) return 1;
+      if (a.sku && !b.sku) return -1;
+      return a.sku.localeCompare(b.sku, 'ja', { numeric: true });
+    });
+  }, [resolveItemLabel, resolveItemSku]);
+
+  const selectedGroupEntries = useMemo(() => {
+    const grouped = new Map<string, OutboundShipmentItem[]>();
+    for (const item of selectedItems) {
+      const key = cleanProductTitle(item.product_title || '') || item.product_title || '未分類';
+      const groupItems = grouped.get(key);
+      if (groupItems) groupItems.push(item);
+      else grouped.set(key, [item]);
+    }
+
+    const entries = Array.from(grouped.entries()).map(([groupName, items]) => ({
+      groupName,
+      items: shipment?.status === 'received'
+        ? [...items].sort((a, b) => {
+            const aSku = resolveItemSku(a);
+            const bSku = resolveItemSku(b);
+            if (!aSku && bSku) return 1;
+            if (aSku && !bSku) return -1;
+            return aSku.localeCompare(bSku, 'ja', { numeric: true });
+          })
+        : items,
+    }));
+
+    if (shipment?.status === 'received') {
+      entries.sort((a, b) => {
+        const aSku = a.items.map(resolveItemSku).find(Boolean) || '';
+        const bSku = b.items.map(resolveItemSku).find(Boolean) || '';
+        if (!aSku && bSku) return 1;
+        if (aSku && !bSku) return -1;
+        return aSku.localeCompare(bSku, 'ja', { numeric: true });
+      });
+    }
+    return entries;
+  }, [resolveItemSku, selectedItems, shipment?.status]);
+
+  const copyGroupName = useCallback(async (groupName: string) => {
+    try {
+      await navigator.clipboard.writeText(groupName);
+      setCopiedGroupName(groupName);
+      window.setTimeout(() => setCopiedGroupName(current => current === groupName ? null : current), 1200);
+    } catch (error) {
+      console.error('複製商品名稱失敗:', error);
+    }
+  }, []);
 
   const toggleGroup = (groupKey: string) => {
     setExpandedGroups(prev => {
@@ -315,6 +595,22 @@ export default function OutboundShipmentDetail() {
     const updated = selectedItems.map(i => {
       if (i.id !== itemId) return i;
       return { ...i, checked: !i.checked, checked_at: !i.checked ? new Date().toISOString() : undefined };
+    });
+    setSelectedItems(updated);
+    saveItems(updated);
+  }, [selectedItems]);
+
+  const toggleCheckedSources = useCallback((sourceItems: OutboundShipmentItem[]) => {
+    const sourceIds = new Set(sourceItems.map(item => item.id));
+    const shouldCheck = !sourceItems.every(item => item.checked);
+    const checkedAt = shouldCheck ? new Date().toISOString() : undefined;
+    const updated = selectedItems.map(item => {
+      if (!sourceIds.has(item.id)) return item;
+      return {
+        ...item,
+        checked: shouldCheck,
+        checked_at: shouldCheck ? (item.checked_at || checkedAt) : undefined,
+      };
     });
     setSelectedItems(updated);
     saveItems(updated);
@@ -555,6 +851,223 @@ export default function OutboundShipmentDetail() {
       </div>
     </div>
   ) : null;
+
+  const toggleBundleItemDetails = (itemId: string) => {
+    setExpandedBundleItems(previous => {
+      const next = new Set(previous);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  };
+
+  const renderBundleItemDetails = (item: OutboundShipmentItem) => {
+    const itemVariant = resolveItemVariant(item);
+    const componentVariants = itemVariant ? (bundleVariantsByParentId.get(itemVariant.id) || []) : [];
+    if (componentVariants.length === 0 || !expandedBundleItems.has(item.id)) return null;
+
+    return (
+      <div style={{
+        marginTop: 8, padding: '8px 10px', borderRadius: 7,
+        border: '1px solid #e2e8f0', background: '#f8fafc',
+        display: 'flex', flexDirection: 'column', gap: 6,
+      }}>
+        <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>套組內含實體商品</div>
+        {componentVariants.map(component => {
+          const componentSku = (component.myacg_item_code || '').trim();
+          return (
+            <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: '#334155', fontWeight: 600 }}>{component.variant_name || component.product_title || '單品'}</div>
+                <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
+                  {componentSku || '無 SKU（不納入彙總）'}
+                </div>
+              </div>
+              <strong style={{ flexShrink: 0, color: '#1d4ed8' }}>×{item.quantity}</strong>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderReceivedSkuRow = (row: ReceivedSkuDisplayRow, groupName: string) => {
+    const sourceCount = row.sourceItems.length;
+    const checkedSources = row.sourceItems.filter(item => item.checked);
+    const allChecked = checkedSources.length === sourceCount;
+    const partiallyChecked = checkedSources.length > 0 && !allChecked;
+    const checkedQuantity = checkedSources.reduce((sum, item) => sum + item.quantity, 0);
+    const sourceKey = `${groupName}::${row.key}`;
+    const sourcesExpanded = expandedReceivingSources.has(sourceKey);
+    const singleSource = sourceCount === 1 ? row.sourceItems[0] : undefined;
+    const singleVariant = singleSource ? resolveItemVariant(singleSource) : undefined;
+    const singleBundleVariants = singleVariant ? (bundleVariantsByParentId.get(singleVariant.id) || []) : [];
+    const prices = Array.from(new Set(
+      row.sourceItems
+        .map(item => getManualTwdPrice(item.note))
+        .filter((price): price is number => price !== undefined)
+    ));
+
+    return (
+      <div
+        key={row.key}
+        onClick={singleSource ? () => toggleChecked(singleSource.id) : undefined}
+        style={{
+          margin: '4px 0 0 22px', padding: '11px 12px', borderRadius: 8,
+          background: allChecked ? '#f0fdf4' : partiallyChecked ? '#fffbeb' : '#fff',
+          border: '1px solid',
+          borderColor: allChecked ? '#bbf7d0' : partiallyChecked ? '#fde68a' : '#e2e8f0',
+          cursor: singleSource ? 'pointer' : 'default',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
+          <button
+            type="button"
+            aria-label={allChecked ? `取消 ${row.label} 全部來源點收` : `完成 ${row.label} 全部來源點收`}
+            title={allChecked ? '取消全部來源點收' : '完成全部來源點收'}
+            onClick={event => {
+              event.stopPropagation();
+              if (singleSource) toggleChecked(singleSource.id);
+              else toggleCheckedSources(row.sourceItems);
+            }}
+            style={{
+            width: 24, height: 24, borderRadius: 6, marginTop: 1,
+            border: '2px solid',
+            borderColor: allChecked ? '#10b981' : partiallyChecked ? '#f59e0b' : '#cbd5e1',
+            background: allChecked ? '#10b981' : partiallyChecked ? '#f59e0b' : '#fff',
+            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            padding: 0, cursor: 'pointer',
+          }}>
+            {allChecked ? <CheckSquare size={16} /> : partiallyChecked ? <span style={{ fontWeight: 900 }}>—</span> : null}
+          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: allChecked ? '#047857' : '#334155', fontSize: 14, fontWeight: 700 }}>
+              <span>{row.label}</span>
+              <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800 }}>×{row.totalQuantity}</span>
+            </div>
+            {(row.sku || prices.length === 1) && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', color: '#94a3b8', fontSize: 11 }}>
+                {row.sku && <span>SKU: {row.sku}</span>}
+                {prices.length === 1 && <span>台幣單價 NT$ {prices[0].toLocaleString()}</span>}
+              </div>
+            )}
+          </div>
+          <span style={{
+            flexShrink: 0, padding: '3px 7px', borderRadius: 999,
+            background: allChecked ? '#dcfce7' : partiallyChecked ? '#fef3c7' : '#f1f5f9',
+            color: allChecked ? '#166534' : partiallyChecked ? '#92400e' : '#64748b',
+            fontSize: 11, fontWeight: 700,
+          }}>
+            {allChecked ? '完成' : partiallyChecked ? `部分完成 ${checkedQuantity}/${row.totalQuantity}` : '未完成'}
+          </span>
+        </div>
+
+        {singleSource && singleBundleVariants.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={event => {
+                event.stopPropagation();
+                toggleBundleItemDetails(singleSource.id);
+              }}
+              style={{
+                margin: '8px 0 0 33px', padding: '3px 8px', borderRadius: 5,
+                border: '1px solid #bfdbfe', background: expandedBundleItems.has(singleSource.id) ? '#dbeafe' : '#eff6ff',
+                color: '#1d4ed8', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              {expandedBundleItems.has(singleSource.id) ? '收合套組' : '展開套組'} ({singleBundleVariants.length})
+            </button>
+            <div onClick={event => event.stopPropagation()} style={{ marginLeft: 33 }}>
+              {renderBundleItemDetails(singleSource)}
+            </div>
+          </>
+        )}
+
+        {sourceCount > 1 && (
+          <div style={{ margin: '8px 0 0 33px' }}>
+            <button
+              type="button"
+              onClick={event => {
+                event.stopPropagation();
+                setExpandedReceivingSources(previous => {
+                  const next = new Set(previous);
+                  if (next.has(sourceKey)) next.delete(sourceKey);
+                  else next.add(sourceKey);
+                  return next;
+                });
+              }}
+              style={{
+                padding: 0, border: 'none', background: 'none', color: '#475569',
+                fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              來源明細（{sourceCount}） {sourcesExpanded ? '▾' : '▸'}
+            </button>
+            {sourcesExpanded && (
+              <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {row.sourceItems.map((sourceItem, index) => {
+                  const sourceVariant = resolveItemVariant(sourceItem);
+                  const sourceBundleVariants = sourceVariant ? (bundleVariantsByParentId.get(sourceVariant.id) || []) : [];
+                  return (
+                    <div key={sourceItem.id} style={{ padding: '7px 8px', borderRadius: 6, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            toggleChecked(sourceItem.id);
+                          }}
+                          aria-label={`切換來源 ${index + 1} 點收狀態`}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '5px 9px', borderRadius: 6,
+                            border: `1px solid ${sourceItem.checked ? '#86efac' : '#cbd5e1'}`,
+                            background: sourceItem.checked ? '#dcfce7' : '#fff',
+                            color: sourceItem.checked ? '#166534' : '#475569',
+                            fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                          }}
+                        >
+                          <span style={{
+                            width: 17, height: 17, borderRadius: 4,
+                            border: `2px solid ${sourceItem.checked ? '#10b981' : '#cbd5e1'}`,
+                            background: sourceItem.checked ? '#10b981' : '#fff', color: '#fff',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {sourceItem.checked && <Check size={12} />}
+                          </span>
+                          ×{sourceItem.quantity}
+                        </button>
+                        {sourceBundleVariants.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={event => {
+                              event.stopPropagation();
+                              toggleBundleItemDetails(sourceItem.id);
+                            }}
+                            style={{
+                              padding: '4px 8px', borderRadius: 5,
+                              border: '1px solid #bfdbfe', background: expandedBundleItems.has(sourceItem.id) ? '#dbeafe' : '#eff6ff',
+                              color: '#1d4ed8', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            }}
+                          >
+                            {expandedBundleItems.has(sourceItem.id) ? '收合套組' : '展開套組'} ({sourceBundleVariants.length})
+                          </button>
+                        )}
+                      </div>
+                      <div onClick={event => event.stopPropagation()}>
+                        {renderBundleItemDetails(sourceItem)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>載入中...</div>;
   if (!shipment) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>找不到此出庫單</div>;
@@ -808,19 +1321,14 @@ export default function OutboundShipmentDetail() {
               <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8', fontSize: 14 }}>
                 從右邊商品池雙擊加入商品
               </div>
-            ) : (() => {
-              const grouped = new Map<string, OutboundShipmentItem[]>();
-              for (const item of selectedItems) {
-                const key = cleanProductTitle(item.product_title || '') || item.product_title || '未分類';
-                if (!grouped.has(key)) grouped.set(key, []);
-                grouped.get(key)!.push(item);
-              }
-              return Array.from(grouped.entries()).map(([groupName, items]) => {
+            ) : selectedGroupEntries.map(({ groupName, items }) => {
                 const groupQty = items.reduce((s, i) => s + i.quantity, 0);
                 const isCollapsed = collapsedSelectedGroups.has(groupName);
                 const groupChecked = items.filter(i => i.checked).length;
                 const groupPercent = items.length > 0 ? Math.round((groupChecked / items.length) * 100) : 0;
                 const canEditGroup = shipment.status === 'draft' || shipment.status === 'packing' || (shipment.status === 'shipped' && editingShipped);
+                const sourceSummary = getGroupSourceSummary(items);
+                const physicalSkuSummary = shipment.status === 'received' ? getPhysicalSkuSummary(items) : [];
                 return (
                   <div key={groupName} style={{ marginBottom: 8 }}>
                     <div
@@ -836,11 +1344,35 @@ export default function OutboundShipmentDetail() {
                         minHeight: 44,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {isCollapsed ? <ChevronDown size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <ChevronUp size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
-                        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>
-                          {groupName}
-                        </span>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                          <span title={groupName} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 14, fontWeight: 700 }}>
+                            {groupName}
+                          </span>
+                          <span style={{ flexShrink: 0, color: '#475569', fontSize: 12, fontWeight: 700 }}>
+                            ｜買動漫{sourceSummary.myacg}・WACA{sourceSummary.waca}・私人{sourceSummary.privateOrder}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void copyGroupName(groupName);
+                          }}
+                          title="複製商品名稱"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 8px', borderRadius: 6,
+                            border: '1px solid #cbd5e1', background: '#fff',
+                            color: copiedGroupName === groupName ? '#15803d' : '#475569',
+                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                            whiteSpace: 'nowrap', flexShrink: 0,
+                          }}
+                        >
+                          {copiedGroupName === groupName ? <Check size={13} /> : <Copy size={13} />}
+                          {copiedGroupName === groupName ? '已複製' : '複製名稱'}
+                        </button>
                         {canEditGroup && (
                           <button
                             type="button"
@@ -876,7 +1408,10 @@ export default function OutboundShipmentDetail() {
                         )}
                       </div>
                     </div>
-                    {!isCollapsed && items.map(item => {
+                    {!isCollapsed && (
+                      shipment.status === 'received'
+                        ? getReceivedSkuDisplayRows(items).map(row => renderReceivedSkuRow(row, groupName))
+                        : items.map(item => {
                       const canEdit = shipment.status === 'draft' || shipment.status === 'packing' || (shipment.status === 'shipped' && editingShipped);
                       const isReceived = shipment.status === 'received';
                       const itemLabel = (() => {
@@ -885,6 +1420,9 @@ export default function OutboundShipmentDetail() {
                         if (!jpi) return item.variant_name || '單一規格';
                         return [jpi.category_name, jpi.variant_name].filter(Boolean).join(' — ') || '單一規格';
                       })();
+                      const itemVariant = resolveItemVariant(item);
+                      const itemBundleVariants = itemVariant ? (bundleVariantsByParentId.get(itemVariant.id) || []) : [];
+                      const isBundleExpanded = expandedBundleItems.has(item.id);
 
                       return (
                         <div
@@ -923,6 +1461,27 @@ export default function OutboundShipmentDetail() {
                                 {(isReceived || (shipment.status === 'shipped' && !editingShipped)) && (
                                   <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800 }}>×{item.quantity}</span>
                                 )}
+                                {isReceived && itemBundleVariants.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setExpandedBundleItems(previous => {
+                                        const next = new Set(previous);
+                                        if (next.has(item.id)) next.delete(item.id);
+                                        else next.add(item.id);
+                                        return next;
+                                      });
+                                    }}
+                                    style={{
+                                      marginLeft: 8, padding: '3px 8px', borderRadius: 5,
+                                      border: '1px solid #bfdbfe', background: isBundleExpanded ? '#dbeafe' : '#eff6ff',
+                                      color: '#1d4ed8', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                    }}
+                                  >
+                                    {isBundleExpanded ? '收合套組' : '展開套組'} ({itemBundleVariants.length})
+                                  </button>
+                                )}
                               </div>
                               {(item.sku || getManualTwdPrice(item.note) !== undefined) && (
                                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: '#94a3b8' }}>
@@ -930,6 +1489,32 @@ export default function OutboundShipmentDetail() {
                                   {getManualTwdPrice(item.note) !== undefined && (
                                     <span>台幣單價 NT$ {getManualTwdPrice(item.note)!.toLocaleString()}</span>
                                   )}
+                                </div>
+                              )}
+                              {isReceived && itemBundleVariants.length > 0 && isBundleExpanded && (
+                                <div
+                                  onClick={event => event.stopPropagation()}
+                                  style={{
+                                    marginTop: 8, padding: '8px 10px', borderRadius: 7,
+                                    border: '1px solid #e2e8f0', background: '#f8fafc',
+                                    display: 'flex', flexDirection: 'column', gap: 6,
+                                  }}
+                                >
+                                  <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>套組內含實體商品</div>
+                                  {itemBundleVariants.map(component => {
+                                    const componentSku = (component.myacg_item_code || '').trim();
+                                    return (
+                                      <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+                                        <div style={{ minWidth: 0 }}>
+                                          <div style={{ color: '#334155', fontWeight: 600 }}>{component.variant_name || component.product_title || '單品'}</div>
+                                          <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
+                                            {componentSku || '無 SKU（不納入彙總）'}
+                                          </div>
+                                        </div>
+                                        <strong style={{ flexShrink: 0, color: '#1d4ed8' }}>×{item.quantity}</strong>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -973,11 +1558,53 @@ export default function OutboundShipmentDetail() {
                           )}
                         </div>
                       );
-                    })}
+                    }))}
+                    {!isCollapsed && shipment.status === 'received' && physicalSkuSummary.length > 0 && (() => {
+                      const summaryExpanded = expandedPhysicalSummaries.has(groupName);
+                      return (
+                        <div style={{
+                          margin: '8px 0 0 22px', borderRadius: 8,
+                          border: '1px solid #bfdbfe', background: '#f8fbff', overflow: 'hidden',
+                        }}>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedPhysicalSummaries(previous => {
+                              const next = new Set(previous);
+                              if (next.has(groupName)) next.delete(groupName);
+                              else next.add(groupName);
+                              return next;
+                            })}
+                            style={{
+                              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              gap: 8, padding: '9px 11px', border: 'none', background: '#eff6ff',
+                              color: '#1e3a8a', fontSize: 13, fontWeight: 800, cursor: 'pointer', textAlign: 'left',
+                            }}
+                          >
+                            <span>各單品品項（{physicalSkuSummary.length}）</span>
+                            <span>{summaryExpanded ? '▾' : '▸'}</span>
+                          </button>
+                          {summaryExpanded && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 10px' }}>
+                              {physicalSkuSummary.map(summary => (
+                                <div key={summary.sku} style={{
+                                  padding: '7px 9px', borderRadius: 6, background: '#fff',
+                                  border: '1px solid #dbeafe',
+                                }}>
+                                  <div style={{ color: '#334155', fontSize: 13, fontWeight: 700 }}>
+                                    <span>{summary.label}</span>
+                                    <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800 }}>×{summary.totalQuantity}</span>
+                                  </div>
+                                  <div style={{ color: '#94a3b8', fontSize: 11 }}>SKU: {summary.sku}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
-              });
-            })()}
+              })}
           </div>
         </div>
 

@@ -228,12 +228,16 @@ export default function PurchaseRecords() {
     const valStr = draftDemands[key];
     if (valStr !== undefined) {
       const val = parseInt(valStr, 10) || 0;
-      setDraftDemands(prev => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-      await handleUpdateGroupPlatformDemand(groupId, platform, val);
+      const saved = await handleUpdateGroupPlatformDemand(groupId, platform, val);
+      if (saved) {
+        setDraftDemands(prev => {
+          // Keep a newer edit if the user changed this field while the save was pending.
+          if (prev[key] !== valStr) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
     }
   };
 
@@ -1226,50 +1230,9 @@ export default function PurchaseRecords() {
     console.log(`[UI Load] UI variants count: ${fetchedVars.length}`);
     console.log('[UI Load] variants sample:', fetchedVars.length > 0 ? JSON.stringify(fetchedVars[0]) : 'empty');
     
-    let finalGroups = fetchedGroups;
-
-    // localStorage migration logic
-    const storedMap = localStorage.getItem('erp_proxy_agent_map');
-    if (storedMap) {
-      try {
-        const localMap = JSON.parse(storedMap);
-        let migrated = false;
-        
-        const nextGroups = fetchedGroups.map(g => {
-          const localAgent = localMap[g.id];
-          if (localAgent && g.proxy_agent !== localAgent) {
-            migrated = true;
-            return { ...g, proxy_agent: localAgent };
-          }
-          return g;
-        });
-
-        if (!migrated) {
-          // Condition 1: storedMap exists, but no migratable data
-          localStorage.removeItem('erp_proxy_agent_map');
-          console.log("[Migration] No migratable data found. Deleted erp_proxy_agent_map.");
-        } else {
-          // Condition 2 & 3: migrated === true
-          // 1. Check stale status first
-          if (dataProvider.checkIsStaleLive && dataProvider.checkIsStaleLive()) {
-            console.warn("[Migration Warning] Local data is stale. Aborting migration to prevent overwriting cloud. LocalStorage preserved.");
-            alert("偵測到雲端資料已有新變更。請重新載入網頁以取得最新狀態，系統將在重新載入後自動完成代理商舊資料搬移與同步。");
-          } else {
-            console.log("[Migration] Attempting to save migrated proxy agents to database...");
-            await dataProvider.saveProductGroups(nextGroups);
-            finalGroups = nextGroups;
-            console.log("[Migration] Database write successful.");
-            
-            // Condition 2: save succeeded -> safely delete localStorage
-            localStorage.removeItem('erp_proxy_agent_map');
-            console.log("[Migration] Local storage 'erp_proxy_agent_map' successfully deleted.");
-          }
-        }
-      } catch (e) {
-        // Condition 3: migrated === true, but save fails / StaleDataError / network error
-        console.error("[Migration ERROR] Failed to complete database migration. LocalStorage preserved. Error:", e);
-      }
-    }
+    // Product Groups are the sole source of truth for proxy_agent. The retired
+    // erp_proxy_agent_map key is deliberately ignored and left untouched.
+    const finalGroups = fetchedGroups;
 
     const meta = finalGroups.find(g => g.id === WACA_META_ID) || null;
     setWacaMeta(meta);
@@ -1803,19 +1766,19 @@ export default function PurchaseRecords() {
   };
 
   const handleUpdateGroupPlatformDemand = async (groupId: string, platform: 'myacg' | 'waca' | 'purchased', totalValue: number) => {
-    if (guardAgainstStaleWrite()) return;
+    if (guardAgainstStaleWrite()) return false;
     if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
     
     const g = groups.find(x => x.id === groupId);
     if (!g || !isProxyProduct(g)) {
       console.warn(`[Edit Blocked] Only proxy products are allowed to modify platform quantities at the group level.`);
-      return;
+      return false;
     }
     
     const catIds = new Set(categories.filter(c => c.product_group_id === groupId).map(c => c.id));
     const groupVars = variants.filter(v => v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id)));
     
-    if (groupVars.length === 0) return;
+    if (groupVars.length === 0) return false;
     const targetVar = groupVars[0];
     
     const allVars = await dataProvider.getProductVariants();
@@ -1833,12 +1796,15 @@ export default function PurchaseRecords() {
       patch.updated_at = new Date().toISOString();
       try {
         await dataProvider.updateProductVariantPatch(targetVar.id, patch);
-        setVariants(variants.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
+        setVariants(prev => prev.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
+        return true;
       } catch (e) {
         console.error(e);
-        alert('手動調整儲存失敗，請確認網路連線後重新輸入一次。畫面已還原為儲存前的數值。');
+        alert('手動調整儲存失敗，請確認網路連線後再試。本次輸入仍保留在畫面上。');
+        return false;
       }
     }
+    return false;
   };
 
   const handleDeleteGroup = async (groupId: string, groupTitle: string) => {
