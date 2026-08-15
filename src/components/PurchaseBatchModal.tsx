@@ -5,6 +5,7 @@ import { calculateVariantDemandAndPurchased } from '../lib/db';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrder, PrivateOrderItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
+import { allocatePurchaseBatchFreight } from '../lib/purchaseBatchFreightAllocation';
 
 interface PurchaseBatchModalProps {
   show: boolean;
@@ -42,6 +43,18 @@ interface ParsedVariant {
   categoryTitle: string | null;
   variantDisplayName: string;
 }
+
+type PurchaseBatchDraftLine = {
+  variant_id: string;
+  quantity: number;
+  cost: number | string;
+  note: string;
+};
+
+type FreightAllocationSnapshot = {
+  freightYen: number;
+  baseCosts: Array<number | string>;
+};
 
 function parseVariantFallback(v: ProductVariant, categoryMap: Map<string, any>): ParsedVariant {
   if (v.product_category_id) {
@@ -151,7 +164,10 @@ export default function PurchaseBatchModal({
 
   const [onlyShowShortage, setOnlyShowShortage] = useState<boolean>(false);
   const [batchForm, setBatchForm] = useState({ name: '', date: '', note: '' });
-  const [batchLines, setBatchLines] = useState<{ variant_id: string; quantity: number; cost: number | string; note: string }[]>([]);
+  const [batchLines, setBatchLines] = useState<PurchaseBatchDraftLine[]>([]);
+  const [freightInput, setFreightInput] = useState('');
+  const [freightStatus, setFreightStatus] = useState<{ kind: 'success' | 'warning' | 'error'; message: string } | null>(null);
+  const freightAllocationRef = useRef<FreightAllocationSnapshot | null>(null);
   const initializedRef = useRef<string | null>(null);
 
   const isDaili = group?.listing_type === '代理版';
@@ -289,6 +305,9 @@ export default function PurchaseBatchModal({
     initializedRef.current = initKey;
 
     setOnlyShowShortage(false);
+    setFreightInput('');
+    setFreightStatus(null);
+    freightAllocationRef.current = null;
     if (editingBatchId) {
       const batch = purchaseBatches.find(b => b.id === editingBatchId);
       if (batch) {
@@ -360,8 +379,30 @@ export default function PurchaseBatchModal({
     if (pressIntervalRef.current) clearInterval(pressIntervalRef.current);
   };
 
+  const restorePreFreightCosts = (
+    lines: PurchaseBatchDraftLine[],
+    snapshot = freightAllocationRef.current
+  ) => {
+    if (!snapshot) return lines.map(line => ({ ...line }));
+    return lines.map((line, index) => ({
+      ...line,
+      cost: snapshot.baseCosts[index] ?? line.cost
+    }));
+  };
+
+  const invalidateFreightAllocation = (
+    update: (lines: PurchaseBatchDraftLine[]) => PurchaseBatchDraftLine[],
+    message = '商品數量／單價已變更，已還原分攤前單價，請重新分攤。'
+  ) => {
+    const snapshot = freightAllocationRef.current;
+    const hadAllocation = snapshot !== null;
+    setBatchLines(prev => update(restorePreFreightCosts(prev, snapshot)));
+    freightAllocationRef.current = null;
+    if (hadAllocation) setFreightStatus({ kind: 'warning', message });
+  };
+
   const adjustBatchLineQuantity = (index: number, delta: number) => {
-    setBatchLines(prev => {
+    invalidateFreightAllocation(prev => {
       const newLines = [...prev];
       if (newLines[index]) {
         const currentQty = newLines[index].quantity || 0;
@@ -385,13 +426,15 @@ export default function PurchaseBatchModal({
   };
 
   const updateBatchLine = (index: number, field: string, value: any) => {
-    const newLines = [...batchLines];
-    newLines[index] = { ...newLines[index], [field]: value };
-    setBatchLines(newLines);
+    invalidateFreightAllocation(prev => {
+      const newLines = [...prev];
+      newLines[index] = { ...newLines[index], [field]: value };
+      return newLines;
+    });
   };
 
   const fillAllShortages = () => {
-    setBatchLines(prev => {
+    invalidateFreightAllocation(prev => {
       const newLines = [...prev];
       mobileGroups.forEach(cg => {
         cg.items.forEach(item => {
@@ -407,6 +450,63 @@ export default function PurchaseBatchModal({
       });
       return newLines;
     });
+  };
+
+  const handleFreightInputChange = (value: string) => {
+    const cleanValue = value.replace(/[^0-9]/g, '');
+    const snapshot = freightAllocationRef.current;
+    const hadAllocation = snapshot !== null;
+    if (hadAllocation) {
+      setBatchLines(prev => restorePreFreightCosts(prev, snapshot));
+      freightAllocationRef.current = null;
+      setFreightStatus({ kind: 'warning', message: '本批運費已變更，已還原分攤前單價，請重新分攤。' });
+    } else {
+      setFreightStatus(null);
+    }
+    setFreightInput(cleanValue);
+  };
+
+  const handleAllocateFreight = () => {
+    const freightYen = Number(freightInput);
+    if (!Number.isSafeInteger(freightYen) || freightYen <= 0) {
+      setFreightStatus({ kind: 'error', message: '本批運費必須是大於 0 的整數日圓。' });
+      return;
+    }
+
+    const existingSnapshot = freightAllocationRef.current;
+    const baseLines = existingSnapshot
+      ? restorePreFreightCosts(batchLines, existingSnapshot)
+      : batchLines.map(line => ({ ...line }));
+
+    try {
+      const result = allocatePurchaseBatchFreight(
+        freightYen,
+        baseLines.map(line => ({
+          key: line.variant_id,
+          quantity: line.quantity,
+          unitCost: typeof line.cost === 'string' ? Number(line.cost) : line.cost
+        }))
+      );
+      const resultByVariant = new Map(result.allocations.map(allocation => [allocation.key, allocation]));
+
+      setBatchLines(baseLines.map(line => {
+        const allocation = resultByVariant.get(line.variant_id);
+        return allocation ? { ...line, cost: allocation.newUnitCost } : line;
+      }));
+      freightAllocationRef.current = {
+        freightYen,
+        baseCosts: baseLines.map(line => line.cost)
+      };
+      setFreightStatus({
+        kind: 'success',
+        message: `✓ 已依 ¥${result.requestedFreightTotal.toLocaleString()} 比例分攤（${result.allocations.length} 項，單價已四捨五入）`
+      });
+    } catch (error) {
+      setFreightStatus({
+        kind: 'error',
+        message: error instanceof Error ? error.message : '運費分攤失敗，請重新確認輸入。'
+      });
+    }
   };
 
   const handleAddBatchSubmit = async () => {
@@ -1002,10 +1102,79 @@ export default function PurchaseBatchModal({
             </table>
           )}
 
+          {!isDaili && !editingBatchId && (
+            <div
+              data-testid="purchase-batch-freight-tool"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                marginTop: '4px',
+                marginBottom: '16px',
+                padding: '12px',
+                border: '1px solid #fcd34d',
+                borderRadius: '8px',
+                backgroundColor: '#fffbeb'
+              }}
+            >
+              <div style={{ fontSize: '13px', fontWeight: 700, color: '#92400e' }}>本批運費分攤</div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#78350f' }}>
+                  本批運費（日幣）
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span>¥</span>
+                    <input
+                      aria-label="本批運費（日幣）"
+                      className="input"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={freightInput}
+                      onChange={event => handleFreightInputChange(event.target.value)}
+                      placeholder="1000"
+                      style={{ width: '120px', height: '36px', padding: '0 10px', border: '1px solid #d97706', borderRadius: '6px', backgroundColor: '#fff' }}
+                    />
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAllocateFreight}
+                  style={{
+                    height: '36px',
+                    padding: '0 14px',
+                    border: '1px solid #b45309',
+                    borderRadius: '6px',
+                    backgroundColor: '#d97706',
+                    color: '#fff',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  分攤運費至單價
+                </button>
+              </div>
+              <div style={{ fontSize: '12px', color: '#92400e', lineHeight: 1.5 }}>
+                僅分攤至「數量 &gt; 0 且實支單價 &gt; 0」的品項；按鈕只會更新本視窗草稿。
+              </div>
+              {freightStatus && (
+                <div
+                  role="status"
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: freightStatus.kind === 'success' ? '#15803d' : freightStatus.kind === 'warning' ? '#b45309' : '#dc2626'
+                  }}
+                >
+                  {freightStatus.message}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
-                本批次合計：<span style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
+                本批次合計：<span data-testid="purchase-batch-total" style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={onClose}>取消</button>
