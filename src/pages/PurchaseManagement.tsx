@@ -166,7 +166,6 @@ function MobilePurchaseBatchTab({
   onRefresh,
   onEditBatch,
   getDisplayProductName,
-  canWrite = false,
   isDaili = false
 }: MobilePurchaseBatchTabProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -381,11 +380,9 @@ function MobilePurchaseBatchTab({
                   {isExpanded ? '▼ 收合明細' : '▶ 查看明細'}
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
-                  {canWrite && (
-                    <button className="btn btn-ghost" style={{ padding: '2px', color: '#2563eb' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
-                      <Copy size={15} />
-                    </button>
-                  )}
+                  <button className="btn btn-ghost" style={{ padding: '2px 6px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
+                    <Copy size={15} /> 複製本批次帳目
+                  </button>
                   <button className="btn btn-ghost" style={{ padding: '2px', color: '#64748b' }} onClick={() => onEditBatch(batch)} title="編輯批次與明細">
                     <Edit2 size={15} />
                   </button>

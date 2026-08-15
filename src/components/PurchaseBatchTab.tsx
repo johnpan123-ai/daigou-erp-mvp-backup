@@ -60,7 +60,7 @@ interface PurchaseBatchTabProps {
   isDaili?: boolean;
 }
 
-export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, groups = [], japanPackages = [], japanPackageItems = [], onRefresh, onEditBatch, getDisplayProductName, canWrite, isDaili = false }: PurchaseBatchTabProps) {
+export default function PurchaseBatchTab({ batches, batchItems, variants, categoryMap, groups = [], japanPackages = [], japanPackageItems = [], onRefresh, onEditBatch, getDisplayProductName, isDaili = false }: PurchaseBatchTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'>('date_desc');
@@ -277,11 +277,9 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                       <div><span style={{ color: '#94a3b8' }}>金:</span> <span style={{ fontWeight: 600, color: '#059669' }}>{currencySymbol}{totalCost.toLocaleString()}</span></div>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
-                      {canWrite && (
-                        <button className="btn btn-ghost" style={{ padding: '4px', color: '#2563eb' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
-                          <Copy size={16} />
-                        </button>
-                      )}
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
+                        <Copy size={16} /> 複製本批次帳目
+                      </button>
                       <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditBatch(batch)} title="編輯批次與明細">
                         <Edit2 size={16} />
                       </button>
@@ -330,11 +328,9 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
                     <div style={{ width: '150px', textAlign: 'right' }}><span style={{ color: '#94a3b8' }}>總金額:</span> <span style={{ fontWeight: 600, color: '#059669' }}>{currencySymbol}{totalCost.toLocaleString()}</span></div>
                     
                     <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
-                      {canWrite && (
-                        <button className="btn btn-ghost" style={{ padding: '4px', color: '#2563eb' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
-                          <Copy size={16} />
-                        </button>
-                      )}
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', color: '#2563eb', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }} onClick={() => handleCopyBatchLedger(batch)} title="複製本批次帳目">
+                        <Copy size={16} /> 複製本批次帳目
+                      </button>
                       <button className="btn btn-ghost" style={{ padding: '4px', color: '#64748b' }} onClick={() => onEditBatch(batch)} title="編輯批次與明細">
                         <Edit2 size={16} />
                       </button>
