@@ -500,8 +500,11 @@ export default function PurchaseBatchModal({
         marginTop: isMobile ? '12px' : '0',
         marginBottom: isMobile ? '12px' : '0'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{editingBatchId ? '編輯採購批次' : '新增採購批次'}</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', padding: '16px', backgroundColor: '#eff6ff', borderBottom: '2px solid #93c5fd' }}>
+          <div>
+            <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#1d4ed8', margin: 0 }}>{editingBatchId ? '編輯採購批次' : '新增採購批次'}</h2>
+            <p style={{ margin: '4px 0 0', color: '#1e40af', fontSize: '13px' }}>建立正式採購批次，記錄本次採購數量與成本。</p>
+          </div>
           <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={onClose}><X size={20} /></button>
         </div>
         
