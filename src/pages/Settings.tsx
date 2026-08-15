@@ -6,6 +6,32 @@ import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
 import { supabase } from '../providers/cloud/supabaseClient';
 import { clearTestSandboxData } from '../lib/testSandboxEnvironment';
+import {
+  getTestSnapshotMetadata,
+  importTestSnapshot,
+  prepareTestSnapshotFile,
+  type TestSnapshotCandidate,
+  type TestSnapshotCollectionName,
+  type TestSnapshotMetadata,
+} from '../lib/testSnapshotImport';
+
+const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
+  { field: 'productGroups', label: '商品群組' },
+  { field: 'productCategories', label: '商品分類' },
+  { field: 'productVariants', label: 'Variants' },
+  { field: 'inventory', label: 'Inventory' },
+  { field: 'purchaseBatches', label: '採購批次' },
+  { field: 'purchaseBatchItems', label: '採購明細' },
+  { field: 'privateOrders', label: '私人訂單' },
+  { field: 'privateOrderItems', label: '私人訂單明細' },
+  { field: 'bundleComponents', label: '套組' },
+  { field: 'japanPackages', label: '日本包裹' },
+  { field: 'japanPackageItems', label: '日本包裹明細' },
+  { field: 'outboundShipments', label: '出庫單' },
+  { field: 'outboundShipmentItems', label: '出庫明細' },
+  { field: 'salesOrders', label: '銷售訂單' },
+  { field: 'salesOrderItems', label: '銷售訂單明細' },
+];
 
 export default function Settings() {
   const { user, signOut } = useAuth();
@@ -68,6 +94,12 @@ export default function Settings() {
   });
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const testSnapshotInputRef = useRef<HTMLInputElement>(null);
+  const [testSnapshotCandidate, setTestSnapshotCandidate] = useState<TestSnapshotCandidate | null>(null);
+  const [testSnapshotMetadata, setTestSnapshotMetadata] = useState<TestSnapshotMetadata | null>(null);
+  const [testSnapshotError, setTestSnapshotError] = useState<string | null>(null);
+  const [isPreparingTestSnapshot, setIsPreparingTestSnapshot] = useState(false);
+  const [isImportingTestSnapshot, setIsImportingTestSnapshot] = useState(false);
 
   const [connectionStatus, setConnectionStatus] = useState<'未測試' | '連線成功' | '連線失敗'>('未測試');
   const [connectionDetail, setConnectionDetail] = useState<string>('');
@@ -93,6 +125,11 @@ export default function Settings() {
   useEffect(() => {
     (window as any).dataProvider = dataProvider;
     loadCounts();
+    if (currentMode === 'test') {
+      getTestSnapshotMetadata()
+        .then(setTestSnapshotMetadata)
+        .catch(error => setTestSnapshotError(error instanceof Error ? error.message : String(error)));
+    }
   }, []);
 
   const loadCounts = async () => {
@@ -223,6 +260,53 @@ export default function Settings() {
     await clearTestSandboxData();
     alert('Test Sandbox 已清空。正式資料未受影響。');
     window.location.reload();
+  };
+
+  const handleTestSnapshotFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsPreparingTestSnapshot(true);
+    setTestSnapshotError(null);
+    setTestSnapshotCandidate(null);
+    try {
+      const candidate = await prepareTestSnapshotFile(file);
+      setTestSnapshotCandidate(candidate);
+    } catch (error) {
+      setTestSnapshotError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsPreparingTestSnapshot(false);
+      if (testSnapshotInputRef.current) testSnapshotInputRef.current.value = '';
+    }
+  };
+
+  const handleImportTestSnapshot = async () => {
+    if (!testSnapshotCandidate) return;
+    if (currentMode !== 'test') {
+      setTestSnapshotError('正式版 JSON 快照只能在 Test Sandbox 匯入。');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `此操作只會清除並取代目前 Test Sandbox 資料。\nProduction 雲端資料不會受到影響。\n\n檔案：${testSnapshotCandidate.fileName}\n\n確定繼續嗎？`,
+    );
+    if (!confirmed) return;
+
+    setIsImportingTestSnapshot(true);
+    setTestSnapshotError(null);
+    try {
+      const result = await importTestSnapshot(testSnapshotCandidate);
+      setTestSnapshotMetadata(result.metadata);
+      setTestSnapshotCandidate(null);
+      alert(
+        `Test Snapshot 匯入完成。\n\n商品群組：${result.verifiedCounts.productGroups}\nVariants：${result.verifiedCounts.productVariants}\nInventory：${result.verifiedCounts.inventory}\n日本包裹：${result.verifiedCounts.japanPackages}\n出庫單：${result.verifiedCounts.outboundShipments}\n\nProduction IndexedDB 與 localStorage 均未改變。`,
+      );
+      window.location.reload();
+    } catch (error) {
+      setTestSnapshotError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsImportingTestSnapshot(false);
+    }
   };
 
   return (
@@ -506,14 +590,97 @@ export default function Settings() {
           </div>
 
           {currentMode === 'test' && (
-            <div style={{ marginTop: '16px', padding: '16px', border: '1px solid #c4b5fd', borderRadius: '8px', backgroundColor: '#faf5ff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
-              <div>
-                <div style={{ color: '#5b21b6', fontWeight: 700, marginBottom: '4px' }}>清空 Test Sandbox</div>
-                <div className="text-xs text-muted">只清除 daigou-erp-db-test-v1，不會清除正式快取、一般 Local DB 或 Supabase。</div>
+            <div style={{ marginTop: '16px', padding: '16px', border: '1px solid #c4b5fd', borderRadius: '8px', backgroundColor: '#faf5ff' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ color: '#5b21b6', fontWeight: 700, marginBottom: '4px' }}>Test Sandbox 資料管理</div>
+                  <div className="text-xs text-muted">兩個操作都只會存取 daigou-erp-db-test-v1，不會連線或寫入 Production Supabase。</div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-primary"
+                    disabled={isPreparingTestSnapshot || isImportingTestSnapshot}
+                    onClick={() => testSnapshotInputRef.current?.click()}
+                  >
+                    <Upload size={16} /> {isPreparingTestSnapshot ? '正在檢查 JSON…' : '匯入正式版 JSON 快照'}
+                  </button>
+                  <input
+                    ref={testSnapshotInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleTestSnapshotFileChange}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    className="btn"
+                    style={{ backgroundColor: '#7c3aed', color: '#fff' }}
+                    disabled={isImportingTestSnapshot}
+                    onClick={handleClearTestSandbox}
+                  >
+                    <Trash2 size={16} /> 清空 Test Sandbox
+                  </button>
+                </div>
               </div>
-              <button className="btn" style={{ backgroundColor: '#7c3aed', color: '#fff' }} onClick={handleClearTestSandbox}>
-                <Trash2 size={16} /> 清空測試資料
-              </button>
+
+              {testSnapshotMetadata && (
+                <div style={{ marginTop: '14px', padding: '12px', backgroundColor: '#fff', border: '1px solid #ddd6fe', borderRadius: '8px' }}>
+                  <div style={{ fontWeight: 700, color: '#4c1d95' }}>目前測試資料來源</div>
+                  <div style={{ marginTop: '6px', fontSize: '14px' }}>{testSnapshotMetadata.sourceFileName}</div>
+                  <div className="text-xs text-muted" style={{ marginTop: '4px' }}>
+                    匯入時間：{new Date(testSnapshotMetadata.importedAt).toLocaleString('zh-TW', { hour12: false })}
+                  </div>
+                  <div className="text-xs text-muted" style={{ marginTop: '2px', wordBreak: 'break-all' }}>
+                    SHA-256：{testSnapshotMetadata.sourceSha256}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '6px 12px', marginTop: '10px', fontSize: '13px' }}>
+                    {TEST_SNAPSHOT_SUMMARY_FIELDS.map(item => (
+                      <div key={item.field}><span className="text-muted">{item.label}：</span><strong>{testSnapshotMetadata.counts[item.field]}</strong></div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {testSnapshotError && (
+                <div style={{ marginTop: '14px', padding: '12px', border: '1px solid #fecaca', borderRadius: '8px', backgroundColor: '#fff1f2', color: '#b91c1c', fontSize: '14px' }}>
+                  {testSnapshotError}
+                </div>
+              )}
+
+              {testSnapshotCandidate && (
+                <div style={{ marginTop: '14px', padding: '14px', border: '2px solid #8b5cf6', borderRadius: '8px', backgroundColor: '#fff' }}>
+                  <div style={{ color: '#4c1d95', fontWeight: 700 }}>確認匯入正式版 JSON 快照</div>
+                  <div style={{ marginTop: '8px', fontSize: '14px' }}><strong>檔案：</strong>{testSnapshotCandidate.fileName}</div>
+                  <div className="text-xs text-muted" style={{ marginTop: '3px' }}>
+                    大小：{(testSnapshotCandidate.fileSize / 1024 / 1024).toFixed(2)} MB
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '6px 12px', marginTop: '12px', fontSize: '13px' }}>
+                    {TEST_SNAPSHOT_SUMMARY_FIELDS.map(item => (
+                      <div key={item.field}><span className="text-muted">{item.label}：</span><strong>{testSnapshotCandidate.counts[item.field]}</strong></div>
+                    ))}
+                  </div>
+                  {testSnapshotCandidate.orphanWarnings.length > 0 && (
+                    <div style={{ marginTop: '12px', padding: '10px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', color: '#92400e', fontSize: '13px' }}>
+                      偵測到 {testSnapshotCandidate.orphanWarnings.reduce((sum, warning) => sum + warning.count, 0)} 筆歷史孤兒關聯；將保留原始資料，不會刪除或自動補值。
+                    </div>
+                  )}
+                  {testSnapshotCandidate.extraTopLevelKeys.length > 0 && (
+                    <div style={{ marginTop: '8px', color: '#92400e', fontSize: '12px' }}>
+                      未納入的額外頂層欄位：{testSnapshotCandidate.extraTopLevelKeys.join('、')}
+                    </div>
+                  )}
+                  <div style={{ marginTop: '12px', padding: '10px', backgroundColor: '#f5f3ff', borderRadius: '6px', color: '#5b21b6', fontWeight: 600, fontSize: '13px' }}>
+                    此操作只會清除並取代目前 Test Sandbox 資料。Production 雲端資料不會受到影響。
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
+                    <button className="btn btn-outline" disabled={isImportingTestSnapshot} onClick={() => setTestSnapshotCandidate(null)}>
+                      取消
+                    </button>
+                    <button className="btn btn-primary" disabled={isImportingTestSnapshot} onClick={handleImportTestSnapshot}>
+                      {isImportingTestSnapshot ? '正在原子匯入…' : '確認匯入 Test Sandbox'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
