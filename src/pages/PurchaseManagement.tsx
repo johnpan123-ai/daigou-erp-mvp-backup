@@ -7,7 +7,7 @@ import type {
   PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, BundleComponent,
   JapanPackage, JapanPackageItem
 } from '../lib/db';
-import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy, Trash2, Edit2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, X, ArrowLeft, Search, AlertTriangle, Package, CheckSquare, RefreshCw, DollarSign, Copy, Trash2, Edit2, ExternalLink } from 'lucide-react';
 import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
@@ -1905,12 +1905,33 @@ export default function PurchaseManagement() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             {isDaili ? cleanDailiTitle(group.normalized_title || group.title) : (group.normalized_title || group.title)}
             {group.listing_type && (
               <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
                 {group.listing_type}
               </span>
+            )}
+            {group.product_url && (
+              <a
+                href={group.product_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="開啟商品官網"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  color: '#2563eb',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <ExternalLink size={14} />
+                官網
+              </a>
             )}
           </h1>
         </div>
