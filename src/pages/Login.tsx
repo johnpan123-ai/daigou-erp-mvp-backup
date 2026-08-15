@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../providers/cloud/supabaseClient';
+import { getProviderMode, setProviderMode } from '../providers/providerMode';
 import { Box, Lock, Mail } from 'lucide-react';
 
 export default function Login() {
@@ -14,6 +15,12 @@ export default function Login() {
   const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+  const isCloudMode = getProviderMode() === 'cloud' || getProviderMode() === 'fallback';
+
+  const handleEnterLocalMode = () => {
+    setProviderMode('local');
+    window.location.replace('/dashboard');
+  };
 
   useEffect(() => {
     if (!loading && user) {
@@ -263,6 +270,29 @@ export default function Login() {
               {isLoading ? '正在登入...' : '登入'}
             </button>
           </form>
+        )}
+
+        {isCloudMode && !user && (
+          <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid var(--color-border)' }}>
+            <button
+              type="button"
+              onClick={handleEnterLocalMode}
+              className="btn btn-ghost"
+              style={{
+                width: '100%',
+                padding: '11px 12px',
+                fontWeight: 600,
+                color: '#475569',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #cbd5e1'
+              }}
+            >
+              進入本地模式
+            </button>
+            <p className="text-muted text-xs" style={{ margin: '8px 0 0', textAlign: 'center', lineHeight: 1.5 }}>
+              不需登入；資料只保存在目前瀏覽器，不會同步至雲端。
+            </p>
+          </div>
         )}
       </div>
     </div>

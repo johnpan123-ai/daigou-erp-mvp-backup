@@ -111,6 +111,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     document.title = isTestMode ? '[TEST] 小河馬 ERP' : '小河馬 ERP';
   }, [isTestMode]);
 
+  const handleEnterLocalMode = () => {
+    setProviderMode('local');
+    window.location.replace('/dashboard');
+  };
+
   if (isCloudOrFallback && loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: '16px' }}>
@@ -288,6 +293,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                             {isCloud ? '訪客 (雲端唯讀)' : '本地管理員（OWNER）'}
                           </div>
                         </div>
+                        {isCloud && (
+                          <button
+                            type="button"
+                            onClick={handleEnterLocalMode}
+                            className="btn btn-ghost"
+                            style={{
+                              width: '100%',
+                              padding: '12px',
+                              fontSize: '14px',
+                              color: '#475569',
+                              backgroundColor: '#fff',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '10px',
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            進入本地模式
+                          </button>
+                        )}
                         <Link 
                           to="/login" 
                           onClick={() => setIsMobileMenuOpen(false)} 
@@ -505,6 +530,27 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                         <span className="badge" style={{ backgroundColor: '#ebf8ff', color: '#2b6cb0', border: '1px solid #bee3f8', padding: '1px 6px', borderRadius: '4px', fontSize: '10px' }}>
                           owner
                         </span>
+                      )}
+                      {isCloud && (
+                        <button
+                          type="button"
+                          onClick={handleEnterLocalMode}
+                          className="btn btn-ghost"
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            height: 'auto',
+                            minHeight: 'auto',
+                            color: '#475569',
+                            backgroundColor: '#fff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '4px',
+                            fontWeight: 600,
+                            marginLeft: '8px'
+                          }}
+                        >
+                          進入本地模式
+                        </button>
                       )}
                       <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', color: '#fff', backgroundColor: 'var(--color-primary)', border: 'none', borderRadius: '4px', fontWeight: 600, marginLeft: '8px' }}>
                         {isCloud ? '管理員登入' : '登入雲端'}
