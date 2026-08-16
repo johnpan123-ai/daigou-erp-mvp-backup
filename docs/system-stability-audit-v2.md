@@ -88,11 +88,13 @@
 
 ### P0-5：刪除出庫單先存 shipment、再存 items
 
+- 狀態：**Design Gate / Blocked（2026-08-16 23:15；未實作、未 Accepted）**。
 - 問題：`deleteShipment()` 先 `saveOutboundShipments(updated)`，再 `saveOutboundShipmentItems(updatedItems)`，中途失敗沒有 rollback。
 - 位置：`src/pages/OutboundShipmentDetail.tsx:816-827`。
 - 影響：可能留下 orphan outbound items，或 shipment 已消失但 items 尚存。這與已修好的 checked save queue 是不同風險。
 - 最小修法：提供 shipment＋items 的原子刪除入口；至少先加失敗狀態與重新讀取，不可把 UI rollback 當成資料 rollback。
 - 涉及：Provider／db transaction；本輪不修改。
+- Design Gate：Cloud 的 shipment／item soft-delete 分別提交，且 delete error 會被內層 `.catch()` 吞掉；真正修正需要複合 Provider 契約與 server-side transaction。詳見 `docs/p0-e-outbound-delete-atomicity-design-gate.md`。
 
 ## 3. P0 程式 crash／白畫面
 
