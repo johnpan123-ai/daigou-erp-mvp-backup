@@ -1,0 +1,132 @@
+# Test Sandbox Feature Registry
+
+Last updated: 2026-08-16 (Asia/Taipei)
+
+## Rules
+
+- One user-facing feature must have one independently reviewable feature commit and one readiness tag.
+- Never merge `codex/test-sandbox` into `main`.
+- Production releases always start from the latest `origin/main`, then cherry-pick only approved feature commits.
+- Test infrastructure commits are never eligible for Production cherry-pick.
+- Every release branch must run Build, core regression, local/Preview acceptance, and receive explicit approval before Production deployment.
+
+## Production-ready feature nodes
+
+| Feature | Status | Final commit | Tag | Production ready | Dependencies | Files changed | Data write | Schema | Manual acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A. Purchase detail official link | Ready as an isolated node | `b0673caab80f33a5ef2246f7fb9c546a19c737b1` | `feature-purchase-detail-official-link-ready` | Candidate; release validation still required | None | `src/pages/PurchaseManagement.tsx` | None; reads existing `ProductGroup.product_url` | No | Test Sandbox direction accepted; Production branch/Preview acceptance pending |
+| B. Recent purchases workspace | Ready as one squashed feature node | `24cc27aac6f126470a8bc695d7b5b8a0e7924187` | `feature-recent-purchases-ready` | Candidate; release validation still required | None, including no dependency on Feature A | `src/App.tsx`, `src/components/layout/AppLayout.tsx`, `src/pages/RecentPurchases.tsx`, `tests/recent-purchases.mjs` | None; reads purchase batches/items and product groups | No | Local Test Sandbox layout accepted; clean Production-base cherry-pick and Build verified; Preview acceptance pending |
+| C. Purchase Management action hierarchy | Ready as an isolated node | `34fb89a7d9530699129f4c8eed138b55d3847a42` | `feature-purchase-management-action-hierarchy-ready` | Candidate; release validation still required | None | `src/pages/PurchaseManagement.tsx`, `src/components/PurchaseBatchModal.tsx` | No new writes; existing handlers and write gates are unchanged | No | Automated Test Sandbox UI acceptance and clean Production-base Build passed; human acceptance pending |
+| C2. Per-batch ledger copy restoration | Ready as a focused follow-up node | `4a08fc77c554b0fb72f891dc785771a69a0a86fc` | `feature-purchase-batch-ledger-copy-restoration-ready` | Candidate; release validation still required | Apply after Feature C | `src/components/PurchaseBatchTab.tsx`, `src/pages/PurchaseManagement.tsx`, `tests/purchase-management-actions.mjs` | None; restores only the existing clipboard UI action | No | Integration Build, core regression, and targeted action test passed |
+| E. Unauthenticated Local Mode entry | Ready as an isolated node | `2450f21ef5d0ee96b3ed3ea1cf258e5c0096bb8a` | `feature-unauthenticated-local-mode-entry-ready` | Candidate; release validation still required | None; clean node is based directly on Production `c3756cd` and does not depend on Test Sandbox | `src/pages/Login.tsx`, `src/components/layout/AppLayout.tsx` | Writes only `erp_provider_mode=local`; no ERP data write | No | Cloud guest → Local OWNER, reload persistence, Settings visibility, Console, Build, and regressions passed locally; human acceptance pending |
+| F. Purchase-batch freight allocation | Ready as an isolated node | `8b72220b463a91700cf4d3fc761ae766f3e78d92` | `feature-purchase-batch-freight-allocation-ready` | Candidate; release validation still required | None; clean node is based directly on Production `c3756cd` and does not depend on Test Sandbox | `src/components/PurchaseBatchModal.tsx`, `src/lib/purchaseBatchFreightAllocation.ts` | No immediate write; updates only the new-batch modal draft until the existing Save action is used | No | Cases A–G, integer-yen unit-cost rounding, no double-add, cancel/no-write, Build, core and Sandbox isolation tests passed locally; human acceptance pending |
+
+### Feature A behavior
+
+- The first and second purchase-record levels use the same `ProductGroup.product_url`.
+- One Product Group shows one official-site entry.
+- The entry is hidden when no URL exists and opens in a new tab when present.
+- No URL inference, new field, Provider change, or data write.
+
+### Feature B behavior
+
+- Dedicated `/recent-purchases` route and Sidebar entry between Purchase Records and Purchasing.
+- Today, yesterday, recent 7 days, and recent 30 days filters; recent 7 days is the default.
+- Product-name search and an optional “official site only” filter.
+- Aggregation key is `Taipei calendar date + product_group_id`.
+- Displays product name, daily purchased quantity, batch count, last purchase time, official link, detail link, and a read-only `proxy_agent` badge when present.
+- Date sections are independently collapsible and start collapsed; expansion state is not persisted.
+- Read-only ViewModel: purchase batches, purchase items, Product Groups, quantities, and timestamps are never modified.
+
+### Feature B history retained for audit
+
+The Test Sandbox history remains unchanged:
+
+- `86a5ecb6b44e32f9af757c0325deeb577c30f359`: original PurchaseRecords card implementation.
+- `9c0dc6347bdddecc9c3a09e9ce9ce469f365e0a3`: moved the feature to a dedicated page.
+- `c77ed76`: added read-only proxy-agent badges and independently collapsible date sections.
+
+Future Production work must cherry-pick only the final node `24cc27a`, not the historical sequence above. This node is based directly on Production `c3756cd`; its browser test uses an isolated Local fixture and does not require Test Mode or Test Sandbox infrastructure.
+
+### Feature C behavior
+
+- Keeps `新增採購批次` as the direct primary action.
+- Moves `私下登記` and the existing permission-gated `新增規格` action into `其他操作`.
+- Hides the unused `複製已採購帳目` UI without deleting its underlying implementation.
+- Gives purchase-batch and private-registration dialogs distinct colors, titles, and explanatory text.
+- Does not change purchase-batch creation, private-registration storage, quantity calculations, Provider behavior, or database structure.
+- Test branch verification commit `6a96293` includes the Sandbox-only browser regression test. Future Production work must cherry-pick only the clean node `34fb89a`.
+
+### Feature C2 behavior
+
+- Keeps the product-level green `複製已採購帳目` action hidden as specified by Feature C.
+- Restores a clear `複製本批次帳目` action on each purchase-batch history entry without changing its clipboard formatter.
+- Keeps batch date, style count, total quantity, total amount, expansion, edit, and delete behavior unchanged.
+- Apply `4a08fc7` only after Feature C; it is a focused follow-up and does not depend on Test Sandbox infrastructure at runtime.
+
+### Feature E behavior
+
+- Cloud visitors see `進入本地模式` beside `管理員登入` on desktop, in the mobile account area, and on the Login page.
+- The action only calls `setProviderMode('local')` and performs a full navigation to `/dashboard`.
+- It does not sign out, clear Supabase tokens, clear IndexedDB, synchronize data, or perform Local-to-Cloud writes.
+- After reload, the existing Local Mode role behavior supplies Local OWNER access and restores the Settings entry.
+- Cloud Mode authentication and visitor permissions are unchanged; the feature has no dependency on Test Owner, Test DB, or Sandbox Guard.
+- The Production-ready node is `2450f21`; the Test Sandbox implementation history must not be cherry-picked to Production.
+
+### Feature F behavior
+
+- Adds a Japanese-yen freight helper only to the new purchase-batch modal for non-proxy products.
+- Eligible rows are determined only from the current modal draft: quantity greater than zero and unit cost greater than zero.
+- Allocates freight proportionally by `quantity × unit cost`, keeps full precision through the proportional calculation, then rounds each final per-unit cost to a whole yen with standard positive-number rounding.
+- The batch total and saved purchase-item costs use those rounded integer unit costs. Because quantity can exceed one, the actual rounded cost increase is allowed to differ slightly from the entered freight instead of introducing fractional-yen unit costs.
+- Repeated allocation always starts from the captured pre-allocation costs; changing quantity, unit cost, or freight restores those base costs and requires recalculation instead of stacking freight.
+- The allocation button never creates a batch or calls a Provider. Only the existing final Save action persists the resulting unit costs.
+- Test Sandbox verification commits `fcdb4bf` and `bbdbfad` contain the targeted browser tests. Future Production work must cherry-pick only the clean node `8b72220`.
+
+## Test infrastructure nodes — never cherry-pick to Production
+
+| Infrastructure | Commit / range | Tag | Production ready | Purpose |
+| --- | --- | --- | --- | --- |
+| Core regression baseline | `e7358a4` | `checkpoint-core-regression-baseline-20260812` | **NO** | Fixed Local fixtures and diagnostics |
+| Test Sandbox Phase A | `214f4d5` | `checkpoint-test-sandbox-phase-a-before-a2` | **NO** | Test provider mode, isolated Test DB, initial guard/UI |
+| Test Sandbox Phase A2 | `b6e16d2` and later Test-only commits | `checkpoint-test-sandbox-phase-a2-before-production-sync-20260815` | **NO** | Test Owner, fail-closed network guard, Test storage isolation |
+| Production-to-Test code alignment | `93b69ab` | — | **NO** | Keeps Test behavior aligned with Production without reversing direction |
+| Test regression alignment | `d907ea1` | `checkpoint-test-sandbox-before-json-import-20260815` | **NO** | Test-only proxy-agent regression behavior |
+| Production JSON snapshot importer | `084a2ebf8fedec0d9d66d8ba35c19e4b555bca9f` | `test-infra-snapshot-import-only` | **NO — TEST INFRA ONLY** | Atomic import into `daigou-erp-db-test-v1` |
+
+These nodes may include `Test Owner`, `TestSandboxProvider`, `daigou-erp-db-test-v1`, namespaced Test localStorage, Supabase Network Guard, snapshot import, and Sandbox tests. None may be included in a Production release.
+
+## Required release flow
+
+### Releasing one feature
+
+1. Fetch and verify the latest `origin/main`.
+2. Create a clean `codex/release-<feature>` branch from that exact commit.
+3. Cherry-pick the feature’s single final commit from this registry.
+4. Review the complete diff against `origin/main` and scan for Test infrastructure.
+5. Run Build, TypeScript, core regression, targeted tests, and `git diff --check`.
+6. Complete local and Preview acceptance.
+7. Wait for explicit Production approval.
+8. Create a Production backup tag, then push/deploy code only.
+
+### Releasing Features A and B together
+
+Cherry-pick in this order:
+
+1. `b0673caab80f33a5ef2246f7fb9c546a19c737b1`
+2. `24cc27aac6f126470a8bc695d7b5b8a0e7924187`
+
+The commits do not depend on one another, but this order keeps the registry order clear.
+
+## Checklist for future Test Sandbox features
+
+- [ ] One feature only in the commit.
+- [ ] No unrelated refactor.
+- [ ] Read/write behavior documented.
+- [ ] Schema and Provider impact documented.
+- [ ] Dependencies explicitly listed.
+- [ ] Targeted tests included.
+- [ ] Core regression passes.
+- [ ] Final squashed feature node created when development used multiple commits.
+- [ ] Readiness tag created locally.
+- [ ] Production release is performed from a clean latest-Production branch, never by merging Test Sandbox.
