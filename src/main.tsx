@@ -92,12 +92,20 @@ async function bootstrap() {
 
   const { StrictMode, createElement } = reactModule;
   const { createRoot } = reactDomModule;
-  const { installTestSandboxEnvironment } = testEnvironmentModule;
+  const { getBuildSandboxMode, installTestSandboxEnvironment } = testEnvironmentModule;
+
+  // Dedicated Next/Experimental servers own their role.  Only this bootstrap
+  // key is intentionally shared; all business storage is namespaced by the
+  // environment installer below.
+  const buildSandboxMode = getBuildSandboxMode();
+  if (buildSandboxMode && typeof window !== 'undefined') {
+    window.localStorage.setItem('erp_provider_mode', buildSandboxMode);
+  }
 
   installTestSandboxEnvironment();
 
   const shouldSimulateBootstrapError = typeof window !== 'undefined'
-    && localStorage.getItem('erp_provider_mode') === 'test'
+    && ['test', 'next', 'experimental'].includes(localStorage.getItem('erp_provider_mode') || '')
     && new URLSearchParams(window.location.search).get('simulateBootstrapError') === '1';
 
   if (shouldSimulateBootstrapError) {
@@ -126,15 +134,22 @@ function renderBootstrapFailure(error: unknown) {
 
   if (typeof document === 'undefined') return;
 
-  const isTestMode = (() => {
+  const sandboxMode = (() => {
     try {
-      return localStorage.getItem('erp_provider_mode') === 'test';
+      const mode = localStorage.getItem('erp_provider_mode');
+      return mode === 'test' || mode === 'next' || mode === 'experimental' ? mode : null;
     } catch {
-      return false;
+      return null;
     }
   })();
 
-  document.title = isTestMode ? '[TEST ERROR] 小河馬 ERP' : '[ERROR] 小河馬 ERP';
+  document.title = sandboxMode === 'next'
+    ? '[NEXT ERROR] 小河馬 ERP'
+    : sandboxMode === 'experimental'
+      ? '[EXPERIMENTAL ERROR] 小河馬 ERP'
+      : sandboxMode === 'test'
+        ? '[TEST ERROR] 小河馬 ERP'
+        : '[ERROR] 小河馬 ERP';
   document.body.dataset.bootstrapError = 'BOOTSTRAP_FAILED';
 
   const rootElement = document.getElementById('root') || document.body.appendChild(document.createElement('div'));

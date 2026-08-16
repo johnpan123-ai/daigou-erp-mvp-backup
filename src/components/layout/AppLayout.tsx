@@ -105,11 +105,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const providerMode = getProviderMode();
   const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';
-  const isTestMode = providerMode === 'test';
+  const isSandboxMode = providerMode === 'test' || providerMode === 'next' || providerMode === 'experimental';
+  const sandboxLabel = providerMode === 'next'
+    ? 'NEXT SANDBOX'
+    : providerMode === 'experimental'
+      ? 'EXPERIMENTAL'
+      : 'TEST SANDBOX';
 
   useEffect(() => {
-    document.title = isTestMode ? '[TEST] 小河馬 ERP' : '小河馬 ERP';
-  }, [isTestMode]);
+    document.title = providerMode === 'next'
+      ? '[NEXT] 小河馬 ERP'
+      : providerMode === 'experimental'
+        ? '[EXPERIMENTAL] 小河馬 ERP'
+        : providerMode === 'test'
+          ? '[TEST] 小河馬 ERP'
+          : '小河馬 ERP';
+  }, [providerMode]);
 
   const handleEnterLocalMode = () => {
     setProviderMode('local');
@@ -151,15 +162,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         alignItems: 'center',
         justifyContent: 'center',
         padding: '0 16px',
-        backgroundColor: isTestMode ? '#5b21b6' : isCloudOrFallback ? '#b45309' : '#475569',
+        backgroundColor: providerMode === 'next' ? '#075985' : providerMode === 'experimental' ? '#9f1239' : providerMode === 'test' ? '#5b21b6' : isCloudOrFallback ? '#b45309' : '#475569',
         color: '#fff',
         fontSize: '14px',
         fontWeight: 800,
         letterSpacing: '0.01em',
         boxShadow: '0 2px 8px rgba(15, 23, 42, 0.22)'
       }}>
-        {isTestMode
-          ? '測試模式｜所有修改只存在本機，不會寫入正式雲端'
+        {providerMode === 'next'
+          ? 'NEXT SANDBOX｜下一版日常測試環境，所有修改只存在本機'
+          : providerMode === 'experimental'
+            ? 'EXPERIMENTAL｜高風險實驗環境，所有修改只存在本機'
+            : providerMode === 'test'
+              ? '測試模式｜所有修改只存在本機，不會寫入正式雲端'
           : isCloudOrFallback
             ? '正式模式｜目前操作會修改正式資料'
             : '本機模式｜資料只保存在目前瀏覽器'}
@@ -254,9 +269,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     } else if (mode === 'fallback') {
                       modeLabel = '備援模式';
                       dotColor = '#3b82f6'; // blue
-                    } else if (mode === 'test') {
-                      modeLabel = 'Test Sandbox';
-                      dotColor = '#7c3aed';
+                    } else if (mode === 'test' || mode === 'next' || mode === 'experimental') {
+                      modeLabel = mode === 'next' ? 'NEXT SANDBOX' : mode === 'experimental' ? 'EXPERIMENTAL' : 'Test Sandbox';
+                      dotColor = mode === 'next' ? '#0369a1' : mode === 'experimental' ? '#be123c' : '#7c3aed';
                     }
 
                     return (
@@ -381,7 +396,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                           cursor: 'pointer' 
                         }}
                       >
-                        {providerMode === 'test' ? '離開測試模式' : '登出'}
+                        {isSandboxMode ? `離開 ${sandboxLabel}` : '登出'}
                       </button>
                     </div>
                   );
@@ -477,11 +492,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 badgeColor = '#3182ce';
                 badgeBg = '#ebf8ff';
                 badgeBorder = '#bee3f8';
-              } else if (mode === 'test') {
-                modeLabel = 'Test Sandbox';
-                badgeColor = '#6d28d9';
-                badgeBg = '#f5f3ff';
-                badgeBorder = '#c4b5fd';
+              } else if (mode === 'test' || mode === 'next' || mode === 'experimental') {
+                modeLabel = mode === 'next' ? 'NEXT SANDBOX' : mode === 'experimental' ? 'EXPERIMENTAL' : 'Test Sandbox';
+                badgeColor = mode === 'next' ? '#0369a1' : mode === 'experimental' ? '#be123c' : '#6d28d9';
+                badgeBg = mode === 'next' ? '#e0f2fe' : mode === 'experimental' ? '#ffe4e6' : '#f5f3ff';
+                badgeBorder = mode === 'next' ? '#7dd3fc' : mode === 'experimental' ? '#fda4af' : '#c4b5fd';
               }
 
               return (
@@ -585,7 +600,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       className="btn btn-ghost text-danger" 
                       style={{ padding: '4px 8px', fontSize: '12px', height: 'auto', minHeight: 'auto', border: '1px solid #fed7d7', color: 'var(--color-danger)', backgroundColor: '#fff5f5', marginLeft: '8px' }}
                     >
-                      {providerMode === 'test' ? '離開測試模式' : '登出'}
+                      {isSandboxMode ? `離開 ${sandboxLabel}` : '登出'}
                     </button>
                   </div>
                 );

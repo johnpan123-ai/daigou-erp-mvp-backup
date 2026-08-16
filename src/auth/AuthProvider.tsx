@@ -5,7 +5,7 @@ import {
   initialSupabaseAuthStorageState,
   supabase,
 } from '../providers/cloud/supabaseClient';
-import { getProviderMode, setProviderMode } from '../providers/providerMode';
+import { getProviderMode, isSandboxProviderMode, setProviderMode } from '../providers/providerMode';
 import type { User } from '@supabase/supabase-js';
 import { TEST_OWNER_PROFILE, TEST_OWNER_USER } from './testOwner';
 
@@ -26,10 +26,10 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const isTestMode = getProviderMode() === 'test';
-  const [user, setUser] = useState<User | null>(() => isTestMode ? TEST_OWNER_USER : null);
-  const [profile, setProfile] = useState<UserProfile | null>(() => isTestMode ? TEST_OWNER_PROFILE : null);
-  const [loading, setLoading] = useState(() => !isTestMode);
+  const isSandboxMode = isSandboxProviderMode();
+  const [user, setUser] = useState<User | null>(() => isSandboxMode ? TEST_OWNER_USER : null);
+  const [profile, setProfile] = useState<UserProfile | null>(() => isSandboxMode ? TEST_OWNER_PROFILE : null);
+  const [loading, setLoading] = useState(() => !isSandboxMode);
   const [profileLoading, setProfileLoading] = useState(false);
   const explicitSignOutRef = useRef(false);
   const sessionRecoveryStartedRef = useRef(false);
@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
     // Local and Test modes never read the Production profiles table.
-    if (getProviderMode() === 'local' || getProviderMode() === 'test') {
+    if (getProviderMode() === 'local' || isSandboxProviderMode()) {
       return null;
     }
 
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Test Sandbox uses a fully local identity and must never initialize or
     // subscribe to the Production Supabase Auth session.
-    if (isTestMode) return;
+    if (isSandboxMode) return;
 
     let active = true;
     let profileRequestId = 0;
@@ -170,11 +170,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profileRequestId++;
       subscription.unsubscribe();
     };
-  }, [isTestMode]);
+  }, [isSandboxMode]);
 
   const signOut = async () => {
-    if (isTestMode) {
-      console.log('[Provider Mode] leave Test Sandbox, switch to local');
+    if (isSandboxMode) {
+      console.log('[Provider Mode] leave Sandbox, switch to local');
       setProviderMode('local');
       window.location.reload();
       return;

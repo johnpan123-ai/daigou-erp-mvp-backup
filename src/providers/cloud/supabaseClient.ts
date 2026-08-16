@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { createGuardedSupabaseFetch } from '../../lib/cloudWriteGuard';
+import { getProviderMode, isSandboxProviderMode } from '../providerMode';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const isTestModeAtStartup = typeof window !== 'undefined'
-  && window.localStorage.getItem('erp_provider_mode') === 'test';
+const isSandboxModeAtStartup = typeof window !== 'undefined'
+  && isSandboxProviderMode(getProviderMode());
 
 const getDefaultAuthStorageKey = (): string | null => {
   if (!supabaseUrl) return null;
@@ -20,7 +21,7 @@ const getDefaultAuthStorageKey = (): string | null => {
 export const supabaseAuthStorageKey = getDefaultAuthStorageKey();
 
 export const initialSupabaseAuthStorageState: 'none' | 'present' | 'corrupt' = (() => {
-  if (isTestModeAtStartup) return 'none';
+  if (isSandboxModeAtStartup) return 'none';
   if (typeof window === 'undefined' || !supabaseAuthStorageKey) return 'none';
 
   const storedValue = window.localStorage.getItem(supabaseAuthStorageKey);
@@ -35,14 +36,14 @@ export const initialSupabaseAuthStorageState: 'none' | 'present' | 'corrupt' = (
 })();
 
 export const hasStoredSupabaseAuthToken = (): boolean => (
-  !isTestModeAtStartup
+  !isSandboxModeAtStartup
   && typeof window !== 'undefined'
   && Boolean(supabaseAuthStorageKey)
   && window.localStorage.getItem(supabaseAuthStorageKey as string) !== null
 );
 
 export const clearStoredSupabaseAuthToken = (): void => {
-  if (isTestModeAtStartup) return;
+  if (isSandboxModeAtStartup) return;
   if (typeof window === 'undefined' || !supabaseAuthStorageKey) return;
 
   // Remove only Supabase Auth state for this browser origin. ERP data and
@@ -53,7 +54,7 @@ export const clearStoredSupabaseAuthToken = (): void => {
 };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: isTestModeAtStartup ? {
+  auth: isSandboxModeAtStartup ? {
     persistSession: false,
     autoRefreshToken: false,
     detectSessionInUrl: false,

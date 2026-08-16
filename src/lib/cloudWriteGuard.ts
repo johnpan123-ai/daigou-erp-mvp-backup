@@ -1,8 +1,8 @@
-import { getProviderMode } from '../providers/providerMode';
+import { getProviderMode, isSandboxProviderMode } from '../providers/providerMode';
 
 export class TestSandboxCloudWriteBlockedError extends Error {
   constructor(method: string, url: string) {
-    super(`測試模式禁止寫入正式雲端：${method.toUpperCase()} ${url}`);
+    super(`Sandbox 禁止連線正式雲端：${method.toUpperCase()} ${url}`);
     this.name = 'TestSandboxCloudWriteBlockedError';
   }
 }
@@ -20,7 +20,7 @@ const getRequestUrl = (input: RequestInfo | URL): string => {
 };
 
 export function isBlockedSupabaseWrite(_method: string, requestUrl: string, supabaseUrl: string): boolean {
-  if (getProviderMode() !== 'test') return false;
+  if (!isSandboxProviderMode(getProviderMode())) return false;
   if (!supabaseUrl) return false;
 
   try {

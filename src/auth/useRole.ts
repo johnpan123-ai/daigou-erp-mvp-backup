@@ -18,10 +18,10 @@ export function useRole(): UserRole {
   const { user, profile, loading, profileLoading } = useAuth();
   const mode = getProviderMode();
 
-  if (mode === 'test') {
+  if (mode === 'test' || mode === 'next' || mode === 'experimental') {
     return {
       role: 'owner',
-      displayName: 'Test Owner',
+      displayName: mode === 'next' ? 'Next Owner' : mode === 'experimental' ? 'Experimental Owner' : 'Test Owner',
       isProfileLoading: false,
       canViewPage: () => true,
       canCreate: () => true,

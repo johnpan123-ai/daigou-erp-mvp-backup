@@ -1,8 +1,11 @@
 import { getProviderMode } from '../providers/providerMode';
 import {
   PRODUCTION_INDEXED_DB_NAME,
-  TEST_SANDBOX_INDEXED_DB_NAME,
   TEST_SANDBOX_STORAGE_PREFIX,
+  NEXT_SANDBOX_STORAGE_PREFIX,
+  EXPERIMENTAL_SANDBOX_STORAGE_PREFIX,
+  getActiveSandboxConfig,
+  isSandboxMode,
   readPhysicalIndexedDbSnapshot,
   readPhysicalLocalStorageValue,
 } from './testSandboxEnvironment';
@@ -110,9 +113,9 @@ const nonEmptyString = (value: unknown): value is string => (
   typeof value === 'string' && value.trim().length > 0
 );
 
-const assertTestMode = (): void => {
-  if (typeof window === 'undefined' || getProviderMode() !== 'test') {
-    throw new Error('正式版 JSON 快照只能在 Test Sandbox 匯入。');
+const assertSandboxMode = (): void => {
+  if (typeof window === 'undefined' || !isSandboxMode(getProviderMode())) {
+    throw new Error('正式版 JSON 快照只能在 Test Sandbox、Next 或 Experimental Sandbox 匯入。');
   }
 };
 
@@ -191,13 +194,18 @@ const buildOrphanWarnings = (data: TestSnapshotData): TestSnapshotOrphanWarning[
 };
 
 const openTestDatabase = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
-  const request = window.indexedDB.open(TEST_SANDBOX_INDEXED_DB_NAME, 1);
+  const config = getActiveSandboxConfig();
+  if (!config) {
+    reject(new Error('目前不是 Sandbox 模式，拒絕開啟 Snapshot DB。'));
+    return;
+  }
+  const request = window.indexedDB.open(config.dbName, 1);
   request.onupgradeneeded = () => {
     if (!request.result.objectStoreNames.contains('kv')) request.result.createObjectStore('kv');
   };
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error);
-  request.onblocked = () => reject(new Error(`Test IndexedDB 開啟被阻擋：${TEST_SANDBOX_INDEXED_DB_NAME}`));
+  request.onblocked = () => reject(new Error(`Sandbox IndexedDB 開啟被阻擋：${config.dbName}`));
 });
 
 const readTestMetadataFromDatabase = async (): Promise<TestSnapshotMetadata | null> => {
@@ -215,7 +223,7 @@ const readTestMetadataFromDatabase = async (): Promise<TestSnapshotMetadata | nu
 };
 
 const isProductionAppStorageKey = (key: string): boolean => {
-  if (key === PROVIDER_MODE_KEY || key.startsWith(TEST_SANDBOX_STORAGE_PREFIX) || key.startsWith('sb-')) return false;
+  if (key === PROVIDER_MODE_KEY || key.startsWith(TEST_SANDBOX_STORAGE_PREFIX) || key.startsWith(NEXT_SANDBOX_STORAGE_PREFIX) || key.startsWith(EXPERIMENTAL_SANDBOX_STORAGE_PREFIX) || key.startsWith('sb-')) return false;
   return key.startsWith('erp_')
     || key.startsWith('variant_default_')
     || key.startsWith('dashboard_')
@@ -290,7 +298,9 @@ const writeSnapshotAtomically = async (
 const verifyImportedSnapshot = async (
   candidate: TestSnapshotCandidate,
 ): Promise<TestSnapshotCounts> => {
-  const snapshot = await readPhysicalIndexedDbSnapshot(TEST_SANDBOX_INDEXED_DB_NAME);
+  const config = getActiveSandboxConfig();
+  if (!config) throw new Error('目前不是 Sandbox 模式，無法驗證 Snapshot。');
+  const snapshot = await readPhysicalIndexedDbSnapshot(config.dbName);
   const verifiedCounts = {} as TestSnapshotCounts;
 
   for (const collection of COLLECTIONS) {
@@ -310,7 +320,7 @@ const verifyImportedSnapshot = async (
 };
 
 export async function prepareTestSnapshotFile(file: File): Promise<TestSnapshotCandidate> {
-  assertTestMode();
+  assertSandboxMode();
   if (!file.name.toLowerCase().endsWith('.json')) throw new Error('請選擇 JSON 檔案。');
 
   const bytes = await file.arrayBuffer();
@@ -345,7 +355,7 @@ export async function prepareTestSnapshotFile(file: File): Promise<TestSnapshotC
 }
 
 export async function importTestSnapshot(candidate: TestSnapshotCandidate): Promise<TestSnapshotImportResult> {
-  assertTestMode();
+  assertSandboxMode();
 
   const data = validateBackupShape(candidate.data);
   const currentHashes = await buildCollectionHashes(data);
@@ -392,7 +402,7 @@ export async function importTestSnapshot(candidate: TestSnapshotCandidate): Prom
 }
 
 export async function getTestSnapshotMetadata(): Promise<TestSnapshotMetadata | null> {
-  assertTestMode();
+  assertSandboxMode();
   return readTestMetadataFromDatabase();
 }
 

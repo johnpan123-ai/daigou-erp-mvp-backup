@@ -294,7 +294,7 @@ class DynamicDataProvider implements IDataProvider {
 
   private getActiveProvider(): IDataProvider {
     const mode = getProviderMode();
-    if (mode === 'test') {
+    if (mode === 'test' || mode === 'next' || mode === 'experimental') {
       return this.testSandboxProvider;
     }
     if (mode === 'cloud') {

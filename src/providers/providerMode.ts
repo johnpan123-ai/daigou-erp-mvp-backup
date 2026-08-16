@@ -1,4 +1,4 @@
-export type ProviderMode = 'local' | 'cloud' | 'fallback' | 'test';
+export type ProviderMode = 'local' | 'cloud' | 'fallback' | 'test' | 'next' | 'experimental';
 
 export const PROVIDER_MODE_KEY = 'erp_provider_mode';
 
@@ -7,7 +7,7 @@ let hasLoggedLoad = false;
 export function getProviderMode(): ProviderMode {
   const mode = localStorage.getItem(PROVIDER_MODE_KEY);
   
-  if (mode === 'cloud' || mode === 'fallback' || mode === 'local' || mode === 'test') {
+  if (mode === 'cloud' || mode === 'fallback' || mode === 'local' || mode === 'test' || mode === 'next' || mode === 'experimental') {
     if (!hasLoggedLoad) {
       console.log(`[Provider Mode] loaded: ${mode === 'fallback' ? 'cloud' : mode}`);
       hasLoggedLoad = true;
@@ -49,4 +49,8 @@ export function setProviderMode(mode: ProviderMode): boolean {
 
 export function isCloudEnabled(): boolean {
   return true;
+}
+
+export function isSandboxProviderMode(mode: ProviderMode = getProviderMode()): boolean {
+  return mode === 'test' || mode === 'next' || mode === 'experimental';
 }

@@ -1,15 +1,60 @@
 export const PRODUCTION_INDEXED_DB_NAME = 'daigou-erp-db';
 export const TEST_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-test-v1';
-export const TEST_SANDBOX_STORAGE_PREFIX = '__hippo_test_sandbox__::';
+export const NEXT_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-next-v1';
+export const EXPERIMENTAL_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-experimental-v1';
 
-const PROVIDER_MODE_KEY = 'erp_provider_mode';
+export const TEST_SANDBOX_STORAGE_PREFIX = '__hippo_test_sandbox__::';
+export const NEXT_SANDBOX_STORAGE_PREFIX = '__hippo_next_sandbox__::';
+export const EXPERIMENTAL_SANDBOX_STORAGE_PREFIX = '__hippo_experimental_sandbox__::';
+export const PROVIDER_MODE_KEY = 'erp_provider_mode';
+
+export type SandboxMode = 'test' | 'next' | 'experimental';
+
+export interface SandboxConfig {
+  mode: SandboxMode;
+  dbName: string;
+  storagePrefix: string;
+  label: string;
+  title: string;
+}
+
 const PRODUCTION_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const SANDBOX_DATABASE_NAMES = new Set([
+  TEST_SANDBOX_INDEXED_DB_NAME,
+  NEXT_SANDBOX_INDEXED_DB_NAME,
+  EXPERIMENTAL_SANDBOX_INDEXED_DB_NAME,
+]);
+
+const SANDBOX_CONFIGS: Record<SandboxMode, SandboxConfig> = {
+  test: {
+    mode: 'test',
+    dbName: TEST_SANDBOX_INDEXED_DB_NAME,
+    storagePrefix: TEST_SANDBOX_STORAGE_PREFIX,
+    label: 'TEST SANDBOX',
+    title: '[TEST] 小河馬 ERP',
+  },
+  next: {
+    mode: 'next',
+    dbName: NEXT_SANDBOX_INDEXED_DB_NAME,
+    storagePrefix: NEXT_SANDBOX_STORAGE_PREFIX,
+    label: 'NEXT SANDBOX',
+    title: '[NEXT] 小河馬 ERP',
+  },
+  experimental: {
+    mode: 'experimental',
+    dbName: EXPERIMENTAL_SANDBOX_INDEXED_DB_NAME,
+    storagePrefix: EXPERIMENTAL_SANDBOX_STORAGE_PREFIX,
+    label: 'EXPERIMENTAL',
+    title: '[EXPERIMENTAL] 小河馬 ERP',
+  },
+};
 
 let installed = false;
 let nativeIndexedDbOpen: typeof IDBFactory.prototype.open | null = null;
 let nativeStorageGetItem: typeof Storage.prototype.getItem | null = null;
 let nativeStorageSetItem: typeof Storage.prototype.setItem | null = null;
 let nativeStorageRemoveItem: typeof Storage.prototype.removeItem | null = null;
+let nativeStorageClear: typeof Storage.prototype.clear | null = null;
 let nativeFetch: typeof globalThis.fetch | null = null;
 let nativeXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
 let nativeSendBeacon: typeof navigator.sendBeacon | null = null;
@@ -28,6 +73,45 @@ const requestUrl = (input: RequestInfo | URL | string): string => {
   return input.url;
 };
 
+const rawProviderMode = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(PROVIDER_MODE_KEY);
+  } catch {
+    return null;
+  }
+};
+
+/** The Vite mode is the immutable role of a dedicated Next/Experimental server. */
+export const getBuildSandboxMode = (): SandboxMode | null => {
+  const configured = import.meta.env.VITE_SANDBOX_ENV || import.meta.env.MODE;
+  if (configured === 'next' || configured === 'experimental') return configured;
+  if (typeof window !== 'undefined' && window.location.port === '4192') return 'next';
+  if (typeof window !== 'undefined' && window.location.port === '4193') return 'experimental';
+  return null;
+};
+
+export const getActiveSandboxMode = (): SandboxMode | null => {
+  const mode = rawProviderMode();
+  if (mode === 'test' || mode === 'next' || mode === 'experimental') return mode;
+  return getBuildSandboxMode();
+};
+
+export const getSandboxConfig = (mode: SandboxMode): SandboxConfig => SANDBOX_CONFIGS[mode];
+
+export const getActiveSandboxConfig = (): SandboxConfig | null => {
+  const mode = getActiveSandboxMode();
+  return mode ? getSandboxConfig(mode) : null;
+};
+
+export const isSandboxMode = (mode: string | null | undefined): mode is SandboxMode => (
+  mode === 'test' || mode === 'next' || mode === 'experimental'
+);
+
+export const isSandboxEnvironmentActive = (): boolean => getActiveSandboxConfig() !== null;
+
+export const isTestSandboxRequested = (): boolean => rawProviderMode() === 'test';
+
 export const isProductionSupabaseRequest = (input: RequestInfo | URL | string): boolean => {
   if (!PRODUCTION_SUPABASE_URL) return false;
   try {
@@ -43,7 +127,10 @@ const installProductionNetworkBlock = (): void => {
   nativeFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     if (isProductionSupabaseRequest(input)) {
-      throw new TestSandboxProductionNetworkBlockedError(`fetch ${init?.method || (input instanceof Request ? input.method : 'GET')}`, requestUrl(input));
+      throw new TestSandboxProductionNetworkBlockedError(
+        `fetch ${init?.method || (input instanceof Request ? input.method : 'GET')}`,
+        requestUrl(input),
+      );
     }
     return nativeFetch!(input, init);
   }) as typeof fetch;
@@ -90,13 +177,9 @@ const installProductionNetworkBlock = (): void => {
   } as typeof WebSocket;
 };
 
-const shouldNamespaceLocalStorageKey = (key: string): boolean => {
-  if (key === PROVIDER_MODE_KEY || key.startsWith(TEST_SANDBOX_STORAGE_PREFIX)) return false;
-
-  // Supabase owns sb-* auth keys. Test Mode must neither read, write, delete,
-  // nor remap the real Production session storage.
-  if (key.startsWith('sb-')) return false;
-
+const shouldNamespaceStorageKey = (key: string): boolean => {
+  if (key === PROVIDER_MODE_KEY || key.startsWith('sb-')) return false;
+  if (Object.values(SANDBOX_CONFIGS).some(config => key.startsWith(config.storagePrefix))) return false;
   return key.startsWith('erp_')
     || key.startsWith('variant_default_')
     || key.startsWith('dashboard_')
@@ -106,49 +189,55 @@ const shouldNamespaceLocalStorageKey = (key: string): boolean => {
     || key === 'remember_me';
 };
 
-const mapLocalStorageKey = (key: string): string => (
-  shouldNamespaceLocalStorageKey(key) ? `${TEST_SANDBOX_STORAGE_PREFIX}${key}` : key
-);
-
-export const isTestSandboxRequested = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(PROVIDER_MODE_KEY) === 'test';
+const mapStorageKey = (key: string): string => {
+  const config = getActiveSandboxConfig();
+  return config && shouldNamespaceStorageKey(key) ? `${config.storagePrefix}${key}` : key;
 };
 
 export function installTestSandboxEnvironment(): void {
-  if (installed || typeof window === 'undefined' || !isTestSandboxRequested()) return;
+  if (installed || typeof window === 'undefined' || !isSandboxEnvironmentActive()) return;
 
   nativeIndexedDbOpen = IDBFactory.prototype.open;
   nativeStorageGetItem = Storage.prototype.getItem;
   nativeStorageSetItem = Storage.prototype.setItem;
   nativeStorageRemoveItem = Storage.prototype.removeItem;
-
+  nativeStorageClear = Storage.prototype.clear;
   installProductionNetworkBlock();
 
   IDBFactory.prototype.open = function sandboxedOpen(name: string, version?: number): IDBOpenDBRequest {
-    const routedName = name === PRODUCTION_INDEXED_DB_NAME ? TEST_SANDBOX_INDEXED_DB_NAME : name;
+    const config = getActiveSandboxConfig();
+    const routedName = config && (name === PRODUCTION_INDEXED_DB_NAME || SANDBOX_DATABASE_NAMES.has(name))
+      ? config.dbName
+      : name;
     return version === undefined
       ? nativeIndexedDbOpen!.call(this, routedName)
       : nativeIndexedDbOpen!.call(this, routedName, version);
   };
 
   Storage.prototype.getItem = function sandboxedGetItem(key: string): string | null {
-    const mappedKey = this === window.localStorage ? mapLocalStorageKey(key) : key;
-    return nativeStorageGetItem!.call(this, mappedKey);
+    return nativeStorageGetItem!.call(this, this === window.localStorage || this === window.sessionStorage ? mapStorageKey(key) : key);
   };
-
   Storage.prototype.setItem = function sandboxedSetItem(key: string, value: string): void {
-    const mappedKey = this === window.localStorage ? mapLocalStorageKey(key) : key;
-    nativeStorageSetItem!.call(this, mappedKey, value);
+    nativeStorageSetItem!.call(this, this === window.localStorage || this === window.sessionStorage ? mapStorageKey(key) : key, value);
   };
-
   Storage.prototype.removeItem = function sandboxedRemoveItem(key: string): void {
-    const mappedKey = this === window.localStorage ? mapLocalStorageKey(key) : key;
-    nativeStorageRemoveItem!.call(this, mappedKey);
+    nativeStorageRemoveItem!.call(this, this === window.localStorage || this === window.sessionStorage ? mapStorageKey(key) : key);
+  };
+  Storage.prototype.clear = function sandboxedClear(): void {
+    const config = getActiveSandboxConfig();
+    if (!config) return nativeStorageClear!.call(this);
+    const remove = nativeStorageRemoveItem!;
+    const keys: string[] = [];
+    for (let index = 0; index < this.length; index += 1) {
+      const key = this.key(index);
+      if (key?.startsWith(config.storagePrefix)) keys.push(key);
+    }
+    keys.forEach(key => remove.call(this, key));
   };
 
   installed = true;
-  console.info(`[Test Sandbox] Storage isolation enabled: ${TEST_SANDBOX_INDEXED_DB_NAME}`);
+  const config = getActiveSandboxConfig()!;
+  console.info(`[${config.label}] isolation enabled: ${config.dbName}, ${config.storagePrefix}`);
 }
 
 const openPhysicalDatabase = (name: string, version = 1): Promise<IDBDatabase> => new Promise((resolve, reject) => {
@@ -162,29 +251,41 @@ const openPhysicalDatabase = (name: string, version = 1): Promise<IDBDatabase> =
   request.onblocked = () => reject(new Error(`IndexedDB open blocked: ${name}`));
 });
 
-export async function clearTestSandboxData(): Promise<void> {
-  if (typeof window === 'undefined') return;
-
-  const database = await openPhysicalDatabase(TEST_SANDBOX_INDEXED_DB_NAME);
+const clearPhysicalSandbox = async (config: SandboxConfig): Promise<void> => {
+  const database = await openPhysicalDatabase(config.dbName);
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction('kv', 'readwrite');
       transaction.objectStore('kv').clear();
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error ?? new Error('Test Sandbox clear aborted'));
+      transaction.onabort = () => reject(transaction.error ?? new Error(`${config.label} clear aborted`));
     });
   } finally {
     database.close();
   }
 
   const remove = nativeStorageRemoveItem ?? Storage.prototype.removeItem;
-  const keysToRemove: string[] = [];
-  for (let index = 0; index < window.localStorage.length; index += 1) {
-    const key = window.localStorage.key(index);
-    if (key?.startsWith(TEST_SANDBOX_STORAGE_PREFIX)) keysToRemove.push(key);
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    const keysToRemove: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key?.startsWith(config.storagePrefix)) keysToRemove.push(key);
+    }
+    keysToRemove.forEach(key => remove.call(storage, key));
   }
-  keysToRemove.forEach(key => remove.call(window.localStorage, key));
+};
+
+export async function clearSandboxData(): Promise<void> {
+  const config = getActiveSandboxConfig();
+  if (typeof window === 'undefined' || !config) return;
+  await clearPhysicalSandbox(config);
+}
+
+/** Legacy API retained for existing Test Sandbox tests and operators. */
+export async function clearTestSandboxData(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  await clearPhysicalSandbox(SANDBOX_CONFIGS.test);
 }
 
 export async function readPhysicalIndexedDbSnapshot(databaseName: string): Promise<Record<string, unknown>> {
@@ -214,4 +315,10 @@ export function readPhysicalLocalStorageValue(key: string): string | null {
   if (typeof window === 'undefined') return null;
   const get = nativeStorageGetItem ?? Storage.prototype.getItem;
   return get.call(window.localStorage, key);
+}
+
+export function readPhysicalSessionStorageValue(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  const get = nativeStorageGetItem ?? Storage.prototype.getItem;
+  return get.call(window.sessionStorage, key);
 }

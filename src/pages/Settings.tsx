@@ -9,7 +9,7 @@ import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } fr
 import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
 import { supabase } from '../providers/cloud/supabaseClient';
-import { clearTestSandboxData } from '../lib/testSandboxEnvironment';
+import { clearSandboxData, getActiveSandboxConfig, isSandboxEnvironmentActive } from '../lib/testSandboxEnvironment';
 import {
   getTestSnapshotMetadata,
   importTestSnapshot,
@@ -41,6 +41,9 @@ export default function Settings() {
   const { user, signOut } = useAuth();
   const { role, displayName, isProfileLoading } = useRole();
   const currentMode = getProviderMode();
+  const isSandbox = isSandboxEnvironmentActive();
+  const sandboxConfig = getActiveSandboxConfig();
+  const sandboxLabel = sandboxConfig?.label ?? 'Sandbox';
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -129,7 +132,7 @@ export default function Settings() {
   useEffect(() => {
     (window as any).dataProvider = dataProvider;
     loadCounts();
-    if (currentMode === 'test') {
+    if (isSandbox) {
       getTestSnapshotMetadata()
         .then(setTestSnapshotMetadata)
         .catch(error => setTestSnapshotError(error instanceof Error ? error.message : String(error)));
@@ -244,15 +247,15 @@ export default function Settings() {
   };
 
   const handleClearTestSandbox = async () => {
-    if (currentMode !== 'test') {
-      alert('此操作只能在測試模式執行。');
+    if (!isSandbox) {
+      alert('此操作只能在 Sandbox 模式執行。');
       return;
     }
-    if (!confirm('確定要清空 Test Sandbox 嗎？\n此操作只會清除測試資料，不會影響正式雲端或一般 Local DB。')) return;
-    if (!confirm('請再次確認：要永久清空目前所有 Test Sandbox 資料嗎？')) return;
+    if (!confirm(`確定要清空 ${sandboxLabel} 嗎？\n此操作只會清除測試資料，不會影響正式雲端或一般 Local DB。`)) return;
+    if (!confirm(`請再次確認：要永久清空目前所有 ${sandboxLabel} 資料嗎？`)) return;
 
-    await clearTestSandboxData();
-    alert('Test Sandbox 已清空。正式資料未受影響。');
+    await clearSandboxData();
+    alert(`${sandboxLabel} 已清空。正式資料未受影響。`);
     window.location.reload();
   };
 
@@ -276,13 +279,13 @@ export default function Settings() {
 
   const handleImportTestSnapshot = async () => {
     if (!testSnapshotCandidate) return;
-    if (currentMode !== 'test') {
-      setTestSnapshotError('正式版 JSON 快照只能在 Test Sandbox 匯入。');
+    if (!isSandbox) {
+      setTestSnapshotError('正式版 JSON 快照只能在 Sandbox 匯入。');
       return;
     }
 
     const confirmed = window.confirm(
-      `此操作只會清除並取代目前 Test Sandbox 資料。\nProduction 雲端資料不會受到影響。\n\n檔案：${testSnapshotCandidate.fileName}\n\n確定繼續嗎？`,
+      `此操作只會清除並取代目前 ${sandboxLabel} 資料。\nProduction 雲端資料不會受到影響。\n\n檔案：${testSnapshotCandidate.fileName}\n\n確定繼續嗎？`,
     );
     if (!confirmed) return;
 
@@ -293,7 +296,7 @@ export default function Settings() {
       setTestSnapshotMetadata(result.metadata);
       setTestSnapshotCandidate(null);
       alert(
-        `Test Snapshot 匯入完成。\n\n商品群組：${result.verifiedCounts.productGroups}\nVariants：${result.verifiedCounts.productVariants}\nInventory：${result.verifiedCounts.inventory}\n日本包裹：${result.verifiedCounts.japanPackages}\n出庫單：${result.verifiedCounts.outboundShipments}\n\nProduction IndexedDB 與 localStorage 均未改變。`,
+        `${sandboxLabel} Snapshot 匯入完成。\n\n商品群組：${result.verifiedCounts.productGroups}\nVariants：${result.verifiedCounts.productVariants}\nInventory：${result.verifiedCounts.inventory}\n日本包裹：${result.verifiedCounts.japanPackages}\n出庫單：${result.verifiedCounts.outboundShipments}\n\nProduction IndexedDB 與 localStorage 均未改變。`,
       );
       window.location.reload();
     } catch (error) {
@@ -513,30 +516,30 @@ export default function Settings() {
           </p>
           
           <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: 'var(--color-text)' }}>
-            目前模式：{getProviderMode() === 'test' ? 'Test Sandbox' : getProviderMode() === 'local' ? '本地模式' : getProviderMode() === 'cloud' ? '雲端模式' : '備援模式'}
+            目前模式：{isSandbox ? `${sandboxLabel}（${sandboxConfig?.dbName}）` : currentMode === 'local' ? '本地模式' : currentMode === 'cloud' ? '雲端模式' : '備援模式'}
           </div>
 
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
             <label
               onClick={() => {
-                if (currentMode !== 'test') {
+                if (!isSandbox) {
                   if (setProviderMode('test')) window.location.reload();
                 }
               }}
               style={{
-                border: currentMode === 'test' ? '2px solid #6d28d9' : '1px solid var(--color-border)',
+                border: isSandbox ? `2px solid ${currentMode === 'experimental' ? '#be123c' : currentMode === 'next' ? '#0369a1' : '#6d28d9'}` : '1px solid var(--color-border)',
                 borderRadius: '8px',
                 padding: '16px',
                 flex: '1',
                 minWidth: '200px',
-                cursor: 'pointer',
+                cursor: isSandbox ? 'default' : 'pointer',
                 position: 'relative',
-                backgroundColor: currentMode === 'test' ? '#f5f3ff' : 'transparent'
+                backgroundColor: isSandbox ? (currentMode === 'experimental' ? '#fff1f2' : currentMode === 'next' ? '#f0f9ff' : '#f5f3ff') : 'transparent'
               }}
             >
-              <input type="radio" checked={currentMode === 'test'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
-              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px', color: '#5b21b6' }}>Test Sandbox</div>
-              <div className="text-xs text-muted">使用獨立 Test IndexedDB；程式會硬性阻止 Supabase 資料與 Storage 寫入。</div>
+              <input type="radio" checked={isSandbox} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
+              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px', color: currentMode === 'experimental' ? '#9f1239' : currentMode === 'next' ? '#075985' : '#5b21b6' }}>{isSandbox ? sandboxLabel : 'Test Sandbox'}</div>
+              <div className="text-xs text-muted">使用獨立 Sandbox IndexedDB；程式會硬性阻止 Supabase 所有網路連線。</div>
             </label>
 
             <label 
@@ -610,12 +613,12 @@ export default function Settings() {
             </label>
           </div>
 
-          {currentMode === 'test' && (
+          {isSandbox && (
             <div style={{ marginTop: '16px', padding: '16px', border: '1px solid #c4b5fd', borderRadius: '8px', backgroundColor: '#faf5ff' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
                 <div>
-                  <div style={{ color: '#5b21b6', fontWeight: 700, marginBottom: '4px' }}>Test Sandbox 資料管理</div>
-                  <div className="text-xs text-muted">兩個操作都只會存取 daigou-erp-db-test-v1，不會連線或寫入 Production Supabase。</div>
+                  <div style={{ color: currentMode === 'experimental' ? '#9f1239' : '#5b21b6', fontWeight: 700, marginBottom: '4px' }}>{sandboxLabel} 資料管理</div>
+                  <div className="text-xs text-muted">兩個操作都只會存取 {sandboxConfig?.dbName}，不會連線或寫入 Production Supabase。</div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
@@ -638,7 +641,7 @@ export default function Settings() {
                     disabled={isImportingTestSnapshot}
                     onClick={handleClearTestSandbox}
                   >
-                    <Trash2 size={16} /> 清空 Test Sandbox
+                    <Trash2 size={16} /> 清空 {sandboxLabel}
                   </button>
                 </div>
               </div>
@@ -690,14 +693,14 @@ export default function Settings() {
                     </div>
                   )}
                   <div style={{ marginTop: '12px', padding: '10px', backgroundColor: '#f5f3ff', borderRadius: '6px', color: '#5b21b6', fontWeight: 600, fontSize: '13px' }}>
-                    此操作只會清除並取代目前 Test Sandbox 資料。Production 雲端資料不會受到影響。
+                    此操作只會清除並取代目前 {sandboxLabel} 資料。Production 雲端資料不會受到影響。
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
                     <button className="btn btn-outline" disabled={isImportingTestSnapshot} onClick={() => setTestSnapshotCandidate(null)}>
                       取消
                     </button>
                     <button className="btn btn-primary" disabled={isImportingTestSnapshot} onClick={handleImportTestSnapshot}>
-                      {isImportingTestSnapshot ? '正在原子匯入…' : '確認匯入 Test Sandbox'}
+                      {isImportingTestSnapshot ? '正在原子匯入…' : `確認匯入 ${sandboxLabel}`}
                     </button>
                   </div>
                 </div>
@@ -901,7 +904,7 @@ export default function Settings() {
             <div>
               <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>資料來源模式 (Provider Mode)</span>
               <strong style={{ fontSize: '15px', color: 'var(--color-primary)' }}>
-                {currentMode === 'local' ? '本地模式 (Local)' : currentMode === 'cloud' ? '雲端模式 (Cloud)' : '備援模式 (Fallback)'}
+                {isSandbox ? `${sandboxLabel} (${sandboxConfig?.dbName})` : currentMode === 'local' ? '本地模式 (Local)' : currentMode === 'cloud' ? '雲端模式 (Cloud)' : '備援模式 (Fallback)'}
               </strong>
             </div>
           </div>
