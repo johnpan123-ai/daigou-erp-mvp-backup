@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-16 21:54（Asia/Taipei，UTC+8）
+最後更新：2026-08-16 22:28（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -41,6 +41,8 @@
 | 2026-08-16 21:31 | Integration | `checkpoint-20260816-2131-p0-a-atomic-import-awaiting-acceptance` | `bc9fb120cda4f23c8ab2c5f9d6102b97b7b945de` | P0-A 一般 JSON `importData()` 完整驗證＋單一 IndexedDB transaction；含成功／損壞 fixture、rollback 專用測試與人工 SOP | Build、core、atomic import、Sandbox guard／architecture、Test Owner、Snapshot、Inventory gate、Outbound export／race、Recent Purchases 通過；Purchase Management 複製按鈕既有 UI 測試 navigation wait timeout，與 P0-A 無關；**等待人工驗收** | 否 | 人工驗收清理可重匯 `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
 | 2026-08-16 21:53 | Integration | `checkpoint-20260816-2153-p0-a-atomic-import-accepted` | `d53d7e6` | P0-A 人工成功匯入、F5、損壞第 8 集合失敗注入與失敗後 F5 全部通過；正式標記 Accepted | 延續上一列自動測試；使用者人工驗收通過 | 否 | 清理時可重匯 `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：P0-A Accepted Restore Point** |
 | 2026-08-16 21:54 | Integration | `checkpoint-20260816-2154-before-p0-b-restore-atomicity` | `52ae720f94267492cb4ac40edf761f964a110819` | P0-B Production cloud restore 原子性分析前；P0-A Accepted 與 Restore Point 已登錄 | P0-A 自動＋人工驗收通過；P0-B 尚未修改 | 否 | `workbench-backup-2026-08-15.json` 僅供 Test | 無新增對應 | 無新增對應 | **是：P0-B 乾淨回復點** |
+| 2026-08-16 22:18 | Integration | `checkpoint-20260816-2218-before-p0-b-cloud-restore-fail-closed` | `c9a9cb86d4d72475ae66e9deeeee57535773cab8` | 使用者核准 Cloud restore 安全止血方案後、實作前；含 P0-B 設計 Gate | P0-A Accepted；P0-B 尚未變更執行行為 | 否 | `workbench-backup-2026-08-15.json` 僅供 Test／Local atomic 驗收 | 無新增對應 | 無新增對應 | **是：P0-B 實作前乾淨回復點** |
+| 2026-08-16 22:28 | Integration | `checkpoint-20260816-2228-p0-b-cloud-restore-awaiting-acceptance` | `d29b3dd43bcfa90350123a7d09abb8863079ac25` | Cloud／Fallback JSON restore UI 停用，`SupabaseProvider.restoreBackup()` 第一筆 read／write 前 fail-closed；Local／Test atomic restore 保留；含專用測試與人工 SOP | Build／TypeScript、core、P0-A atomic import、Cloud fail-closed、Sandbox guard／architecture、Test Owner、Snapshot、Inventory backup gate、Outbound export／race、Recent Purchases、Purchase Management 全部通過；本機 Test UI 與 Console 0 Error | 否 | 成功／失敗 fixture 與 `workbench-backup-2026-08-15.json` 僅供 Test／Local 驗收 | 無新增對應 | 無新增對應 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
 | 2026-08-16 18:02 | Test | `checkpoint-test-sandbox-before-production-like-p0-outbound-fix-20260816` | `a13721f83b763466ba19c32899f2011cfd8851c8` | 封存完整 Test Sandbox：Test Owner、Snapshot Import、近期採購、Stability Hardening、Feature Registry 與 Audit | Test Sandbox 完整測試／Audit 已完成 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：完整 Test Sandbox 封存點** |
 
 ## Production 歷史回復點
