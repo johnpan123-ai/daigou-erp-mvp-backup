@@ -107,6 +107,34 @@ Future Production work must cherry-pick only the final node `24cc27a`, not the h
 - Existing `bundle_components`, selected component IDs, package quantities, shipment items, receiving state, and all write handlers remain unchanged.
 - WeatherPlanet’s four `雨海ルカ` components are distinguishable by their existing category/product title and SKU without modifying stored data.
 
+## Dual Sandbox environment nodes
+
+| Environment | Branch | Commit | DB | Port | Storage namespace | Status | Production ready |
+| --- | --- | --- | --- | ---: | --- | --- | --- |
+| Next Sandbox | `codex/next-sandbox` | `961ec41` | `daigou-erp-db-next-v1` | 4192 | `__hippo_next_sandbox__::` | Baseline implementation; parity and isolation tests passed; awaiting manual acceptance | **NO** |
+| Experimental Sandbox | `codex/experimental-sandbox` | `0c61828` | `daigou-erp-db-experimental-v1` | 4193 | `__hippo_experimental_sandbox__::` | Same baseline implementation on an independent worktree; awaiting manual acceptance | **NO** |
+
+Both nodes preserve the legacy `codex/test-sandbox` and `daigou-erp-db-test-v1`.
+They add no Production feature and must not be cherry-picked to Production.
+They use the fail-closed Sandbox network guard, local Test Owner, fixed DB
+routing, and independent Snapshot import state.
+
+### Performance baseline fields
+
+For Sandbox performance work, record the following before any optimization:
+
+- Snapshot filename and SHA-256 when available.
+- Collection counts and collection hashes after import.
+- Snapshot import duration.
+- PurchaseRecords first load and reload duration.
+- Repeated search, sort, and category-switch duration.
+- Inventory parser duration for a fixed 1300-row fixture.
+- Production Supabase request count.
+- Whether the measurement changed application code or data.
+
+The current dual-Sandbox baseline is measurement-only. It does not claim that
+an optimization has been implemented.
+
 ## Test infrastructure nodes — never cherry-pick to Production
 
 | Infrastructure | Commit / range | Tag | Production ready | Purpose |

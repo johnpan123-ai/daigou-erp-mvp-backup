@@ -159,3 +159,16 @@
 ## 稽核文件
 
 本次 Stability Audit v2 報告：`docs/system-stability-audit-v2.md`。報告只記錄風險與測試結果，不代表任何 P0／P1 已修正；後續修正必須另建帶台灣日期時間的 checkpoint。
+
+## Dual Sandbox Checkpoint Index（2026-08-17）
+
+以下節點屬本地 Test Infrastructure，Production 不得使用。Tag 均使用
+Asia/Taipei 時間；既有 Tag 保留不改名、不刪除。
+
+| 台灣日期時間 | 環境 | Tag | Commit | 建立原因／內容 | Build／Test | Production 部署 | Snapshot／Backup | 建議作為 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-17 00:22 | Integration | `checkpoint-20260817-0022-dual-sandbox-before` | `d6b412c` | 建立雙 Sandbox 前保存 Integration 狀態 | 建立前節點 | 否 | 無新增 | 是：雙 Sandbox 前回復點 |
+| 2026-08-17 00:44 | Next Sandbox | `checkpoint-20260817-0044-next-sandbox-isolated` | `961ec41` | Next 固定 DB、storage namespace、Test Owner、fail-closed guard 與模式 UI | Build／architecture／dual isolation 通過 | 否 | 無新增 | 是：Next 隔離完成點 |
+| 2026-08-17 00:46 | Experimental Sandbox | `checkpoint-20260817-0046-experimental-sandbox-isolated` | `0c61828` | Experimental 以獨立 worktree 建立同等隔離基準 | Build／dual isolation 通過 | 否 | 無新增 | 是：Experimental 隔離完成點 |
+| 2026-08-17 待建立 | Next + Experimental | `checkpoint-YYYYMMDD-HHMM-dual-sandbox-snapshot-parity` | 待建立 | 同一 Production JSON Snapshot 兩環境匯入、筆數與 hash parity | parity test 通過 | 否 | `workbench-backup-2026-08-15.json` | 是：Snapshot parity 完成後 |
+| 2026-08-17 待建立 | Next + Experimental | `checkpoint-YYYYMMDD-HHMM-dual-sandbox-baseline-complete` | 待建立 | 固定資料規模的載入／搜尋／排序／Inventory parser 效能 baseline | baseline test 通過 | 否 | 同上 | 是：人工驗收前基準 |
