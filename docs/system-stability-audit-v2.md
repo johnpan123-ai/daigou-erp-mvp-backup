@@ -58,6 +58,7 @@
 
 ### P0-2：一般 `importData()` 逐集合寫入，可能半套匯入
 
+- Stage 狀態：**Implementation Passed / Awaiting Manual Acceptance**（尚未 Accepted）。
 - 問題：`IndexedDbAdapter.importData()` 依序呼叫多個 `saveXXX()`，不是單一 transaction；任一集合失敗時只回傳 `false`，前面已完成的集合不會 rollback。
 - 位置：`src/lib/db.ts:3185` 附近；LocalAdapter 也有同樣的逐項流程。
 - 影響：Local／Production-like 的一般設定還原或舊匯入流程可能留下混合新舊資料。Test-only `importTestSnapshot()` 是另一條 atomic 路徑，本輪測試通過，不代表一般 `importData()` 安全。
@@ -228,7 +229,7 @@
 | Test Snapshot JSON | atomic transaction、count／checksum／rollback 通過 | 安全；保留現有 importer |
 | Inventory XLS 前自動 JSON backup | backup gate 通過；失敗會中止 XLS | 安全但跨 inventory／group sync 非 transaction（P0-4） |
 | 手動 JSON export | serializer parse／非空／集合完整測試通過 | 安全，仍需保留檔案驗證 |
-| 一般 `importData()` | 逐集合 save，不是 atomic | P0-2 |
+| 一般 `importData()` | 已改為完整格式驗證＋單一 IndexedDB transaction；專用 rollback 測試通過，等待人工驗收 | P0-2：Implementation Passed / Awaiting Manual Acceptance |
 | Production cloud restore | 逐表 delete＋逐表 push，沒有 transaction | P0-1；本輪禁止執行 |
 
 ## 11. Sandbox 隔離結果

@@ -1889,6 +1889,67 @@ const INDEXED_DB_BACKED_STORAGE_KEYS = [
   'erp_last_import_backup',
 ] as const;
 
+const ATOMIC_IMPORT_COLLECTIONS = [
+  ['inventory', 'erp_inventory'],
+  ['salesOrders', 'erp_sales_orders'],
+  ['salesOrderItems', 'erp_sales_order_items'],
+  ['productGroups', 'erp_product_groups'],
+  ['productCategories', 'erp_product_categories'],
+  ['productVariants', 'erp_product_variants'],
+  ['purchaseBatches', 'erp_purchase_batches'],
+  ['purchaseBatchItems', 'erp_purchase_batch_items'],
+  ['privateOrders', 'erp_private_orders'],
+  ['privateOrderItems', 'erp_private_order_items'],
+  ['japanPackages', 'erp_japan_packages'],
+  ['japanPackageItems', 'erp_japan_package_items'],
+  ['outboundShipments', 'erp_outbound_shipments'],
+  ['outboundShipmentItems', 'erp_outbound_shipment_items'],
+  ['bundleComponents', 'erp_bundle_components'],
+] as const;
+
+const OPTIONAL_ATOMIC_IMPORT_COLLECTIONS = [
+  ['importBatches', 'erp_import_batches'],
+] as const;
+
+type AtomicImportEntry = {
+  storageKey: string;
+  value: unknown[];
+};
+
+const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] => {
+  const parsed: unknown = JSON.parse(jsonString);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('JSON 備份最上層必須是物件。');
+  }
+
+  const data = parsed as Record<string, unknown>;
+  const entries: AtomicImportEntry[] = [];
+
+  for (const [collectionName, storageKey] of ATOMIC_IMPORT_COLLECTIONS) {
+    const collection = data[collectionName];
+    if (!Array.isArray(collection)) {
+      throw new Error(`JSON 備份集合 ${collectionName} 缺少或不是陣列。`);
+    }
+    if (collection.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
+      throw new Error(`JSON 備份集合 ${collectionName} 含有無效資料列。`);
+    }
+    entries.push({ storageKey, value: collection });
+  }
+
+  for (const [collectionName, storageKey] of OPTIONAL_ATOMIC_IMPORT_COLLECTIONS) {
+    const collection = data[collectionName];
+    if (collection !== undefined && !Array.isArray(collection)) {
+      throw new Error(`JSON 備份集合 ${collectionName} 不是陣列。`);
+    }
+    if (Array.isArray(collection) && collection.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
+      throw new Error(`JSON 備份集合 ${collectionName} 含有無效資料列。`);
+    }
+    entries.push({ storageKey, value: Array.isArray(collection) ? collection : [] });
+  }
+
+  return entries;
+};
+
 export class IndexedDbAdapter implements DatabaseAdapter {
   private dbPromise: Promise<IDBDatabase>;
 
@@ -3184,23 +3245,44 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   
   async importData(jsonString: string): Promise<boolean> {
     try {
-      const data = JSON.parse(jsonString);
-      if (data.inventory) await this.saveInventory(data.inventory);
-      if (data.salesOrders) await this.saveSalesOrders(data.salesOrders);
-      if (data.salesOrderItems) await this.saveSalesOrderItems(data.salesOrderItems);
-      if (data.productGroups) await this.saveProductGroups(data.productGroups);
-      if (data.productCategories) await this.saveProductCategories(data.productCategories);
-      if (data.productVariants) await this.saveProductVariants(data.productVariants);
-      if (data.purchaseBatches) await this.savePurchaseBatches(data.purchaseBatches);
-      if (data.purchaseBatchItems) await this.savePurchaseBatchItems(data.purchaseBatchItems);
-      if (data.privateOrders) await this.savePrivateOrders(data.privateOrders);
-      if (data.privateOrderItems) await this.savePrivateOrderItems(data.privateOrderItems);
-      if (data.japanPackages) await this.saveJapanPackages(data.japanPackages);
-      if (data.japanPackageItems) await this.saveJapanPackageItems(data.japanPackageItems);
-      if (data.outboundShipments) await this.saveOutboundShipments(data.outboundShipments);
-      if (data.outboundShipmentItems) await this.saveOutboundShipmentItems(data.outboundShipmentItems);
-      if (data.bundleComponents) await this.saveBundleComponents(data.bundleComponents);
-      if (data.importBatches) await this.saveImportBatches(data.importBatches);
+      // Validate the complete backup before opening a write transaction. This
+      // prevents malformed later collections from leaving an earlier subset
+      // committed to the database.
+      const entries = validateAtomicImportPayload(jsonString);
+      const database = await this.dbPromise;
+
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('kv', 'readwrite');
+        const store = transaction.objectStore('kv');
+        let synchronousFailure: unknown = null;
+
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error ?? new Error('JSON 匯入 transaction 失敗。'));
+        transaction.onabort = () => reject(
+          synchronousFailure instanceof Error
+            ? synchronousFailure
+            : transaction.error ?? new Error('JSON 匯入已回滾。'),
+        );
+
+        try {
+          entries.forEach(({ storageKey, value }) => {
+            store.put(value, storageKey);
+          });
+        } catch (error) {
+          synchronousFailure = error;
+          transaction.abort();
+        }
+      });
+
+      // IndexedDB is authoritative. Remove duplicate fallbacks only after the
+      // all-or-nothing transaction commits successfully.
+      entries.forEach(({ storageKey }) => {
+        try {
+          localStorage.removeItem(storageKey);
+        } catch {
+          // A stale fallback is harmless because IndexedDB remains primary.
+        }
+      });
       return true;
     } catch (e) {
       console.error('Import failed', e);

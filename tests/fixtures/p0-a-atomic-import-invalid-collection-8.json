@@ -1,0 +1,20 @@
+{
+  "inventory": [],
+  "salesOrders": [],
+  "salesOrderItems": [],
+  "productGroups": [],
+  "productCategories": [],
+  "productVariants": [],
+  "purchaseBatches": [],
+  "purchaseBatchItems": {
+    "invalid": "第 8 個集合故意不是陣列"
+  },
+  "privateOrders": [],
+  "privateOrderItems": [],
+  "japanPackages": [],
+  "japanPackageItems": [],
+  "outboundShipments": [],
+  "outboundShipmentItems": [],
+  "bundleComponents": [],
+  "importBatches": []
+}

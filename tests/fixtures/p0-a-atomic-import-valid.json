@@ -1,0 +1,197 @@
+{
+  "inventory": [
+    {
+      "inventory_key": "P0A-B::SKU-B::規格 B",
+      "myacg_item_code": "P0A-SKU-B",
+      "product_title": "P0-A 新資料商品",
+      "raw_variant_name": "規格 B",
+      "listing_type": "測試",
+      "final_price": 120,
+      "myacg_available_quantity": 3,
+      "myacg_sold_quantity": 2,
+      "myacg_listed_at": "2026-08-16"
+    }
+  ],
+  "salesOrders": [
+    {
+      "id": "p0a-b-sales-order",
+      "platform": "Test",
+      "order_number": "P0A-B",
+      "buyer_name": "P0-A Test",
+      "created_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "salesOrderItems": [
+    {
+      "id": "p0a-b-sales-order-item",
+      "order_id": "p0a-b-sales-order",
+      "product_variant_id": "p0a-b-variant-1",
+      "myacg_item_code": "P0A-SKU-B",
+      "quantity": 2
+    }
+  ],
+  "productGroups": [
+    {
+      "id": "p0a-b-group",
+      "purchase_date": "2026-08-16",
+      "priority": "Medium",
+      "title": "P0-A 新資料商品",
+      "closing_date": "2026-08-31",
+      "release_month": "2026年09月",
+      "has_official_site": false,
+      "product_url": "",
+      "created_at": "2026-08-16T13:00:00.000Z",
+      "updated_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "productCategories": [
+    {
+      "id": "p0a-b-category",
+      "product_group_id": "p0a-b-group",
+      "title": "P0-A 分類",
+      "sort_order": 0
+    }
+  ],
+  "productVariants": [
+    {
+      "id": "p0a-b-variant-1",
+      "product_group_id": "p0a-b-group",
+      "product_category_id": "p0a-b-category",
+      "myacg_item_code": "P0A-SKU-B",
+      "product_title": "P0-A 新資料商品",
+      "variant_name": "規格 B",
+      "note": "",
+      "sort_order": 0
+    },
+    {
+      "id": "p0a-b-variant-2",
+      "product_group_id": "p0a-b-group",
+      "product_category_id": "p0a-b-category",
+      "myacg_item_code": "P0A-SKU-B2",
+      "product_title": "P0-A 新資料商品",
+      "variant_name": "規格 B2",
+      "note": "",
+      "sort_order": 1
+    }
+  ],
+  "purchaseBatches": [
+    {
+      "id": "p0a-b-batch",
+      "product_group_id": "p0a-b-group",
+      "name": "P0-A 新批次",
+      "date": "2026-08-16",
+      "note": "",
+      "created_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "purchaseBatchItems": [
+    {
+      "id": "p0a-b-batch-item-1",
+      "purchase_batch_id": "p0a-b-batch",
+      "product_variant_id": "p0a-b-variant-1",
+      "quantity": 2,
+      "cost": 1000,
+      "note": ""
+    },
+    {
+      "id": "p0a-b-batch-item-2",
+      "purchase_batch_id": "p0a-b-batch",
+      "product_variant_id": "p0a-b-variant-2",
+      "quantity": 1,
+      "cost": 2000,
+      "note": ""
+    }
+  ],
+  "privateOrders": [
+    {
+      "id": "p0a-b-private-order",
+      "product_group_id": "p0a-b-group",
+      "customer_name": "P0-A Test",
+      "contact": "",
+      "note": "",
+      "created_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "privateOrderItems": [
+    {
+      "id": "p0a-b-private-order-item",
+      "private_order_id": "p0a-b-private-order",
+      "product_variant_id": "p0a-b-variant-1",
+      "quantity": 1,
+      "amount": 120,
+      "note": ""
+    }
+  ],
+  "japanPackages": [
+    {
+      "id": "p0a-b-package",
+      "title": "P0-A 新日本包裹",
+      "status": "registered",
+      "created_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "japanPackageItems": [
+    {
+      "id": "p0a-b-package-item",
+      "japan_package_id": "p0a-b-package",
+      "product_group_id": "p0a-b-group",
+      "product_variant_id": "p0a-b-variant-1",
+      "purchase_batch_id": "p0a-b-batch",
+      "purchase_batch_item_id": "p0a-b-batch-item-1",
+      "quantity": 2,
+      "checked": false
+    }
+  ],
+  "outboundShipments": [
+    {
+      "id": "p0a-b-shipment",
+      "title": "P0-A 新出庫單",
+      "status": "draft",
+      "created_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "outboundShipmentItems": [
+    {
+      "id": "p0a-b-shipment-item",
+      "outbound_shipment_id": "p0a-b-shipment",
+      "japan_package_item_id": "p0a-b-package-item",
+      "product_group_id": "p0a-b-group",
+      "product_variant_id": "p0a-b-variant-1",
+      "sku": "P0A-SKU-B",
+      "quantity": 2,
+      "checked": false
+    }
+  ],
+  "bundleComponents": [
+    {
+      "id": "p0a-b-bundle",
+      "bundle_variant_id": "p0a-b-variant-2",
+      "component_variant_id": "p0a-b-variant-1",
+      "created_at": "2026-08-16T13:00:00.000Z"
+    }
+  ],
+  "importBatches": [
+    {
+      "id": "p0a-b-import-batch",
+      "platform": "myacg",
+      "file_name": "p0-a-atomic-import-valid.json",
+      "imported_at": "2026-08-16T13:00:00.000Z",
+      "total_rows": 1,
+      "valid_rows": 1,
+      "skipped_cancelled_rows": 0,
+      "new_order_items": 1,
+      "skipped_duplicate_items": 0,
+      "created_groups_count": 1,
+      "completed_group_skus_count": 1,
+      "catalog_missing_count": 0,
+      "note": "",
+      "details": {
+        "newOrderItems": [],
+        "skippedDuplicateItems": [],
+        "createdGroups": ["p0a-b-group"],
+        "completedGroupSkus": [],
+        "catalogMissingSkus": []
+      }
+    }
+  ]
+}

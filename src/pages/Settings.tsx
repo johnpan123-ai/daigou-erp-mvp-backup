@@ -214,10 +214,10 @@ export default function Settings() {
         alert('資料還原成功！');
         await loadCounts();
       } else {
-        alert('還原失敗，格式不正確。');
+        alert('還原失敗，資料未套用；匯入前的原有資料已完整保留。請確認 JSON 格式與必要集合。');
       }
     } catch (err: any) {
-      alert(`還原失敗：${err.message || err}`);
+      alert(`還原失敗，資料未套用；匯入前的原有資料已完整保留。\n${err.message || err}`);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
