@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-16 21:31（Asia/Taipei，UTC+8）
+最後更新：2026-08-16 21:53（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -39,6 +39,7 @@
 | 2026-08-16 20:50 | Integration | `checkpoint-20260816-2050-integration-before-stability-audit-v2` | `e24a6e8b191e95893be3bf5e72e20037996043cc` | Stability Audit v2 前封存；包含 Inventory JSON 備份 gate、Outbound 採購日幣單價空值輸出修正、對應測試與 Restore Point Index | 既有 Build、core、Sandbox guard、P0 race、Inventory gate、Outbound export 測試通過；Audit v2 於 21:05 完成分析 | 否 | `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：本輪 Audit 的乾淨起點** |
 | 2026-08-16 21:17 | Integration | `checkpoint-20260816-2117-before-p0-a-atomic-import` | `3d203187e32a9d68a01b8d68231552dea1a73c2e` | P0-A `importData()` 原子化實作前；保留 Stability Audit v2 已完成狀態 | Audit v2 Build／regression／Sandbox isolation 已完成；P0-A 尚未開始 | 否 | `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：P0-A 乾淨回復點** |
 | 2026-08-16 21:31 | Integration | `checkpoint-20260816-2131-p0-a-atomic-import-awaiting-acceptance` | `bc9fb120cda4f23c8ab2c5f9d6102b97b7b945de` | P0-A 一般 JSON `importData()` 完整驗證＋單一 IndexedDB transaction；含成功／損壞 fixture、rollback 專用測試與人工 SOP | Build、core、atomic import、Sandbox guard／architecture、Test Owner、Snapshot、Inventory gate、Outbound export／race、Recent Purchases 通過；Purchase Management 複製按鈕既有 UI 測試 navigation wait timeout，與 P0-A 無關；**等待人工驗收** | 否 | 人工驗收清理可重匯 `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
+| 2026-08-16 21:53 | Integration | `checkpoint-20260816-2153-p0-a-atomic-import-accepted` | `d53d7e6` | P0-A 人工成功匯入、F5、損壞第 8 集合失敗注入與失敗後 F5 全部通過；正式標記 Accepted | 延續上一列自動測試；使用者人工驗收通過 | 否 | 清理時可重匯 `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：P0-A Accepted Restore Point** |
 | 2026-08-16 18:02 | Test | `checkpoint-test-sandbox-before-production-like-p0-outbound-fix-20260816` | `a13721f83b763466ba19c32899f2011cfd8851c8` | 封存完整 Test Sandbox：Test Owner、Snapshot Import、近期採購、Stability Hardening、Feature Registry 與 Audit | Test Sandbox 完整測試／Audit 已完成 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：完整 Test Sandbox 封存點** |
 
 ## Production 歷史回復點
