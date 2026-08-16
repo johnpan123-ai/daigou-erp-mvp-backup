@@ -834,12 +834,32 @@ export default function OutboundShipmentDetail() {
     return map;
   }, [inventoryItems]);
 
+  const purchaseBatchItemById = useMemo(
+    () => new Map(purchaseBatchItems.map(item => [item.id, item])),
+    [purchaseBatchItems]
+  );
+
+  const resolvePurchaseJpyUnitCost = useCallback((item: OutboundShipmentItem): number | undefined => {
+    const directPurchaseBatchItemId = (
+      item as OutboundShipmentItem & { purchase_batch_item_id?: string }
+    ).purchase_batch_item_id;
+    const packageItem = item.japan_package_item_id
+      ? japanPackageItemById.get(item.japan_package_item_id)
+      : undefined;
+    const purchaseBatchItemId = directPurchaseBatchItemId || packageItem?.purchase_batch_item_id;
+    if (!purchaseBatchItemId) return undefined;
+
+    const cost = purchaseBatchItemById.get(purchaseBatchItemId)?.cost;
+    return typeof cost === 'number' && Number.isFinite(cost) && cost > 0 ? cost : undefined;
+  }, [japanPackageItemById, purchaseBatchItemById]);
+
   const exportMyAcgXLS = () => {
     if (!shipment || selectedItems.length === 0) return;
 
     const rows = selectedItems.map(item => {
       const inv = item.sku ? inventoryBySku.get(item.sku) : undefined;
       const manualTwdPrice = getManualTwdPrice(item.note);
+      const purchaseJpyUnitCost = resolvePurchaseJpyUnitCost(item);
       return {
         '主編號(多規格編號)': inv?.myacg_parent_code || '',
         '子編號(商品編號)': item.sku || '',
@@ -848,6 +868,7 @@ export default function OutboundShipmentDetail() {
         '規格/項目': item.variant_name || '',
         '商品類型': inv?.listing_type || '',
         '價格': manualTwdPrice !== undefined ? manualTwdPrice : inv ? `${inv.final_price}元` : '',
+        '採購日幣單價': purchaseJpyUnitCost ?? '',
         '庫存': item.quantity,
         '銷售': inv?.myacg_sold_quantity ?? 0,
         '刊登時間': inv?.myacg_listed_at || '',
@@ -1295,7 +1316,7 @@ export default function OutboundShipmentDetail() {
               padding: '8px 12px', background: '#fff', color: '#475569',
               border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer',
               whiteSpace: 'nowrap', flexShrink: 0,
-            }}>📄 匯出 XLS</button>
+            }}>📄 匯出商品清單</button>
             <button onClick={exportInboundXLS} style={{
               padding: '8px 12px', background: '#fff', color: '#475569',
               border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer',

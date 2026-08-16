@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
-import { Upload, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
+import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useResizableColumns } from '../hooks/useResizableColumns';
+import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
 
 interface InventoryGroup {
   title: string;
@@ -63,6 +64,8 @@ export default function Inventory() {
   const [currentPage, setCurrentPage] = useState(1);
   const [lastBackupTime, setLastBackupTime] = useState<string | null>(null);
   const [isRollbackPending, setIsRollbackPending] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [backupNotice, setBackupNotice] = useState<string>('');
 
   useEffect(() => {
     loadItems();
@@ -94,32 +97,50 @@ export default function Inventory() {
     fileInputRef.current?.click();
   };
 
+  const createPreImportBackup = async () => {
+    const timestamp = new Date();
+    const backup = await createAndDownloadWorkbenchBackup(
+      dataProvider,
+      'workbench-before-xls-import',
+      timestamp,
+    );
+    const timestampIso = timestamp.toISOString();
+    await dataProvider.saveLastImportBackup({ data: backup.json, timestamp: timestampIso });
+    setLastBackupTime(timestampIso);
+    setBackupNotice(`已建立匯入前備份：${backup.filename}`);
+    return backup;
+  };
+
+  const handleManualExportBackup = async () => {
+    setIsExportingBackup(true);
+    setBackupNotice('');
+    try {
+      const backup = await createAndDownloadWorkbenchBackup(dataProvider, 'workbench-backup');
+      setBackupNotice(`JSON 備份已建立：${backup.filename}`);
+      alert(`JSON 備份已建立並開始下載。\n檔名：${backup.filename}`);
+    } catch (error: any) {
+      console.error('[Manual Backup ERROR]:', error);
+      alert(`JSON 備份失敗：${error?.message || error}`);
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsImporting(true);
+    setBackupNotice('');
     try {
       console.log('[Import Backup] Creating pre-import snapshot...');
       try {
-        const backupData = {
-          inventory: await dataProvider.getInventory(),
-          salesOrders: await dataProvider.getSalesOrders(),
-          salesOrderItems: await dataProvider.getSalesOrderItems(),
-          productGroups: await dataProvider.getProductGroups(),
-          productCategories: await dataProvider.getProductCategories(),
-          productVariants: await dataProvider.getProductVariants(),
-          purchaseBatches: await dataProvider.getPurchaseBatches(),
-          purchaseBatchItems: await dataProvider.getPurchaseBatchItems(),
-          privateOrders: await dataProvider.getPrivateOrders(),
-          privateOrderItems: await dataProvider.getPrivateOrderItems(),
-        };
-        const timestamp = new Date().toISOString();
-        await dataProvider.saveLastImportBackup({ data: JSON.stringify(backupData), timestamp });
-        setLastBackupTime(timestamp);
-        console.log('[Import Backup] Snapshotted successfully at', timestamp);
+        const backup = await createPreImportBackup();
+        console.log('[Import Backup] Downloaded and saved successfully:', backup.filename, backup.byteLength);
       } catch (backupErr) {
-        console.error('[Import Backup ERROR] Backup failed, continuing import:', backupErr);
+        console.error('[Import Backup ERROR] Backup failed; XLS import aborted:', backupErr);
+        alert(`匯入前 JSON 備份失敗，已中止 XLS 匯入。\n${backupErr instanceof Error ? backupErr.message : String(backupErr)}`);
+        return;
       }
 
       const parsedItems = await parseMyAcgFile(file);
@@ -544,6 +565,74 @@ export default function Inventory() {
 
         .btn-import-xls:active {
           transform: scale(0.98);
+        }
+
+        .btn-export-backup {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 8px 16px;
+          font-size: 14px;
+          font-weight: 700;
+          color: #ffffff;
+          background: #047857;
+          border: 1px solid #047857;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          box-shadow: 0 1px 2px rgba(4, 120, 87, 0.18);
+        }
+
+        .btn-export-backup:hover:not(:disabled) {
+          background: #065f46;
+          border-color: #065f46;
+        }
+
+        .btn-export-backup:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .inventory-more-actions {
+          position: relative;
+        }
+
+        .inventory-more-actions > summary {
+          list-style: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 8px 12px;
+          font-size: 13px;
+          font-weight: 600;
+          color: #64748b;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .inventory-more-actions > summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .inventory-more-actions-menu {
+          position: absolute;
+          top: calc(100% + 6px);
+          right: 0;
+          z-index: 20;
+          min-width: 190px;
+          padding: 8px;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          border-radius: 10px;
+          box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+        }
+
+        .inventory-more-actions-menu .btn-rollback-backup {
+          width: 100%;
+          justify-content: center;
         }
 
         .btn-rollback-backup {
@@ -1098,16 +1187,29 @@ export default function Inventory() {
               <Upload size={14} />
               <span>{isImporting ? '匯入中...' : '匯入主檔 XLS'}</span>
             </button>
+            <button
+              className="btn-export-backup"
+              onClick={handleManualExportBackup}
+              disabled={isImporting || isExportingBackup}
+            >
+              <Download size={14} />
+              <span>{isExportingBackup ? '備份中...' : '匯出 JSON 備份'}</span>
+            </button>
             {lastBackupTime && (
-              <button 
-                className="btn-rollback-backup" 
-                onClick={handleRollbackBackup} 
-                disabled={isRollbackPending || isImporting}
-                title={`上次匯入前備份時間：${new Date(lastBackupTime).toLocaleString()}`}
-              >
-                <RotateCcw size={14} />
-                <span>{isRollbackPending ? '還原中...' : '還原上次狀態'}</span>
-              </button>
+              <details className="inventory-more-actions">
+                <summary>更多操作 <ChevronDown size={14} /></summary>
+                <div className="inventory-more-actions-menu">
+                  <button
+                    className="btn-rollback-backup"
+                    onClick={handleRollbackBackup}
+                    disabled={isRollbackPending || isImporting}
+                    title={`上次匯入前備份時間：${new Date(lastBackupTime).toLocaleString()}`}
+                  >
+                    <RotateCcw size={14} />
+                    <span>{isRollbackPending ? '還原中...' : '還原上次狀態'}</span>
+                  </button>
+                </div>
+              </details>
             )}
             {selectedSkus.size > 0 && (
               <button className="btn btn-primary" onClick={handleCreatePurchaseRecords} style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
@@ -1115,6 +1217,11 @@ export default function Inventory() {
               </button>
             )}
           </div>
+          {backupNotice && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#047857', fontWeight: 600 }}>
+              {backupNotice}
+            </div>
+          )}
         </div>
         <div className="inventory-header-right" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
           {refreshTime && (
