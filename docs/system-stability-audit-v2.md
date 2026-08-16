@@ -100,10 +100,12 @@
 
 ### P0-C1：bootstrap rejection 沒有最外層 catch
 
+- 狀態：**Implementation Passed / Awaiting Manual Acceptance（2026-08-16）**。
 - 位置：`src/main.tsx:109` 的 `void bootstrap()`。
 - 根因：動態 import、`createRoot` 或 Test Sandbox 初始化若 reject，沒有最外層 error boundary 可接住；可能只留下空 root／白畫面與 unhandled rejection。
 - 本輪結果：Build 與 50 次有效路由切換均正常，未重現；這是故障路徑風險，不是本輪觀察到的 crash。
 - 最小修法：在 bootstrap 最外層顯示不可依賴 React 的啟動錯誤畫面並記錄錯誤。
+- 修正：React、ReactDOM、App、Provider 與 CSS 都改由受控 bootstrap 動態載入；最外層 catch 以原生 DOM 顯示可重新載入的安全錯誤頁。`simulateBootstrapError=1` 僅在 Test Mode 生效。
 - 涉及：`src/main.tsx`；低改動但需單獨測試。
 
 ## 4. P1 race／狀態錯誤

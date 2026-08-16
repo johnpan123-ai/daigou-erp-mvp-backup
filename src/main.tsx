@@ -82,13 +82,27 @@
   }
 })();
 
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import { installTestSandboxEnvironment } from './lib/testSandboxEnvironment'
-
 async function bootstrap() {
+  const [reactModule, reactDomModule, testEnvironmentModule] = await Promise.all([
+    import('react'),
+    import('react-dom/client'),
+    import('./lib/testSandboxEnvironment'),
+    import('./index.css'),
+  ]);
+
+  const { StrictMode, createElement } = reactModule;
+  const { createRoot } = reactDomModule;
+  const { installTestSandboxEnvironment } = testEnvironmentModule;
+
   installTestSandboxEnvironment();
+
+  const shouldSimulateBootstrapError = typeof window !== 'undefined'
+    && localStorage.getItem('erp_provider_mode') === 'test'
+    && new URLSearchParams(window.location.search).get('simulateBootstrapError') === '1';
+
+  if (shouldSimulateBootstrapError) {
+    throw new Error('TEST_ONLY_BOOTSTRAP_FAILURE');
+  }
 
   const [{ default: App }, { dataProvider }] = await Promise.all([
     import('./App.tsx'),
@@ -99,11 +113,58 @@ async function bootstrap() {
     (window as any).dataProvider = dataProvider;
   }
 
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
+  const rootElement = document.getElementById('root');
+  if (!rootElement) throw new Error('ROOT_ELEMENT_MISSING');
+
+  createRoot(rootElement).render(
+    createElement(StrictMode, null, createElement(App)),
   );
 }
 
-void bootstrap();
+function renderBootstrapFailure(error: unknown) {
+  console.error('[Bootstrap Fatal]', error);
+
+  if (typeof document === 'undefined') return;
+
+  const isTestMode = (() => {
+    try {
+      return localStorage.getItem('erp_provider_mode') === 'test';
+    } catch {
+      return false;
+    }
+  })();
+
+  document.title = isTestMode ? '[TEST ERROR] 小河馬 ERP' : '[ERROR] 小河馬 ERP';
+  document.body.dataset.bootstrapError = 'BOOTSTRAP_FAILED';
+
+  const rootElement = document.getElementById('root') || document.body.appendChild(document.createElement('div'));
+  rootElement.id ||= 'root';
+  rootElement.replaceChildren();
+
+  const panel = document.createElement('main');
+  panel.setAttribute('role', 'alert');
+  panel.style.cssText = 'box-sizing:border-box;max-width:560px;margin:12vh auto;padding:32px;border:1px solid #fecaca;border-radius:16px;background:#fff;box-shadow:0 18px 50px rgba(15,23,42,.12);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1e293b;';
+
+  const title = document.createElement('h1');
+  title.textContent = '系統啟動失敗';
+  title.style.cssText = 'margin:0 0 12px;font-size:26px;color:#b91c1c;';
+
+  const message = document.createElement('p');
+  message.textContent = '系統無法完成初始化。請重新載入；若問題持續，請停止操作並聯絡管理員。';
+  message.style.cssText = 'margin:0 0 8px;line-height:1.7;';
+
+  const code = document.createElement('p');
+  code.textContent = '錯誤代碼：BOOTSTRAP_FAILED';
+  code.style.cssText = 'margin:0 0 20px;color:#64748b;font-size:13px;';
+
+  const reloadButton = document.createElement('button');
+  reloadButton.type = 'button';
+  reloadButton.textContent = '重新載入';
+  reloadButton.style.cssText = 'padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;';
+  reloadButton.addEventListener('click', () => window.location.reload(), { once: true });
+
+  panel.append(title, message, code, reloadButton);
+  rootElement.appendChild(panel);
+}
+
+void bootstrap().catch(renderBootstrapFailure);
