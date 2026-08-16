@@ -159,7 +159,11 @@ const storageKeys = {
 
 await waitForServer();
 const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
-const context = await browser.newContext({ locale: 'zh-TW', timezoneId: TAIPEI_TIME_ZONE });
+const context = await browser.newContext({
+  locale: 'zh-TW',
+  timezoneId: TAIPEI_TIME_ZONE,
+  permissions: ['clipboard-read', 'clipboard-write'],
+});
 const page = await context.newPage();
 const supabaseRequests = [];
 const unexpectedErrors = [];
@@ -218,6 +222,40 @@ try {
 
   const rows = page.getByTestId('recent-purchase-row');
   assert.equal(await rows.count(), 0, 'Collapsed date sections must not render purchase rows');
+
+  const dailyCopyButtons = page.getByTestId('recent-purchases-copy-daily-ledger');
+  assert.equal(await dailyCopyButtons.count(), 2, 'Every populated date section must expose daily ledger copy while collapsed');
+  await dailyCopyButtons.first().click();
+  assert.equal(await dateToggles.first().getAttribute('aria-expanded'), 'false', 'Copying a collapsed date must not expand it');
+  await page.getByTestId('recent-purchases-copy-notice').waitFor();
+  assert.equal(await page.getByTestId('recent-purchases-copy-notice').innerText(), '已複製當日帳目');
+
+  const dailyLedger = await page.evaluate(() => navigator.clipboard.readText());
+  assert.match(dailyLedger, /【上午採購｜/);
+  assert.match(dailyLedger, /【商品 B 採購｜/);
+  assert.match(dailyLedger, /【下午採購｜/);
+  assert.equal((dailyLedger.match(/────────────/g) || []).length, 2, 'Three original batches must have two clear separators');
+  assert.equal((dailyLedger.match(/商品 A-/g) || []).length, 2, 'Same-day merged product must retain both original batch ledgers');
+
+  const persistedPurchaseDataAfterCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('daigou-erp-db', 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const transaction = db.transaction('kv', 'readonly');
+    const store = transaction.objectStore('kv');
+    const read = key => new Promise((resolve, reject) => {
+      const request = store.get(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result ?? []);
+    });
+    const [batches, items] = await Promise.all([read(batchKey), read(itemKey)]);
+    db.close();
+    return { batches, items };
+  }, { batchKey: storageKeys.purchaseBatches, itemKey: storageKeys.purchaseBatchItems });
+  assert.deepEqual(persistedPurchaseDataAfterCopy.batches, purchaseBatches, 'Daily copy must not modify purchase_batches');
+  assert.deepEqual(persistedPurchaseDataAfterCopy.items, purchaseBatchItems, 'Daily copy must not modify purchase_batch_items');
 
   await dateToggles.first().click();
   assert.equal(await rows.count(), 2, 'Opening today must reveal only today rows');
@@ -282,6 +320,8 @@ try {
   console.log('PASS same date + product_group_id merges quantity and batch count');
   console.log('PASS date sections and last-purchase ordering are correct');
   console.log('PASS date sections are independent, collapsed by default, and reset on date-filter changes');
+  console.log('PASS collapsed date sections copy every original batch with shared ledger formatting');
+  console.log('PASS daily ledger copy preserves purchase_batches and purchase_batch_items');
   console.log('PASS date/search/official-site filters are correct');
   console.log('PASS proxy_agent is shown read-only and blank agents stay hidden');
   console.log('PASS product detail and official URL actions are correct');

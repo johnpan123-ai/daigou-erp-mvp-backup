@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, ExternalLink, History, RefreshCcw, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { ProductGroup, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
+import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
+import { formatMultiplePurchaseBatchLedgers } from '../lib/purchaseBatchLedger';
 
 type DateFilter = 'today' | 'yesterday' | '7d' | '30d';
 
@@ -73,6 +74,8 @@ const dateFilterOptions: Array<{ value: DateFilter; label: string }> = [
 export default function RecentPurchases() {
   const navigate = useNavigate();
   const [groups, setGroups] = useState<ProductGroup[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [batches, setBatches] = useState<PurchaseBatch[]>([]);
   const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [dateFilter, setDateFilter] = useState<DateFilter>('7d');
@@ -81,17 +84,23 @@ export default function RecentPurchases() {
   const [onlyWithOfficialSite, setOnlyWithOfficialSite] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [copyNotice, setCopyNotice] = useState<{ text: string; isError: boolean } | null>(null);
+  const copyNoticeTimerRef = useRef<number | null>(null);
 
   const loadData = async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const [nextGroups, nextBatches, nextBatchItems] = await Promise.all([
+      const [nextGroups, nextCategories, nextVariants, nextBatches, nextBatchItems] = await Promise.all([
         dataProvider.getProductGroups(),
+        dataProvider.getProductCategories(),
+        dataProvider.getProductVariants(),
         dataProvider.getPurchaseBatches(),
         dataProvider.getPurchaseBatchItems(),
       ]);
       setGroups(nextGroups);
+      setCategories(nextCategories);
+      setVariants(nextVariants);
       setBatches(nextBatches);
       setBatchItems(nextBatchItems);
     } catch (error) {
@@ -110,6 +119,10 @@ export default function RecentPurchases() {
     setExpandedDateKeys(new Set());
   }, [dateFilter]);
 
+  useEffect(() => () => {
+    if (copyNoticeTimerRef.current !== null) window.clearTimeout(copyNoticeTimerRef.current);
+  }, []);
+
   const toggleDateSection = (dateKey: string) => {
     setExpandedDateKeys(current => {
       const next = new Set(current);
@@ -123,6 +136,70 @@ export default function RecentPurchases() {
   };
 
   const todayKey = getTaipeiDateKey(Date.now());
+
+  const categoryById = useMemo(
+    () => new Map(categories.map(category => [category.id, category])),
+    [categories],
+  );
+  const groupById = useMemo(
+    () => new Map(groups.map(group => [group.id, group])),
+    [groups],
+  );
+
+  const getLedgerDisplayProductName = (variant: ProductVariant): string => {
+    const variantName = (variant.variant_name || '').trim();
+    const ownerGroup = variant.product_group_id ? groupById.get(variant.product_group_id) : undefined;
+    const productTitle = ownerGroup?.normalized_title || ownerGroup?.title || variant.product_title || '';
+
+    if (ownerGroup?.listing_type === '代理版') {
+      if (variantName && variantName !== '單品' && variantName !== '一箱') return variantName;
+      return variant.product_title || productTitle || variant.myacg_item_code || '未命名規格';
+    }
+
+    const category = variant.product_category_id ? categoryById.get(variant.product_category_id) : undefined;
+    if (category?.title && category.title !== '單品') return `${category.title} - ${variantName || '單品'}`;
+    return variantName || productTitle || variant.myacg_item_code || '未命名規格';
+  };
+
+  const showCopyNotice = (text: string, isError = false) => {
+    setCopyNotice({ text, isError });
+    if (copyNoticeTimerRef.current !== null) window.clearTimeout(copyNoticeTimerRef.current);
+    copyNoticeTimerRef.current = window.setTimeout(() => {
+      setCopyNotice(null);
+      copyNoticeTimerRef.current = null;
+    }, 2200);
+  };
+
+  const copyDailyLedger = async (dateKey: string) => {
+    const itemBatchIds = new Set(batchItems.map(item => item.purchase_batch_id));
+    const dailyBatches = batches
+      .filter(batch => itemBatchIds.has(batch.id) && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === dateKey)
+      .sort((a, b) => {
+        const timeDiff = getPurchaseBatchTimestamp(a) - getPurchaseBatchTimestamp(b);
+        return timeDiff || a.id.localeCompare(b.id);
+      });
+    const ledgerText = formatMultiplePurchaseBatchLedgers({
+      batches: dailyBatches,
+      batchItems,
+      variants,
+      categoryById,
+      groupById,
+      getDisplayProductName: getLedgerDisplayProductName,
+    });
+
+    if (!ledgerText) {
+      showCopyNotice('當日沒有可複製的採購帳目', true);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(ledgerText);
+      showCopyNotice('已複製當日帳目');
+    } catch (error) {
+      console.error('[RecentPurchases] Failed to copy daily ledger:', error);
+      showCopyNotice('複製失敗，請確認瀏覽器剪貼簿權限', true);
+    }
+  };
 
   const allRows = useMemo(() => {
     const groupById = new Map(groups.map(group => [group.id, group]));
@@ -311,6 +388,16 @@ export default function RecentPurchases() {
         </div>
       </header>
 
+      {copyNotice && (
+        <div
+          role="status"
+          data-testid="recent-purchases-copy-notice"
+          style={{ position: 'fixed', top: '76px', right: '24px', zIndex: 1000, padding: '9px 14px', borderRadius: '8px', background: copyNotice.isError ? '#b91c1c' : '#047857', color: '#fff', fontSize: '13px', fontWeight: 700, boxShadow: '0 8px 24px rgba(15, 23, 42, 0.18)' }}
+        >
+          {copyNotice.text}
+        </div>
+      )}
+
       <div className="recent-purchases-toolbar" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', padding: '14px', marginBottom: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
           {dateFilterOptions.map(option => (
@@ -370,22 +457,41 @@ export default function RecentPurchases() {
             const sectionQuantity = section.rows.reduce((sum, row) => sum + row.totalQuantity, 0);
             const isExpanded = expandedDateKeys.has(section.dateKey);
             const contentId = `recent-purchases-date-content-${section.dateKey}`;
+            const hasDailyLedger = batches.some(batch => (
+              batchItems.some(item => item.purchase_batch_id === batch.id)
+              && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === section.dateKey
+            ));
             return (
               <section key={section.dateKey} data-testid="recent-purchases-date-section" data-date={section.dateKey} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff', overflow: 'hidden' }}>
-                <button
-                  type="button"
-                  data-testid="recent-purchases-date-toggle"
-                  aria-expanded={isExpanded}
-                  aria-controls={contentId}
-                  onClick={() => toggleDateSection(section.dateKey)}
-                  style={{ width: '100%', minHeight: '44px', padding: '9px 14px', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', background: '#eff6ff', cursor: 'pointer', textAlign: 'left' }}
+                <div
+                  style={{ width: '100%', minHeight: '44px', padding: '6px 10px 6px 4px', display: 'flex', alignItems: 'center', gap: '8px', background: '#eff6ff' }}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
-                    {isExpanded ? <ChevronDown size={16} color="#1e3a8a" /> : <ChevronRight size={16} color="#1e3a8a" />}
-                    <strong style={{ color: '#1e3a8a', fontSize: '15px' }}>{formatDateHeading(section.dateKey, todayKey)}</strong>
-                  </span>
-                  <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>{section.rows.length} 項・{sectionQuantity} 件</span>
-                </button>
+                  <button
+                    type="button"
+                    data-testid="recent-purchases-date-toggle"
+                    aria-expanded={isExpanded}
+                    aria-controls={contentId}
+                    onClick={() => toggleDateSection(section.dateKey)}
+                    style={{ minWidth: 0, flex: 1, alignSelf: 'stretch', padding: '3px 10px', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+                      {isExpanded ? <ChevronDown size={16} color="#1e3a8a" /> : <ChevronRight size={16} color="#1e3a8a" />}
+                      <strong style={{ color: '#1e3a8a', fontSize: '15px' }}>{formatDateHeading(section.dateKey, todayKey)}</strong>
+                    </span>
+                    <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>{section.rows.length} 項・{sectionQuantity} 件</span>
+                  </button>
+                  {hasDailyLedger && (
+                    <button
+                      type="button"
+                      data-testid="recent-purchases-copy-daily-ledger"
+                      onClick={() => void copyDailyLedger(section.dateKey)}
+                      title="複製該日期所有原始採購批次帳目"
+                      style={{ flexShrink: 0, minHeight: '32px', padding: '0 10px', border: '1px solid #93c5fd', borderRadius: '7px', display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fff', color: '#1d4ed8', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      <Copy size={14} /> 複製當日帳目
+                    </button>
+                  )}
+                </div>
                 {isExpanded && <div id={contentId} data-testid="recent-purchases-date-content" style={{ width: '100%', overflowX: 'auto', borderTop: '1px solid #dbeafe' }}>
                   <table className="recent-purchases-table">
                     <colgroup>

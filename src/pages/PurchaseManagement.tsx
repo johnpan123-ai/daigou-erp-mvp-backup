@@ -13,6 +13,7 @@ import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
+import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -219,47 +220,15 @@ function MobilePurchaseBatchTab({
       alert('此批次無任何採購商品！');
       return;
     }
-    const ledgerMap = new Map<string, { name: string; quantity: number; cost: number }>();
     const groupMap = new Map((groups || []).map(g => [g.id, g]));
-    const variantMap = new Map(variants.map(v => [v.id, v]));
-    
-    for (const item of items) {
-      const variant = variantMap.get(item.product_variant_id);
-      if (!variant) continue;
-
-      const g = variant.product_group_id ? groupMap.get(variant.product_group_id) : null;
-      const groupTitle = g?.normalized_title
-        || g?.title
-        || variant.product_title
-        || '未命名商品';
-      
-      const cat = variant.product_category_id ? categoryMap.get(variant.product_category_id) : null;
-      const catTitle = (cat && cat.title && cat.title !== '單品') ? cat.title : '';
-      const displayProdName = getDisplayProductName(variant);
-      let restName = displayProdName;
-      if (catTitle && !displayProdName.includes(catTitle)) {
-        restName = `${catTitle} - ${displayProdName}`;
-      }
-      const displayName = `${groupTitle} - ${restName}`.replace(/\s*-\s*/g, '-');
-
-      const costVal = item.cost ?? 0;
-      const key = `${displayName}_${costVal}`;
-      const existing = ledgerMap.get(key);
-      if (existing) {
-        existing.quantity += item.quantity;
-      } else {
-        ledgerMap.set(key, {
-          name: displayName,
-          quantity: item.quantity,
-          cost: costVal
-        });
-      }
-    }
-
-    const tsvRows = Array.from(ledgerMap.values()).map(row => {
-      return `${row.name}\t${row.quantity}\t\t${row.cost}`;
+    const tsvString = formatPurchaseBatchLedger({
+      batchId: batch.id,
+      batchItems,
+      variants,
+      categoryById: categoryMap,
+      groupById: groupMap,
+      getDisplayProductName,
     });
-    const tsvString = tsvRows.join('\n');
 
     try {
       await navigator.clipboard.writeText(tsvString);
