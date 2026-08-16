@@ -67,6 +67,7 @@
 
 ### P0-3：新增／編輯採購批次先存批次、再存明細
 
+- Stage 狀態：**Design Gate / Blocked**（2026-08-16）。Cloud 需要 server-side transaction／RPC；Local／Test 需要對應的複合 Provider 契約。依安全規則未用前端 compensation 假裝 atomic，未修改執行程式。
 - 問題：`PurchaseBatchModal.handleAddBatchSubmit()` 先 `savePurchaseBatches()`，再 `savePurchaseBatchItems()`。
 - 位置：`src/components/PurchaseBatchModal.tsx:488-540`。
 - 影響：第二次寫入失敗時可能留下沒有明細的批次；編輯時也可能出現批次 metadata 與明細不一致。
