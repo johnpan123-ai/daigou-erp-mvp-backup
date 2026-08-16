@@ -6,6 +6,11 @@ import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronR
 import { EmptyState } from '../components/empty/EmptyState';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
+import { getProviderMode } from '../providers/providerMode';
+import {
+  CLOUD_RESTORE_DISABLED_MESSAGE,
+  isCloudRestoreDisabledMode,
+} from '../providers/cloudRestorePolicy';
 
 interface InventoryGroup {
   title: string;
@@ -42,6 +47,8 @@ const DEFAULT_COL_WIDTHS = {
 };
 
 export default function Inventory() {
+  const currentMode = getProviderMode();
+  const isCloudRestoreDisabled = isCloudRestoreDisabledMode(currentMode);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [isImporting, setIsImporting] = useState(false);
@@ -188,6 +195,11 @@ export default function Inventory() {
   };
 
   const handleRollbackBackup = async () => {
+    if (isCloudRestoreDisabled) {
+      alert(CLOUD_RESTORE_DISABLED_MESSAGE);
+      return;
+    }
+
     const backup = await dataProvider.getLastImportBackup();
     if (!backup) {
       alert('找不到任何可用備份！');
@@ -1195,19 +1207,26 @@ export default function Inventory() {
               <Download size={14} />
               <span>{isExportingBackup ? '備份中...' : '匯出 JSON 備份'}</span>
             </button>
-            {lastBackupTime && (
+            {(lastBackupTime || isCloudRestoreDisabled) && (
               <details className="inventory-more-actions">
                 <summary>更多操作 <ChevronDown size={14} /></summary>
                 <div className="inventory-more-actions-menu">
                   <button
                     className="btn-rollback-backup"
                     onClick={handleRollbackBackup}
-                    disabled={isRollbackPending || isImporting}
-                    title={`上次匯入前備份時間：${new Date(lastBackupTime).toLocaleString()}`}
+                    disabled={isRollbackPending || isImporting || isCloudRestoreDisabled}
+                    title={isCloudRestoreDisabled
+                      ? CLOUD_RESTORE_DISABLED_MESSAGE
+                      : `上次匯入前備份時間：${new Date(lastBackupTime!).toLocaleString()}`}
                   >
                     <RotateCcw size={14} />
-                    <span>{isRollbackPending ? '還原中...' : '還原上次狀態'}</span>
+                    <span>{isCloudRestoreDisabled ? 'Cloud Mode 暫停還原' : isRollbackPending ? '還原中...' : '還原上次狀態'}</span>
                   </button>
+                  {isCloudRestoreDisabled && (
+                    <div style={{ maxWidth: '280px', padding: '8px 10px', color: '#92400e', fontSize: '12px', lineHeight: 1.5 }}>
+                      {CLOUD_RESTORE_DISABLED_MESSAGE}
+                    </div>
+                  )}
                 </div>
               </details>
             )}

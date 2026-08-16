@@ -14,6 +14,7 @@
     "test:test-owner-auth": "node tests/test-owner-auth.mjs",
     "test:test-snapshot-import": "node tests/test-snapshot-import.mjs",
     "test:atomic-import-data": "node tests/atomic-import-data.mjs",
+    "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
     "test:inventory-backup-gate": "node tests/inventory-backup-gate.mjs",
     "test:outbound-purchase-cost-export": "node tests/outbound-purchase-cost-export.mjs",
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",

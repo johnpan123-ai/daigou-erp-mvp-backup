@@ -2,9 +2,9 @@
 
 ## Stage
 
-**Design Gate / Awaiting Architecture Decision**
+**Implementation Passed / Awaiting Manual Acceptance**
 
-這不是 `Implementation Passed`、`Accepted` 或 `Completed`。目前沒有修改 Cloud restore 行為，也沒有執行任何 Production restore。
+使用者已採用方案 1。Cloud restore 現已由 UI 與 `SupabaseProvider.restoreBackup()` 雙層 fail-closed；Local／Test atomic restore 保留。這不是 `Accepted` 或 `Completed`，且沒有執行任何 Production restore。
 
 ## 實際呼叫鏈
 
@@ -97,11 +97,12 @@ Supabase REST 每一次 delete／upsert 都是獨立 HTTP request 與獨立資�
 
 先採方案 1，把已確認危險的 Cloud restore fail-closed；另立高風險專案設計方案 2。不要保留目前前端逐表 restore 並只加 loading／confirm，因為那不會提供 rollback。
 
-## 修改前停止點
+## 實作結果與停止點
 
-等待使用者決定：
+- 已採方案 1：Cloud／Fallback UI 停用 JSON 還原與上次狀態還原。
+- `SupabaseProvider.restoreBackup()` 在任何 Cloud read／write 前丟出 `CloudRestoreDisabledError`。
+- Local／Test 仍沿用 P0-A atomic IndexedDB restore。
+- 專用自動測試：`npm run test:cloud-restore-fail-closed`。
+- 人工 SOP：`docs/p0-b-cloud-restore-fail-closed-manual-acceptance.md`。
 
-1. 採方案 1，先停用 Cloud restore，保留 Local／Test restore。
-2. 授權設計方案 2，但先只在獨立 Supabase Test Project 實作與驗證。
-
-在決定以前：Production 0 write、0 restore、0 migration、0 deploy。
+目前停止於 `Implementation Passed / Awaiting Manual Acceptance`。Production 0 write、0 restore、0 migration、0 deploy；真正 Cloud atomic restore 仍需另立高風險 server-side transaction 專案。

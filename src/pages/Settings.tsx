@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode, setProviderMode } from '../providers/providerMode';
+import {
+  CLOUD_RESTORE_DISABLED_MESSAGE,
+  isCloudRestoreDisabledMode,
+} from '../providers/cloudRestorePolicy';
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
@@ -179,6 +183,10 @@ export default function Settings() {
   };
 
   const handleImportClick = () => {
+    if (isCloudRestoreDisabledMode(currentMode)) {
+      alert(CLOUD_RESTORE_DISABLED_MESSAGE);
+      return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -186,29 +194,15 @@ export default function Settings() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (currentMode === 'cloud') {
-      const confirmImport = window.confirm('目前為雲端模式，匯入此 JSON 備份將覆蓋雲端資料。是否確定還原？');
-      if (!confirmImport) {
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
-      }
+    if (isCloudRestoreDisabledMode(currentMode)) {
+      alert(CLOUD_RESTORE_DISABLED_MESSAGE);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
     }
 
     try {
       const text = await file.text();
-      let success = false;
-
-      if (currentMode === 'cloud') {
-        let backupData;
-        try {
-          backupData = JSON.parse(text);
-        } catch (parseErr: any) {
-          throw new Error(`JSON 檔案解析失敗：${parseErr.message}`);
-        }
-        success = await dataProvider.restoreBackup(backupData);
-      } else {
-        success = await dataProvider.importData(text);
-      }
+      const success = await dataProvider.importData(text);
 
       if (success) {
         alert('資料還原成功！');
@@ -394,19 +388,46 @@ export default function Settings() {
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
-                <div className="text-xs text-muted">從先前的備份檔案還原資料 (會覆蓋現有資料)。</div>
+                <div className="text-xs text-muted">
+                  {isCloudRestoreDisabledMode(currentMode)
+                    ? 'Cloud Mode 暫不可使用；Local／Test Mode 仍可進行原子還原。'
+                    : '從先前的備份檔案還原資料 (會覆蓋現有資料)。'}
+                </div>
               </div>
-              <button className="btn btn-primary" onClick={handleImportClick}>
-                <Upload size={16} /> 匯入還原
+              <button
+                className="btn btn-primary"
+                onClick={handleImportClick}
+                disabled={isCloudRestoreDisabledMode(currentMode)}
+                title={isCloudRestoreDisabledMode(currentMode) ? CLOUD_RESTORE_DISABLED_MESSAGE : undefined}
+              >
+                <Upload size={16} /> {isCloudRestoreDisabledMode(currentMode) ? 'Cloud Mode 暫停還原' : '匯入還原'}
               </button>
               <input 
                 type="file" 
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
                 accept=".json" 
+                disabled={isCloudRestoreDisabledMode(currentMode)}
                 style={{ display: 'none' }} 
               />
             </div>
+
+            {isCloudRestoreDisabledMode(currentMode) && (
+              <div
+                role="alert"
+                style={{
+                  padding: '12px 16px',
+                  border: '1px solid #f59e0b',
+                  borderRadius: '8px',
+                  background: '#fffbeb',
+                  color: '#92400e',
+                  fontSize: '13px',
+                  lineHeight: 1.6,
+                }}
+              >
+                {CLOUD_RESTORE_DISABLED_MESSAGE}
+              </div>
+            )}
 
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
