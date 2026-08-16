@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-16 20:30（Asia/Taipei，UTC+8）
+最後更新：2026-08-16 21:05（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -36,6 +36,7 @@
 | 2026-08-16 19:24 | Production-like | `checkpoint-production-like-outbound-p0-clean-before-feature-integration-20260816` | `0d729c7a0a2df20491dcdc461d9324679abbb63f` | 封存乾淨 P0 分支，準備建立 Integration Sandbox | 同上 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：P0 乾淨基準** |
 | 2026-08-16 19:35 | Integration | `checkpoint-integration-sandbox-final-verified-20260816` | `687dae934b02ed5e2255a2242a2879c9ea9949b6` | P0＋第二層官網＋近期採購＋採購操作層級／歷史＋運費分攤＋Local Mode 入口 | Build、core、Sandbox isolation、P0 race regression 通過 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：進入後續 Integration UI 工作前的完整已驗證節點** |
 | 2026-08-16 19:50 | Integration | `checkpoint-integration-before-inventory-backup-gate-20260816` | `687dae934b02ed5e2255a2242a2879c9ea9949b6` | Inventory「匯入 XLS 前自動 JSON 備份」開發前基準 | 與上一列相同 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | 是：Inventory 備份流程變更前回復點 |
+| 2026-08-16 20:50 | Integration | `checkpoint-20260816-2050-integration-before-stability-audit-v2` | `e24a6e8b191e95893be3bf5e72e20037996043cc` | Stability Audit v2 前封存；包含 Inventory JSON 備份 gate、Outbound 採購日幣單價空值輸出修正、對應測試與 Restore Point Index | 既有 Build、core、Sandbox guard、P0 race、Inventory gate、Outbound export 測試通過；Audit v2 於 21:05 完成分析 | 否 | `workbench-backup-2026-08-15.json` | 無新增對應 | 無新增對應 | **是：本輪 Audit 的乾淨起點** |
 | 2026-08-16 18:02 | Test | `checkpoint-test-sandbox-before-production-like-p0-outbound-fix-20260816` | `a13721f83b763466ba19c32899f2011cfd8851c8` | 封存完整 Test Sandbox：Test Owner、Snapshot Import、近期採購、Stability Hardening、Feature Registry 與 Audit | Test Sandbox 完整測試／Audit 已完成 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：完整 Test Sandbox 封存點** |
 
 ## Production 歷史回復點
@@ -138,7 +139,6 @@
 | 時間待確認（Commit：2026-08-06 22:18） | 歷史開發 | `checkpoint-manual-item-edit-20260806` | `5787a08343fda10649b486c0d58fc37466f29658` | Manual package／outbound item edit | 歷史日本包裹／出庫節點 |
 | 時間待確認（Commit：2026-08-06 23:14） | Production | `checkpoint-needs-purchase-filter-composition-20260806` | `716895ab0edf362259323bfef3759395a4199217` | Purchase-needed filter 與狀態分頁疊加 | 後續曾作為正式基準 | 是 | **已由 2026-08-15 Production backup tag 取代為更完整索引** |
 
-## 尚未建立 Restore Point 的目前工作
+## 稽核文件
 
-目前 Integration Sandbox 在 `687dae934b02ed5e2255a2242a2879c9ea9949b6` 之後仍有尚未提交的 Inventory JSON 備份 gate 與 Outbound XLS 採購日幣單價修改。這些變更尚未形成 Commit／Tag，因此**不是回復點**，也未列為已部署功能。建立下一個 checkpoint 時，必須使用本文件的新台灣時間命名格式並補登測試結果。
-
+本次 Stability Audit v2 報告：`docs/system-stability-audit-v2.md`。報告只記錄風險與測試結果，不代表任何 P0／P1 已修正；後續修正必須另建帶台灣日期時間的 checkpoint。
