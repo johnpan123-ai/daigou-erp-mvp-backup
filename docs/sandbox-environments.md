@@ -128,13 +128,13 @@ parses a 1300-row HTML/XLS-shaped inventory fixture in both environments.
 
 | Measurement | Next | Experimental |
 | --- | ---: | ---: |
-| Snapshot import | 30,027 ms | 33,369 ms |
-| PurchaseRecords first load | 2,210 ms | 3,317 ms |
-| PurchaseRecords reload | 1,921 ms | 2,000 ms |
-| 100 searches | 17,142 ms | 16,696 ms |
-| 25 sorts | 2,966 ms | 3,313 ms |
-| Category switch | 232 ms | 244 ms |
-| 1300-row inventory parser | 32 ms | 30 ms |
+| Snapshot import | 30,286 ms | 33,587 ms |
+| PurchaseRecords first load | 2,234 ms | 2,173 ms |
+| PurchaseRecords reload | 1,852 ms | 1,977 ms |
+| 100 searches | 16,306 ms | 17,211 ms |
+| 25 sorts | 3,426 ms | 2,915 ms |
+| Category switch | 230 ms | 229 ms |
+| 1300-row inventory parser | 35 ms | 35 ms |
 | Production Supabase requests | 0 | 0 |
 
 These figures are a starting baseline, not an approved performance fix. No
@@ -148,4 +148,3 @@ Important checkpoints use Taiwan time (`Asia/Taipei`) and the format
 renamed or deleted. Every future Sandbox checkpoint must be added to
 `docs/restore-points.md` with its environment, commit, test state, Snapshot,
 and whether it is recommended as a restore point.
-
