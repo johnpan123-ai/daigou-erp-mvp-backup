@@ -2,9 +2,9 @@
 
 ## Stage
 
-**Implementation Passed / Awaiting Manual Acceptance**
+**Accepted（2026-08-17，Asia/Taipei）**
 
-本文件尚未代表 `Accepted` 或 `Completed`。只有依本 SOP 完成人工驗收，並確認 Cloud 業務資料 0 write 後，才能另建 Accepted checkpoint。
+使用者已依本 SOP 確認：Cloud Restore 安全阻擋正常、Local／Test Restore 正常、F5 後資料與功能正常。正式標記 Accepted；Production 仍為 0 write／0 deploy。
 
 ## 修正內容
 

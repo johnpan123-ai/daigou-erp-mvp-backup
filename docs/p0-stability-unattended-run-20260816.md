@@ -9,7 +9,7 @@
 | Stage | 狀態 | Implementation／分析 Commit | Checkpoint | 結論 |
 | --- | --- | --- | --- | --- |
 | P0-A `importData()` 原子化 | **Accepted** | `bc9fb120cda4f23c8ab2c5f9d6102b97b7b945de` | `checkpoint-20260816-2153-p0-a-atomic-import-accepted` | 單一 IndexedDB transaction；成功全換、失敗完整 rollback；使用者已完成成功／失敗／F5 人工驗收。 |
-| P0-B Restore 原子性 | **Implementation Passed / Awaiting Manual Acceptance** | `d29b3dd43bcfa90350123a7d09abb8863079ac25` | `checkpoint-20260816-2228-p0-b-cloud-restore-awaiting-acceptance` | Cloud restore UI 停用且 Provider 在第一筆 read／write 前 fail-closed；Local／Test atomic restore 保留。 |
+| P0-B Restore 原子性 | **Accepted（2026-08-17）** | `d29b3dd43bcfa90350123a7d09abb8863079ac25` | Accepted checkpoint 於本次驗收後建立 | Cloud restore UI／Provider fail-closed，Local／Test atomic restore 與 F5 已人工驗收通過。真正 Cloud restore 仍維持停用。 |
 | P0-C 採購批次＋明細 | **Design Gate / Blocked** | `5ba1d1d4fc035d4898ac10ff9bcd63f3146844f0` | `checkpoint-20260816-2310-p0-c-purchase-batch-atomicity-design-gate` | Cloud 需要 server-side transaction／RPC 與複合 Provider 契約；未用 compensation 假裝 atomic。 |
 | P0-D Inventory XLS＋訂購紀錄同步 | **Design Gate / Blocked** | `be3c0a0ef712f5fedd7461e2e1e117a8e29ef58f` | `checkpoint-20260816-2314-p0-d-inventory-sync-atomicity-design-gate` | Inventory、residue delete/upsert、Category、Variant 是多次提交；需要 staged plan＋server transaction。 |
 | P0-E 出庫單＋明細刪除 | **Design Gate / Blocked** | `5784843ab228f385b8ff29e6b508dd0991d272aa` | `checkpoint-20260816-2316-p0-e-outbound-delete-atomicity-design-gate` | 單頭與明細分兩次提交；Cloud soft-delete error 另會被內層 catch 吞掉；需要 atomic delete endpoint。 |
@@ -85,7 +85,7 @@
 
 ### P0-B
 
-依 `docs/p0-b-cloud-restore-fail-closed-manual-acceptance.md` 驗證 Cloud UI／Provider fail-closed，及 Local／Test restore 成功與 rollback。
+**Accepted。** 使用者已確認 Cloud Restore 安全阻擋、Local／Test Restore 與 F5 正常。
 
 ### P0-F
 
@@ -96,7 +96,7 @@ P0-C／D／E 尚未有可驗收 implementation；其 SOP 只能在 server-side t
 ## 停止點
 
 - P0-A：Accepted。
-- P0-B、P0-F：Awaiting Manual Acceptance。
+- P0-B：Accepted；P0-F：Awaiting Manual Acceptance。
 - P0-C、P0-D、P0-E：Design Gate / Blocked。
 - 沒有任何其他 P0 被自行修補。
 - 不 Push、不 Deploy、Production 0 write。

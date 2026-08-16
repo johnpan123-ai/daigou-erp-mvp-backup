@@ -52,7 +52,7 @@
 - 位置：`src/providers/cloud/supabaseProvider.ts:2421` 附近。
 - 重現／推論：在任一 delete chunk、local import 或後續 save 失敗時，前面已完成的雲端刪除／寫入不會自動回復。
 - 影響：Production restore 中途失敗可能留下部分舊資料被刪除、部分新資料已寫入的狀態。
-- 本輪結果：**Implementation Passed / Awaiting Manual Acceptance**。Cloud restore 已以 UI＋Provider fail-closed 安全止血；未執行 restore、未修改 Production。Test／Local atomic restore 專用測試通過。
+- 本輪結果：**Accepted（2026-08-17 人工驗收通過）**。Cloud restore 已以 UI＋Provider fail-closed 安全止血；人工確認 Cloud 阻擋、Local／Test restore 與 F5 正常。未執行 Production restore、未修改 Production。
 - 最小修法：安全止血已完成；若未來要恢復 Cloud restore，必須移至受控 server-side transaction／明確 staged restore，不可回復前端逐表 delete＋save。
 - 涉及：SupabaseProvider、後端／資料庫交易邊界；可能需要架構決策，不能只靠 UI 修。
 
@@ -237,7 +237,7 @@
 | Inventory XLS 前自動 JSON backup | backup gate 通過；失敗會中止 XLS | 安全但跨 inventory／group sync 非 transaction（P0-4） |
 | 手動 JSON export | serializer parse／非空／集合完整測試通過 | 安全，仍需保留檔案驗證 |
 | 一般 `importData()` | 已改為完整格式驗證＋單一 IndexedDB transaction；專用 rollback 測試與人工成功／失敗／F5 驗收通過 | P0-2：Accepted |
-| Production cloud restore | UI 停用；Provider 在第一筆 read／write 前 fail-closed；真正 atomic restore 尚未實作 | P0-1：Implementation Passed / Awaiting Manual Acceptance |
+| Production cloud restore | UI 停用；Provider 在第一筆 read／write 前 fail-closed；真正 atomic restore 尚未實作 | P0-1：Accepted（安全止血） |
 
 ## 11. Sandbox 隔離結果
 

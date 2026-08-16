@@ -2,9 +2,9 @@
 
 ## Stage
 
-**Implementation Passed / Awaiting Manual Acceptance**
+**Accepted（Cloud Restore 安全止血；2026-08-17 人工驗收通過）**
 
-使用者已採用方案 1。Cloud restore 現已由 UI 與 `SupabaseProvider.restoreBackup()` 雙層 fail-closed；Local／Test atomic restore 保留。這不是 `Accepted` 或 `Completed`，且沒有執行任何 Production restore。
+使用者已採用方案 1。Cloud restore 現已由 UI 與 `SupabaseProvider.restoreBackup()` 雙層 fail-closed；Local／Test atomic restore 保留。人工已確認 Cloud 阻擋、Local／Test restore 與 F5 均正常，且沒有執行任何 Production restore。真正 Cloud atomic restore 仍維持 Design Gate，未來若恢復功能仍需 server-side transaction。
 
 ## 實際呼叫鏈
 
