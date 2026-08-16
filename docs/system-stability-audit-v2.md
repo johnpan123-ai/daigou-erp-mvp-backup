@@ -77,12 +77,14 @@
 
 ### P0-4：Inventory XLS 匯入與訂購紀錄同步分成兩次寫入
 
+- 狀態：**Design Gate / Blocked（2026-08-16 23:12；未實作、未 Accepted）**。
 - 問題：`Inventory.handleFileChange()` 先 `upsertInventory()`，再 `syncProductGroupsWithInventory()`，最後 reload；兩者沒有跨集合 transaction。
 - 位置：`src/pages/Inventory.tsx:115-165`。
 - 影響：Catalog 已寫入但 ProductGroup／Variant 同步失敗時，主檔與訂購紀錄可能短暫或持續不一致。匯入前 JSON 備份 gate 能提供人工回復點，但不是 automatic rollback。
 - 本輪結果：備份 gate 測試通過；未執行正式資料匯入。
 - 最小修法：先做 staged import／transactional sync，或在同步失敗時以同一份 pre-import snapshot 明確 rollback 並驗證 checksum。
 - 涉及：Inventory、Provider、db transaction；需另立功能批次。
+- Design Gate：Cloud 實際包含 Inventory residue delete／upsert、Category save、Variant save 等多次獨立 REST 提交；真正修正需要複合 Provider 契約與 server-side transaction。詳見 `docs/p0-d-inventory-purchase-records-atomicity-design-gate.md`。
 
 ### P0-5：刪除出庫單先存 shipment、再存 items
 
