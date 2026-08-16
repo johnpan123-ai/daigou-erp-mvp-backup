@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-16 22:57（Asia/Taipei，UTC+8）
+最後更新：2026-08-16 23:04（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -44,6 +44,7 @@
 | 2026-08-16 22:18 | Integration | `checkpoint-20260816-2218-before-p0-b-cloud-restore-fail-closed` | `c9a9cb86d4d72475ae66e9deeeee57535773cab8` | 使用者核准 Cloud restore 安全止血方案後、實作前；含 P0-B 設計 Gate | P0-A Accepted；P0-B 尚未變更執行行為 | 否 | `workbench-backup-2026-08-15.json` 僅供 Test／Local atomic 驗收 | 無新增對應 | 無新增對應 | **是：P0-B 實作前乾淨回復點** |
 | 2026-08-16 22:28 | Integration | `checkpoint-20260816-2228-p0-b-cloud-restore-awaiting-acceptance` | `d29b3dd43bcfa90350123a7d09abb8863079ac25` | Cloud／Fallback JSON restore UI 停用，`SupabaseProvider.restoreBackup()` 第一筆 read／write 前 fail-closed；Local／Test atomic restore 保留；含專用測試與人工 SOP | Build／TypeScript、core、P0-A atomic import、Cloud fail-closed、Sandbox guard／architecture、Test Owner、Snapshot、Inventory backup gate、Outbound export／race、Recent Purchases、Purchase Management 全部通過；本機 Test UI 與 Console 0 Error | 否 | 成功／失敗 fixture 與 `workbench-backup-2026-08-15.json` 僅供 Test／Local 驗收 | 無新增對應 | 無新增對應 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
 | 2026-08-16 22:57 | Integration | `checkpoint-20260816-2257-bundle-component-display-consistency` | `b7e49019e391aa086204db01188291070209b297` | 套組子項統一顯示商品名稱、規格與 SKU；涵蓋採購 Modal、日本包裹與出庫唯讀 ViewModel | Build、core、Sandbox guard、outbound receiving race、WeatherPlanet 瀏覽器驗證通過 | 否 | `workbench-backup-2026-08-15.json`（唯讀基準） | 無新增對應 | 無新增對應 | **是：獨立低風險 UI 回復點；Production 尚未部署** |
+| 2026-08-16 23:04 | Integration | `checkpoint-20260816-2304-recent-purchases-daily-ledger-verified` | `87120eba586f388fd867159d033f4719afcc80c8` | 近期採購日期列可複製當日所有原始批次帳目；與既有每批帳目共用 formatter | Build、core、Recent Purchases、Purchase Management actions、Sandbox guard及本機收合狀態複製驗證通過 | 否 | `workbench-backup-2026-08-15.json`（唯讀測試資料） | 無新增對應 | 無新增對應 | **是：Feature B 小修正的獨立本機回復點；Production 尚未部署** |
 | 2026-08-16 18:02 | Test | `checkpoint-test-sandbox-before-production-like-p0-outbound-fix-20260816` | `a13721f83b763466ba19c32899f2011cfd8851c8` | 封存完整 Test Sandbox：Test Owner、Snapshot Import、近期採購、Stability Hardening、Feature Registry 與 Audit | Test Sandbox 完整測試／Audit 已完成 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：完整 Test Sandbox 封存點** |
 
 ## Production 歷史回復點

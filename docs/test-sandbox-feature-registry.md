@@ -1,6 +1,6 @@
 # Test Sandbox Feature Registry
 
-Last updated: 2026-08-16 22:57 (Asia/Taipei)
+Last updated: 2026-08-16 23:04 (Asia/Taipei)
 
 ## Rules
 
@@ -16,6 +16,7 @@ Last updated: 2026-08-16 22:57 (Asia/Taipei)
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A. Purchase detail official link | Ready as an isolated node | `b0673caab80f33a5ef2246f7fb9c546a19c737b1` | `feature-purchase-detail-official-link-ready` | Candidate; release validation still required | None | `src/pages/PurchaseManagement.tsx` | None; reads existing `ProductGroup.product_url` | No | Test Sandbox direction accepted; Production branch/Preview acceptance pending |
 | B. Recent purchases workspace | Ready as one squashed feature node | `24cc27aac6f126470a8bc695d7b5b8a0e7924187` | `feature-recent-purchases-ready` | Candidate; release validation still required | None, including no dependency on Feature A | `src/App.tsx`, `src/components/layout/AppLayout.tsx`, `src/pages/RecentPurchases.tsx`, `tests/recent-purchases.mjs` | None; reads purchase batches/items and product groups | No | Local Test Sandbox layout accepted; clean Production-base cherry-pick and Build verified; Preview acceptance pending |
+| B2. Recent purchases daily ledger copy | Ready as a focused follow-up node | `87120eba586f388fd867159d033f4719afcc80c8` | `feature-20260816-2304-recent-purchases-daily-ledger-ready` | Candidate; release validation still required | Apply after Feature B; does not depend on Feature A | `src/lib/purchaseBatchLedger.ts`, `src/components/PurchaseBatchTab.tsx`, `src/pages/PurchaseManagement.tsx`, `src/pages/RecentPurchases.tsx`, `tests/recent-purchases.mjs` | None; clipboard-only read of original purchase batches/items | No | Build, core, Recent Purchases, original per-batch ledger action, Sandbox guard and local browser copy notice passed; human acceptance pending |
 | C. Purchase Management action hierarchy | Ready as an isolated node | `34fb89a7d9530699129f4c8eed138b55d3847a42` | `feature-purchase-management-action-hierarchy-ready` | Candidate; release validation still required | None | `src/pages/PurchaseManagement.tsx`, `src/components/PurchaseBatchModal.tsx` | No new writes; existing handlers and write gates are unchanged | No | Automated Test Sandbox UI acceptance and clean Production-base Build passed; human acceptance pending |
 | C2. Per-batch ledger copy restoration | Ready as a focused follow-up node | `4a08fc77c554b0fb72f891dc785771a69a0a86fc` | `feature-purchase-batch-ledger-copy-restoration-ready` | Candidate; release validation still required | Apply after Feature C | `src/components/PurchaseBatchTab.tsx`, `src/pages/PurchaseManagement.tsx`, `tests/purchase-management-actions.mjs` | None; restores only the existing clipboard UI action | No | Integration Build, core regression, and targeted action test passed |
 | E. Unauthenticated Local Mode entry | Ready as an isolated node | `2450f21ef5d0ee96b3ed3ea1cf258e5c0096bb8a` | `feature-unauthenticated-local-mode-entry-ready` | Candidate; release validation still required | None; clean node is based directly on Production `c3756cd` and does not depend on Test Sandbox | `src/pages/Login.tsx`, `src/components/layout/AppLayout.tsx` | Writes only `erp_provider_mode=local`; no ERP data write | No | Cloud guest → Local OWNER, reload persistence, Settings visibility, Console, Build, and regressions passed locally; human acceptance pending |
@@ -48,6 +49,13 @@ The Test Sandbox history remains unchanged:
 - `c77ed76`: added read-only proxy-agent badges and independently collapsible date sections.
 
 Future Production work must cherry-pick only the final node `24cc27a`, not the historical sequence above. This node is based directly on Production `c3756cd`; its browser test uses an isolated Local fixture and does not require Test Mode or Test Sandbox infrastructure.
+
+### Feature B2 behavior
+
+- Every populated date heading exposes `複製當日帳目` even while the date section is collapsed.
+- The clipboard text is generated from every original `purchase_batch` and `purchase_batch_item` on that Taipei calendar date, not from the merged Recent Purchases rows.
+- The original `複製本批次帳目` action and the daily action share `formatPurchaseBatchLedger`; daily output only adds batch headings and separators.
+- Copying does not expand the date section or modify purchase data, and shows a short `已複製當日帳目` notice on success.
 
 ### Feature C behavior
 
