@@ -1,6 +1,6 @@
 # Test Sandbox Feature Registry
 
-Last updated: 2026-08-16 (Asia/Taipei)
+Last updated: 2026-08-16 22:57 (Asia/Taipei)
 
 ## Rules
 
@@ -20,6 +20,7 @@ Last updated: 2026-08-16 (Asia/Taipei)
 | C2. Per-batch ledger copy restoration | Ready as a focused follow-up node | `4a08fc77c554b0fb72f891dc785771a69a0a86fc` | `feature-purchase-batch-ledger-copy-restoration-ready` | Candidate; release validation still required | Apply after Feature C | `src/components/PurchaseBatchTab.tsx`, `src/pages/PurchaseManagement.tsx`, `tests/purchase-management-actions.mjs` | None; restores only the existing clipboard UI action | No | Integration Build, core regression, and targeted action test passed |
 | E. Unauthenticated Local Mode entry | Ready as an isolated node | `2450f21ef5d0ee96b3ed3ea1cf258e5c0096bb8a` | `feature-unauthenticated-local-mode-entry-ready` | Candidate; release validation still required | None; clean node is based directly on Production `c3756cd` and does not depend on Test Sandbox | `src/pages/Login.tsx`, `src/components/layout/AppLayout.tsx` | Writes only `erp_provider_mode=local`; no ERP data write | No | Cloud guest → Local OWNER, reload persistence, Settings visibility, Console, Build, and regressions passed locally; human acceptance pending |
 | F. Purchase-batch freight allocation | Ready as an isolated node | `8b72220b463a91700cf4d3fc761ae766f3e78d92` | `feature-purchase-batch-freight-allocation-ready` | Candidate; release validation still required | None; clean node is based directly on Production `c3756cd` and does not depend on Test Sandbox | `src/components/PurchaseBatchModal.tsx`, `src/lib/purchaseBatchFreightAllocation.ts` | No immediate write; updates only the new-batch modal draft until the existing Save action is used | No | Cases A–G, integer-yen unit-cost rounding, no double-add, cancel/no-write, Build, core and Sandbox isolation tests passed locally; human acceptance pending |
+| G. Bundle component display consistency | Ready as an isolated UI node | `b7e49019e391aa086204db01188291070209b297` | `feature-20260816-2257-bundle-component-display-consistency-ready` | Candidate; release validation still required | None at runtime; clean Production release must cherry-pick this node only | `src/lib/bundleComponentDisplay.ts`, `src/pages/PurchaseManagement.tsx`, `src/pages/JapanPackageDetail.tsx`, `src/pages/OutboundShipmentDetail.tsx` | None; read-only Product Group／Category／Variant ViewModel | No | WeatherPlanet 4-component browser verification, Build, core, Sandbox guard and outbound race tests passed locally; human direction accepted, Production release acceptance pending |
 
 ### Feature A behavior
 
@@ -82,6 +83,13 @@ Future Production work must cherry-pick only the final node `24cc27a`, not the h
 - Repeated allocation always starts from the captured pre-allocation costs; changing quantity, unit cost, or freight restores those base costs and requires recalculation instead of stacking freight.
 - The allocation button never creates a batch or calls a Provider. Only the existing final Save action persists the resulting unit costs.
 - Test Sandbox verification commits `fcdb4bf` and `bbdbfad` contain the targeted browser tests. Future Production work must cherry-pick only the clean node `8b72220`.
+
+### Feature G behavior
+
+- Bundle-component candidates and expanded bundle contents show `商品名稱｜規格名稱` plus a separate `SKU: ...` line.
+- The same display helper is used by the Purchase Management bundle modal, all Japan Package bundle layouts, Outbound bundle expansion, and the Outbound physical-item summary.
+- Existing `bundle_components`, selected component IDs, package quantities, shipment items, receiving state, and all write handlers remain unchanged.
+- WeatherPlanet’s four `雨海ルカ` components are distinguishable by their existing category/product title and SKU without modifying stored data.
 
 ## Test infrastructure nodes — never cherry-pick to Production
 
