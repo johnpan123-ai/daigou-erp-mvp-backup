@@ -13,7 +13,7 @@
 | P0-C 採購批次＋明細 | **Design Gate / Blocked** | `5ba1d1d4fc035d4898ac10ff9bcd63f3146844f0` | `checkpoint-20260816-2310-p0-c-purchase-batch-atomicity-design-gate` | Cloud 需要 server-side transaction／RPC 與複合 Provider 契約；未用 compensation 假裝 atomic。 |
 | P0-D Inventory XLS＋訂購紀錄同步 | **Design Gate / Blocked** | `be3c0a0ef712f5fedd7461e2e1e117a8e29ef58f` | `checkpoint-20260816-2314-p0-d-inventory-sync-atomicity-design-gate` | Inventory、residue delete/upsert、Category、Variant 是多次提交；需要 staged plan＋server transaction。 |
 | P0-E 出庫單＋明細刪除 | **Design Gate / Blocked** | `5784843ab228f385b8ff29e6b508dd0991d272aa` | `checkpoint-20260816-2316-p0-e-outbound-delete-atomicity-design-gate` | 單頭與明細分兩次提交；Cloud soft-delete error 另會被內層 catch 吞掉；需要 atomic delete endpoint。 |
-| P0-F Bootstrap crash 保護 | **Implementation Passed / Awaiting Manual Acceptance** | `f390650aabcebbdeb1f9b9193738fc780d6abd89`、test fix `9e0690e7e3fb36b6959ca2f12ec51b896c09a699` | `checkpoint-20260816-2323-p0-f-bootstrap-failure-awaiting-acceptance-final` | 最外層 catch 以原生 DOM 顯示錯誤頁；Test-only failure injection 通過；尚待使用者依 SOP 人工 Acceptance。 |
+| P0-F Bootstrap crash 保護 | **Accepted（2026-08-17）** | `f390650aabcebbdeb1f9b9193738fc780d6abd89`、test fix `9e0690e7e3fb36b6959ca2f12ec51b896c09a699` | Accepted checkpoint 於本次驗收後建立 | 原生錯誤頁、`BOOTSTRAP_FAILED`、重新載入、無白畫面與正常 URL 回復均人工驗收通過。 |
 
 ## 本輪同時完成的獨立低風險 UI／唯讀功能
 
@@ -89,14 +89,14 @@
 
 ### P0-F
 
-依 `docs/p0-f-bootstrap-failure-manual-acceptance.md` 驗證正常啟動、Test-only 故障頁、F5、移除 query 後恢復與 Test DB checksum。
+**Accepted。** 使用者已確認 Test-only 故障頁、錯誤代碼、重新載入、無白畫面及正常 URL 回復。
 
 P0-C／D／E 尚未有可驗收 implementation；其 SOP 只能在 server-side transaction 設計獲准後執行。
 
 ## 停止點
 
 - P0-A：Accepted。
-- P0-B：Accepted；P0-F：Awaiting Manual Acceptance。
+- P0-B、P0-F：Accepted。
 - P0-C、P0-D、P0-E：Design Gate / Blocked。
 - 沒有任何其他 P0 被自行修補。
 - 不 Push、不 Deploy、Production 0 write。

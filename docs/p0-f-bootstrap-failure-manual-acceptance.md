@@ -1,7 +1,7 @@
 # P0-F Bootstrap crash 保護人工驗收 SOP
 
-目前狀態：**Implementation Passed / Awaiting Manual Acceptance**  
-只能在 Test Sandbox 人工驗收；人工完成前不得標記 Accepted。
+目前狀態：**Accepted（2026-08-17，Asia/Taipei）**
+使用者已確認 Test-only 故障頁、錯誤代碼、重新載入入口、無白畫面，以及回正常網址後 ERP 可正常使用。
 
 ## 驗收頁面
 
@@ -50,3 +50,11 @@
 - 程式回退：`checkpoint-20260816-2317-before-p0-f-bootstrap-failure-boundary`。
 - Production：0 write／0 deploy。
 
+## 人工驗收紀錄
+
+- `?simulateBootstrapError=1`：成功顯示「系統啟動失敗」。
+- 錯誤代碼：`BOOTSTRAP_FAILED` 正常。
+- 「重新載入」入口存在。
+- 沒有白畫面。
+- 回到正常網址後 ERP 可正常使用。
+- 結論：**Accepted**。
