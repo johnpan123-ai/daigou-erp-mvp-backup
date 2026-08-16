@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-16 23:08（Asia/Taipei，UTC+8）
+最後更新：2026-08-16 23:10（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -46,6 +46,7 @@
 | 2026-08-16 22:57 | Integration | `checkpoint-20260816-2257-bundle-component-display-consistency` | `b7e49019e391aa086204db01188291070209b297` | 套組子項統一顯示商品名稱、規格與 SKU；涵蓋採購 Modal、日本包裹與出庫唯讀 ViewModel | Build、core、Sandbox guard、outbound receiving race、WeatherPlanet 瀏覽器驗證通過 | 否 | `workbench-backup-2026-08-15.json`（唯讀基準） | 無新增對應 | 無新增對應 | **是：獨立低風險 UI 回復點；Production 尚未部署** |
 | 2026-08-16 23:04 | Integration | `checkpoint-20260816-2304-recent-purchases-daily-ledger-verified` | `87120eba586f388fd867159d033f4719afcc80c8` | 近期採購日期列可複製當日所有原始批次帳目；與既有每批帳目共用 formatter | Build、core、Recent Purchases、Purchase Management actions、Sandbox guard及本機收合狀態複製驗證通過 | 否 | `workbench-backup-2026-08-15.json`（唯讀測試資料） | 無新增對應 | 無新增對應 | **是：Feature B 小修正的獨立本機回復點；Production 尚未部署** |
 | 2026-08-16 23:08 | Integration | `checkpoint-20260816-2308-purchase-ledger-clipboard-format-verified` | `d153dc55c3dd0b13b6e8a064e9b8ebe8b312f4cf` | 每批／當日帳目統一為連續的「商品名稱＋數量」兩欄，不含批次、日期、成本、分隔線或空白列 | Build、core、Recent Purchases 與 Purchase Management clipboard tests 通過；本機 Test Sandbox 提示正常 | 否 | `workbench-backup-2026-08-15.json`（唯讀測試資料） | 無新增對應 | 無新增對應 | **是：剪貼簿格式修正回復點；Production 尚未部署** |
+| 2026-08-16 23:10 | Integration | `checkpoint-20260816-2310-p0-c-purchase-batch-atomicity-design-gate` | `5ba1d1d4fc035d4898ac10ff9bcd63f3146844f0` | P0-C 採購批次＋明細原子保存分析；確認 Cloud 需要 server-side transaction／RPC，未以不可靠 compensation 假裝修正 | 靜態呼叫鏈與 Provider 邊界完成；無 runtime 修改、無寫入測試；附未來人工 SOP | 否 | 無新增對應 | 無新增對應 | 無新增對應 | **是：Design Gate 稽核節點；不是 Implementation Passed／Accepted** |
 | 2026-08-16 18:02 | Test | `checkpoint-test-sandbox-before-production-like-p0-outbound-fix-20260816` | `a13721f83b763466ba19c32899f2011cfd8851c8` | 封存完整 Test Sandbox：Test Owner、Snapshot Import、近期採購、Stability Hardening、Feature Registry 與 Audit | Test Sandbox 完整測試／Audit 已完成 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：完整 Test Sandbox 封存點** |
 
 ## Production 歷史回復點
