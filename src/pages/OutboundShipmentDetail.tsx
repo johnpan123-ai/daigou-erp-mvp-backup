@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, Copy, Check } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
@@ -130,6 +130,15 @@ export default function OutboundShipmentDetail() {
   const [editingShipped, setEditingShipped] = useState(false);
   const [editingManualItemId, setEditingManualItemId] = useState<string | null>(null);
   const [isSavingManualEdit, setIsSavingManualEdit] = useState(false);
+  const [pendingItemSaveCount, setPendingItemSaveCount] = useState(0);
+  const [itemSaveError, setItemSaveError] = useState<string | null>(null);
+  const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
+  const selectedItemsRef = useRef<OutboundShipmentItem[]>([]);
+  const allShipmentItemsRef = useRef<OutboundShipmentItem[]>([]);
+  const itemSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const latestQueuedSaveRef = useRef(0);
+  const pendingItemSaveCountRef = useRef(0);
+  const isMountedRef = useRef(true);
   const [manualEditForm, setManualEditForm] = useState({
     sku: '',
     productTitle: '',
@@ -146,11 +155,7 @@ export default function OutboundShipmentDetail() {
   const [formCost, setFormCost] = useState('');
   const [formNote, setFormNote] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, [id]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [shipments, items, jp, jpi, inv, variants, categories, privateItems, batchItems, salesItems, bundleItems] = await Promise.all([
@@ -167,6 +172,7 @@ export default function OutboundShipmentDetail() {
         dataProvider.getBundleComponents(),
       ]);
       setAllShipments(shipments);
+      allShipmentItemsRef.current = items;
       setAllShipmentItems(items);
       setJapanPackages(jp);
       setJapanPackageItems(jpi);
@@ -179,8 +185,10 @@ export default function OutboundShipmentDetail() {
       setBundleComponents(bundleItems);
 
       const current = shipments.find(s => s.id === id);
+      const currentItems = items.filter(i => i.outbound_shipment_id === id);
       setShipment(current || null);
-      setSelectedItems(items.filter(i => i.outbound_shipment_id === id));
+      selectedItemsRef.current = currentItems;
+      setSelectedItems(currentItems);
 
       if (current) {
         setFormTitle(current.title);
@@ -193,7 +201,42 @@ export default function OutboundShipmentDetail() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (pendingItemSaveCountRef.current === 0) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const blockInternalNavigationWhileSaving = (event: MouseEvent) => {
+      if (pendingItemSaveCountRef.current === 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest('a[href]');
+      if (!anchor || anchor.getAttribute('target') === '_blank') return;
+      event.preventDefault();
+      event.stopPropagation();
+      alert('點收狀態仍在儲存中，請稍候完成後再離開。');
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    document.addEventListener('click', blockInternalNavigationWhileSaving, true);
+    return () => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+      document.removeEventListener('click', blockInternalNavigationWhileSaving, true);
+    };
+  }, []);
 
   // Build pool: items from arrived packages with available quantity > 0
   const poolItems = useMemo<PoolItem[]>(() => {
@@ -498,8 +541,62 @@ export default function OutboundShipmentDetail() {
     });
   };
 
+  const saveItems = useCallback((items: OutboundShipmentItem[]): Promise<boolean> => {
+    const otherItems = allShipmentItemsRef.current.filter(i => i.outbound_shipment_id !== id);
+    const allItems = [...otherItems, ...items];
+    const sequence = ++latestQueuedSaveRef.current;
+
+    allShipmentItemsRef.current = allItems;
+    setAllShipmentItems(allItems);
+    pendingItemSaveCountRef.current += 1;
+    setPendingItemSaveCount(pendingItemSaveCountRef.current);
+
+    const operation = itemSaveQueueRef.current.then(async () => {
+      try {
+        await dataProvider.saveOutboundShipmentItems(allItems);
+        return { ok: true as const };
+      } catch (error) {
+        console.error('[OutboundShipment] 出庫項目儲存失敗:', error);
+        if (sequence === latestQueuedSaveRef.current) {
+          try {
+            await loadData();
+          } catch (reloadError) {
+            console.error('[OutboundShipment] 儲存失敗後重新載入也失敗:', reloadError);
+          }
+        }
+        return { ok: false as const, error };
+      }
+    });
+
+    // 所有出庫項目寫入共用同一條 queue；前一筆完成後才會開始下一筆。
+    itemSaveQueueRef.current = operation.then(() => undefined);
+
+    return operation.then(result => {
+      if (isMountedRef.current && sequence === latestQueuedSaveRef.current) {
+        if (result.ok) {
+          setItemSaveError(null);
+          setLastItemsSavedAt(new Date().toLocaleTimeString('zh-TW', { hour12: false }));
+        } else {
+          const message = result.error instanceof Error ? result.error.message : String(result.error);
+          setItemSaveError(`點收狀態儲存失敗：${message}`);
+        }
+      }
+      return result.ok;
+    }).finally(() => {
+      pendingItemSaveCountRef.current = Math.max(0, pendingItemSaveCountRef.current - 1);
+      if (isMountedRef.current) setPendingItemSaveCount(pendingItemSaveCountRef.current);
+    });
+  }, [id, loadData]);
+
+  const applyAndSaveItems = useCallback((items: OutboundShipmentItem[]) => {
+    selectedItemsRef.current = items;
+    setSelectedItems(items);
+    return saveItems(items);
+  }, [saveItems]);
+
   const addItemToShipment = useCallback((poolItem: PoolItem, qty?: number) => {
-    const existing = selectedItems.find(i => i.japan_package_item_id === poolItem.japanPackageItemId);
+    const currentItems = selectedItemsRef.current;
+    const existing = currentItems.find(i => i.japan_package_item_id === poolItem.japanPackageItemId);
     const addQty = qty || 1;
 
     // Check already selected qty for this item in current shipment
@@ -508,7 +605,7 @@ export default function OutboundShipmentDetail() {
 
     let updated: OutboundShipmentItem[];
     if (existing) {
-      updated = selectedItems.map(i =>
+      updated = currentItems.map(i =>
         i.id === existing.id ? { ...i, quantity: i.quantity + addQty } : i
       );
     } else {
@@ -526,14 +623,13 @@ export default function OutboundShipmentDetail() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
-      updated = [...selectedItems, newItem];
+      updated = [...currentItems, newItem];
     }
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems, id]);
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems, id]);
 
   const addGroupToShipment = useCallback((items: PoolItem[]) => {
-    let updated = [...selectedItems];
+    let updated = [...selectedItemsRef.current];
     for (const poolItem of items) {
       const existing = updated.find(i => i.japan_package_item_id === poolItem.japanPackageItemId);
       if (existing) {
@@ -559,52 +655,49 @@ export default function OutboundShipmentDetail() {
         });
       }
     }
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems, id]);
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems, id]);
 
   const removeItem = useCallback((itemId: string) => {
-    const updated = selectedItems.filter(i => i.id !== itemId);
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems]);
+    const updated = selectedItemsRef.current.filter(i => i.id !== itemId);
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems]);
 
   const removeGroupItems = useCallback((groupName: string, items: OutboundShipmentItem[]) => {
     if (items.length === 0) return;
     if (!confirm(`確認刪除「${groupName}」底下全部 ${items.length} 項商品？`)) return;
 
     const itemIds = new Set(items.map(item => item.id));
-    const updated = selectedItems.filter(item => !itemIds.has(item.id));
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems]);
+    const updated = selectedItemsRef.current.filter(item => !itemIds.has(item.id));
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems]);
 
   const updateItemQty = useCallback((itemId: string, delta: number) => {
-    const updated = selectedItems.map(i => {
+    const updated = selectedItemsRef.current.map(i => {
       if (i.id !== itemId) return i;
       const poolItem = poolItems.find(p => p.japanPackageItemId === i.japan_package_item_id);
       const maxQty = poolItem ? poolItem.availableQty : i.quantity;
       const newQty = Math.max(1, Math.min(i.quantity + delta, maxQty));
       return { ...i, quantity: newQty };
     });
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems, poolItems]);
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems, poolItems]);
 
   const toggleChecked = useCallback((itemId: string) => {
-    const updated = selectedItems.map(i => {
+    const updated = selectedItemsRef.current.map(i => {
       if (i.id !== itemId) return i;
       return { ...i, checked: !i.checked, checked_at: !i.checked ? new Date().toISOString() : undefined };
     });
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems]);
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems]);
 
   const toggleCheckedSources = useCallback((sourceItems: OutboundShipmentItem[]) => {
     const sourceIds = new Set(sourceItems.map(item => item.id));
-    const shouldCheck = !sourceItems.every(item => item.checked);
+    const currentItems = selectedItemsRef.current;
+    const currentSources = currentItems.filter(item => sourceIds.has(item.id));
+    const shouldCheck = !currentSources.every(item => item.checked);
     const checkedAt = shouldCheck ? new Date().toISOString() : undefined;
-    const updated = selectedItems.map(item => {
+    const updated = currentItems.map(item => {
       if (!sourceIds.has(item.id)) return item;
       return {
         ...item,
@@ -612,9 +705,8 @@ export default function OutboundShipmentDetail() {
         checked_at: shouldCheck ? (item.checked_at || checkedAt) : undefined,
       };
     });
-    setSelectedItems(updated);
-    saveItems(updated);
-  }, [selectedItems]);
+    void applyAndSaveItems(updated);
+  }, [applyAndSaveItems]);
 
   const addManualItem = useCallback(() => {
     const name = manualName.trim();
@@ -635,23 +727,15 @@ export default function OutboundShipmentDetail() {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    const updated = [...selectedItems, newItem];
-    setSelectedItems(updated);
-    saveItems(updated);
+    const updated = [...selectedItemsRef.current, newItem];
+    void applyAndSaveItems(updated);
     setManualSku('');
     setManualName('');
     setManualVariant('');
     setManualTwdPrice('');
     setManualQty('1');
     setShowManualAdd(false);
-  }, [selectedItems, id, manualSku, manualName, manualVariant, manualTwdPrice, manualQty]);
-
-  const saveItems = async (items: OutboundShipmentItem[]) => {
-    const otherItems = allShipmentItems.filter(i => i.outbound_shipment_id !== id);
-    const all = [...otherItems, ...items];
-    setAllShipmentItems(all);
-    await dataProvider.saveOutboundShipmentItems(all);
-  };
+  }, [applyAndSaveItems, id, manualSku, manualName, manualVariant, manualTwdPrice, manualQty]);
 
   const startEditingManualItem = (item: OutboundShipmentItem) => {
     if (!isDirectManualOutboundItem(item)) return;
@@ -683,7 +767,7 @@ export default function OutboundShipmentDetail() {
       return;
     }
 
-    const original = selectedItems.find(item => item.id === editingManualItemId);
+    const original = selectedItemsRef.current.find(item => item.id === editingManualItemId);
     if (!original || !isDirectManualOutboundItem(original)) {
       alert('此商品已不存在或已有其他資料關聯，無法編輯。');
       setEditingManualItemId(null);
@@ -699,10 +783,12 @@ export default function OutboundShipmentDetail() {
       note: twdPrice !== undefined ? `${MANUAL_TWD_PRICE_PREFIX}${twdPrice}` : undefined,
       updated_at: new Date().toISOString()
     };
-    const updatedItems = selectedItems.map(item => item.id === original.id ? updatedItem : item);
+    const updatedItems = selectedItemsRef.current.map(item => item.id === original.id ? updatedItem : item);
     setIsSavingManualEdit(true);
     try {
-      await saveItems(updatedItems);
+      const saved = await saveItems(updatedItems);
+      if (!saved) return;
+      selectedItemsRef.current = updatedItems;
       setSelectedItems(updatedItems);
       setEditingManualItemId(null);
     } catch (error) {
@@ -716,11 +802,22 @@ export default function OutboundShipmentDetail() {
 
   const clearAllItems = useCallback(() => {
     if (!confirm(`確認清空全部 ${selectedItems.length} 項商品？`)) return;
-    setSelectedItems([]);
-    saveItems([]);
-  }, [selectedItems]);
+    void applyAndSaveItems([]);
+  }, [applyAndSaveItems, selectedItems.length]);
+
+  const returnToShipmentList = useCallback(() => {
+    if (pendingItemSaveCountRef.current > 0) {
+      alert('點收狀態仍在儲存中，請稍候完成後再離開。');
+      return;
+    }
+    navigate('/outbound-shipments');
+  }, [navigate]);
 
   const deleteShipment = async () => {
+    if (pendingItemSaveCountRef.current > 0) {
+      alert('出庫項目仍在儲存中，請稍候完成後再刪除出庫單。');
+      return;
+    }
     if (!confirm(`確認刪除出庫單「${shipment?.title}」？此操作無法復原。`)) return;
     const updated = allShipments.filter(s => s.id !== id);
     await dataProvider.saveOutboundShipments(updated);
@@ -1080,7 +1177,7 @@ export default function OutboundShipmentDetail() {
     <div style={{ padding: isMobile ? '12px' : '20px 28px', maxWidth: 1400, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
-        <button onClick={() => navigate('/outbound-shipments')} style={{
+        <button onClick={returnToShipmentList} style={{
           display: 'flex', alignItems: 'center', gap: 4, background: 'none',
           border: 'none', color: '#3b82f6', fontSize: 14, cursor: 'pointer', padding: 0, marginBottom: 8,
         }}>
@@ -1126,7 +1223,29 @@ export default function OutboundShipmentDetail() {
           {shipment.status === 'received' && (
             <span>✅ 點收進度 {checkedCount}/{selectedItems.length} ({selectedItems.length > 0 ? Math.round((checkedCount / selectedItems.length) * 100) : 0}%)</span>
           )}
+          {pendingItemSaveCount > 0 && (
+            <span role="status" aria-live="polite" style={{ color: '#b45309', fontWeight: 700 }}>
+              儲存中（{pendingItemSaveCount}）…請勿離開
+            </span>
+          )}
+          {pendingItemSaveCount === 0 && !itemSaveError && lastItemsSavedAt && (
+            <span style={{ color: '#15803d', fontWeight: 600 }}>已儲存 {lastItemsSavedAt}</span>
+          )}
         </div>
+        {itemSaveError && (
+          <div role="alert" style={{
+            marginTop: 10, padding: '10px 12px', borderRadius: 8,
+            border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            fontSize: 13, fontWeight: 600,
+          }}>
+            <span>{itemSaveError}。畫面已重新讀取目前保存狀態，請確認後再操作。</span>
+            <button type="button" onClick={() => void loadData()} style={{
+              border: '1px solid #fca5a5', background: '#fff', color: '#b91c1c',
+              borderRadius: 6, padding: '5px 10px', fontWeight: 700, cursor: 'pointer', flexShrink: 0,
+            }}>重新載入</button>
+          </div>
+        )}
 
         {/* Action buttons based on status */}
         {shipment.status === 'draft' && selectedItems.length > 0 && (
