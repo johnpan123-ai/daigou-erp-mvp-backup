@@ -13,6 +13,7 @@
     "test:sandbox-architecture": "node tests/sandbox-architecture.mjs",
     "test:test-owner-auth": "node tests/test-owner-auth.mjs",
     "test:test-snapshot-import": "node tests/test-snapshot-import.mjs",
+    "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },
   "dependencies": {
