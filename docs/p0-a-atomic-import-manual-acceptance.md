@@ -2,9 +2,9 @@
 
 ## Stage
 
-**Implementation Passed / Awaiting Manual Acceptance**
+**Accepted**
 
-在人工完成「成功匯入、F5、失敗檔匯入、再次 F5」以前，不得標記 `Accepted` 或 `Completed`。
+人工已完成「成功匯入、F5、失敗檔匯入、再次 F5」，使用者於 2026-08-16 確認驗收通過。
 
 ## 修正內容
 
@@ -107,11 +107,12 @@
 4. 不得使用 Cloud Restore，不得切到 Production 匯入。
 5. 程式碼回退點：`checkpoint-20260816-2117-before-p0-a-atomic-import`。
 
-## 驗收紀錄（待人工填寫）
+## 驗收紀錄
 
-- 成功案例：待驗收
-- 成功後 F5：待驗收
-- 失敗案例：待驗收
-- 失敗後 F5：待驗收
-- Production 0 write：待驗收
-- 最終 Stage：維持 **Implementation Passed / Awaiting Manual Acceptance**
+- 成功案例：通過
+- 成功後 F5：通過
+- 失敗案例：通過
+- 失敗後 F5：通過
+- Production 0 write：通過
+- 驗收來源：使用者人工驗收回報
+- 最終 Stage：**Accepted**
