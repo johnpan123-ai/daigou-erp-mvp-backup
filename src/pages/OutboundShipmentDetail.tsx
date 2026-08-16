@@ -9,6 +9,7 @@ import type {
   JapanPackage,
   JapanPackageItem,
   InventoryItem,
+  ProductGroup,
   ProductVariant,
   ProductCategory,
   PrivateOrderItem,
@@ -17,6 +18,7 @@ import type {
   BundleComponent,
 } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
+import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import * as XLSX from 'xlsx';
 
 const cleanProductTitle = (title: string) =>
@@ -106,6 +108,7 @@ export default function OutboundShipmentDetail() {
   const [japanPackages, setJapanPackages] = useState<JapanPackage[]>([]);
   const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
   const [productCategories, setProductCategories] = useState<ProductCategory[]>([]);
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
@@ -158,12 +161,13 @@ export default function OutboundShipmentDetail() {
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [shipments, items, jp, jpi, inv, variants, categories, privateItems, batchItems, salesItems, bundleItems] = await Promise.all([
+      const [shipments, items, jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems] = await Promise.all([
         dataProvider.getOutboundShipments(),
         dataProvider.getOutboundShipmentItems(),
         dataProvider.getJapanPackages(),
         dataProvider.getJapanPackageItems(),
         dataProvider.getInventory(),
+        dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
         dataProvider.getProductCategories(),
         dataProvider.getPrivateOrderItems(),
@@ -177,6 +181,7 @@ export default function OutboundShipmentDetail() {
       setJapanPackages(jp);
       setJapanPackageItems(jpi);
       setInventoryItems(inv);
+      setProductGroups(groups);
       setProductVariants(variants);
       setProductCategories(categories);
       setPrivateOrderItems(privateItems);
@@ -319,6 +324,27 @@ export default function OutboundShipmentDetail() {
     [productVariants]
   );
 
+  const productCategoryById = useMemo(
+    () => new Map(productCategories.map(category => [category.id, category])),
+    [productCategories]
+  );
+
+  const productGroupById = useMemo(
+    () => new Map(productGroups.map(productGroup => [productGroup.id, productGroup])),
+    [productGroups]
+  );
+
+  const bundleDisplayByVariantId = useMemo(
+    () => new Map(productVariants.map(variant => [
+      variant.id,
+      getBundleComponentDisplay(variant, {
+        categoryById: productCategoryById,
+        productGroupById
+      })
+    ])),
+    [productCategoryById, productGroupById, productVariants]
+  );
+
   const categoryGroupById = useMemo(
     () => new Map(productCategories.map(category => [category.id, category.product_group_id])),
     [productCategories]
@@ -436,7 +462,7 @@ export default function OutboundShipmentDetail() {
           if (!componentSku) continue;
           addQuantity(
             componentSku,
-            component.variant_name || component.product_title || componentSku,
+            bundleDisplayByVariantId.get(component.id)?.label || componentSku,
             0,
             item.quantity
           );
@@ -445,13 +471,21 @@ export default function OutboundShipmentDetail() {
       }
 
       const sku = resolveItemSku(item);
-      addQuantity(sku, item.variant_name || item.product_title || sku, item.quantity, 0);
+      addQuantity(
+        sku,
+        (parentVariant ? bundleDisplayByVariantId.get(parentVariant.id)?.label : undefined)
+          || item.variant_name
+          || item.product_title
+          || sku,
+        item.quantity,
+        0
+      );
     }
 
     return Array.from(summaryBySku.values()).sort((a, b) =>
       a.sku.localeCompare(b.sku, 'ja', { numeric: true })
     );
-  }, [bundleVariantsByParentId, resolveItemSku, resolveItemVariant]);
+  }, [bundleDisplayByVariantId, bundleVariantsByParentId, resolveItemSku, resolveItemVariant]);
 
   const resolveItemLabel = useCallback((item: OutboundShipmentItem) => {
     if (!item.japan_package_item_id) return item.variant_name || '單一規格';
@@ -993,12 +1027,13 @@ export default function OutboundShipmentDetail() {
         <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>套組內含實體商品</div>
         {componentVariants.map(component => {
           const componentSku = (component.myacg_item_code || '').trim();
+          const componentDisplay = bundleDisplayByVariantId.get(component.id);
           return (
             <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: '#334155', fontWeight: 600 }}>{component.variant_name || component.product_title || '單品'}</div>
+                <div style={{ color: '#334155', fontWeight: 600 }}>{componentDisplay?.label || component.variant_name || '單品'}</div>
                 <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
-                  {componentSku || '無 SKU（不納入彙總）'}
+                  {componentSku ? `SKU: ${componentSku}` : '無 SKU（不納入彙總）'}
                 </div>
               </div>
               <strong style={{ flexShrink: 0, color: '#1d4ed8' }}>×{item.quantity}</strong>
@@ -1643,12 +1678,13 @@ export default function OutboundShipmentDetail() {
                                   <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>套組內含實體商品</div>
                                   {itemBundleVariants.map(component => {
                                     const componentSku = (component.myacg_item_code || '').trim();
+                                    const componentDisplay = bundleDisplayByVariantId.get(component.id);
                                     return (
                                       <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
                                         <div style={{ minWidth: 0 }}>
-                                          <div style={{ color: '#334155', fontWeight: 600 }}>{component.variant_name || component.product_title || '單品'}</div>
+                                          <div style={{ color: '#334155', fontWeight: 600 }}>{componentDisplay?.label || component.variant_name || '單品'}</div>
                                           <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
-                                            {componentSku || '無 SKU（不納入彙總）'}
+                                            {componentSku ? `SKU: ${componentSku}` : '無 SKU（不納入彙總）'}
                                           </div>
                                         </div>
                                         <strong style={{ flexShrink: 0, color: '#1d4ed8' }}>×{item.quantity}</strong>

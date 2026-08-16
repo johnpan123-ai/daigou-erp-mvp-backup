@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Pack
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
+import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 
 const cleanDisplayProductTitle = (title: string): string => {
   if (!title) return '';
@@ -163,6 +164,15 @@ export default function JapanPackageDetail() {
   const [expandedBundleItems, setExpandedBundleItems] = useState<Set<string>>(new Set());
   const [showDetailedInfo, setShowDetailedInfo] = useState<boolean>(false);
 
+  const bundleCategoryById = useMemo(
+    () => new Map(categories.map(category => [category.id, category])),
+    [categories]
+  );
+  const bundleProductGroupById = useMemo(
+    () => new Map(productGroups.map(productGroup => [productGroup.id, productGroup])),
+    [productGroups]
+  );
+
   const getBundleComponents = (parentVar: ProductVariant): ProductVariant[] => {
     const compIds = new Set(
       bundleComponents
@@ -171,6 +181,23 @@ export default function JapanPackageDetail() {
     );
     if (compIds.size === 0) return [];
     return variants.filter(v => compIds.has(v.id));
+  };
+
+  const renderBundleComponent = (component: ProductVariant) => {
+    const display = getBundleComponentDisplay(component, {
+      categoryById: bundleCategoryById,
+      productGroupById: bundleProductGroupById
+    });
+
+    return (
+      <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
+        <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1px' }}>
+          <span style={{ fontWeight: 500, color: '#334155', wordBreak: 'break-word' }}>{display.label}</span>
+          <span style={{ fontSize: '11px', color: '#94a3b8' }}>SKU: {display.sku || '(無)'}</span>
+        </div>
+      </div>
+    );
   };
 
   const toggleBundleExpand = (itemId: string, e: React.MouseEvent) => {
@@ -1681,15 +1708,7 @@ export default function JapanPackageDetail() {
                                     <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
                                       📦 套組內容 ({bundleComps.length})
                                     </div>
-                                    {bundleComps.map((comp) => {
-                                      const compLabel = comp.variant_name || '單品';
-                                      return (
-                                        <div key={comp.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
-                                          <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
-                                          <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{compLabel}</span>
-                                        </div>
-                                      );
-                                    })}
+                                    {bundleComps.map(renderBundleComponent)}
                                   </div>
                                 )}
 
@@ -3148,15 +3167,7 @@ export default function JapanPackageDetail() {
                           <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
                             📦 套組內容 ({bundleComps.length})
                           </div>
-                          {bundleComps.map((comp) => {
-                            const compLabel = comp.variant_name || '單品';
-                            return (
-                              <div key={comp.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
-                                <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
-                                <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{compLabel}</span>
-                              </div>
-                            );
-                          })}
+                          {bundleComps.map(renderBundleComponent)}
                         </div>
                       )}
 
@@ -3354,15 +3365,7 @@ export default function JapanPackageDetail() {
                                       <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
                                         📦 套組內容 ({bundleComps.length})
                                       </div>
-                                      {bundleComps.map((comp) => {
-                                        const compLabel = comp.variant_name || '單品';
-                                        return (
-                                          <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
-                                            <span style={{ color: '#94a3b8' }}>•</span>
-                                            <span style={{ fontWeight: 500 }}>{compLabel}</span>
-                                          </div>
-                                        );
-                                      })}
+                                      {bundleComps.map(renderBundleComponent)}
                                     </div>
                                   )}
 

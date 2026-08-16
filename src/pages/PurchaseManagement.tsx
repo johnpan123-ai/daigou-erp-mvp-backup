@@ -12,6 +12,7 @@ import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
+import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -1714,6 +1715,16 @@ export default function PurchaseManagement() {
     }
 
     return '單品';
+  };
+
+  const productGroupById = new Map(groups.map(productGroup => [productGroup.id, productGroup]));
+
+  const getBundleCandidateLabel = (variant: ProductVariant) => {
+    return getBundleComponentDisplay(variant, {
+      categoryById: categoryMap,
+      productGroupById,
+      fallbackGroup: group
+    }).label;
   };
 
   const renderMobileVariantCard = (v: ProductVariant) => {
@@ -4242,7 +4253,7 @@ export default function PurchaseManagement() {
                 }}>
                   {variants.filter(v => v.id !== activeBundleVariant.id).map(v => {
                     const isChecked = selectedComponentVariantIds.has(v.id);
-                    const label = isDaili ? getDisplayProductName(v) : getVariantDisplayLabel(v);
+                    const label = getBundleCandidateLabel(v);
                     return (
                       <label 
                         key={v.id}
