@@ -231,11 +231,12 @@ try {
   assert.equal(await page.getByTestId('recent-purchases-copy-notice').innerText(), '已複製當日帳目');
 
   const dailyLedger = await page.evaluate(() => navigator.clipboard.readText());
-  assert.match(dailyLedger, /【上午採購｜/);
-  assert.match(dailyLedger, /【商品 B 採購｜/);
-  assert.match(dailyLedger, /【下午採購｜/);
-  assert.equal((dailyLedger.match(/────────────/g) || []).length, 2, 'Three original batches must have two clear separators');
+  assert.doesNotMatch(dailyLedger, /【|批下單|採購日期|────|\n\n/, 'Daily ledger must not contain batch headings, dates, separators, or blank rows');
   assert.equal((dailyLedger.match(/商品 A-/g) || []).length, 2, 'Same-day merged product must retain both original batch ledgers');
+  const dailyLedgerRows = dailyLedger.split('\n');
+  assert.equal(dailyLedgerRows.length, 3, 'Three original one-item batches must produce three continuous rows');
+  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 2), 'Every ledger row must contain only product name and quantity');
+  assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[1])), [3, 12, 2], 'Original batch quantities must remain intact in chronological order');
 
   const persistedPurchaseDataAfterCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
     const db = await new Promise((resolve, reject) => {

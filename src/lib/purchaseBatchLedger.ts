@@ -22,7 +22,7 @@ export const formatPurchaseBatchLedger = ({
   getDisplayProductName,
 }: PurchaseBatchLedgerContext): string => {
   const variantById = new Map(variants.map(variant => [variant.id, variant]));
-  const ledgerRows = new Map<string, { name: string; quantity: number; cost: number }>();
+  const ledgerRows = new Map<string, { name: string; quantity: number }>();
 
   for (const item of batchItems) {
     if (item.purchase_batch_id !== batchId) continue;
@@ -41,19 +41,17 @@ export const formatPurchaseBatchLedger = ({
       ? `${categoryTitle} - ${displayedProductName}`
       : displayedProductName;
     const name = `${groupTitle} - ${restName}`.replace(/\s*-\s*/g, '-');
-    const cost = item.cost ?? 0;
-    const key = `${name}_${cost}`;
-    const existing = ledgerRows.get(key);
+    const existing = ledgerRows.get(name);
 
     if (existing) {
       existing.quantity += item.quantity;
     } else {
-      ledgerRows.set(key, { name, quantity: item.quantity, cost });
+      ledgerRows.set(name, { name, quantity: item.quantity });
     }
   }
 
   return Array.from(ledgerRows.values())
-    .map(row => `${row.name}\t${row.quantity}\t\t${row.cost}`)
+    .map(row => `${row.name}\t${row.quantity}`)
     .join('\n');
 };
 
@@ -61,10 +59,6 @@ export const formatMultiplePurchaseBatchLedgers = ({
   batches,
   ...context
 }: MultipleBatchLedgerContext): string => batches
-  .map(batch => {
-    const ledger = formatPurchaseBatchLedger({ ...context, batchId: batch.id });
-    if (!ledger) return '';
-    return `【${batch.name || '未命名批次'}｜${batch.date || '-'}】\n${ledger}`;
-  })
+  .map(batch => formatPurchaseBatchLedger({ ...context, batchId: batch.id }))
   .filter(Boolean)
-  .join('\n\n────────────\n\n');
+  .join('\n');

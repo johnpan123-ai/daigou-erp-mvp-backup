@@ -131,7 +131,10 @@ try {
   const dialog = await copyDialog;
   assert.match(dialog.message(), /已複製本批次帳目/);
   await dialog.accept();
-  assert.notEqual(await page.evaluate(() => navigator.clipboard.readText()), '', 'Batch ledger copy output must remain available');
+  const copiedBatchLedger = await page.evaluate(() => navigator.clipboard.readText());
+  assert.notEqual(copiedBatchLedger, '', 'Batch ledger copy output must remain available');
+  assert.doesNotMatch(copiedBatchLedger, /【|批下單|採購日期|────|\n\n/, 'Per-batch ledger must not contain batch metadata, separators, or blank rows');
+  assert.ok(copiedBatchLedger.split('\n').every(row => row.split('\t').length === 2), 'Per-batch ledger rows must contain only product name and quantity');
 
   assert.deepEqual(supabaseRequests, [], 'Test Mode must not call Production Supabase');
   assert.deepEqual(unexpectedErrors, [], 'Browser Console must not contain unexpected errors');
