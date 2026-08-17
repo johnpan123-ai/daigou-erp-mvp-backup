@@ -28,6 +28,7 @@
     "test:next-nightly-integrity": "node tests/next-nightly-integrity.mjs",
     "test:next-readonly-soak": "node tests/next-readonly-soak.mjs",
     "test:read-failure-harness": "node tests/read-failure-harness.mjs",
+    "test:purchase-batch-freight": "node tests/purchase-batch-freight.mjs",
     "test:next-nightly-performance": "node tests/next-nightly-performance-soak.mjs",
     "test:atomic-import-data": "node tests/atomic-import-data.mjs",
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
