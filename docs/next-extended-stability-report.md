@@ -2,7 +2,7 @@
 
 建立時間：2026-08-18（Asia/Taipei）  
 Branch：`codex/next-sandbox`  
-Production write：**0**；Production Supabase write：**0**；Push：**NO**；Deploy：**NO**；Experimental modification：**NO**。
+Production write：**0**；Production Supabase write：**0**；Push：**NO**；Deploy：**NO**；Experimental source modification：**NO**。
 
 ## 版本與範圍
 
@@ -11,7 +11,7 @@ Production write：**0**；Production Supabase write：**0**；Push：**NO**；D
 - Next DB：`daigou-erp-db-next-v1`。
 - Snapshot：`C:\Users\小河馬\Downloads\workbench-backup-2026-08-15.json`。
 - Snapshot SHA-256：`e626e5a7a25a377072aa4358443d9d784ec772ef7bce93349316d6339ad1a17f`。
-- 本輪沒有修改 Production main、Production-like hotfix worktree、Experimental worktree 或 Legacy Test Sandbox。
+- 本輪沒有修改 Production main、Production-like hotfix worktree、Experimental source code 或 Legacy Test Sandbox。注意：既有 `test:p0-g-variant-sync-guard` regression 內含 Next＋Experimental 兩個隔離 fixture，測試執行時曾寫入各自 Sandbox DB；沒有寫 Production，也沒有修改 Experimental source。
 
 ## 資料正確性：Next Baseline vs Final
 
@@ -102,6 +102,36 @@ Production-like hotfix：`b50a0a4`，基準 Production：`c3756cd55e90658546a193
 
 每個測試使用 fixture／全新 DB 或既有隔離清理流程；沒有 Production write。
 
+## Final automated gate
+
+以下均在本輪最後一次 Build 後重跑並通過：
+
+- `npm run build:next`（TypeScript 0 error）
+- `npm run build`（TypeScript 0 error）
+- `git diff --check`
+- `test:core`
+- `test:sandbox-guard`
+- `test:sandbox-architecture`
+- `test:test-owner-auth`
+- `test:test-snapshot-import`
+- `test:p0-gh-next-raw-integrity`
+- `test:sync-product-groups-regression`
+- `test:p0-g-variant-sync-guard`（既有雙模式隔離 fixture；Next／Experimental source 均未改）
+- `test:next-nightly-integrity`
+- `test:next-readonly-soak`
+- `test:read-failure-harness`
+- `test:atomic-import-data`
+- `test:cloud-restore-fail-closed`
+- `test:bootstrap-error`
+- `test:inventory-backup-gate`
+- `test:outbound-purchase-cost-export`
+- `test:outbound-receiving-race`
+- `test:purchase-batch-freight`
+- `tests/recent-purchases.mjs`
+- `tests/purchase-management-actions.mjs`
+
+Build 有 Vite 的大型 chunk advisory（>500 kB），不是 TypeScript／runtime error；本輪沒有為此做效能重構。
+
 ## Performance：三輪量測（未優化）
 
 單位：ms；每輪使用相同 Snapshot／Next-only fresh server。
@@ -164,7 +194,7 @@ Heap delta observations：173.72–177.22 MB。沒有 forced GC，不能宣稱 m
 - Push：NO。
 - Deploy：NO。
 - main：未修改。
-- Experimental：未修改。
+- Experimental source：未修改；只有既有 P0-G 雙模式測試寫入其隔離 fixture，沒有 Production request/write。
 - Snapshot、Schema、Migration、RLS、Provider core、`db.ts` runtime：本輪未修改；新增的是 tests／docs。
 
 ## 明日建議前三件事
