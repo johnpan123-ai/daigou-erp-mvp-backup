@@ -212,3 +212,13 @@ the operator explicitly completes the relevant SOP.
 | 2026-08-17 23:26 | Next Sandbox | `checkpoint-20260817-2326-before-p0-g-variant-destructive-sync-guard` | `50709bd88a5ceb699a654283f1eb91f088ee0c28` | P0-G Variant destructive sync fail-closed guard 實作前；已確認 `c08fe2e` 為 Historical First Bad Commit | 實作前工作目錄 clean；Production 0 write／0 deploy | 否 | `workbench-backup-2026-08-15.json` 僅供隔離回歸 | **是：P0-G 防護實作前乾淨回復點** |
 | 2026-08-17 23:45 | Next + Experimental | `checkpoint-20260817-2345-p0-g-variant-sync-guard-awaiting-manual-acceptance` | Next `edbac2f8d72b408c9fb2e1321cbad5d9707f801e`；Experimental `f0699bbdcd15b6cb04684fcee0686cf4f471db4f` | P0-G fail-closed guard：嚴格 readonly source probe、Verified Empty 分流、Variant identity／manual adjustment／大量建立 sanity gate、Test-only failure injection | Next／Experimental Build；core；Sandbox guard／architecture；舊 sync regression；新正常／讀取失敗／異常 0／Verified Empty 專用測試通過；Production Supabase request 0 | 否 | `workbench-backup-2026-08-15.json` 僅供隔離回歸；未修改來源檔 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
 | 2026-08-18 00:18 | Next Sandbox | `checkpoint-20260818-0018-p0-g-variant-sync-guard-accepted` | 待建立（Accepted docs checkpoint） | P0-G 正常同步、Variant Read Failure 故障注入、F5 後固定 VSPO 業務數字與採購批次解析人工驗收通過 | Build／core／sandbox guard／architecture／P0-G 專用測試通過；人工 SOP 通過 | 否 | `workbench-backup-2026-08-15.json` 僅供隔離驗收；無 Production 寫入 | **是：P0-G Accepted 回復點** |
+
+## Next Sandbox Nightly Stability (2026-08-18)
+
+| 台灣日期時間 | 環境 | Tag | Commit | 建立原因／內容 | Build／Test | Production 部署 | Snapshot／Backup | 建議作為 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-18 00:36 | Next Sandbox | `checkpoint-20260818-0036-next-nightly-start` | `f0d08f2` | Nightly Stability 起始；保存 P0-G Accepted 後的乾淨 Next | 起始前 clean | 否 | `workbench-backup-2026-08-15.json` | 是：Nightly 前回復點 |
+| 2026-08-18 00:48 | Next Sandbox | `checkpoint-20260818-0048-next-data-integrity` | `0791069`（文件整合 commit 後再補登） | Next-only raw Snapshot parity、Golden Business Regression、完整 orphan probe 與測試工具 | raw counts/hash/orphan/golden PASS；Build PASS | 否 | 同上；Snapshot SHA-256 已記錄於 Nightly Report | 是：資料完整性回復點 |
+| 2026-08-18 00:48 | Next Sandbox | `checkpoint-20260818-0055-next-data-integrity` | `0791069` | 同 `0048` 內容的預估命名 alias；保留以避免破壞既有引用 | 同上 | 否 | 同上 | 可追溯，不作首選 |
+
+Nightly 其餘 stage（business parity、relational integrity、P0-G regression、feature regression、soak）會在 Nightly 文件 commit 完成後補上實際建立時間與 commit；自動測試不等同人工 Accepted。
