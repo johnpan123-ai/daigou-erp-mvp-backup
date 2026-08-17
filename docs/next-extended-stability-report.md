@@ -184,6 +184,7 @@ Heap delta observations：173.72–177.22 MB。沒有 forced GC，不能宣稱 m
 | Feature Registry | `a701fc2` | `checkpoint-20260818-0505-next-feature-registry-reviewed` | Evidence reviewed |
 | Fixture regression | `29992ce` | `checkpoint-20260818-0508-next-fixture-regression` | Automated Tested |
 | Performance | `29992ce` | `checkpoint-20260818-0510-next-performance-measured` | Measurement only |
+| Final report / manual card | `1073e36` | `checkpoint-20260818-0519-next-extended-complete` | Automated gates passed / Awaiting Manual Acceptance |
 
 錯誤時間命名的既有 tag 不刪除；依 Git annotated tag metadata 判讀實際時間，符合既有 restore-point 規則。
 
