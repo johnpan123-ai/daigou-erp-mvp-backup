@@ -199,3 +199,10 @@ the operator explicitly completes the relevant SOP.
 | 2026-08-17 11:38 | Next + Experimental | `checkpoint-20260817-1138-stage-12-import-performance-analysis` | `7673cfa57f43fdaf9de8ea364988e07338d3e3ca` | Product/Variant import bottleneck analysis | No code change | 否 | Analysis reference |
 | 2026-08-17 11:38 | Next + Experimental | `checkpoint-20260817-1138-stage-13-stability-audit-v3` | `7673cfa57f43fdaf9de8ea364988e07338d3e3ca` | Stability Audit v3 report | Build/tests documented | 否 | Audit restore point |
 | 2026-08-17 11:38 | Next + Experimental | `checkpoint-20260817-1138-stage-14-feature-registry-audit` | `7673cfa57f43fdaf9de8ea364988e07338d3e3ca` | Feature Registry status audit | No feature promoted | 否 | Registry audit point |
+
+## P0-G / P0-H Production Snapshot parity diagnostic (2026-08-17)
+
+| 台灣日期時間 | 環境 | Tag | Commit | 建立原因／內容 | Build／Test | Production 部署 | Snapshot／Backup | 建議作為 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-17 20:50 | Next Sandbox | `checkpoint-20260817-2050-p0-gh-production-snapshot-diagnostic` | 本次診斷文件 commit（建立後補登） | P0-G Production Business Parity 與 P0-H PurchaseBatch Item Referential Integrity 唯讀診斷；未修資料與程式 | 未執行完整 Build；診斷證據已記錄 | 否 | `workbench-backup-2026-08-15.json`；無新增備份 | 否：只作診斷回復點，完成 raw Next 四層驗證前不可作資料修復基準 |
+| 2026-08-17 20:50 | Experimental Sandbox | `checkpoint-20260817-2050-experimental-performance-paused` | `1bd7faf30b2ec1381514a63696ad61f758285c9a` | 暫停 Experimental Performance 工作，保留原狀 | 原節點狀態不變 | 否 | 無新增 | 是：保留實驗分支停工前狀態 |
