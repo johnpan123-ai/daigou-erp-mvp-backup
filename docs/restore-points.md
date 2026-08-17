@@ -228,3 +228,19 @@ Nightly stage 的自動測試不等同人工 Accepted。
 | 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-p0g-regression` | `135e086` | P0-G 正常／故障／Verified Empty regression | P0-G 專用測試 PASS | 否 | 同上 | 是：P0-G nightly 回復點 |
 | 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-feature-regression` | `135e086` | Recent Purchases、Purchase Management、Outbound regression | targeted tests PASS；人工驗收待做 | 否 | 同上 | 是：feature regression 回復點 |
 | 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-soak-complete` | `135e086` | 100 route cycles、30 reload、performance baseline | console/page error 0；heap 需後續 trend | 否 | 同上 | 是：soak 完成回復點 |
+
+## Next Extended Stability (2026-08-18)
+
+以下均為 `codex/next-sandbox` 的本地 checkpoint；沒有 Push、Deploy 或 Production write。時間以 annotated tag metadata 為準；若 Tag 名稱中的時間與實際 tagger time 不一致，保留原 Tag、不 rename/delete，並以 metadata 記錄。
+
+| 台灣日期時間 | 環境 | Tag | Commit Hash | 建立原因／當時功能 | Build／Test | 曾部署 Production | JSON Snapshot | Database Dump | Storage Backup | 是否建議 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-18 04:50:04 | Next | `checkpoint-20260818-0449-next-extended-start` | `0ac087a2f5ba35987870ac3b0801bda4e3edf728` | 數據鎖定後的 Extended Stability 起始；建立 baseline 前乾淨點 | 起始 clean；後續 baseline integrity PASS | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | 是：本輪起始回復點 |
+| 2026-08-18 04:57:03（Tag 名稱為 0508） | Production-like／Next test tool | `checkpoint-20260818-0508-p0g-hotfix-productionlike-verified` | `7750b0804b707f0cdfa95f0c1d80fcd6b5d596f7` | b50a0a4 Production-like P0-G Hotfix 正常／Variant read failure zero-write 驗證器 | `test:p0-g-hotfix-productionlike` PASS | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | 是：P0-G 人工驗收前回復點 |
+| 2026-08-18 05:00:43 | Next | `checkpoint-20260818-0500-next-readonly-soak` | `627c0028f4653cada2b942876cafa42388e8c47d` | 10 輪、60 路由、10 F5 的純讀取 checksum soak | checksum／Console／Page Error／Supabase request PASS | 否 | 同上 | 無 | 無 | 是：read-only soak 回復點 |
+| 2026-08-18 05:01:42 | Next | `checkpoint-20260818-0501-p1-read-failure-audit` | `c95248e76bab3095f6a13e7a29d714019616ea62` | P1 Read Failure Matrix；未改 runtime | 文件 audit 完成 | 否 | 同上 | 無 | 無 | 是：P1 audit reference |
+| 2026-08-18 05:04:00 | Next | `checkpoint-20260818-0504-p1-read-failure-harness` | `2346edd7bbc45492a10097d89a19c79076ebc267` | 7 類 read fault injection；failure 不寫 Test DB | `test:read-failure-harness` PASS | 否 | 同上 | 無 | 無 | 是：Read Failure harness 回復點 |
+| 2026-08-18 05:04:38 | Next | `checkpoint-20260818-0504-test-harness-fixed` | `af38849c9c7ea67e991079f65071eed7408b3ec8` | `test:atomic-import-data` 改用 neutral port 4253；只改 test harness | `test:atomic-import-data` PASS | 否 | fixtures／同上 | 無 | 無 | 是：test harness 回復點 |
+| 2026-08-18 05:05:09 | Next | `checkpoint-20260818-0505-next-feature-registry-reviewed` | `a701fc2ecbf53b532f5da9734ca41a9d7ff1d264` | Feature Registry 健康度盤點；未提升 Production Ready | 文件 review 完成 | 否 | 同上 | 無 | 無 | 是：Registry review reference |
+| 2026-08-18 05:08:25 | Next | `checkpoint-20260818-0508-next-fixture-regression` | `29992ce26f2bedd5959abc61cd62579f251965e9` | Test fixture writing flows、Outbound、Inventory、freight helper regression | targeted tests PASS | 否 | 同上 | 無 | 無 | 是：fixture regression 回復點 |
+| 2026-08-18 05:10:05 | Next | `checkpoint-20260818-0510-next-performance-measured` | `29992ce26f2bedd5959abc61cd62579f251965e9` | 三輪 Next-only 效能量測；沒有優化 | 3 runs PASS；console/page error 0 | 否 | 同上 | 無 | 無 | 是：measurement reference |
