@@ -1,6 +1,6 @@
 # P0-G：Variant Destructive Sync Guard
 
-狀態：**Implementation Passed / Awaiting Manual Acceptance**
+狀態：**Accepted**
 
 適用環境：Next Sandbox、Experimental Sandbox。Production 未修改、未部署、未執行同步測試。
 
@@ -98,3 +98,15 @@ Next 與 Experimental 各自使用全新 browser context／獨立 DB，固定驗
 ## 驗收狀態規則
 
 在操作者完成正常同步、F5、故障注入、F5 與 DB／業務數字比對前，不得標記 Accepted。
+
+## 人工驗收結果（2026-08-18 00:18 Asia/Taipei）
+
+- 正常同步驗證：通過；顯示「正常同步完成」。
+- Variant Read Failure 故障注入：通過；顯示「商品規格資料讀取失敗，為保護既有採購關聯，本次同步已取消。」且沒有同步成功訊息。
+- 故障注入後 F5：通過；Inventory 頁仍可正常載入，商品總數 1305、已加入訂購 567、未加入訂購 738、代理版 331、Hololive 782、VSPO 68。
+- VSPO 五筆固定樣本：WACA `4 / 3 / 0 / 0 / 2`、已採購 `9 / 19 / 0 / 2 / 13`，與驗收前一致。
+- 採購批次頁：固定資料可載入，未出現「未知商品」。
+- Test Sandbox：操作只在 Next Test DB；未執行 Production 寫入、Push 或 Deploy。
+- 故障注入 Console：僅有預期的 guard error log；正常頁面未見其他錯誤。
+
+因此本 P0-G 節點可標記為 **Accepted**。固定 orphan baseline（BatchItem 145、Private 17、Bundle 32/34、JapanPackage 41）由專用 readonly regression test 驗證未增加。
