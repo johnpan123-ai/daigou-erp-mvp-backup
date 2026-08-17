@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT_PATH = fileURLToPath(new URL('../', import.meta.url));
-const BASE_URL = 'http://127.0.0.1:4193';
+// 4193 is reserved by the local Experimental dev command and is mapped to
+// Experimental mode by the app bootstrap. Keep this atomic-import test on a
+// neutral port so its explicit Test mode selection is authoritative.
+const BASE_URL = 'http://127.0.0.1:4253';
 const CHROME_PATH = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const VALID_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/p0-a-atomic-import-valid.json', import.meta.url));
 const INVALID_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/p0-a-atomic-import-invalid-collection-8.json', import.meta.url));
@@ -47,7 +50,7 @@ const expectedSnapshot = fixture => Object.fromEntries(
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--host', '127.0.0.1', '--port', '4193', '--strictPort',
+  '--host', '127.0.0.1', '--port', '4253', '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 
 let viteOutput = '';
