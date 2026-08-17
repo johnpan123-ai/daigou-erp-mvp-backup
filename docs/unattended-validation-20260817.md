@@ -49,7 +49,20 @@ Status: `Implementation Passed / Awaiting Manual Acceptance`.
 
 The automated isolation test passed for independent DB names, storage
 namespaces, cross-visibility, fail-closed Supabase requests, and zero observed
-Production requests. Manual clear/reload/re-import SOP remains pending.
+Production requests. The lifecycle test also passed: both Sandboxes imported
+the same Snapshot, persisted mode-only rows across reload, cleared independently,
+and re-imported independently without changing the other Sandbox. Physical
+Production IndexedDB remained unchanged and both request logs stayed empty.
+
+Manual clear/reload/re-import SOP remains pending.
 
 Status: `Implementation Passed / Awaiting Manual Acceptance`.
 
+Automated command: `npm run test:dual-sandbox-lifecycle` (Next and Experimental).
+
+Checkpoint tags:
+
+- `checkpoint-20260817-1112-stage-02-dual-sandbox-lifecycle`
+  (`344801a` on Next)
+- `checkpoint-20260817-1115-experimental-stage-02-dual-sandbox-lifecycle`
+  (`d647278` on Experimental)
