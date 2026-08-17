@@ -182,3 +182,25 @@ The commits do not depend on one another, but this order keeps the registry orde
 - [ ] Final squashed feature node created when development used multiple commits.
 - [ ] Readiness tag created locally.
 - [ ] Production release is performed from a clean latest-Production branch, never by merging Test Sandbox.
+
+## Unattended validation audit — 2026-08-17
+
+The dual-Sandbox unattended run validated the existing selected features and
+recorded them as `Implementation Passed / Awaiting Manual Acceptance` or
+`Field Testing` only. No item was promoted to `Accepted` by automation.
+
+| Area | Status | Evidence / limitation |
+| --- | --- | --- |
+| Dual Sandbox parity and lifecycle | Implementation Passed / Awaiting Manual Acceptance | `test:dual-sandbox`, `test:sandbox-snapshot-parity`, `test:dual-sandbox-lifecycle`; persistent browser import/clear/re-import still needs operator SOP |
+| Outbound receiving P0 race | Implementation Passed / Awaiting Manual Acceptance | `tests/outbound-receiving-save-race.mjs`; serial queue, pending navigation/F5 and failure paths passed |
+| Purchase Management / Recent Purchases | Implementation Passed / Awaiting Manual Acceptance | targeted action, ledger and recent-purchases checks passed; no data writes |
+| Japan Package bundle display | Field Testing | Existing Registry behavior reviewed; fresh full visual sweep remains for manual acceptance |
+| P0-A / P0-B / P0-F | Implementation Passed / Awaiting Manual Acceptance | maintained atomic import, cloud restore fail-closed and bootstrap boundary checks passed; manual SOP required |
+| P0-C / P0-D / P0-E | Design Gate | no front-end compensation or partial-write workaround attempted |
+| PurchaseRecords performance | Analysis Only | benchmark variance did not prove a stable optimization; no code changed |
+| Product/Variant import performance | Analysis Only | parser ~38 ms; verification/transaction/readback dominate; no code changed |
+| Stability Audit v3 | Implementation Passed / Awaiting Manual Acceptance | report: `docs/system-stability-audit-v3.md`; findings remain analysis-only |
+
+The unattended run did not add a new Production-ready feature, did not alter
+the Feature Registry's existing Production decisions, and did not push or
+deploy either Sandbox.

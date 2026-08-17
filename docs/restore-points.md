@@ -177,3 +177,25 @@ Asia/Taipei 時間；既有 Tag 保留不改名、不刪除。
 | 2026-08-17 11:03 | Next + Experimental | `checkpoint-20260817-1103-stage-00-before-unattended-validation` | `37f8c50`（Next；Experimental `180348f`） | Unattended validation 起始基準；兩個持久 Sandbox 尚未匯入 Snapshot | Stage 0 記錄完成 | 否 | Snapshot reference only；未自動匯入 | 是：Stage 0 回復點 |
 | 2026-08-17 11:12 | Next Sandbox | `checkpoint-20260817-1112-stage-02-dual-sandbox-lifecycle` | `344801a` | 雙 Sandbox 匯入／重整／獨立清空／重新匯入生命週期測試工具與通過節點 | Lifecycle test 通過；Production request 0 | 否 | `workbench-backup-2026-08-15.json`（僅本機測試） | 是：Next Stage 2 回復點 |
 | 2026-08-17 11:15 | Experimental Sandbox | `checkpoint-20260817-1115-experimental-stage-02-dual-sandbox-lifecycle` | `d647278` | 同一生命週期隔離測試套用至 Experimental 的通過節點 | Lifecycle test 通過；Production request 0 | 否 | `workbench-backup-2026-08-15.json`（僅本機測試） | 是：Experimental Stage 2 回復點 |
+
+## Dual Sandbox unattended validation stages (2026-08-17)
+
+The following stages are local audit checkpoints. They are not Production
+release points. All times use Asia/Taipei and all tags created for this run
+include the Taiwan date and time. Manual acceptance remains pending unless
+the operator explicitly completes the relevant SOP.
+
+| 台灣日期時間 | 環境 | Tag | Commit | Stage / reason | Build / test | Production deploy | Restore-point guidance |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-03-feature-regression` | 待建立 | Selected feature regression | Targeted tests passed | 否 | Manual acceptance pending |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-04-purchaserecords-race-audit` | 待建立 | PurchaseRecords / save-race regression record | Core and outbound race checks passed | 否 | Manual acceptance pending |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-05-purchase-workspace-regression` | 待建立 | Purchase workspace, freight and ledger checks | Targeted tests passed | 否 | Manual acceptance pending |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-06-japan-package-ui-regression` | 待建立 | Japan Package / bundle visual review | Field testing pending | 否 | Manual acceptance pending |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-07-outbound-regression` | 待建立 | Outbound export and receiving regression | Targeted tests passed | 否 | Manual acceptance pending |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-08-p0-abf-regression` | 待建立 | P0-A / P0-B / P0-F automated regression | Automated checks passed; manual SOP pending | 否 | Do not mark Accepted automatically |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-09-p0-design-gate` | 待建立 | P0-C / P0-D / P0-E design gate | No implementation | 否 | Design reference only |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-10-experimental-baseline` | 待建立 | Fixed Snapshot performance baseline | Measurement passed | 否 | Benchmark reference |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-11-purchaserecords-performance-analysis` | 待建立 | PurchaseRecords performance analysis | No stable optimization claim | 否 | Analysis reference |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-12-import-performance-analysis` | 待建立 | Product/Variant import bottleneck analysis | No code change | 否 | Analysis reference |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-13-stability-audit-v3` | 待建立 | Stability Audit v3 report | Build/tests documented | 否 | Audit restore point |
+| 建立後補登 | Next + Experimental | `checkpoint-20260817-<time>-stage-14-feature-registry-audit` | 待建立 | Feature Registry status audit | No feature promoted | 否 | Registry audit point |
