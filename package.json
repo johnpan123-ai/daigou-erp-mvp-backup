@@ -16,6 +16,7 @@
     "test:sandbox-guard": "node tests/sandbox-guard.mjs",
     "test:sandbox-architecture": "node tests/sandbox-architecture.mjs",
     "test:dual-sandbox": "node tests/dual-sandbox-isolation.mjs",
+    "test:dual-sandbox-lifecycle": "node tests/dual-sandbox-lifecycle.mjs",
     "test:sandbox-snapshot-parity": "node tests/sandbox-snapshot-parity.mjs",
     "benchmark:sandbox-baseline": "node tests/sandbox-performance-baseline.mjs",
     "test:test-owner-auth": "node tests/test-owner-auth.mjs",
