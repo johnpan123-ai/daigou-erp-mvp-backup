@@ -437,6 +437,47 @@ export interface ImportStats {
   groupCount: number;
 }
 
+export const VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE =
+  '商品規格資料讀取失敗，為保護既有採購關聯，本次同步已取消。';
+
+export class VariantDestructiveSyncGuardError extends Error {
+  readonly code = 'VARIANT_DESTRUCTIVE_SYNC_GUARD';
+
+  constructor(reason: string, options?: { cause?: unknown }) {
+    super(VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE, options);
+    this.name = 'VariantDestructiveSyncGuardError';
+    console.error(`[Variant Destructive Sync Guard] ${reason}`, options?.cause);
+  }
+}
+
+export const isVariantDestructiveSyncGuardError = (error: unknown): boolean => (
+  error instanceof VariantDestructiveSyncGuardError
+  || (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'VARIANT_DESTRUCTIVE_SYNC_GUARD'
+  )
+);
+
+/**
+ * Test-only failure injection for the P0-G manual acceptance SOP.
+ * Production builds cannot enable this path, even if the query parameter is present.
+ */
+export const isVariantSyncReadFailureInjectionEnabled = (): boolean => (
+  import.meta.env.DEV
+  && (import.meta.env.MODE === 'next' || import.meta.env.MODE === 'experimental')
+  && typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('simulateVariantReadFailure') === '1'
+);
+
+export const isVariantSyncGuardAcceptanceUiEnabled = (): boolean => (
+  import.meta.env.DEV
+  && (import.meta.env.MODE === 'next' || import.meta.env.MODE === 'experimental')
+  && typeof window !== 'undefined'
+  && new URLSearchParams(window.location.search).get('p0GGuardAcceptance') === '1'
+);
+
 export interface DatabaseAdapter {
   getInventory(): Promise<InventoryItem[]>;
   saveInventory(items: InventoryItem[]): Promise<void>;
@@ -2002,6 +2043,153 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
   }
 
+  private async readVariantSyncGuardSnapshot(): Promise<{
+    variants: ProductVariant[];
+    verifiedEmpty: boolean;
+  }> {
+    const keys = [
+      'erp_product_variants',
+      'erp_product_groups',
+      'erp_purchase_batch_items',
+      'erp_private_order_items',
+      'erp_bundle_components',
+      'erp_japan_package_items',
+      'erp_outbound_shipment_items',
+      'erp_sales_order_items',
+    ] as const;
+
+    try {
+      if (isVariantSyncReadFailureInjectionEnabled()) {
+        throw new Error('TEST_ONLY_VARIANT_READ_FAILURE');
+      }
+
+      const database = await this.dbPromise;
+      const values = await new Promise<Map<string, unknown>>((resolve, reject) => {
+        let transaction: IDBTransaction;
+        try {
+          transaction = database.transaction('kv', 'readonly');
+        } catch (error) {
+          reject(error);
+          return;
+        }
+
+        const store = transaction.objectStore('kv');
+        const result = new Map<string, unknown>();
+        let requestFailure: unknown = null;
+
+        for (const key of keys) {
+          const request = store.get(key);
+          request.onsuccess = () => result.set(key, request.result);
+          request.onerror = () => {
+            requestFailure = request.error ?? new Error(`IndexedDB read failed: ${key}`);
+            try {
+              transaction.abort();
+            } catch {
+              // The transaction may already be inactive; onerror/onabort still rejects.
+            }
+          };
+        }
+
+        transaction.oncomplete = () => resolve(result);
+        transaction.onerror = () => reject(
+          requestFailure ?? transaction.error ?? new Error('Variant sync readonly transaction failed.'),
+        );
+        transaction.onabort = () => reject(
+          requestFailure ?? transaction.error ?? new Error('Variant sync readonly transaction aborted.'),
+        );
+      });
+
+      const readArray = <T>(key: typeof keys[number]): T[] => {
+        const value = values.get(key);
+        if (value === undefined) return [];
+        if (!Array.isArray(value)) {
+          throw new Error(`Expected ${key} to contain an array.`);
+        }
+        return value as T[];
+      };
+
+      const rawVariantValue = values.get('erp_product_variants');
+      const variants = readArray<ProductVariant>('erp_product_variants');
+      const groups = readArray<ProductGroup>('erp_product_groups');
+      const purchaseItems = readArray<PurchaseBatchItem>('erp_purchase_batch_items');
+      const privateItems = readArray<PrivateOrderItem>('erp_private_order_items');
+      const bundleComponents = readArray<BundleComponent>('erp_bundle_components');
+      const japanPackageItems = readArray<JapanPackageItem>('erp_japan_package_items');
+      const outboundItems = readArray<OutboundShipmentItem>('erp_outbound_shipment_items');
+      const salesItems = readArray<SalesOrderItem>('erp_sales_order_items');
+      const variantReferenceCount = (
+        purchaseItems.filter(item => Boolean(item.product_variant_id)).length
+        + privateItems.filter(item => Boolean(item.product_variant_id)).length
+        + bundleComponents.filter(item => Boolean(item.bundle_variant_id)).length
+        + bundleComponents.filter(item => Boolean(item.component_variant_id)).length
+        + japanPackageItems.filter(item => Boolean(item.product_variant_id)).length
+        + outboundItems.filter(item => Boolean(item.product_variant_id)).length
+        + salesItems.filter(item => Boolean(item.product_variant_id)).length
+      );
+
+      const variantsKeyExists = rawVariantValue !== undefined;
+      const isCompletelyBlankDatabase = groups.length === 0 && variantReferenceCount === 0;
+      const isSmallExplicitInitialization = variantsKeyExists
+        && groups.length <= 10
+        && variantReferenceCount === 0;
+      const verifiedEmpty = variants.length === 0
+        && (isCompletelyBlankDatabase || isSmallExplicitInitialization);
+
+      if (variants.length === 0 && !verifiedEmpty) {
+        throw new Error('Variant collection is missing while existing ERP data is present.');
+      }
+      if (variants.length === 0 && variantReferenceCount > 0) {
+        throw new Error(`Variant collection is empty but ${variantReferenceCount} existing records reference Variants.`);
+      }
+
+      return { variants, verifiedEmpty };
+    } catch (error) {
+      if (isVariantDestructiveSyncGuardError(error)) throw error;
+      throw new VariantDestructiveSyncGuardError('Variant source could not be verified.', { cause: error });
+    }
+  }
+
+  private assertVariantSyncCandidateSafe(
+    baseline: ProductVariant[],
+    candidate: ProductVariant[],
+    verifiedEmpty: boolean,
+  ): void {
+    const baselineById = new Map(baseline.map(variant => [variant.id, variant]));
+    const candidateById = new Map(candidate.map(variant => [variant.id, variant]));
+    const missingIds = [...baselineById.keys()].filter(id => !candidateById.has(id));
+
+    if (missingIds.length > 0) {
+      throw new VariantDestructiveSyncGuardError(
+        `Sync would remove or replace ${missingIds.length} existing Variant identities.`,
+      );
+    }
+
+    for (const [id, before] of baselineById.entries()) {
+      const after = candidateById.get(id);
+      if (!after) continue;
+      if (
+        after.waca_manual_adjustment !== before.waca_manual_adjustment
+        || after.purchased_manual_adjustment !== before.purchased_manual_adjustment
+        || after.myacg_manual_adjustment !== before.myacg_manual_adjustment
+        || after.private_manual_adjustment !== before.private_manual_adjustment
+      ) {
+        throw new VariantDestructiveSyncGuardError(
+          `Sync would change manual demand/purchase metadata for Variant ${id}.`,
+        );
+      }
+    }
+
+    if (!verifiedEmpty && baseline.length > 0) {
+      const plannedNewCount = candidate.filter(variant => !baselineById.has(variant.id)).length;
+      const maximumExpectedNewVariants = Math.max(50, Math.ceil(baseline.length * 0.25));
+      if (plannedNewCount >= maximumExpectedNewVariants) {
+        throw new VariantDestructiveSyncGuardError(
+          `Sync would create ${plannedNewCount} new Variants from a baseline of ${baseline.length}.`,
+        );
+      }
+    }
+  }
+
   private async get<T>(key: string, defaultValue: T): Promise<T> {
     try {
       const db = await this.dbPromise;
@@ -2463,9 +2651,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount: number }> {
+    const verifiedSource = await this.readVariantSyncGuardSnapshot();
     const allInventory = await this.getInventory();
     const groups = await this.getProductGroups();
-    const variants = await this.getProductVariants();
+    const { canonical: verifiedCanonicalVariants } = this.computeVariantDedupe(verifiedSource.variants);
+    const baselineVariants = verifiedCanonicalVariants.map(variant => ({ ...variant }));
+    const variants = verifiedCanonicalVariants.map(variant => ({ ...variant }));
     let categories = await this.getProductCategories();
 
     let filledVariantsCount = 0;
@@ -2701,7 +2892,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
 
     if (anyGroupChanged) {
-        await this.saveProductCategories(categories);
+      this.assertVariantSyncCandidateSafe(
+        baselineVariants,
+        variants,
+        verifiedSource.verifiedEmpty,
+      );
+      await this.saveProductCategories(categories);
         await this.saveProductVariants(variants);
     }
 

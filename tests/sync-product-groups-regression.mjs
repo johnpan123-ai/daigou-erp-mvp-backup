@@ -73,6 +73,7 @@ const localStoragePairs = [
 
 const vite = spawn(process.execPath, [
   VITE_PATH,
+  '--mode', 'next',
   '--host', '127.0.0.1', '--port', PORT, '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 let viteOutput = '';
@@ -128,14 +129,17 @@ await waitForServer();
 const browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
 // A new incognito context gives every run a fresh IndexedDB/localStorage namespace.
 const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
-await context.addInitScript(() => localStorage.setItem('erp_provider_mode', 'local'));
+await context.addInitScript(() => localStorage.setItem('erp_provider_mode', 'next'));
 const page = await context.newPage();
 
 try {
-  await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+  const testUrl = injectEmptyVariantRead
+    ? `${BASE_URL}/?simulateVariantReadFailure=1`
+    : BASE_URL;
+  await page.goto(testUrl, { waitUntil: 'domcontentloaded' });
   await page.evaluate(async ({ indexedDbPairs, localPairs }) => {
     localStorage.clear();
-    localStorage.setItem('erp_provider_mode', 'local');
+    localStorage.setItem('erp_provider_mode', 'next');
     for (const [key, value] of localPairs) localStorage.setItem(key, JSON.stringify(value));
 
     const database = await new Promise((resolve, reject) => {
@@ -159,7 +163,7 @@ try {
   }, { indexedDbPairs: storagePairs, localPairs: localStoragePairs });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
-  const result = await page.evaluate(async injectEmptyVariantReadInBrowser => {
+  const result = await page.evaluate(async () => {
     const module = await import('/src/lib/db.ts');
     const adapter = module.db;
     const before = {
@@ -171,16 +175,17 @@ try {
       japanPackageItems: typeof adapter.getJapanPackageItems === 'function' ? await adapter.getJapanPackageItems() : [],
     };
     const supported = typeof adapter.syncProductGroupsWithInventory === 'function';
-    if (supported && injectEmptyVariantReadInBrowser) {
-      const originalGetProductVariants = adapter.getProductVariants.bind(adapter);
-      let variantReadCount = 0;
-      adapter.getProductVariants = async (...args) => {
-        variantReadCount += 1;
-        if (variantReadCount === 1) return [];
-        return originalGetProductVariants(...args);
-      };
+    let guardError = null;
+    if (supported) {
+      try {
+        await adapter.syncProductGroupsWithInventory();
+      } catch (error) {
+        guardError = {
+          code: error?.code,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
-    if (supported) await adapter.syncProductGroupsWithInventory();
     const after = {
       productVariants: await adapter.getProductVariants(),
       purchaseBatches: await adapter.getPurchaseBatches(),
@@ -189,8 +194,8 @@ try {
       bundleComponents: typeof adapter.getBundleComponents === 'function' ? await adapter.getBundleComponents() : [],
       japanPackageItems: typeof adapter.getJapanPackageItems === 'function' ? await adapter.getJapanPackageItems() : [],
     };
-    return { supported, before, after };
-  }, injectEmptyVariantRead);
+    return { supported, guardError, before, after };
+  });
 
   const beforeFingerprint = variantFingerprint(result.before.productVariants);
   const afterFingerprint = variantFingerprint(result.after.productVariants);
@@ -205,6 +210,7 @@ try {
     variants: result.before.productVariants.length,
     variantsAfter: result.after.productVariants.length,
     injectEmptyVariantRead,
+    guardError: result.guardError,
     variantParity,
     orphanParity,
     beforeOrphans,
@@ -213,6 +219,11 @@ try {
   }, null, 2));
   assert.equal(variantParity, true, 'sync changed Variant identity or WACA/manual metadata');
   assert.equal(orphanParity, true, 'sync increased or changed referential-integrity failures');
+  if (injectEmptyVariantRead) {
+    assert.equal(result.guardError?.code, 'VARIANT_DESTRUCTIVE_SYNC_GUARD');
+  } else {
+    assert.equal(result.guardError, null);
+  }
 } finally {
   await browser.close();
   vite.kill('SIGTERM');

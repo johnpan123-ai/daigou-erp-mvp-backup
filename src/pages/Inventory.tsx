@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { dataProvider } from '../providers/dataProvider';
+import {
+  isVariantDestructiveSyncGuardError,
+  isVariantSyncGuardAcceptanceUiEnabled,
+  isVariantSyncReadFailureInjectionEnabled,
+  VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE,
+} from '../lib/db';
 import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
@@ -73,6 +79,9 @@ export default function Inventory() {
   const [isRollbackPending, setIsRollbackPending] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [backupNotice, setBackupNotice] = useState<string>('');
+  const [variantGuardProbeNotice, setVariantGuardProbeNotice] = useState<string>('');
+  const showVariantGuardAcceptanceUi = isVariantSyncGuardAcceptanceUiEnabled();
+  const injectVariantReadFailure = isVariantSyncReadFailureInjectionEnabled();
 
   useEffect(() => {
     loadItems();
@@ -187,10 +196,39 @@ export default function Inventory() {
       alert(report);
     } catch (err) {
       console.error(err);
-      alert('匯入失敗，請確認檔案格式是否正確。');
+      alert(
+        isVariantDestructiveSyncGuardError(err)
+          ? VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE
+          : '匯入失敗，請確認檔案格式是否正確。',
+      );
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleVariantGuardFaultInjection = async () => {
+    setVariantGuardProbeNotice(
+      injectVariantReadFailure ? '正在模擬商品規格讀取失敗…' : '正在執行正常規格同步驗證…',
+    );
+    try {
+      const result = await dataProvider.syncProductGroupsWithInventory();
+      if (injectVariantReadFailure) {
+        setVariantGuardProbeNotice('故障注入未被阻擋，請停止驗收。');
+        alert('故障注入未被阻擋，請停止驗收。');
+        return;
+      }
+      const message = `正常同步完成：新增規格 ${result.filledVariantsCount}、影響群組 ${result.affectedGroupsCount}`;
+      setVariantGuardProbeNotice(message);
+      alert(message);
+    } catch (error) {
+      if (isVariantDestructiveSyncGuardError(error)) {
+        setVariantGuardProbeNotice(VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE);
+        alert(VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE);
+        return;
+      }
+      setVariantGuardProbeNotice(`故障注入發生非預期錯誤：${error instanceof Error ? error.message : String(error)}`);
+      throw error;
     }
   };
 
@@ -1207,6 +1245,17 @@ export default function Inventory() {
               <Download size={14} />
               <span>{isExportingBackup ? '備份中...' : '匯出 JSON 備份'}</span>
             </button>
+            {showVariantGuardAcceptanceUi && (
+              <button
+                type="button"
+                className="btn-rollback-backup"
+                onClick={handleVariantGuardFaultInjection}
+                disabled={isImporting}
+                title="僅限 Next／Experimental 開發環境的 P0-G 人工驗收"
+              >
+                {injectVariantReadFailure ? '執行 P0-G 規格讀取故障注入' : '執行 P0-G 正常同步驗證'}
+              </button>
+            )}
             {(lastBackupTime || isCloudRestoreDisabled) && (
               <details className="inventory-more-actions">
                 <summary>更多操作 <ChevronDown size={14} /></summary>
@@ -1239,6 +1288,15 @@ export default function Inventory() {
           {backupNotice && (
             <div style={{ marginTop: '8px', fontSize: '12px', color: '#047857', fontWeight: 600 }}>
               {backupNotice}
+            </div>
+          )}
+          {variantGuardProbeNotice && (
+            <div
+              role="status"
+              data-testid="variant-sync-guard-probe-notice"
+              style={{ marginTop: '8px', fontSize: '12px', color: '#b91c1c', fontWeight: 700 }}
+            >
+              {variantGuardProbeNotice}
             </div>
           )}
         </div>
