@@ -24,6 +24,8 @@
     "test:p0-gh-next-raw-integrity": "node tests/p0-gh-next-raw-integrity.mjs",
     "test:sync-product-groups-regression": "node tests/sync-product-groups-regression.mjs",
     "test:p0-g-variant-sync-guard": "node tests/variant-destructive-sync-guard.mjs",
+    "test:next-nightly-integrity": "node tests/next-nightly-integrity.mjs",
+    "test:next-nightly-performance": "node tests/next-nightly-performance-soak.mjs",
     "test:atomic-import-data": "node tests/atomic-import-data.mjs",
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
     "test:bootstrap-error": "node tests/bootstrap-error-boundary.mjs",
