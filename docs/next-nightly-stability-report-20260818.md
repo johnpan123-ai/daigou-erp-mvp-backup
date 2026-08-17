@@ -166,3 +166,12 @@ Production write：**0**；Production Supabase request：**0**；Push：**NO**�
 ## Stage status
 
 所有自動測試 stage 均只能標示 **Implementation Passed / Awaiting Manual Acceptance**；本報告沒有把自動測試當成人工 Accepted。P0-G 除外，因為它在本輪前已由使用者完成 SOP 並標記 Accepted。
+
+| Stage | Local checkpoint | 狀態 |
+| --- | --- | --- |
+| Nightly start | `checkpoint-20260818-0036-next-nightly-start` | 回復點 |
+| Raw data integrity / Golden business parity | `checkpoint-20260818-0053-next-business-parity` | Implementation Passed / Awaiting Manual Acceptance |
+| Referential integrity | `checkpoint-20260818-0053-next-relational-integrity` | Implementation Passed / Awaiting Manual Acceptance |
+| P0-G regression | `checkpoint-20260818-0053-next-p0g-regression` | Implementation Passed / Awaiting Manual Acceptance；既有 P0-G 本身已 Accepted |
+| Feature regression | `checkpoint-20260818-0053-next-feature-regression` | Implementation Passed / Awaiting Manual Acceptance |
+| 100 route / 30 reload soak | `checkpoint-20260818-0053-next-soak-complete` | Implementation Passed / Awaiting Manual Acceptance |

@@ -218,7 +218,13 @@ the operator explicitly completes the relevant SOP.
 | 台灣日期時間 | 環境 | Tag | Commit | 建立原因／內容 | Build／Test | Production 部署 | Snapshot／Backup | 建議作為 Restore Point |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-08-18 00:36 | Next Sandbox | `checkpoint-20260818-0036-next-nightly-start` | `f0d08f2` | Nightly Stability 起始；保存 P0-G Accepted 後的乾淨 Next | 起始前 clean | 否 | `workbench-backup-2026-08-15.json` | 是：Nightly 前回復點 |
-| 2026-08-18 00:48 | Next Sandbox | `checkpoint-20260818-0048-next-data-integrity` | `0791069`（文件整合 commit 後再補登） | Next-only raw Snapshot parity、Golden Business Regression、完整 orphan probe 與測試工具 | raw counts/hash/orphan/golden PASS；Build PASS | 否 | 同上；Snapshot SHA-256 已記錄於 Nightly Report | 是：資料完整性回復點 |
+| 2026-08-18 00:48 | Next Sandbox | `checkpoint-20260818-0048-next-data-integrity` | `0791069` | Next-only raw Snapshot parity、Golden Business Regression、完整 orphan probe 與測試工具 | raw counts/hash/orphan/golden PASS；Build PASS | 否 | 同上；Snapshot SHA-256 已記錄於 Nightly Report | 是：資料完整性回復點 |
 | 2026-08-18 00:48 | Next Sandbox | `checkpoint-20260818-0055-next-data-integrity` | `0791069` | 同 `0048` 內容的預估命名 alias；保留以避免破壞既有引用 | 同上 | 否 | 同上 | 可追溯，不作首選 |
 
-Nightly 其餘 stage（business parity、relational integrity、P0-G regression、feature regression、soak）會在 Nightly 文件 commit 完成後補上實際建立時間與 commit；自動測試不等同人工 Accepted。
+Nightly stage 的自動測試不等同人工 Accepted。
+
+| 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-business-parity` | `135e086` | Raw counts/hash 與 VSPO Golden business parity | raw probe PASS；Production request 0 | 否 | `workbench-backup-2026-08-15.json` | 是：business parity 回復點 |
+| 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-relational-integrity` | `135e086` | Snapshot orphan 與 Next raw orphan 對照 | orphan 未增加 | 否 | 同上 | 是：關聯完整性回復點 |
+| 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-p0g-regression` | `135e086` | P0-G 正常／故障／Verified Empty regression | P0-G 專用測試 PASS | 否 | 同上 | 是：P0-G nightly 回復點 |
+| 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-feature-regression` | `135e086` | Recent Purchases、Purchase Management、Outbound regression | targeted tests PASS；人工驗收待做 | 否 | 同上 | 是：feature regression 回復點 |
+| 2026-08-18 00:53 | Next Sandbox | `checkpoint-20260818-0053-next-soak-complete` | `135e086` | 100 route cycles、30 reload、performance baseline | console/page error 0；heap 需後續 trend | 否 | 同上 | 是：soak 完成回復點 |
