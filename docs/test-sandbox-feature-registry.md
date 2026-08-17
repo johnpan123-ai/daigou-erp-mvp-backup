@@ -204,3 +204,22 @@ recorded them as `Implementation Passed / Awaiting Manual Acceptance` or
 The unattended run did not add a new Production-ready feature, did not alter
 the Feature Registry's existing Production decisions, and did not push or
 deploy either Sandbox.
+
+## Extended stability health review — 2026-08-18
+
+This review updates evidence status only. It does not promote any feature to
+Production Ready and does not replace the feature commits/tags above.
+
+| Area | Evidence | Current status | Production Ready |
+| --- | --- | --- | --- |
+| P0-G Variant destructive-sync guard | Production-like `b50a0a4`; normal sync, Variant read failure, zero-write assertion, VSPO Golden and orphan checks | **Accepted** by prior manual SOP; extended automated verification passed | **NO — separate Production hotfix approval still required** |
+| Next raw snapshot integrity | `test:next-nightly-integrity`; 16 collections, counts/hashes, Golden VSPO and source orphan parity | **Automated Tested** | NO |
+| Next read-only route/F5 stability | `test:next-readonly-soak`; 10 rounds, 60 routes, 10 reloads, checksum unchanged | **Automated Tested / Awaiting Manual Acceptance** | NO |
+| Read Failure Matrix | `docs/next-read-failure-matrix-20260818.md`; 7 collection fault probes plus Variant sync gate | **Analysis Complete**; C-class paths remain open | NO |
+| Atomic import harness | `test:atomic-import-data` on neutral port 4253 | **Automated Tested** | NO |
+| Existing user-facing Features A/B/C/C2/E/F/G | Existing targeted tests plus cross-route read-only review | **Field Testing**; no new manual acceptance inferred | NO |
+
+The new commits in this extended run are test/documentation infrastructure or
+stability evidence only. They must not be cherry-picked into a Production
+release. Any Production release still starts from current `origin/main` and
+selects only the explicitly approved clean feature/hotfix node.
