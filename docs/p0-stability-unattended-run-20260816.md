@@ -8,7 +8,7 @@
 
 | Stage | 狀態 | Implementation／分析 Commit | Checkpoint | 結論 |
 | --- | --- | --- | --- | --- |
-| P0-A `importData()` 原子化 | **Accepted** | `bc9fb120cda4f23c8ab2c5f9d6102b97b7b945de` | `checkpoint-20260816-2153-p0-a-atomic-import-accepted` | 單一 IndexedDB transaction；成功全換、失敗完整 rollback；使用者已完成成功／失敗／F5 人工驗收。 |
+| P0-A `importData()` 原子化 | **Atomicity Accepted / Business Parity Under Investigation** | `bc9fb120cda4f23c8ab2c5f9d6102b97b7b945de` | `checkpoint-20260816-2153-p0-a-atomic-import-accepted` | 單一 IndexedDB transaction；成功全換、失敗完整 rollback已驗收。P0-G/H 另查 Snapshot semantic parity／後續 Variant identity。 |
 | P0-B Restore 原子性 | **Accepted（2026-08-17）** | `d29b3dd43bcfa90350123a7d09abb8863079ac25` | Accepted checkpoint 於本次驗收後建立 | Cloud restore UI／Provider fail-closed，Local／Test atomic restore 與 F5 已人工驗收通過。真正 Cloud restore 仍維持停用。 |
 | P0-C 採購批次＋明細 | **Design Gate / Blocked** | `5ba1d1d4fc035d4898ac10ff9bcd63f3146844f0` | `checkpoint-20260816-2310-p0-c-purchase-batch-atomicity-design-gate` | Cloud 需要 server-side transaction／RPC 與複合 Provider 契約；未用 compensation 假裝 atomic。 |
 | P0-D Inventory XLS＋訂購紀錄同步 | **Design Gate / Blocked** | `be3c0a0ef712f5fedd7461e2e1e117a8e29ef58f` | `checkpoint-20260816-2314-p0-d-inventory-sync-atomicity-design-gate` | Inventory、residue delete/upsert、Category、Variant 是多次提交；需要 staged plan＋server transaction。 |

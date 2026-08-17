@@ -21,6 +21,7 @@
     "benchmark:sandbox-baseline": "node tests/sandbox-performance-baseline.mjs",
     "test:test-owner-auth": "node tests/test-owner-auth.mjs",
     "test:test-snapshot-import": "node tests/test-snapshot-import.mjs",
+    "test:p0-gh-next-raw-integrity": "node tests/p0-gh-next-raw-integrity.mjs",
     "test:atomic-import-data": "node tests/atomic-import-data.mjs",
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
     "test:bootstrap-error": "node tests/bootstrap-error-boundary.mjs",

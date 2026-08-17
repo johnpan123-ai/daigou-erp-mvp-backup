@@ -205,4 +205,5 @@ the operator explicitly completes the relevant SOP.
 | 台灣日期時間 | 環境 | Tag | Commit | 建立原因／內容 | Build／Test | Production 部署 | Snapshot／Backup | 建議作為 Restore Point |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-08-17 20:50 | Next Sandbox | `checkpoint-20260817-2050-p0-gh-production-snapshot-diagnostic` | `c9072d4` | P0-G Production Business Parity 與 P0-H PurchaseBatch Item Referential Integrity 唯讀診斷；未修資料與程式 | 未執行完整 Build；診斷證據已記錄 | 否 | `workbench-backup-2026-08-15.json`；無新增備份 | 否：只作診斷回復點，完成 raw Next 四層驗證前不可作資料修復基準 |
+| 2026-08-17 20:55 | Next Sandbox | `checkpoint-20260817-2055-before-p0-gh-phase2-raw-db-probe` | `d6eb39d389d76f26d5da7f7f7749e4ad849f690c` | P0-G/H Phase 2 Next raw readonly probe 實作前乾淨點 | 前一階段診斷完成；工作目錄 clean | 否 | `workbench-backup-2026-08-15.json` 僅唯讀對照 | **是：Phase 2 前乾淨回復點** |
 | 2026-08-17 20:50 | Experimental Sandbox | `checkpoint-20260817-2050-experimental-performance-paused` | `1bd7faf30b2ec1381514a63696ad61f758285c9a` | 暫停 Experimental Performance 工作，保留原狀 | 原節點狀態不變 | 否 | 無新增 | 是：保留實驗分支停工前狀態 |

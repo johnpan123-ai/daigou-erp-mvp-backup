@@ -19,6 +19,7 @@ import UnlistedItems from './pages/UnlistedItems';
 import DuplicateVariants from './pages/DuplicateVariants';
 import OutboundShipmentsList from './pages/OutboundShipmentsList';
 import OutboundShipmentDetail from './pages/OutboundShipmentDetail';
+import NextRawDbIntegrityProbe from './pages/NextRawDbIntegrityProbe';
 
 function App() {
   return (
@@ -49,6 +50,7 @@ function App() {
               <Route path="/unlisted-items" element={<UnlistedItems />} />
               <Route path="/duplicate-variants" element={<DuplicateVariants />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/diagnostics/next-raw-db" element={<NextRawDbIntegrityProbe />} />
             </Routes>
           </AppLayout>
         </BrowserRouter>

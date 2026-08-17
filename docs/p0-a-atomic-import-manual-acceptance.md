@@ -1,5 +1,7 @@
 # P0-A：`importData()` 原子化人工驗收 SOP
 
+> 狀態註記（2026-08-17）：**Atomicity Accepted / Business Parity Under Investigation**。P0-A 已證明全成功／全 rollback；P0-G/H 另行驗證 Snapshot 的業務語意與後續 catalog 同步不會破壞 Variant identity。兩者不可視為同一個 Gate。
+
 ## Stage
 
 **Accepted**
