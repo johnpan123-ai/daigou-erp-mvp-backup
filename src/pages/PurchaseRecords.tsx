@@ -15,6 +15,12 @@ import {
   normalizeProxyProductIdentity,
   selectProxyCatalogCandidate,
 } from '../lib/proxyProductIdentity';
+import {
+  CATALOG_SERVICE_UNAVAILABLE_MESSAGE,
+  CatalogServiceError,
+  fetchReadonlyCatalogJson,
+  fetchReadonlyCatalogText,
+} from '../lib/readonlyCatalogApi';
 
 const DEFAULT_COL_WIDTHS = {
   title: 350,
@@ -1525,8 +1531,9 @@ export default function PurchaseRecords() {
 
     // --- Proxy (代理版) catalog lookup ---
     const searchCatalog = async (query: string) => {
-      const resp = await fetch(`/api/catalog/search?q=${encodeURIComponent(query)}&pageSize=8`);
-      return resp.json();
+      return fetchReadonlyCatalogJson<{ products?: any[] }>(
+        `/api/catalog/search?q=${encodeURIComponent(query)}&pageSize=8`,
+      );
     };
 
     const lookupProxy = async (group: ProductGroup): Promise<LookupResult> => {
@@ -1632,8 +1639,9 @@ export default function PurchaseRecords() {
       const all: any[] = [];
       let page = 1;
       while (page <= 4) {
-        const resp = await fetch(`${apiBase}/products.json?limit=250&page=${page}`);
-        const data = await resp.json();
+        const data = await fetchReadonlyCatalogJson<{ products?: any[] }>(
+          `${apiBase}/products.json?limit=250&page=${page}`,
+        );
         if (!data.products || data.products.length === 0) break;
         all.push(...data.products);
         if (data.products.length < 250) break;
@@ -1644,8 +1652,7 @@ export default function PurchaseRecords() {
     };
 
     const parseShopifyPageDates = async (apiBase: string, handle: string): Promise<{ deadline?: string; shippingMonth?: string }> => {
-      const resp = await fetch(`${apiBase}/products/${handle}`);
-      const html = await resp.text();
+      const html = await fetchReadonlyCatalogText(`${apiBase}/products/${handle}`);
       const text = html.replace(/<[^>]*>/g, '');
       let deadline: string | undefined;
       const dlMatch = text.match(/(?:受注受付期間|販売期間)[^〜～~]*[〜～~]\s*(\d{4})年(\d{1,2})月(\d{1,2})日/);
@@ -1701,6 +1708,7 @@ export default function PurchaseRecords() {
     };
 
     // --- Main loop ---
+    let catalogServiceFailed = false;
     for (const group of targetGroups) {
       try {
         const source = getSource(group)!;
@@ -1747,7 +1755,17 @@ export default function PurchaseRecords() {
       } catch (err) {
         failed++;
         console.error('[AutoLookup] Error:', err);
+        if (err instanceof CatalogServiceError) {
+          catalogServiceFailed = true;
+          break;
+        }
       }
+    }
+
+    if (catalogServiceFailed) {
+      setIsLookingUpDeadlines(false);
+      alert(CATALOG_SERVICE_UNAVAILABLE_MESSAGE);
+      return;
     }
 
     if (matched > 0) {
