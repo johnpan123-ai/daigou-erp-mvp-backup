@@ -8,6 +8,8 @@ export type ProxyProductType =
 export interface ProxyProductIdentity {
   originalTitle: string;
   productType: ProxyProductType | null;
+  manufacturer: 'GSC' | null;
+  size: string | null;
   identityTokens: string[];
   seriesTokens: string[];
   versionTokens: string[];
@@ -18,6 +20,12 @@ export interface ProxyCatalogCandidate {
   name?: string | null;
   url?: string | null;
   slug?: string | null;
+  sku?: string | null;
+  janCode?: string | null;
+  manufacturer?: string | null;
+  brand?: {
+    name?: string | null;
+  } | null;
   catalog?: {
     deadlineAt?: string | null;
   } | null;
@@ -27,7 +35,7 @@ export interface ProxyCandidateScore<T extends ProxyCatalogCandidate = ProxyCata
   candidate: T;
   confidence: number;
   rejected: boolean;
-  reason: 'type_conflict' | 'identity_missing' | 'scored';
+  reason: 'type_conflict' | 'size_conflict' | 'identity_missing' | 'scored';
   sourceIdentity: ProxyProductIdentity;
   candidateIdentity: ProxyProductIdentity;
 }
@@ -106,6 +114,8 @@ const BUSINESS_AND_MAKER_REMOVERS = [
 ];
 
 const VERSION_TOKEN = /(?:^|[-_])(?:DX|DELUXE|BASIC)(?:$|[-_])|限定版|再販|特典版|(?:ver(?:sion)?\.?)$/iu;
+const SIZE_PATTERN = /(?:^|\s)(XXL|XL|L|M|S)\s*Size(?=\s|$)/iu;
+const SIZE_REMOVER = /(?:^|\s)(?:XXL|XL|L|M|S)\s*Size(?=\s|$)/giu;
 
 const compactToken = (value: string): string => value
   .toLocaleLowerCase()
@@ -120,11 +130,22 @@ export function detectProxyProductType(title: string): ProxyProductType | null {
   return null;
 }
 
-export function normalizeProxyProductIdentity(title: string): ProxyProductIdentity {
+const detectProxyManufacturer = (title: string, manufacturerName: string): 'GSC' | null => {
+  const combined = `${title} ${manufacturerName}`;
+  return /(?:^|\s)GSC(?=\s|$)|Good\s*Smile\s*Company/iu.test(combined) ? 'GSC' : null;
+};
+
+export function normalizeProxyProductIdentity(
+  title: string,
+  manufacturerName = '',
+): ProxyProductIdentity {
   const productType = detectProxyProductType(title);
+  const manufacturer = detectProxyManufacturer(title, manufacturerName);
+  const size = title.match(SIZE_PATTERN)?.[1]?.toUpperCase() ?? null;
   let cleaned = title;
   for (const pattern of TYPE_REMOVERS) cleaned = cleaned.replace(pattern, ' ');
   for (const pattern of BUSINESS_AND_MAKER_REMOVERS) cleaned = cleaned.replace(pattern, ' ');
+  cleaned = cleaned.replace(SIZE_REMOVER, ' ');
   cleaned = cleaned
     .replace(/[！!？?／《》「」【】\[\]（）()]/gu, ' ')
     .replace(/\s+/gu, ' ')
@@ -142,6 +163,8 @@ export function normalizeProxyProductIdentity(title: string): ProxyProductIdenti
   return {
     originalTitle: title,
     productType,
+    manufacturer,
+    size,
     identityTokens,
     seriesTokens,
     versionTokens,
@@ -161,14 +184,18 @@ export function buildProxyCatalogQueries(identity: ProxyProductIdentity): string
   if (!coreIdentity) return [];
 
   const queries: string[] = [];
+  const sizeSuffix = identity.size ? ` ${identity.size} Size` : '';
   if (identity.productType) {
     for (const alias of TYPE_QUERY_ALIASES[identity.productType]) {
+      if (sizeSuffix) queries.push(`${alias} ${coreIdentity}${sizeSuffix}`);
       queries.push(`${alias} ${coreIdentity}`);
     }
   }
   if (identity.seriesTokens.length > 0) {
+    if (sizeSuffix) queries.push(`${identity.seriesTokens.join(' ')} ${coreIdentity}${sizeSuffix}`);
     queries.push(`${identity.seriesTokens.join(' ')} ${coreIdentity}`);
   }
+  if (sizeSuffix) queries.push(`${coreIdentity}${sizeSuffix}`);
   queries.push(coreIdentity);
   return unique(queries);
 }
@@ -195,7 +222,10 @@ export function scoreProxyCatalogCandidate<T extends ProxyCatalogCandidate>(
   candidate: T,
 ): ProxyCandidateScore<T> {
   const sourceIdentity = normalizeProxyProductIdentity(sourceTitle);
-  const candidateIdentity = normalizeProxyProductIdentity(candidate.name || '');
+  const candidateIdentity = normalizeProxyProductIdentity(
+    candidate.name || '',
+    candidate.manufacturer || candidate.brand?.name || '',
+  );
 
   if (
     sourceIdentity.productType
@@ -207,6 +237,17 @@ export function scoreProxyCatalogCandidate<T extends ProxyCatalogCandidate>(
       confidence: 0,
       rejected: true,
       reason: 'type_conflict',
+      sourceIdentity,
+      candidateIdentity,
+    };
+  }
+
+  if (sourceIdentity.size && candidateIdentity.size && sourceIdentity.size !== candidateIdentity.size) {
+    return {
+      candidate,
+      confidence: 0,
+      rejected: true,
+      reason: 'size_conflict',
       sourceIdentity,
       candidateIdentity,
     };
@@ -228,6 +269,8 @@ export function scoreProxyCatalogCandidate<T extends ProxyCatalogCandidate>(
   if (sourceIdentity.productType && sourceIdentity.productType === candidateIdentity.productType) {
     confidence += 0.55;
   }
+  if (sourceIdentity.size && sourceIdentity.size === candidateIdentity.size) confidence += 0.03;
+  if (sourceIdentity.manufacturer && sourceIdentity.manufacturer === candidateIdentity.manufacturer) confidence += 0.02;
   if (hasVersionMatch(sourceIdentity, candidateIdentity)) confidence += 0.05;
   confidence += Math.min(0.05, countSeriesMatches(sourceIdentity, candidateIdentity) * 0.025);
 

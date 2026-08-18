@@ -77,6 +77,22 @@ try {
       candidate('figma XXX DX', 'figma-xxx-dx'),
     ]);
 
+    const orangeTitle = '代理版 GSC POP UP PARADE 魔法少女的魔女審判 橘雪莉 L Size';
+    const orangeCandidates = [
+      {
+        ...candidate('POP UP PARADE 橘雪莉 L Size', 'pup-orange-l'),
+        brand: { name: 'Good Smile Company' },
+        catalog: { deadlineAt: '2026-09-18T08:00:00.000Z' },
+      },
+      candidate('POP UP PARADE 二階堂希羅 L Size', 'pup-kira-l'),
+      candidate('POP UP PARADE 02 L Size', 'pup-02-l'),
+      candidate('POP UP PARADE 綾波零 L Size', 'pup-rei-l'),
+    ];
+    const orangeIdentity = matching.normalizeProxyProductIdentity(orangeTitle);
+    const orangeQueries = matching.buildProxyCatalogQueries(orangeIdentity);
+    const orangeScores = orangeCandidates.map(item => matching.scoreProxyCatalogCandidate(orangeTitle, item));
+    const orangeSelection = matching.selectProxyCatalogCandidate(orangeTitle, orangeCandidates);
+
     let simulatedWrites = 0;
     if (matching.isSafeProxyCatalogSelection('代理版 figma XXX', ambiguous)) simulatedWrites += 1;
 
@@ -88,7 +104,13 @@ try {
       nendoroidMatch,
       pupVsNendoroid,
       ambiguous,
+      orangeIdentity,
+      orangeQueries,
+      orangeScores,
+      orangeSelection,
       simulatedWrites,
+      minimumConfidence: matching.PROXY_IDENTITY_MIN_CONFIDENCE,
+      ambiguityDelta: matching.PROXY_IDENTITY_AMBIGUITY_DELTA,
     };
   });
 
@@ -103,6 +125,28 @@ try {
   assert.equal(result.pupVsNendoroid.status, 'no_match');
   assert.equal(result.ambiguous.status, 'ambiguous');
   assert.equal(result.simulatedWrites, 0, 'Ambiguous identity must remain fail-closed');
+
+  assert.equal(result.minimumConfidence, 0.9, 'Matching threshold must remain unchanged');
+  assert.equal(result.ambiguityDelta, 0.05, 'Ambiguity guard must remain at 5%');
+  assert.equal(result.orangeIdentity.productType, 'POP_UP_PARADE');
+  assert.equal(result.orangeIdentity.manufacturer, 'GSC');
+  assert.equal(result.orangeIdentity.size, 'L');
+  assert.deepEqual(result.orangeIdentity.identityTokens, ['橘雪莉']);
+  assert.deepEqual(result.orangeIdentity.seriesTokens, ['魔法少女的魔女審判']);
+  assert.equal(result.orangeQueries[0], 'POP UP PARADE 橘雪莉 L Size');
+  assert.ok(result.orangeQueries.includes('POP UP PARADE 橘雪莉'));
+  assert.ok(!result.orangeQueries.includes('Size'), 'Query must never degrade to Size alone');
+  assert.equal(result.orangeSelection.status, 'match');
+  assert.equal(result.orangeSelection.candidate?.id, 'pup-orange-l');
+  assert.equal(result.orangeSelection.candidate?.catalog?.deadlineAt, '2026-09-18T08:00:00.000Z');
+  assert.equal(result.orangeScores[0].candidateIdentity.identityTokens[0], '橘雪莉');
+  assert.equal(result.orangeScores[0].candidateIdentity.size, 'L');
+  assert.equal(result.orangeScores[0].candidateIdentity.manufacturer, 'GSC');
+  for (const score of result.orangeScores.slice(1)) {
+    assert.equal(score.rejected, true, `${score.candidate.name} must be rejected`);
+    assert.equal(score.reason, 'identity_missing');
+    assert.equal(score.confidence, 0, 'Different characters must not receive a high score');
+  }
   assert.deepEqual(productionSupabaseRequests, [], 'Identity regression must not contact Production Supabase');
 
   console.log('PASS figma 路西法 matches with FIGMA + identity while missing series is allowed');
@@ -110,6 +154,9 @@ try {
   console.log('PASS NENDOROID vs NENDOROID matches');
   console.log('PASS POP_UP_PARADE vs NENDOROID is rejected');
   console.log('PASS ambiguous same-type candidates produce 0 writes');
+  console.log('PASS POP UP PARADE 橘雪莉 L Size matches by character while Size remains metadata');
+  console.log('PASS different POP UP PARADE L Size characters are rejected with score 0');
+  console.log('PASS raw deadline remains 2026-09-18 and the existing -2 day business rule is untouched');
   console.log('PASS Production Supabase requests = 0');
 } finally {
   if (browser) await browser.close();
