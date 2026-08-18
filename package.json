@@ -36,6 +36,7 @@
     "test:inventory-backup-gate": "node tests/inventory-backup-gate.mjs",
     "test:outbound-purchase-cost-export": "node tests/outbound-purchase-cost-export.mjs",
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
+    "test:proxy-product-identity": "node tests/proxy-product-identity-matching.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },
   "dependencies": {

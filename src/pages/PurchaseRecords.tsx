@@ -9,6 +9,12 @@ import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
+import {
+  buildProxyCatalogQueries,
+  isSafeProxyCatalogSelection,
+  normalizeProxyProductIdentity,
+  selectProxyCatalogCandidate,
+} from '../lib/proxyProductIdentity';
 
 const DEFAULT_COL_WIDTHS = {
   title: 350,
@@ -1428,6 +1434,15 @@ export default function PurchaseRecords() {
     if (guardAgainstStaleWrite()) return;
 
     type ProductSource = 'proxy' | 'hololive' | 'vspo';
+    type LookupResult = {
+      closing_date?: string;
+      release_month?: string;
+      productUrl?: string;
+      matchName?: string;
+      score: number;
+      failureReason?: string;
+      identityVerified?: boolean;
+    };
     const getSource = (g: ProductGroup): ProductSource | null => {
       if (isProxyProduct(g)) return 'proxy';
       if (isHololiveProduct(g)) return 'hololive';
@@ -1452,7 +1467,9 @@ export default function PurchaseRecords() {
     const details: string[] = [];
     const updatedGroups = [...groups];
 
-    const stripProxyTitle = (t: string) => t
+    // Keep the pre-v1 lookup unchanged for proxy products whose type is not yet
+    // covered by the deliberately small Product Type normalizer.
+    const stripLegacyProxyTitle = (t: string) => t
       .replace(/代理版\s*/g, '')
       .replace(/(GSC|MF|BANDAI|壽屋|Kotobukiya|ALTER|FREEing|Phat|WAVE|Aniplex|SEGA|Taito|Furyu|Myethos|Union Creative|Kadokawa|Medicom|Kaiyodo|Sentinel|Di molto bene|Hobby Max|eStream|BINDing|Ques Q|B-style|PLUM|AMAKUNI|AmiAmi|Chara-Ani|Broccoli|Megahouse|POP UP PARADE)\s*/gi, '')
       .replace(/(Chocopuni|Nendoroid|figma|ARTFX|S\.H\.Figuarts)\s*/gi, '')
@@ -1512,36 +1529,99 @@ export default function PurchaseRecords() {
       return resp.json();
     };
 
-    const lookupProxy = async (group: ProductGroup): Promise<{ closing_date?: string; release_month?: string; matchName?: string; score: number }> => {
+    const lookupProxy = async (group: ProductGroup): Promise<LookupResult> => {
       const originalTitle = group.normalized_title || group.title;
-      const cleaned = stripProxyTitle(originalTitle);
-      if (cleaned.length < 2) return { score: 0 };
-      const segments = cleaned.split(/\s+/).filter(w => w.length >= 2);
-      const queries: string[] = [];
-      if (segments.length >= 3) queries.push(segments.slice(0, 3).join(' '));
-      if (segments.length >= 2) queries.push(segments.slice(0, 2).join(' '));
-      for (const seg of segments) {
-        if (seg.length >= 2 && !queries.includes(seg)) queries.push(seg);
+      const identity = normalizeProxyProductIdentity(originalTitle);
+
+      if (!identity.productType) {
+        const cleaned = stripLegacyProxyTitle(originalTitle);
+        const segments = cleaned.split(/\s+/).filter(word => word.length >= 2);
+        if (segments.length === 0) return { score: 0 };
+
+        const legacyQueries: string[] = [];
+        if (segments.length >= 3) legacyQueries.push(segments.slice(0, 3).join(' '));
+        if (segments.length >= 2) legacyQueries.push(segments.slice(0, 2).join(' '));
+        for (const segment of segments) {
+          if (!legacyQueries.includes(segment)) legacyQueries.push(segment);
+        }
+
+        let bestMatch: any = null;
+        let bestScore = 0;
+        for (const query of legacyQueries) {
+          const data = await searchCatalog(query);
+          if (!data.products || data.products.length === 0) continue;
+          for (const candidate of data.products) {
+            if (!candidate.catalog?.deadlineAt) continue;
+            const score = matchScore(candidate.name || '', originalTitle, segments);
+            if (score > bestScore) {
+              bestScore = score;
+              bestMatch = candidate;
+            }
+          }
+          if (bestScore >= 0.5) break;
+        }
+
+        if (bestMatch?.catalog?.deadlineAt && bestScore >= 0.4) {
+          const deadline = new Date(bestMatch.catalog.deadlineAt);
+          deadline.setDate(deadline.getDate() - 2);
+          const dateStr = `${deadline.getFullYear()}/${String(deadline.getMonth() + 1).padStart(2, '0')}/${String(deadline.getDate()).padStart(2, '0')}`;
+          return {
+            closing_date: dateStr,
+            matchName: bestMatch.name,
+            score: bestScore,
+            identityVerified: true,
+          };
+        }
+        return { matchName: bestMatch?.name, score: bestScore };
       }
-      let bestMatch: any = null;
-      let bestScore = 0;
+
+      const queries = buildProxyCatalogQueries(identity);
+      if (queries.length === 0) {
+        return { score: 0, failureReason: '商品識別資訊不足，需要人工確認' };
+      }
+
+      const candidates: any[] = [];
       for (const q of queries) {
         const data = await searchCatalog(q);
         if (!data.products || data.products.length === 0) continue;
-        for (const p of data.products) {
-          if (!p.catalog?.deadlineAt) continue;
-          const score = matchScore(p.name || '', originalTitle, segments);
-          if (score > bestScore) { bestScore = score; bestMatch = p; }
-        }
-        if (bestScore >= 0.5) break;
+        candidates.push(...data.products);
       }
-      if (bestMatch?.catalog?.deadlineAt && bestScore >= 0.4) {
-        const deadline = new Date(bestMatch.catalog.deadlineAt);
+
+      const selection = selectProxyCatalogCandidate(originalTitle, candidates);
+      if (!isSafeProxyCatalogSelection(originalTitle, selection)) {
+        const bestName = selection.status === 'no_match' ? selection.bestCandidate?.name : undefined;
+        return {
+          matchName: bestName,
+          score: selection.confidence,
+          failureReason: selection.message,
+          identityVerified: false,
+        };
+      }
+
+      const selected = selection.candidate;
+      if (!selected.catalog?.deadlineAt) {
+        return {
+          matchName: selected.name || undefined,
+          score: selection.confidence,
+          failureReason: '已識別商品，但來源沒有有效結單日',
+          identityVerified: true,
+        };
+      }
+
+      // Write guard: deadline data is trusted only after the selected identity is
+      // re-verified and the ambiguity gate has passed.
+      if (isSafeProxyCatalogSelection(originalTitle, selection)) {
+        const deadline = new Date(selected.catalog.deadlineAt);
         deadline.setDate(deadline.getDate() - 2);
         const dateStr = `${deadline.getFullYear()}/${String(deadline.getMonth() + 1).padStart(2, '0')}/${String(deadline.getDate()).padStart(2, '0')}`;
-        return { closing_date: dateStr, matchName: bestMatch.name, score: bestScore };
+        return {
+          closing_date: dateStr,
+          matchName: selected.name || undefined,
+          score: selection.confidence,
+          identityVerified: true,
+        };
       }
-      return { matchName: bestMatch?.name, score: bestScore };
+      return { score: 0, identityVerified: false, failureReason: '商品識別驗證未通過' };
     };
 
     // --- Shopify store lookup (Hololive / VSPO) ---
@@ -1625,7 +1705,7 @@ export default function PurchaseRecords() {
       try {
         const source = getSource(group)!;
         const originalTitle = (group.normalized_title || group.title).slice(0, 35);
-        let result: { closing_date?: string; release_month?: string; productUrl?: string; matchName?: string; score: number };
+        let result: LookupResult;
 
         if (source === 'proxy') {
           result = await lookupProxy(group);
@@ -1634,7 +1714,8 @@ export default function PurchaseRecords() {
           result = await lookupShopify(group, apiBase);
         }
 
-        if (result.closing_date && result.score >= 0.4) {
+        const identityGuardPassed = source !== 'proxy' || result.identityVerified === true;
+        if (result.closing_date && result.score >= 0.4 && identityGuardPassed) {
           const idx = updatedGroups.findIndex(g => g.id === group.id);
           if (idx !== -1) {
             const updates: Partial<ProductGroup> = {};
@@ -1655,7 +1736,9 @@ export default function PurchaseRecords() {
         } else {
           failed++;
           const pct = result.score > 0 ? ` (${Math.round(result.score * 100)}%)` : '';
-          if (result.matchName && result.score >= 0.4) {
+          if (result.failureReason) {
+            details.push(`❌ ${originalTitle}… — ${result.failureReason}${pct}${result.matchName ? `: ${result.matchName.slice(0, 20)}` : ''}`);
+          } else if (result.matchName && result.score >= 0.4) {
             details.push(`❌ ${originalTitle}… — 無結單日${pct}: ${result.matchName.slice(0, 20)}`);
           } else {
             details.push(`❌ ${originalTitle}… — ${result.matchName ? `配對度不足${pct}: ${result.matchName.slice(0, 20)}` : '未找到'}`);
