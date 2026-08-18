@@ -14,6 +14,7 @@ import { useViewport } from '../contexts/ViewportContext';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
+import { getProviderMode } from '../providers/providerMode';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -427,6 +428,12 @@ export default function PurchaseManagement() {
     return localStorage.getItem('purchase_management_edit_mode') === 'true';
   });
   const [canWrite, setCanWrite] = useState<boolean>(false);
+  const providerMode = getProviderMode();
+  const isLocalDataWritableMode = providerMode === 'local'
+    || providerMode === 'test'
+    || providerMode === 'next'
+    || providerMode === 'experimental';
+  const canEditData = isLocalDataWritableMode || canWrite;
 
   const getVariantDefaultJpyCost = (v: ProductVariant): number | undefined | null => {
     return (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) 
@@ -663,7 +670,7 @@ export default function PurchaseManagement() {
   };
 
   const handleAddNewVariant = async () => {
-    if (!id || !canWrite) return;
+    if (!id || !canEditData) return;
 
     const existingSortOrders = variants.map(v => getSortVal(v));
     const maxSortOrder = existingSortOrders.length > 0 ? Math.max(...existingSortOrders) : -1;
@@ -709,7 +716,7 @@ export default function PurchaseManagement() {
   };
 
   const handleMoveVariant = async (variantId: string, direction: 'up' | 'down') => {
-    if (!canWrite) return;
+    if (!canEditData) return;
     const idx = variants.findIndex(v => v.id === variantId);
     if (idx === -1) return;
 
@@ -756,7 +763,7 @@ export default function PurchaseManagement() {
   };
 
   const handleDeleteVariant = async (variantId: string) => {
-    if (!canWrite) return;
+    if (!canEditData) return;
     const target = variants.find(v => v.id === variantId);
     if (!target || target.source !== 'manual') {
       alert('只能刪除手動建立的規格！');
@@ -788,7 +795,7 @@ export default function PurchaseManagement() {
   });
 
   const handleUpdateDefaultJpyCost = async (variantId: string, valStr: string) => {
-    if (!canWrite) return;
+    if (!canEditData) return;
     const val = valStr === '' ? null : parseInt(valStr);
     
     const updated = { ...variantDefaultJpyCosts };
@@ -818,7 +825,7 @@ export default function PurchaseManagement() {
   });
 
   const handleUpdateDefaultTwdCost = async (variantId: string, valStr: string) => {
-    if (!canWrite) return;
+    if (!canEditData) return;
     const val = valStr === '' ? null : parseInt(valStr);
 
     const updated = { ...variantDefaultTwdCosts };
@@ -2345,7 +2352,7 @@ export default function PurchaseManagement() {
                       <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); openPrivateOrderModal(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#be185d', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
                         <Plus size={14} /> 私下登記
                       </button>
-                      {canWrite && (
+                      {canEditData && (
                         <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); handleAddNewVariant(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
                           <Plus size={14} /> 新增規格
                         </button>
@@ -2457,7 +2464,7 @@ export default function PurchaseManagement() {
 
                 {/* Action Buttons */}
                 <div style={{ display: 'flex', gap: '8px', width: isMobile ? '100%' : 'auto', flexWrap: 'wrap', flexShrink: 0, marginLeft: isMobile ? '0' : 'auto' }}>
-                  {COPY_PURCHASED_LEDGER_ACTION_VISIBLE && canWrite && (
+                  {COPY_PURCHASED_LEDGER_ACTION_VISIBLE && canEditData && (
                     <button 
                       className="btn btn-outline" 
                       style={{ 
@@ -2527,7 +2534,7 @@ export default function PurchaseManagement() {
                         <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); openPrivateOrderModal(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#be185d', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
                           <Plus size={14} /> 私下登記
                         </button>
-                        {canWrite && (
+                        {canEditData && (
                           <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); handleAddNewVariant(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
                             <Plus size={14} /> 新增規格
                           </button>
@@ -2539,7 +2546,7 @@ export default function PurchaseManagement() {
               </div>
 
               {/* Divider & Row 2: Bulk Master Cost Settings */}
-              {editMode && canWrite && (
+              {editMode && canEditData && (
                 <>
                   <div style={{ height: '1px', backgroundColor: '#e2e8f0', margin: '4px 0', flexShrink: 0 }} />
                   <div style={{ 
@@ -2754,7 +2761,7 @@ export default function PurchaseManagement() {
                       <tbody>
                         <tr>
                            <td style={{ padding: '10px 20px', textAlign: 'left' }}>
-                            {editMode && canWrite && v.source === 'manual' ? (
+                            {editMode && canEditData && v.source === 'manual' ? (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
                                 <input 
                                   type="text" 
@@ -2839,7 +2846,7 @@ export default function PurchaseManagement() {
                                   }}>
                                     [手動建立]
                                   </span>
-                                  {editMode && canWrite && (
+                                  {editMode && canEditData && (
                                     <div style={{ display: 'inline-flex', gap: '6px' }}>
                                       <button 
                                         type="button"
@@ -2980,7 +2987,7 @@ export default function PurchaseManagement() {
                                 NT$ {(inventoryMap.get(v.myacg_item_code)?.final_price ?? 0).toLocaleString()}
                               </td>
                               <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                {editMode && canWrite ? (
+                                {editMode && canEditData ? (
                                   <input
                                     type="text"
                                     inputMode="numeric"
@@ -3029,7 +3036,7 @@ export default function PurchaseManagement() {
                             </>
                           ) : (
                             <td style={{ padding: '10px 12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                              {editMode && canWrite ? (
+                              {editMode && canEditData ? (
                                 <input
                                   type="text"
                                   inputMode="numeric"
@@ -3317,7 +3324,7 @@ export default function PurchaseManagement() {
                               return (
                                 <tr key={v.id} style={{ borderBottom: i === filteredList.length - 1 ? 'none' : '1px solid #F1F5F9' }}>
                                   <td style={{ padding: '12px 20px', textAlign: 'left' }}>
-                                    {editMode && canWrite && v.source === 'manual' ? (
+                                    {editMode && canEditData && v.source === 'manual' ? (
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
                                         <input 
                                           type="text" 
@@ -3402,7 +3409,7 @@ export default function PurchaseManagement() {
                                           }}>
                                             [手動建立]
                                           </span>
-                                          {editMode && canWrite && (
+                                          {editMode && canEditData && (
                                             <div style={{ display: 'inline-flex', gap: '6px' }}>
                                               <button 
                                                 type="button"
@@ -3543,7 +3550,7 @@ export default function PurchaseManagement() {
                                         NT$ {(inventoryMap.get(v.myacg_item_code)?.final_price ?? 0).toLocaleString()}
                                       </td>
                                       <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                        {editMode && canWrite ? (
+                                        {editMode && canEditData ? (
                                           <input
                                             type="text"
                                             inputMode="numeric"
@@ -3592,7 +3599,7 @@ export default function PurchaseManagement() {
                                     </>
                                   ) : (
                                     <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: 600, color: '#334155' }}>
-                                      {editMode && canWrite ? (
+                                      {editMode && canEditData ? (
                                         <input
                                           type="text"
                                           inputMode="numeric"
@@ -3921,7 +3928,7 @@ export default function PurchaseManagement() {
               onRefresh={loadData}
               onEditBatch={handleEditBatch}
               getDisplayProductName={getDisplayProductName}
-              canWrite={canWrite}
+              canWrite={canEditData}
               isDaili={isDaili}
             />
           ) : (
@@ -3936,7 +3943,7 @@ export default function PurchaseManagement() {
               onRefresh={loadData}
               onEditBatch={handleEditBatch}
               getDisplayProductName={getDisplayProductName}
-              canWrite={canWrite}
+              canWrite={canEditData}
               isDaili={isDaili}
             />
           )

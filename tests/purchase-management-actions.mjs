@@ -111,7 +111,8 @@ try {
   await otherActions.click();
   assert.equal(await otherActions.getAttribute('aria-expanded'), 'true');
   assert.equal(await page.getByRole('menuitem', { name: '私下登記' }).count(), 1);
-  assert.equal(await page.getByRole('menuitem', { name: '新增規格' }).count(), 0, 'Test Sandbox must preserve its existing cloud-write permission gate');
+  assert.equal(await page.getByRole('menuitem', { name: '新增規格' }).count(), 1, 'Test Sandbox must allow writes to its isolated DB without granting Cloud write permission');
+  assert.ok(await page.locator('input[placeholder="-"]').count() > 0, 'Test Sandbox edit mode must render editable unit price inputs');
 
   await page.getByRole('menuitem', { name: '私下登記' }).click();
   await page.getByRole('heading', { name: '新增私下登記' }).waitFor();
