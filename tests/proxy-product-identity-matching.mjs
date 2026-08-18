@@ -93,6 +93,28 @@ try {
     const orangeScores = orangeCandidates.map(item => matching.scoreProxyCatalogCandidate(orangeTitle, item));
     const orangeSelection = matching.selectProxyCatalogCandidate(orangeTitle, orangeCandidates);
 
+    const mutsukiTitle = '代理版 GSC 黏土人 3121 BanG Dream! 夢限大MewType 峰月律';
+    const mutsukiCandidates = [
+      {
+        ...candidate('黏土人3121《BanG Dream!》峰月律', 'nendoroid-mutsuki-dreamlink'),
+        brand: { name: 'Goodsmile' },
+        catalog: {
+          deadlineAt: '2026-09-09T15:00:00.000Z',
+          supplier: { code: 'dreamlink' },
+        },
+      },
+      {
+        ...candidate('黏土人 峰月律', 'nendoroid-mutsuki-wanrong'),
+        brand: { name: 'Good Smile Company' },
+        catalog: {
+          deadlineAt: '2026-09-07T08:00:00.000Z',
+          supplier: { code: 'wanrong' },
+        },
+      },
+    ];
+    const mutsukiScores = mutsukiCandidates.map(item => matching.scoreProxyCatalogCandidate(mutsukiTitle, item));
+    const mutsukiSelection = matching.selectProxyCatalogCandidate(mutsukiTitle, mutsukiCandidates);
+
     let simulatedWrites = 0;
     if (matching.isSafeProxyCatalogSelection('代理版 figma XXX', ambiguous)) simulatedWrites += 1;
 
@@ -108,6 +130,8 @@ try {
       orangeQueries,
       orangeScores,
       orangeSelection,
+      mutsukiScores,
+      mutsukiSelection,
       simulatedWrites,
       minimumConfidence: matching.PROXY_IDENTITY_MIN_CONFIDENCE,
       ambiguityDelta: matching.PROXY_IDENTITY_AMBIGUITY_DELTA,
@@ -147,6 +171,15 @@ try {
     assert.equal(score.reason, 'identity_missing');
     assert.equal(score.confidence, 0, 'Different characters must not receive a high score');
   }
+  assert.equal(result.mutsukiScores[0].confidence, 1, 'Dreamlink listing should retain its identity score');
+  assert.ok(
+    Math.abs(result.mutsukiScores[1].confidence - 0.97) < Number.EPSILON * 2,
+    'Wanrong listing should retain its identity score',
+  );
+  assert.equal(result.mutsukiSelection.status, 'match', 'Same product listings must not trigger identity ambiguity');
+  assert.equal(result.mutsukiSelection.candidate?.id, 'nendoroid-mutsuki-wanrong');
+  assert.equal(result.mutsukiSelection.candidate?.catalog?.supplier?.code, 'wanrong');
+  assert.equal(result.mutsukiSelection.candidate?.catalog?.deadlineAt, '2026-09-07T08:00:00.000Z');
   assert.deepEqual(productionSupabaseRequests, [], 'Identity regression must not contact Production Supabase');
 
   console.log('PASS figma 路西法 matches with FIGMA + identity while missing series is allowed');
@@ -157,6 +190,7 @@ try {
   console.log('PASS POP UP PARADE 橘雪莉 L Size matches by character while Size remains metadata');
   console.log('PASS different POP UP PARADE L Size characters are rejected with score 0');
   console.log('PASS raw deadline remains 2026-09-18 and the existing -2 day business rule is untouched');
+  console.log('PASS same-product Dreamlink + Wanrong listings select Wanrong before applying deadline rules');
   console.log('PASS Production Supabase requests = 0');
 } finally {
   if (browser) await browser.close();

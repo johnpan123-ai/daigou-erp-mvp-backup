@@ -28,6 +28,9 @@ export interface ProxyCatalogCandidate {
   } | null;
   catalog?: {
     deadlineAt?: string | null;
+    supplier?: {
+      code?: string | null;
+    } | null;
   } | null;
 }
 
@@ -66,6 +69,7 @@ export type ProxyCatalogSelection<T extends ProxyCatalogCandidate = ProxyCatalog
 
 export const PROXY_IDENTITY_MIN_CONFIDENCE = 0.9;
 export const PROXY_IDENTITY_AMBIGUITY_DELTA = 0.05;
+export const PROXY_DEFAULT_SUPPLIER_PRIORITY = ['wanrong'] as const;
 
 const TYPE_PATTERNS: Array<{ type: ProxyProductType; patterns: RegExp[] }> = [
   {
@@ -292,6 +296,29 @@ const candidateKey = (candidate: ProxyCatalogCandidate): string => {
   return `${candidate.name || ''}::${candidate.catalog?.deadlineAt || ''}`;
 };
 
+const productIdentityKey = (identity: ProxyProductIdentity): string => JSON.stringify({
+  productType: identity.productType,
+  identityTokens: identity.identityTokens.map(compactToken).sort(),
+  size: identity.size,
+  versionTokens: identity.versionTokens.map(compactToken).sort(),
+});
+
+const supplierPriority = (candidate: ProxyCatalogCandidate): number => {
+  const supplierCode = candidate.catalog?.supplier?.code?.trim().toLocaleLowerCase() ?? '';
+  const index = PROXY_DEFAULT_SUPPLIER_PRIORITY.indexOf(
+    supplierCode as (typeof PROXY_DEFAULT_SUPPLIER_PRIORITY)[number],
+  );
+  return index === -1 ? PROXY_DEFAULT_SUPPLIER_PRIORITY.length : index;
+};
+
+const chooseSupplierListing = <T extends ProxyCatalogCandidate>(
+  matches: ProxyCandidateScore<T>[],
+): ProxyCandidateScore<T> => [...matches].sort((left, right) => {
+  const priorityDifference = supplierPriority(left.candidate) - supplierPriority(right.candidate);
+  if (priorityDifference !== 0) return priorityDifference;
+  return right.confidence - left.confidence;
+})[0];
+
 export function selectProxyCatalogCandidate<T extends ProxyCatalogCandidate>(
   sourceTitle: string,
   candidates: T[],
@@ -299,42 +326,57 @@ export function selectProxyCatalogCandidate<T extends ProxyCatalogCandidate>(
   const deduped = Array.from(new Map(candidates.map(candidate => [candidateKey(candidate), candidate])).values());
   const scored = deduped
     .map(candidate => scoreProxyCatalogCandidate(sourceTitle, candidate))
-    .filter(result => !result.rejected)
-    .sort((left, right) => right.confidence - left.confidence);
+    .filter(result => !result.rejected);
 
-  const top = scored[0];
-  const runnerUp = scored[1];
-  if (!top || top.confidence < PROXY_IDENTITY_MIN_CONFIDENCE) {
+  // Product identity and supplier selection are separate decisions. Multiple
+  // supplier listings for the same normalized product must not trigger the
+  // ambiguity guard; once identity is established, proxy catalog policy
+  // prefers Wanrong. The ambiguity guard remains between distinct identities.
+  const groupedByIdentity = new Map<string, ProxyCandidateScore<T>[]>();
+  for (const result of scored) {
+    const key = productIdentityKey(result.candidateIdentity);
+    const matches = groupedByIdentity.get(key) ?? [];
+    matches.push(result);
+    groupedByIdentity.set(key, matches);
+  }
+  const identityGroups = Array.from(groupedByIdentity.values()).map(matches => ({
+    identityConfidence: Math.max(...matches.map(match => match.confidence)),
+    selectedListing: chooseSupplierListing(matches),
+  })).sort((left, right) => right.identityConfidence - left.identityConfidence);
+
+  const top = identityGroups[0];
+  const runnerUp = identityGroups[1];
+  if (!top || top.identityConfidence < PROXY_IDENTITY_MIN_CONFIDENCE) {
     return {
       status: 'no_match',
       candidate: null,
-      confidence: top?.confidence ?? 0,
-      runnerUpConfidence: runnerUp?.confidence ?? null,
-      bestCandidate: top?.candidate,
+      confidence: top?.identityConfidence ?? 0,
+      runnerUpConfidence: runnerUp?.identityConfidence ?? null,
+      bestCandidate: top?.selectedListing.candidate,
       message: '無法可靠識別商品，需要人工確認',
     };
   }
 
   if (
     runnerUp
-    && runnerUp.confidence >= PROXY_IDENTITY_MIN_CONFIDENCE
-    && top.confidence - runnerUp.confidence < PROXY_IDENTITY_AMBIGUITY_DELTA
+    && runnerUp.identityConfidence >= PROXY_IDENTITY_MIN_CONFIDENCE
+    && top.identityConfidence - runnerUp.identityConfidence < PROXY_IDENTITY_AMBIGUITY_DELTA
   ) {
     return {
       status: 'ambiguous',
       candidate: null,
-      confidence: top.confidence,
-      runnerUpConfidence: runnerUp.confidence,
-      candidates: [top.candidate, runnerUp.candidate],
+      confidence: top.identityConfidence,
+      runnerUpConfidence: runnerUp.identityConfidence,
+      candidates: [top.selectedListing.candidate, runnerUp.selectedListing.candidate],
       message: '找到多筆相似商品，需要人工確認',
     };
   }
 
   return {
     status: 'match',
-    candidate: top.candidate,
-    confidence: top.confidence,
-    runnerUpConfidence: runnerUp?.confidence ?? null,
+    candidate: top.selectedListing.candidate,
+    confidence: top.selectedListing.confidence,
+    runnerUpConfidence: runnerUp?.identityConfidence ?? null,
   };
 }
 
