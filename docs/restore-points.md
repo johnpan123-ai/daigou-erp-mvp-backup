@@ -245,3 +245,9 @@ Nightly stage 的自動測試不等同人工 Accepted。
 | 2026-08-18 05:08:25 | Next | `checkpoint-20260818-0508-next-fixture-regression` | `29992ce26f2bedd5959abc61cd62579f251965e9` | Test fixture writing flows、Outbound、Inventory、freight helper regression | targeted tests PASS | 否 | 同上 | 無 | 無 | 是：fixture regression 回復點 |
 | 2026-08-18 05:10:05 | Next | `checkpoint-20260818-0510-next-performance-measured` | `29992ce26f2bedd5959abc61cd62579f251965e9` | 三輪 Next-only 效能量測；沒有優化 | 3 runs PASS；console/page error 0 | 否 | 同上 | 無 | 無 | 是：measurement reference |
 | 2026-08-18 05:19（Tag metadata） | Next | `checkpoint-20260818-0519-next-extended-complete` | `1073e360aeaaf9b5e26738c58e149f8c5edda8a1` | Extended Stability 報告、P0-G report、人工驗收卡與 final automated gate 完成 | Build／TypeScript、選定全套 tests、diff check PASS；等待人工驗收 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | **是：本輪最終 Next 回復點；尚未人工 Accepted** |
+
+## Next Functional Exploration (2026-08-19)
+
+| 台灣日期時間 | 環境 | Tag | Commit Hash | 建立原因／當時功能 | Build／Test | 曾部署 Production | JSON Snapshot | Database Dump | Storage Backup | 是否建議 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-19 00:41 | Next | `checkpoint-20260819-0041-next-before-functional-exploration` | `f6f7f32994b2261ccd4d0b0a82e16c418e20accb` | Functional Exploration、Real-world Catalog Regression、Stability Audit 前基準；保存既有單價 permission fix 與 Field Test Bug 記錄 | `test:next-nightly-integrity` PASS；完整 nightly gate 待本輪完成 | 否 | `workbench-backup-2026-08-15.json` | 無 | 無 | 是：本輪起始回復點 |
