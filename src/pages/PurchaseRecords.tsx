@@ -18,6 +18,13 @@ import {
 } from '../lib/proxyProductIdentity';
 import type { ProxyCatalogCandidate } from '../lib/proxyProductIdentity';
 import {
+  canUseProxyIdentityShadow,
+  compareProxyIdentityShadows,
+  createProxyIdentityShadowDiagnostic,
+  type ProxyIdentityShadowComparison,
+  type ProxyIdentityShadowDiagnostic,
+} from '../lib/proxyProductIdentityShadow';
+import {
   CATALOG_SERVICE_UNAVAILABLE_MESSAGE,
   CatalogServiceError,
   fetchReadonlyCatalogJson,
@@ -66,6 +73,8 @@ type LookupCandidateSummary = LookupIdentitySummary & {
   supplier: string | null;
   rawDeadline: string | null;
   score: number | null;
+  identityShadow?: ProxyIdentityShadowDiagnostic;
+  shadowComparison?: ProxyIdentityShadowComparison[];
 };
 
 type LookupDiagnostic = {
@@ -76,6 +85,7 @@ type LookupDiagnostic = {
   score: number;
   reason?: string;
   sourceIdentity?: LookupIdentitySummary;
+  sourceIdentityShadow?: ProxyIdentityShadowDiagnostic;
   selected?: LookupCandidateSummary;
   candidates?: LookupCandidateSummary[];
   finalClosingDate?: string;
@@ -97,19 +107,81 @@ const summarizeIdentity = (identity: ReturnType<typeof normalizeProxyProductIden
 const summarizeCandidate = (
   candidate: ProxyCatalogCandidate,
   score: number | null = null,
+  sourceIdentityShadow?: ProxyIdentityShadowDiagnostic,
 ): LookupCandidateSummary => {
   const identity = normalizeProxyProductIdentity(
     candidate.name || '',
     candidate.manufacturer || candidate.brand?.name || '',
   );
+  const identityShadow = sourceIdentityShadow
+    ? createProxyIdentityShadowDiagnostic(
+      candidate.name || '',
+      identity,
+      candidate.manufacturer || candidate.brand?.name || '',
+    )
+    : undefined;
   return {
     ...summarizeIdentity(identity),
     title: candidate.name || '(未提供商品名稱)',
     supplier: candidate.catalog?.supplier?.code || null,
     rawDeadline: candidate.catalog?.deadlineAt || null,
     score,
+    identityShadow,
+    shadowComparison: identityShadow && sourceIdentityShadow
+      ? compareProxyIdentityShadows(sourceIdentityShadow, identityShadow)
+      : undefined,
   };
 };
+
+const formatShadowValues = (values: string[]): string => values.join('、') || '—';
+
+const formatCompoundSubjects = (shadow: ProxyIdentityShadowDiagnostic): string => shadow.v2.compoundSubjects
+  .map(compound => compound.members.join(' + '))
+  .join('；') || '—';
+
+const IdentityShadowBlock = ({
+  shadow,
+  comparison,
+}: {
+  shadow: ProxyIdentityShadowDiagnostic;
+  comparison?: ProxyIdentityShadowComparison[];
+}) => (
+  <div
+    data-testid="identity-parser-v2-shadow"
+    style={{ marginTop: '6px', padding: '7px 9px', borderRadius: '6px', backgroundColor: '#eef2ff', color: '#3730a3' }}
+  >
+    <div style={{ fontWeight: 700 }}>Parser v2 Shadow（NEXT ONLY・不參與 Matching）</div>
+    <div>
+      Manufacturer {formatShadowValues(shadow.v2.manufacturers)} ・
+      Product Type {formatShadowValues(shadow.v2.productTypes)} ・
+      Product Line {formatShadowValues(shadow.v2.productLines)}
+    </div>
+    <div>
+      Subject {formatShadowValues(shadow.v2.subjects)} ・
+      Compound Subject {formatCompoundSubjects(shadow)} ・
+      Series {formatShadowValues(shadow.v2.series)}
+    </div>
+    <div>
+      Version {formatShadowValues(shadow.v2.versions)} ・
+      Form {formatShadowValues(shadow.v2.forms)} ・
+      Scale {formatShadowValues(shadow.v2.scales)} ・
+      Dimension {formatShadowValues(shadow.v2.dimensions)}
+    </div>
+    <div>
+      Model Code {formatShadowValues(shadow.v2.modelCodes)} ・
+      Qualifier {formatShadowValues(shadow.v2.qualifiers)}
+    </div>
+    <div style={{ marginTop: '3px', fontWeight: 700 }}>
+      Parser disagreement：{shadow.disagreements.length > 0 ? 'YES' : 'NO'}
+      {shadow.disagreements.length > 0 ? ` — ${shadow.disagreements.join('、')}` : ''}
+    </div>
+    {comparison && comparison.length > 0 && (
+      <div style={{ marginTop: '3px', fontWeight: 700 }}>
+        Shadow identity comparison：{comparison.join('、')}
+      </div>
+    )}
+  </div>
+);
 
 
 const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
@@ -175,6 +247,7 @@ const parseReleaseYm = (raw: string | undefined | null): { tier: 0 | 1 | 2; ym: 
 
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
+  const isNextIdentityShadowMode = canUseProxyIdentityShadow(getProviderMode());
 
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -1617,6 +1690,9 @@ export default function PurchaseRecords() {
     const lookupProxy = async (group: ProductGroup): Promise<LookupResult> => {
       const originalTitle = group.normalized_title || group.title;
       const identity = normalizeProxyProductIdentity(originalTitle);
+      const sourceIdentityShadow = isNextIdentityShadowMode
+        ? createProxyIdentityShadowDiagnostic(originalTitle, identity)
+        : undefined;
 
       const queries = buildProxyCatalogQueries(identity);
       if (queries.length === 0) {
@@ -1631,6 +1707,7 @@ export default function PurchaseRecords() {
             score: 0,
             reason: '商品識別資訊不足，需要人工確認',
             sourceIdentity: summarizeIdentity(identity),
+            sourceIdentityShadow,
           },
         };
       }
@@ -1659,6 +1736,7 @@ export default function PurchaseRecords() {
       const summarizeScoredCandidate = (candidate: ProxyCatalogCandidate) => summarizeCandidate(
         candidate,
         scoreProxyCatalogCandidate(originalTitle, candidate).confidence,
+        sourceIdentityShadow,
       );
       const selectionCandidates = selection.status === 'ambiguous'
         ? selection.candidates.map(summarizeScoredCandidate)
@@ -1677,6 +1755,7 @@ export default function PurchaseRecords() {
         score: selection.confidence,
         reason: selection.status === 'match' ? undefined : selection.message,
         sourceIdentity: summarizeIdentity(identity),
+        sourceIdentityShadow,
         candidates: selectionCandidates,
         ...overrides,
       });
@@ -1699,7 +1778,7 @@ export default function PurchaseRecords() {
           failureReason: '已識別商品，但來源沒有有效結單日',
           identityVerified: true,
           diagnostic: selectionDiagnostic({
-            selected: summarizeCandidate(selected, selection.confidence),
+            selected: summarizeCandidate(selected, selection.confidence, sourceIdentityShadow),
             reason: '已識別商品，但來源沒有有效結單日',
           }),
         };
@@ -1717,7 +1796,7 @@ export default function PurchaseRecords() {
           score: selection.confidence,
           identityVerified: true,
           diagnostic: selectionDiagnostic({
-            selected: summarizeCandidate(selected, selection.confidence),
+            selected: summarizeCandidate(selected, selection.confidence, sourceIdentityShadow),
             finalClosingDate: dateStr,
           }),
         };
@@ -3097,26 +3176,43 @@ export default function PurchaseRecords() {
                 </div>
                 {diagnostic.sourceIdentity && (
                   <div style={{ marginTop: '6px', color: '#475569' }}>
-                    ERP Identity：類型 {diagnostic.sourceIdentity.productType || '—'} ・
+                    <strong>Parser v1 ERP：</strong>類型 {diagnostic.sourceIdentity.productType || '—'} ・
+                    Product Line {diagnostic.sourceIdentity.productLine || '—'} ・
                     識別 {diagnostic.sourceIdentity.identity.join('、') || '—'} ・
                     系列 {diagnostic.sourceIdentity.series.join('、') || '—'} ・
+                    Version {diagnostic.sourceIdentity.qualifiers.join('、') || '—'} ・
                     尺寸 {diagnostic.sourceIdentity.size || '—'} ・
                     製造商 {diagnostic.sourceIdentity.manufacturer || '—'}
                   </div>
                 )}
+                {isNextIdentityShadowMode && diagnostic.sourceIdentityShadow && (
+                  <IdentityShadowBlock shadow={diagnostic.sourceIdentityShadow} />
+                )}
                 {diagnostic.selected && (
                   <div style={{ marginTop: '6px', padding: '8px 10px', backgroundColor: '#ecfdf5', borderRadius: '6px' }}>
                     <div><strong>Catalog：</strong>{diagnostic.selected.title}</div>
-                    <div>類型 {diagnostic.selected.productType || '—'} ・ 識別 {diagnostic.selected.identity.join('、') || '—'} ・ 系列 {diagnostic.selected.series.join('、') || '—'} ・ 尺寸 {diagnostic.selected.size || '—'}</div>
+                    <div><strong>Parser v1 Candidate：</strong>類型 {diagnostic.selected.productType || '—'} ・ Product Line {diagnostic.selected.productLine || '—'} ・ 識別 {diagnostic.selected.identity.join('、') || '—'} ・ 系列 {diagnostic.selected.series.join('、') || '—'} ・ Version {diagnostic.selected.qualifiers.join('、') || '—'} ・ 尺寸 {diagnostic.selected.size || '—'}</div>
                     <div>Supplier：{diagnostic.selected.supplier || '—'} ・ Raw Deadline：{diagnostic.selected.rawDeadline || '—'} ・ ERP 結單日：{diagnostic.finalClosingDate || '—'}</div>
+                    {isNextIdentityShadowMode && diagnostic.selected.identityShadow && (
+                      <IdentityShadowBlock
+                        shadow={diagnostic.selected.identityShadow}
+                        comparison={diagnostic.selected.shadowComparison}
+                      />
+                    )}
                   </div>
                 )}
                 {diagnostic.candidates && diagnostic.candidates.length > 0 && (
                   <div style={{ marginTop: '6px' }}>
                     <div style={{ fontWeight: 600 }}>候選／未採用：</div>
                     {diagnostic.candidates.map((candidate, index) => (
-                      <div key={`${diagnostic.groupId}-${index}`} style={{ marginTop: '3px', paddingLeft: '10px' }}>
-                        {candidate.title} ・ 類型 {candidate.productType || '—'} ・ 識別 {candidate.identity.join('、') || '—'} ・ 尺寸 {candidate.size || '—'} ・ Supplier {candidate.supplier || '—'} ・ Score {candidate.score === null ? '—' : `${Math.round(candidate.score * 100)}%`}
+                      <div key={`${diagnostic.groupId}-${index}`} style={{ marginTop: '5px', paddingLeft: '10px' }}>
+                        <div>{candidate.title} ・ 類型 {candidate.productType || '—'} ・ 識別 {candidate.identity.join('、') || '—'} ・ 尺寸 {candidate.size || '—'} ・ Supplier {candidate.supplier || '—'} ・ Score {candidate.score === null ? '—' : `${Math.round(candidate.score * 100)}%`}</div>
+                        {isNextIdentityShadowMode && candidate.identityShadow && (
+                          <IdentityShadowBlock
+                            shadow={candidate.identityShadow}
+                            comparison={candidate.shadowComparison}
+                          />
+                        )}
                       </div>
                     ))}
                   </div>

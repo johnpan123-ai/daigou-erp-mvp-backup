@@ -260,10 +260,10 @@ const tokenizeResidual = (source: string): string[] => source
  * Test/evaluation-only semantic parser foundation.
  *
  * This function intentionally has no dependency on Provider, IndexedDB, Supabase,
- * catalog retrieval, matching thresholds, or closing-date writes. Runtime continues
- * to use proxyProductIdentity.ts until a separate integration stage is approved.
+ * catalog retrieval, matching thresholds, or closing-date writes. Runtime matching
+ * continues to use proxyProductIdentity.ts; v2 may only run as a Next-only shadow.
  */
-export function parseProxyProductIdentityV2(title: string): ProxyProductIdentityV2 {
+export function parseProxyProductIdentityV2(title: string, manufacturerName = ''): ProxyProductIdentityV2 {
   const normalizedTitle = normalizeTitle(title);
   const manufacturers: string[] = [];
   const productTypes: ProxySemanticProductType[] = [];
@@ -290,6 +290,7 @@ export function parseProxyProductIdentityV2(title: string): ProxyProductIdentity
         matched = true;
         return ' ';
       });
+      if (manufacturerName.match(pattern)) matched = true;
     }
     if (matched) manufacturers.push(definition.value);
   }
