@@ -145,7 +145,7 @@ an optimization has been implemented.
 | Same-identity supplier selection with Wanrong default priority | `37eaf94` | `079ce89` | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | Identity v1 |
 | Field-test diagnostics panel and log protocol | local follow-up | — | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | The four nodes above |
 | Identity Parser v2 legacy + Matching Pilot | `f99aba2`, `a4a5868`, `b852f42` | — | **Frozen; no further Matching expansion** | **NO** | Existing runtime decisions retained only for regression safety |
-| Parser v2.1 Subject Extraction Rewrite | local implementation | — | **Implemented + automated tested / Awaiting Manual Acceptance** | **NO** | Next-only Shadow; no last-token fallback; no Matching or closing-date authority |
+| Parser v2.1 Subject Extraction Rewrite | `c979ccc` | — | **Implemented + automated tested / Awaiting Manual Acceptance** | **NO** | Next-only Shadow; no last-token fallback; no Matching or closing-date authority |
 | Structured v2 Query fallback + real 4192 probe | current Next development | — | **Closing Date Lookup v2 Development / Confirmed Version False Positive Blocker** | **NO** | P21-11 proved v1 could select PLAMATEA Black Barrel for the standard product |
 | Matching v2 default-version compatibility | `510b24d` | — | **Fixed + automated tested / Awaiting Human Field Test** | **NO** | Next-only v2 Pilot; requires exact subject and structural/series evidence |
 | v1 MATCH version safety veto | local implementation | — | **Implemented + automated tested / Awaiting Manual Acceptance** | **NO** | Next-only; v2 can only veto a reliable one-sided identity-bearing version conflict |
