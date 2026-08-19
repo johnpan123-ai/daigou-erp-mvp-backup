@@ -11,7 +11,6 @@ import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import {
   buildProxyCatalogQueries,
-  isSafeProxyCatalogSelection,
   normalizeProxyProductIdentity,
   scoreProxyCatalogCandidate,
   selectProxyCatalogCandidate,
@@ -24,6 +23,10 @@ import {
   type ProxyIdentityShadowComparison,
   type ProxyIdentityShadowDiagnostic,
 } from '../lib/proxyProductIdentityShadow';
+import {
+  resolveProxyCatalogDecision,
+  type ProxyIdentityPilotEvidence,
+} from '../lib/proxyProductIdentityPilot';
 import {
   CATALOG_SERVICE_UNAVAILABLE_MESSAGE,
   CatalogServiceError,
@@ -75,6 +78,7 @@ type LookupCandidateSummary = LookupIdentitySummary & {
   score: number | null;
   identityShadow?: ProxyIdentityShadowDiagnostic;
   shadowComparison?: ProxyIdentityShadowComparison[];
+  pilotEvidence?: ProxyIdentityPilotEvidence[];
 };
 
 type LookupDiagnostic = {
@@ -82,12 +86,14 @@ type LookupDiagnostic = {
   source: 'proxy' | 'hololive' | 'vspo';
   originalTitle: string;
   decision: LookupDecision;
+  decisionSource?: 'V1' | 'V2_PILOT';
   score: number;
   reason?: string;
   sourceIdentity?: LookupIdentitySummary;
   sourceIdentityShadow?: ProxyIdentityShadowDiagnostic;
   selected?: LookupCandidateSummary;
   candidates?: LookupCandidateSummary[];
+  pilotEvidence?: ProxyIdentityPilotEvidence[];
   finalClosingDate?: string;
 };
 
@@ -108,6 +114,7 @@ const summarizeCandidate = (
   candidate: ProxyCatalogCandidate,
   score: number | null = null,
   sourceIdentityShadow?: ProxyIdentityShadowDiagnostic,
+  pilotEvidence?: ProxyIdentityPilotEvidence[],
 ): LookupCandidateSummary => {
   const identity = normalizeProxyProductIdentity(
     candidate.name || '',
@@ -130,6 +137,7 @@ const summarizeCandidate = (
     shadowComparison: identityShadow && sourceIdentityShadow
       ? compareProxyIdentityShadows(sourceIdentityShadow, identityShadow)
       : undefined,
+    pilotEvidence,
   };
 };
 
@@ -247,7 +255,8 @@ const parseReleaseYm = (raw: string | undefined | null): { tier: 0 | 1 | 2; ym: 
 
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
-  const isNextIdentityShadowMode = canUseProxyIdentityShadow(getProviderMode());
+  const providerMode = getProviderMode();
+  const isNextIdentityShadowMode = canUseProxyIdentityShadow(providerMode);
 
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -1704,6 +1713,7 @@ export default function PurchaseRecords() {
             source: 'proxy',
             originalTitle,
             decision: 'NOT_FOUND',
+            decisionSource: 'V1',
             score: 0,
             reason: '商品識別資訊不足，需要人工確認',
             sourceIdentity: summarizeIdentity(identity),
@@ -1714,6 +1724,7 @@ export default function PurchaseRecords() {
 
       const candidates: ProxyCatalogCandidate[] = [];
       let selection = selectProxyCatalogCandidate(originalTitle, candidates);
+      let decisionResolution = resolveProxyCatalogDecision(providerMode, originalTitle, candidates, selection);
       let successfulQueries = 0;
       let lastQueryError: unknown = null;
       for (const q of queries) {
@@ -1727,9 +1738,13 @@ export default function PurchaseRecords() {
         }
         if (data.products && data.products.length > 0) candidates.push(...data.products);
         selection = selectProxyCatalogCandidate(originalTitle, candidates);
+        decisionResolution = resolveProxyCatalogDecision(providerMode, originalTitle, candidates, selection);
+        // Preserve the existing v1 early-stop behavior. A Pilot match keeps
+        // collecting the already-planned queries so Wanrong priority can see all
+        // supplier listings; it does not add queries beyond the v1 rejection path.
         if (
-          isSafeProxyCatalogSelection(originalTitle, selection)
-          && selection.candidate.catalog?.deadlineAt
+          decisionResolution.match?.decisionSource === 'V1'
+          && decisionResolution.match.candidate.catalog?.deadlineAt
         ) break;
       }
       if (successfulQueries === 0 && lastQueryError) throw lastQueryError;
@@ -1752,6 +1767,7 @@ export default function PurchaseRecords() {
           : selection.status === 'ambiguous'
             ? 'AMBIGUOUS'
             : 'NOT_FOUND',
+        decisionSource: 'V1',
         score: selection.confidence,
         reason: selection.status === 'match' ? undefined : selection.message,
         sourceIdentity: summarizeIdentity(identity),
@@ -1759,44 +1775,70 @@ export default function PurchaseRecords() {
         candidates: selectionCandidates,
         ...overrides,
       });
-      if (!isSafeProxyCatalogSelection(originalTitle, selection)) {
+      const effectiveMatch = decisionResolution.match;
+      if (!effectiveMatch) {
         const bestName = selection.status === 'no_match' ? selection.bestCandidate?.name : undefined;
+        const failureMessage = selection.status === 'match'
+          ? '商品識別驗證未通過'
+          : selection.message;
         return {
           matchName: bestName || undefined,
           score: selection.confidence,
-          failureReason: selection.message,
+          failureReason: failureMessage,
           identityVerified: false,
           diagnostic: selectionDiagnostic(),
         };
       }
 
-      const selected = selection.candidate;
+      const selected = effectiveMatch.candidate;
       if (!selected.catalog?.deadlineAt) {
         return {
           matchName: selected.name || undefined,
-          score: selection.confidence,
+          score: effectiveMatch.confidence,
           failureReason: '已識別商品，但來源沒有有效結單日',
           identityVerified: true,
           diagnostic: selectionDiagnostic({
-            selected: summarizeCandidate(selected, selection.confidence, sourceIdentityShadow),
+            decision: 'MATCH',
+            decisionSource: effectiveMatch.decisionSource,
+            score: effectiveMatch.confidence,
+            pilotEvidence: effectiveMatch.pilotEvidence,
+            selected: summarizeCandidate(
+              selected,
+              effectiveMatch.confidence,
+              sourceIdentityShadow,
+              effectiveMatch.pilotEvidence,
+            ),
             reason: '已識別商品，但來源沒有有效結單日',
           }),
         };
       }
 
       // Write guard: deadline data is trusted only after the selected identity is
-      // re-verified and the ambiguity gate has passed.
-      if (isSafeProxyCatalogSelection(originalTitle, selection)) {
+      // re-verified by its decision source and the unchanged ambiguity gate has passed.
+      const reverifiedDecision = resolveProxyCatalogDecision(providerMode, originalTitle, candidates, selection);
+      const effectiveMatchIsStillSafe = reverifiedDecision.match !== null
+        && reverifiedDecision.match.decisionSource === effectiveMatch.decisionSource
+        && reverifiedDecision.match.candidate === selected;
+      if (effectiveMatchIsStillSafe) {
         const deadline = new Date(selected.catalog.deadlineAt);
         deadline.setDate(deadline.getDate() - 2);
         const dateStr = `${deadline.getFullYear()}/${String(deadline.getMonth() + 1).padStart(2, '0')}/${String(deadline.getDate()).padStart(2, '0')}`;
         return {
           closing_date: dateStr,
           matchName: selected.name || undefined,
-          score: selection.confidence,
+          score: effectiveMatch.confidence,
           identityVerified: true,
           diagnostic: selectionDiagnostic({
-            selected: summarizeCandidate(selected, selection.confidence, sourceIdentityShadow),
+            decision: 'MATCH',
+            decisionSource: effectiveMatch.decisionSource,
+            score: effectiveMatch.confidence,
+            pilotEvidence: effectiveMatch.pilotEvidence,
+            selected: summarizeCandidate(
+              selected,
+              effectiveMatch.confidence,
+              sourceIdentityShadow,
+              effectiveMatch.pilotEvidence,
+            ),
             finalClosingDate: dateStr,
           }),
         };
@@ -3173,6 +3215,19 @@ export default function PurchaseRecords() {
                   </strong>
                   <span>{diagnostic.originalTitle}</span>
                   <span style={{ color: '#64748b' }}>Score {Math.round(diagnostic.score * 100)}%</span>
+                  {diagnostic.decisionSource && (
+                    <span
+                      style={{
+                        padding: '2px 6px',
+                        borderRadius: '999px',
+                        backgroundColor: diagnostic.decisionSource === 'V2_PILOT' ? '#ede9fe' : '#e2e8f0',
+                        color: diagnostic.decisionSource === 'V2_PILOT' ? '#6d28d9' : '#475569',
+                        fontWeight: 700,
+                      }}
+                    >
+                      Decision Source: {diagnostic.decisionSource}
+                    </span>
+                  )}
                 </div>
                 {diagnostic.sourceIdentity && (
                   <div style={{ marginTop: '6px', color: '#475569' }}>
@@ -3193,6 +3248,11 @@ export default function PurchaseRecords() {
                     <div><strong>Catalog：</strong>{diagnostic.selected.title}</div>
                     <div><strong>Parser v1 Candidate：</strong>類型 {diagnostic.selected.productType || '—'} ・ Product Line {diagnostic.selected.productLine || '—'} ・ 識別 {diagnostic.selected.identity.join('、') || '—'} ・ 系列 {diagnostic.selected.series.join('、') || '—'} ・ Version {diagnostic.selected.qualifiers.join('、') || '—'} ・ 尺寸 {diagnostic.selected.size || '—'}</div>
                     <div>Supplier：{diagnostic.selected.supplier || '—'} ・ Raw Deadline：{diagnostic.selected.rawDeadline || '—'} ・ ERP 結單日：{diagnostic.finalClosingDate || '—'}</div>
+                    {diagnostic.decisionSource === 'V2_PILOT' && diagnostic.pilotEvidence && (
+                      <div style={{ marginTop: '4px', color: '#6d28d9', fontWeight: 700 }}>
+                        V2 Pilot Evidence：{diagnostic.pilotEvidence.join('、')}
+                      </div>
+                    )}
                     {isNextIdentityShadowMode && diagnostic.selected.identityShadow && (
                       <IdentityShadowBlock
                         shadow={diagnostic.selected.identityShadow}
