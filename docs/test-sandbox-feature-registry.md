@@ -146,6 +146,7 @@ an optimization has been implemented.
 | Field-test diagnostics panel and log protocol | local follow-up | — | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | The four nodes above |
 | Identity Parser v2 + Matching Pilot | `f99aba2`, `a4a5868`, `b852f42` | — | Implemented + automated tested; runtime field testing | **NO** | Parser v1 remains primary; Next only |
 | Structured v2 Query fallback + real 4192 probe | current Next candidate | — | **Closing Date Lookup v2 Field-Test Candidate / Awaiting Human Acceptance** | **NO** | v2 Pilot, read-only Catalog gateway |
+| Matching v2 default-version compatibility | `510b24d` | — | **Fixed + automated tested / Awaiting Human Field Test** | **NO** | Next-only v2 Pilot; requires exact subject and structural/series evidence |
 
 This node is intentionally not listed as Production-ready. It exists to support
 large real-product field testing in Next. `product_groups.proxy_agent` supplier
