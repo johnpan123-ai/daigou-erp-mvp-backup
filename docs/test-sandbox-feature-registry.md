@@ -144,6 +144,8 @@ an optimization has been implemented.
 | Size metadata and Golden Cases | `f579c67` | `dcc8ea0` | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | Identity v1 |
 | Same-identity supplier selection with Wanrong default priority | `37eaf94` | `079ce89` | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | Identity v1 |
 | Field-test diagnostics panel and log protocol | local follow-up | — | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | The four nodes above |
+| Identity Parser v2 + Matching Pilot | `f99aba2`, `a4a5868`, `b852f42` | — | Implemented + automated tested; runtime field testing | **NO** | Parser v1 remains primary; Next only |
+| Structured v2 Query fallback + real 4192 probe | current Next candidate | — | **Closing Date Lookup v2 Field-Test Candidate / Awaiting Human Acceptance** | **NO** | v2 Pilot, read-only Catalog gateway |
 
 This node is intentionally not listed as Production-ready. It exists to support
 large real-product field testing in Next. `product_groups.proxy_agent` supplier
@@ -161,6 +163,13 @@ SEGA/prize lines, FuRyu, Chocopuni, Bandai, and other lines selected from the
 fixed Production JSON snapshot. New cases are `OBSERVE` until manually
 confirmed; no threshold, ambiguity guard, supplier priority, closing-date
 business rule, ERP DB, or Production data was changed.
+
+The v2 Field-Test Candidate adds a bounded Next-only structured query fallback
+(maximum five planned queries, only after the existing v1 candidate path has no
+safe decision). Real 4192 probes confirmed five correct matches and zero false
+positives. Version-less Star Platinum, unverified TAKARATOMY naming, special SMP
+product-set mapping, and Omaneko remain fail-closed. This is not Manual Accepted
+and must not be promoted to Production Candidate or Production Ready.
 
 ## Test infrastructure nodes — never cherry-pick to Production
 

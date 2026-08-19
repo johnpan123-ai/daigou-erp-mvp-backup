@@ -108,6 +108,14 @@ try {
         '代理版 和模線 勝利女神：妮姬 小紅帽 1/12 組裝模型',
         candidate('1/12 Scale Figure 勝利女神：妮姬 小紅帽', 'wrong-type'),
       ),
+      nendoroidVsScale: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 GSC 黏土人 峰月律',
+        candidate('1/7 Scale Figure 峰月律', 'nendoroid-vs-scale'),
+      ),
+      popupVsNendoroid: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 POP UP PARADE 橘雪莉 L Size',
+        candidate('黏土人 橘雪莉', 'popup-vs-nendoroid'),
+      ),
       takaratomyAliasUnproven: pilot.scoreProxyCatalogCandidateV2Pilot(
         '代理版 TAKARATOMY 商店限定 彈珠超人 彈珠人 大福箱’27 戰鬥鳳凰號豪華套組',
         candidate('T-SPARK LEGACYSOUL 彈珠超人 大福箱27[TAKARATOMY]', 'takaratomy'),
@@ -195,6 +203,8 @@ try {
 
   assert.equal(result.rejected.wrongSubject.reason, 'subject_conflict');
   assert.equal(result.rejected.modelKitVsScale.reason, 'product_type_conflict');
+  assert.equal(result.rejected.nendoroidVsScale.reason, 'product_type_conflict');
+  assert.equal(result.rejected.popupVsNendoroid.reason, 'product_type_conflict');
   assert.equal(result.rejected.takaratomyAliasUnproven.reason, 'subject_conflict');
   assert.equal(result.rejected.smpDifferentSet.reason, 'compound_subject_conflict');
   assert.equal(result.rejected.productLineConflict.reason, 'product_line_conflict');

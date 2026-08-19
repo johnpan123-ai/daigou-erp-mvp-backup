@@ -40,6 +40,8 @@
     "test:proxy-product-identity-v2": "node tests/proxy-product-identity-v2.mjs",
     "test:proxy-product-identity-shadow": "node tests/proxy-product-identity-shadow.mjs",
     "test:proxy-product-identity-pilot": "node tests/proxy-product-identity-pilot.mjs",
+    "test:proxy-product-identity-query-v2": "node tests/proxy-product-identity-query-v2.mjs",
+    "probe:closing-date-runtime-v2": "node tests/closing-date-runtime-v2-probe.mjs",
     "test:catalog-api-availability": "node tests/catalog-api-availability.mjs",
     "capture:closing-date-fixtures": "node tests/capture-closing-date-fixtures.mjs",
     "test:closing-date-evaluation": "node tests/evaluate-closing-date.mjs",

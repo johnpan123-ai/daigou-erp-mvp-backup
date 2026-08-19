@@ -25,8 +25,10 @@ import {
 } from '../lib/proxyProductIdentityShadow';
 import {
   resolveProxyCatalogDecision,
+  canUseProxyIdentityPilot,
   type ProxyIdentityPilotEvidence,
 } from '../lib/proxyProductIdentityPilot';
+import { buildProxyCatalogQueriesV2 } from '../lib/proxyProductIdentityQueryV2';
 import {
   CATALOG_SERVICE_UNAVAILABLE_MESSAGE,
   CatalogServiceError,
@@ -95,6 +97,9 @@ type LookupDiagnostic = {
   candidates?: LookupCandidateSummary[];
   pilotEvidence?: ProxyIdentityPilotEvidence[];
   finalClosingDate?: string;
+  v1Queries?: string[];
+  v2Queries?: string[];
+  executedQueries?: string[];
 };
 
 const summarizeIdentity = (identity: ReturnType<typeof normalizeProxyProductIdentity>): LookupIdentitySummary => ({
@@ -1723,11 +1728,13 @@ export default function PurchaseRecords() {
       }
 
       const candidates: ProxyCatalogCandidate[] = [];
+      const executedQueries: string[] = [];
       let selection = selectProxyCatalogCandidate(originalTitle, candidates);
       let decisionResolution = resolveProxyCatalogDecision(providerMode, originalTitle, candidates, selection);
       let successfulQueries = 0;
       let lastQueryError: unknown = null;
       for (const q of queries) {
+        executedQueries.push(q);
         let data: { products?: any[] };
         try {
           data = await searchCatalog(q);
@@ -1746,6 +1753,27 @@ export default function PurchaseRecords() {
           decisionResolution.match?.decisionSource === 'V1'
           && decisionResolution.match.candidate.catalog?.deadlineAt
         ) break;
+      }
+      const v2Queries = canUseProxyIdentityPilot(providerMode)
+        ? buildProxyCatalogQueriesV2(originalTitle).filter(query => !queries.includes(query))
+        : [];
+      if (!decisionResolution.match && v2Queries.length > 0) {
+        for (const q of v2Queries) {
+          executedQueries.push(q);
+          let data: { products?: any[] };
+          try {
+            data = await searchCatalog(q);
+            successfulQueries += 1;
+          } catch (error) {
+            lastQueryError = error;
+            continue;
+          }
+          if (data.products && data.products.length > 0) candidates.push(...data.products);
+          selection = selectProxyCatalogCandidate(originalTitle, candidates);
+          decisionResolution = resolveProxyCatalogDecision(providerMode, originalTitle, candidates, selection);
+          const supplier = decisionResolution.match?.candidate.catalog?.supplier?.code?.toLocaleLowerCase();
+          if (decisionResolution.match?.decisionSource === 'V1' || supplier === 'wanrong') break;
+        }
       }
       if (successfulQueries === 0 && lastQueryError) throw lastQueryError;
       const summarizeScoredCandidate = (candidate: ProxyCatalogCandidate) => summarizeCandidate(
@@ -1772,6 +1800,9 @@ export default function PurchaseRecords() {
         reason: selection.status === 'match' ? undefined : selection.message,
         sourceIdentity: summarizeIdentity(identity),
         sourceIdentityShadow,
+        v1Queries: queries,
+        v2Queries,
+        executedQueries,
         candidates: selectionCandidates,
         ...overrides,
       });
@@ -3238,6 +3269,14 @@ export default function PurchaseRecords() {
                     Version {diagnostic.sourceIdentity.qualifiers.join('、') || '—'} ・
                     尺寸 {diagnostic.sourceIdentity.size || '—'} ・
                     製造商 {diagnostic.sourceIdentity.manufacturer || '—'}
+                  </div>
+                )}
+                {diagnostic.executedQueries && diagnostic.executedQueries.length > 0 && (
+                  <div style={{ marginTop: '6px', color: '#475569' }}>
+                    <strong>Runtime Queries：</strong>{diagnostic.executedQueries.join(' → ')}
+                    {diagnostic.v2Queries && diagnostic.v2Queries.length > 0 && (
+                      <span style={{ color: '#6d28d9' }}>（含 Parser v2 fallback）</span>
+                    )}
                   </div>
                 )}
                 {isNextIdentityShadowMode && diagnostic.sourceIdentityShadow && (
