@@ -1,5 +1,5 @@
 export type ProxyProductType = 'FIGMA' | 'NENDOROID' | 'NENDOROID_DOLL' | 'POP_UP_PARADE' | 'SCALE_FIGURE';
-export type ProxyProductLine = 'YUMEMIRIZE' | 'RELAX_TIME' | 'HIKKAKE' | 'CHOCOPUNI' | 'MOCHIPICO' | 'SMP' | 'SHF' | 'PLAMATEA' | 'T_SPARK_LEGACYSOUL';
+export type ProxyProductLine = 'YUMEMIRIZE' | 'RELAX_TIME' | 'HIKKAKE' | 'CHOCOPUNI' | 'MOCHIPICO' | 'SMP' | 'SHF' | 'PLAMATEA' | 'T_SPARK_LEGACYSOUL' | 'G_S_COLLECTION';
 export type ProxyManufacturer = 'GSC' | 'SEGA' | 'BANDAI' | 'FURYU' | 'TAITO' | 'TAKARATOMY';
 
 export interface ProxyProductIdentity {
@@ -70,6 +70,7 @@ const PRODUCT_LINE_PATTERNS: Array<{ line: ProxyProductLine; patterns: RegExp[] 
   { line: 'SHF', patterns: [/s\.?\s*h\.?\s*f(?:iguarts)?/iu, /(?:^|\s)SHF(?=\s|$)/iu] },
   { line: 'PLAMATEA', patterns: [/plamatea/iu] },
   { line: 'T_SPARK_LEGACYSOUL', patterns: [/t[\s-]*spark\s*legacysoul/iu] },
+  { line: 'G_S_COLLECTION', patterns: [/g\.?\s*s\.?\s*collection/iu] },
 ];
 
 const TYPE_REMOVERS = [
@@ -84,6 +85,7 @@ const PRODUCT_LINE_REMOVERS = [
   /hikkake/giu, /趴趴公仔/giu, /chocopuni/giu, /mochipico/giu,
   /(?:^|\s)SMP(?=\s|$)/giu, /s\.?\s*h\.?\s*f(?:iguarts)?/giu,
   /(?:^|\s)SHF(?=\s|$)/giu, /plamatea/giu, /t[\s-]*spark\s*legacysoul/giu,
+  /g\.?\s*s\.?\s*collection/giu,
 ];
 
 const BUSINESS_AND_MAKER_REMOVERS = [
@@ -119,6 +121,7 @@ const PRODUCT_LINE_QUERY_ALIASES: Record<ProxyProductLine, string[]> = {
   CHOCOPUNI: ['Chocopuni'], MOCHIPICO: ['MOCHIPICO'], SMP: ['SMP'],
   SHF: ['S.H.Figuarts', 'SHF'], PLAMATEA: ['PLAMATEA'],
   T_SPARK_LEGACYSOUL: ['T-SPARK LEGACYSOUL'],
+  G_S_COLLECTION: ['G.S. Collection'],
 };
 
 const MANUFACTURER_QUERY_ALIASES: Partial<Record<ProxyManufacturer, string[]>> = {

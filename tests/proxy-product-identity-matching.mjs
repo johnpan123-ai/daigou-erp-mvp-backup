@@ -140,6 +140,46 @@ try {
     const takaratomySelection = matching.selectProxyCatalogCandidate(takaratomyTitle, takaratomyRetrievedCandidates);
     const takaratomyCandidateScore = matching.scoreProxyCatalogCandidate(takaratomyTitle, takaratomyCatalogCandidate);
 
+    const gsCollectionTitle = '代理版 GSC 蔚藍檔案 Blue Archive G.S. Collection 妃姬 回憶大廳Ver.';
+    const gsCollectionCandidate = {
+      ...candidate('1/7 蔚藍檔案 Blue Archive G.S. Collection 妃姬 回憶大廳Ver.', 'gs-collection-hina-memory-lobby'),
+      brand: { name: 'Good Smile Company' },
+      catalog: {
+        deadlineAt: '2026-09-07T08:00:00.000Z',
+        supplier: { code: 'wanrong' },
+      },
+    };
+    const gsCollectionNoScaleCandidate = candidate(
+      'G.S. Collection 蔚藍檔案 妃姬 回憶大廳Ver.',
+      'gs-collection-hina-memory-lobby-no-scale',
+    );
+    const gsCollectionWrongLineCandidate = candidate(
+      'Hikkake 妃姬 回憶大廳Ver.',
+      'hikkake-hina-memory-lobby',
+    );
+    const gsCollectionWrongIdentityCandidate = candidate(
+      '1/7 蔚藍檔案 Blue Archive G.S. Collection 渚 回憶大廳Ver.',
+      'gs-collection-nagisa-memory-lobby',
+    );
+    const gsCollectionIdentity = matching.normalizeProxyProductIdentity(gsCollectionTitle);
+    const gsCollectionCandidateIdentity = matching.normalizeProxyProductIdentity(
+      gsCollectionCandidate.name,
+      gsCollectionCandidate.brand?.name,
+    );
+    const gsCollectionSelection = matching.selectProxyCatalogCandidate(gsCollectionTitle, [gsCollectionCandidate]);
+    const gsCollectionSuggestedClosingDate = new Date(gsCollectionCandidate.catalog.deadlineAt);
+    gsCollectionSuggestedClosingDate.setDate(gsCollectionSuggestedClosingDate.getDate() - 2);
+    const gsCollectionNoScaleSelection = matching.selectProxyCatalogCandidate(gsCollectionTitle, [gsCollectionNoScaleCandidate]);
+    const gsCollectionWrongLineScore = matching.scoreProxyCatalogCandidate(gsCollectionTitle, gsCollectionWrongLineCandidate);
+    const gsCollectionWrongIdentityScore = matching.scoreProxyCatalogCandidate(gsCollectionTitle, gsCollectionWrongIdentityCandidate);
+    const gsCollectionEvidenceTitles = [
+      '1/7 蔚藍檔案 Blue Archive G.S. Collection 渚 ～花香微笑～',
+      '1/7 賽馬娘Pretty Derby G.S. Collection [不融的砂糖點心]奧斯頓真弓',
+      '1/7 G.S. Collection 四月是你的謊言 宮園薰 結婚禮服Ver.',
+      'G.S. Collection 辣妹富江×Hello Kitty',
+      'G.S. Collection 大神澪 Date Style 外出服ver.',
+    ].map(title => matching.normalizeProxyProductIdentity(title));
+
     const retrievalFoundation = Object.fromEntries(Object.entries({
       shf: '代理版 BANDAI SHF 七龍珠 孫悟飯 SUPER HERO 再版',
       firefly: '代理版 GSC 黏土人 崩壞 星穹鐵道 流螢 0907',
@@ -177,6 +217,14 @@ try {
       takaratomyRetrievedCandidateCount: takaratomyRetrievedCandidates.length,
       takaratomySelection,
       takaratomyCandidateScore,
+      gsCollectionIdentity,
+      gsCollectionCandidateIdentity,
+      gsCollectionSelection,
+      gsCollectionSuggestedClosingDate: gsCollectionSuggestedClosingDate.toISOString().slice(0, 10),
+      gsCollectionNoScaleSelection,
+      gsCollectionWrongLineScore,
+      gsCollectionWrongIdentityScore,
+      gsCollectionEvidenceTitles,
       retrievalFoundation,
       simulatedWrites,
       minimumConfidence: matching.PROXY_IDENTITY_MIN_CONFIDENCE,
@@ -240,6 +288,26 @@ try {
   assert.equal(result.takaratomyCandidateScore.reason, 'identity_missing');
   assert.equal(result.takaratomyCandidateScore.confidence, 0);
   assert.equal(result.takaratomyRequestCount, result.takaratomyQueries.length, 'Safe reject may continue through the bounded progressive plan');
+  assert.equal(result.gsCollectionIdentity.productLine, 'G_S_COLLECTION');
+  assert.equal(result.gsCollectionIdentity.productType, null, 'Product line must not be hardcoded as SCALE_FIGURE');
+  assert.deepEqual(result.gsCollectionIdentity.identityTokens, ['妃姬']);
+  assert.ok(result.gsCollectionIdentity.versionTokens.includes('回憶大廳Ver.'));
+  assert.equal(result.gsCollectionIdentity.manufacturer, 'GSC');
+  assert.equal(result.gsCollectionCandidateIdentity.productLine, 'G_S_COLLECTION');
+  assert.equal(result.gsCollectionCandidateIdentity.productType, 'SCALE_FIGURE');
+  assert.equal(result.gsCollectionSelection.status, 'match');
+  assert.equal(result.gsCollectionSelection.candidate?.id, 'gs-collection-hina-memory-lobby');
+  assert.equal(result.gsCollectionSelection.candidate?.catalog?.deadlineAt, '2026-09-07T08:00:00.000Z');
+  assert.equal(result.gsCollectionSuggestedClosingDate, '2026-09-05');
+  assert.ok((result.gsCollectionSelection.confidence ?? 0) >= 0.9);
+  assert.equal(result.gsCollectionNoScaleSelection.status, 'match', 'Product line + identity + version may match without type inference');
+  assert.equal(result.gsCollectionWrongLineScore.rejected, true);
+  assert.equal(result.gsCollectionWrongLineScore.reason, 'product_line_conflict');
+  assert.equal(result.gsCollectionWrongIdentityScore.rejected, true);
+  assert.equal(result.gsCollectionWrongIdentityScore.reason, 'identity_missing');
+  assert.ok(result.gsCollectionEvidenceTitles.every(identity => identity.productLine === 'G_S_COLLECTION'));
+  assert.equal(result.gsCollectionEvidenceTitles[3].productType, null, 'Catalog evidence without explicit scale must remain unknown type');
+  assert.equal(result.gsCollectionEvidenceTitles[4].productType, null, 'Product line metadata must not infer a product type');
   assert.equal(result.retrievalFoundation.shf.identity.productLine, 'SHF');
   assert.deepEqual(result.retrievalFoundation.shf.identity.identityTokens, ['孫悟飯']);
   assert.ok(result.retrievalFoundation.shf.identity.versionTokens.includes('再版'));
@@ -270,6 +338,7 @@ try {
   console.log('PASS raw deadline remains 2026-09-18 and the existing -2 day business rule is untouched');
   console.log('PASS same-product Dreamlink + Wanrong listings select Wanrong before applying deadline rules');
   console.log('PASS TAKARATOMY aliases retrieve 大福箱27 while identity mismatch remains fail-closed');
+  console.log('PASS G.S. Collection matches by product line + identity + version without hardcoding SCALE_FIGURE');
   console.log('PASS Retrieval v2 parses SHF, date tokens, scale, product lines, qualifiers, and one-character CJK identity');
   console.log('PASS Production Supabase requests = 0');
 } finally {
