@@ -118,6 +118,28 @@ try {
     const mutsukiScores = mutsukiCandidates.map(item => matching.scoreProxyCatalogCandidate(mutsukiTitle, item));
     const mutsukiSelection = matching.selectProxyCatalogCandidate(mutsukiTitle, mutsukiCandidates);
 
+    const takaratomyTitle = '代理版 TAKARATOMY 商店限定 彈珠超人 彈珠人 大福箱’27 戰鬥鳳凰號豪華套組';
+    const takaratomyIdentity = matching.normalizeProxyProductIdentity(takaratomyTitle);
+    const takaratomyQueries = matching.buildProxyCatalogQueries(takaratomyIdentity);
+    const takaratomyCatalogCandidate = {
+      ...candidate('T-SPARK LEGACYSOUL 彈珠超人 大福箱27[TAKARATOMY]', 'takaratomy-big-box-27'),
+      brand: { name: '千值練' },
+      catalog: {
+        deadlineAt: '2026-08-25T08:00:00.000Z',
+        supplier: { code: 'wanrong' },
+      },
+    };
+    const takaratomyRetrievedCandidates = [];
+    let takaratomyRequestCount = 0;
+    for (const query of takaratomyQueries) {
+      takaratomyRequestCount += 1;
+      if (query === '彈珠超人 大福箱27') takaratomyRetrievedCandidates.push(takaratomyCatalogCandidate);
+      const selection = matching.selectProxyCatalogCandidate(takaratomyTitle, takaratomyRetrievedCandidates);
+      if (matching.isSafeProxyCatalogSelection(takaratomyTitle, selection)) break;
+    }
+    const takaratomySelection = matching.selectProxyCatalogCandidate(takaratomyTitle, takaratomyRetrievedCandidates);
+    const takaratomyCandidateScore = matching.scoreProxyCatalogCandidate(takaratomyTitle, takaratomyCatalogCandidate);
+
     const retrievalFoundation = Object.fromEntries(Object.entries({
       shf: '代理版 BANDAI SHF 七龍珠 孫悟飯 SUPER HERO 再版',
       firefly: '代理版 GSC 黏土人 崩壞 星穹鐵道 流螢 0907',
@@ -149,6 +171,12 @@ try {
       orangeSelection,
       mutsukiScores,
       mutsukiSelection,
+      takaratomyIdentity,
+      takaratomyQueries,
+      takaratomyRequestCount,
+      takaratomyRetrievedCandidateCount: takaratomyRetrievedCandidates.length,
+      takaratomySelection,
+      takaratomyCandidateScore,
       retrievalFoundation,
       simulatedWrites,
       minimumConfidence: matching.PROXY_IDENTITY_MIN_CONFIDENCE,
@@ -199,6 +227,19 @@ try {
   assert.equal(result.mutsukiSelection.candidate?.id, 'nendoroid-mutsuki-wanrong');
   assert.equal(result.mutsukiSelection.candidate?.catalog?.supplier?.code, 'wanrong');
   assert.equal(result.mutsukiSelection.candidate?.catalog?.deadlineAt, '2026-09-07T08:00:00.000Z');
+  assert.equal(result.takaratomyIdentity.manufacturer, 'TAKARATOMY');
+  assert.equal(result.takaratomyQueries[0], '彈珠超人 大福箱27');
+  assert.ok(result.takaratomyQueries.includes('T-SPARK LEGACYSOUL 彈珠超人'));
+  assert.ok(result.takaratomyQueries.includes('TAKARATOMY 大福箱27'));
+  assert.ok(result.takaratomyQueries.includes('TAKARATOMY'));
+  assert.ok(result.takaratomyQueries.every(query => !query.includes('’')));
+  assert.ok(result.takaratomyQueries.every(query => !query.includes('彈珠人')));
+  assert.ok(result.takaratomyQueries.length <= 8, 'Progressive query planner must remain bounded');
+  assert.equal(result.takaratomyRetrievedCandidateCount, 1, 'Query planner must retrieve the existing Catalog candidate');
+  assert.equal(result.takaratomySelection.status, 'no_match', 'Retrieval must not bypass identity safety');
+  assert.equal(result.takaratomyCandidateScore.reason, 'identity_missing');
+  assert.equal(result.takaratomyCandidateScore.confidence, 0);
+  assert.equal(result.takaratomyRequestCount, result.takaratomyQueries.length, 'Safe reject may continue through the bounded progressive plan');
   assert.equal(result.retrievalFoundation.shf.identity.productLine, 'SHF');
   assert.deepEqual(result.retrievalFoundation.shf.identity.identityTokens, ['孫悟飯']);
   assert.ok(result.retrievalFoundation.shf.identity.versionTokens.includes('再版'));
@@ -228,6 +269,7 @@ try {
   console.log('PASS different POP UP PARADE L Size characters are rejected with score 0');
   console.log('PASS raw deadline remains 2026-09-18 and the existing -2 day business rule is untouched');
   console.log('PASS same-product Dreamlink + Wanrong listings select Wanrong before applying deadline rules');
+  console.log('PASS TAKARATOMY aliases retrieve 大福箱27 while identity mismatch remains fail-closed');
   console.log('PASS Retrieval v2 parses SHF, date tokens, scale, product lines, qualifiers, and one-character CJK identity');
   console.log('PASS Production Supabase requests = 0');
 } finally {

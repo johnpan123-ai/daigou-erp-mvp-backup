@@ -1,6 +1,6 @@
 export type ProxyProductType = 'FIGMA' | 'NENDOROID' | 'NENDOROID_DOLL' | 'POP_UP_PARADE' | 'SCALE_FIGURE';
-export type ProxyProductLine = 'YUMEMIRIZE' | 'RELAX_TIME' | 'HIKKAKE' | 'CHOCOPUNI' | 'MOCHIPICO' | 'SMP' | 'SHF' | 'PLAMATEA';
-export type ProxyManufacturer = 'GSC' | 'SEGA' | 'BANDAI' | 'FURYU' | 'TAITO';
+export type ProxyProductLine = 'YUMEMIRIZE' | 'RELAX_TIME' | 'HIKKAKE' | 'CHOCOPUNI' | 'MOCHIPICO' | 'SMP' | 'SHF' | 'PLAMATEA' | 'T_SPARK_LEGACYSOUL';
+export type ProxyManufacturer = 'GSC' | 'SEGA' | 'BANDAI' | 'FURYU' | 'TAITO' | 'TAKARATOMY';
 
 export interface ProxyProductIdentity {
   originalTitle: string;
@@ -69,6 +69,7 @@ const PRODUCT_LINE_PATTERNS: Array<{ line: ProxyProductLine; patterns: RegExp[] 
   { line: 'SMP', patterns: [/(?:^|\s)SMP(?=\s|$)/iu] },
   { line: 'SHF', patterns: [/s\.?\s*h\.?\s*f(?:iguarts)?/iu, /(?:^|\s)SHF(?=\s|$)/iu] },
   { line: 'PLAMATEA', patterns: [/plamatea/iu] },
+  { line: 'T_SPARK_LEGACYSOUL', patterns: [/t[\s-]*spark\s*legacysoul/iu] },
 ];
 
 const TYPE_REMOVERS = [
@@ -82,13 +83,13 @@ const PRODUCT_LINE_REMOVERS = [
   /yumemirize/giu, /relax\s*time/giu, /休息時光/giu,
   /hikkake/giu, /趴趴公仔/giu, /chocopuni/giu, /mochipico/giu,
   /(?:^|\s)SMP(?=\s|$)/giu, /s\.?\s*h\.?\s*f(?:iguarts)?/giu,
-  /(?:^|\s)SHF(?=\s|$)/giu, /plamatea/giu,
+  /(?:^|\s)SHF(?=\s|$)/giu, /plamatea/giu, /t[\s-]*spark\s*legacysoul/giu,
 ];
 
 const BUSINESS_AND_MAKER_REMOVERS = [
   /【[^】]*】/gu,
   /(?:^|\s)(?:代理版|代理|預購|廠商)(?=\s|$)/giu,
-  /(?:^|\s)(?:GSC|Good\s*Smile(?:\s*Company)?|MF|BANDAI|萬代|壽屋|Kotobukiya|ALTER|FREEing|Phat!?|WAVE|Aniplex|SEGA|Taito|Furyu|Myethos|Union\s*Creative|Kadokawa|Medicom|Kaiyodo|Sentinel|Di\s*molto\s*bene|Hobby\s*Max|eStream|BINDing|Ques\s*Q|B-style|PLUM|AMAKUNI|AmiAmi|Chara-Ani|Broccoli|Megahouse)(?=\s|$)/giu,
+  /(?:^|\s)(?:GSC|Good\s*Smile(?:\s*Company)?|MF|BANDAI|萬代|TAKARATOMY|壽屋|Kotobukiya|ALTER|FREEing|Phat!?|WAVE|Aniplex|SEGA|Taito|Furyu|Myethos|Union\s*Creative|Kadokawa|Medicom|Kaiyodo|Sentinel|Di\s*molto\s*bene|Hobby\s*Max|eStream|BINDing|Ques\s*Q|B-style|PLUM|AMAKUNI|AmiAmi|Chara-Ani|Broccoli|Megahouse)(?=\s|$)/giu,
   /(?:^|\s)(?:玩偶|模型|景品|公仔|完成品|PVC|組裝模型|盒玩|大型絨毛|泡麵蓋公仔|大尺寸\d+公分玩偶|原創插畫)(?=\s|$)/giu,
 ];
 
@@ -117,6 +118,11 @@ const PRODUCT_LINE_QUERY_ALIASES: Record<ProxyProductLine, string[]> = {
   YUMEMIRIZE: ['Yumemirize'], RELAX_TIME: ['Relax time'], HIKKAKE: ['Hikkake'],
   CHOCOPUNI: ['Chocopuni'], MOCHIPICO: ['MOCHIPICO'], SMP: ['SMP'],
   SHF: ['S.H.Figuarts', 'SHF'], PLAMATEA: ['PLAMATEA'],
+  T_SPARK_LEGACYSOUL: ['T-SPARK LEGACYSOUL'],
+};
+
+const MANUFACTURER_QUERY_ALIASES: Partial<Record<ProxyManufacturer, string[]>> = {
+  TAKARATOMY: ['TAKARATOMY'],
 };
 
 const compactToken = (value: string): string => value.toLocaleLowerCase().replace(/[\s\-_.・‧:：/／]/gu, '');
@@ -144,7 +150,31 @@ const detectProxyManufacturer = (title: string, manufacturerName: string): Proxy
   if (/(?:^|\s)BANDAI(?=\s|$)|萬代/iu.test(combined)) return 'BANDAI';
   if (/(?:^|\s)FURYU(?=\s|$)/iu.test(combined)) return 'FURYU';
   if (/(?:^|\s)TAITO(?=\s|$)/iu.test(combined)) return 'TAITO';
+  if (/(?:^|\s)TAKARATOMY(?=\s|$)|TAKARA\s*TOMY/iu.test(combined)) return 'TAKARATOMY';
   return null;
+};
+
+const normalizeCatalogQueryText = (value: string): string => value
+  .normalize('NFKC')
+  .replace(/[’‘`']/gu, '')
+  .replace(/彈珠人/gu, '彈珠超人')
+  .replace(/\s+/gu, ' ')
+  .trim();
+
+const uniqueCatalogQueries = (values: string[]): string[] => unique(values.map(normalizeCatalogQueryText));
+
+const IMPORTANT_SERIES_IGNORES = /^(?:商店限定|限定|代理版?|預購|廠商)$/iu;
+
+const importantSeriesTokens = (identity: ProxyProductIdentity): string[] => uniqueCatalogQueries(
+  identity.seriesTokens.filter(token => !IMPORTANT_SERIES_IGNORES.test(token)),
+);
+
+const contextualProductLineAliases = (identity: ProxyProductIdentity, seriesTokens: string[]): string[] => {
+  const compactSeries = new Set(seriesTokens.map(compactToken));
+  if (identity.manufacturer === 'TAKARATOMY' && compactSeries.has(compactToken('彈珠超人'))) {
+    return PRODUCT_LINE_QUERY_ALIASES.T_SPARK_LEGACYSOUL;
+  }
+  return [];
 };
 
 const deriveIdentityAliases = (tokens: string[], primaryIndex: number, primary: string): string[] => {
@@ -234,7 +264,8 @@ export function buildProxyCatalogQueries(identity: ProxyProductIdentity): string
       for (const candidate of identity.identityAliases) aliasQueries.push(`${alias} ${candidate}`);
     }
   }
-  const seriesContext = identity.seriesTokens.slice(-2).join(' ').trim();
+  const significantSeriesTokens = importantSeriesTokens(identity);
+  const seriesContext = significantSeriesTokens.slice(-2).join(' ').trim();
   const qualifierContext = identity.versionTokens.filter(token => !/^(?:再版|再販|附特典|特典)$/u.test(token)).join(' ');
   const contextQueries = seriesContext
     ? unique([
@@ -242,15 +273,28 @@ export function buildProxyCatalogQueries(identity: ProxyProductIdentity): string
       `${seriesContext} ${primaryIdentity}${sizeSuffix}`,
     ])
     : [];
+  const queryLineAliases = contextualProductLineAliases(identity, significantSeriesTokens);
+  const manufacturerAliases = identity.manufacturer ? (MANUFACTURER_QUERY_ALIASES[identity.manufacturer] ?? []) : [];
+  const firstSeries = significantSeriesTokens[0] ?? '';
+  const lastSeries = significantSeriesTokens.at(-1) ?? '';
+  const seriesOnlyQueries = uniqueCatalogQueries([
+    firstSeries && lastSeries && firstSeries !== lastSeries ? `${firstSeries} ${lastSeries}` : '',
+    ...queryLineAliases.map(alias => firstSeries ? `${alias} ${firstSeries}` : alias),
+    ...manufacturerAliases.map(alias => lastSeries ? `${alias} ${lastSeries}` : alias),
+    lastSeries,
+    ...manufacturerAliases,
+  ]);
   const fallbackQuery = `${primaryIdentity}${sizeSuffix}`;
-  const preferred = unique([
+  const preferred = uniqueCatalogQueries([
     ...primaryQueries,
+    ...seriesOnlyQueries,
     ...contextQueries,
     ...aliasQueries,
     ...identity.identityAliases.map(alias => `${alias}${sizeSuffix}`),
   ]);
-  if (preferred.includes(fallbackQuery)) return preferred.slice(0, MAX_PROXY_CATALOG_QUERIES);
-  return unique([...preferred.slice(0, MAX_PROXY_CATALOG_QUERIES - 1), fallbackQuery]);
+  const normalizedFallback = normalizeCatalogQueryText(fallbackQuery);
+  if (preferred.includes(normalizedFallback)) return preferred.slice(0, MAX_PROXY_CATALOG_QUERIES);
+  return uniqueCatalogQueries([...preferred.slice(0, MAX_PROXY_CATALOG_QUERIES - 1), normalizedFallback]);
 }
 
 const hasExactIdentity = (source: ProxyProductIdentity, candidate: ProxyProductIdentity): boolean => {
