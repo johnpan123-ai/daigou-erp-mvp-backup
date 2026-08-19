@@ -18,6 +18,7 @@ export type ProxyIdentityPilotEvidence =
   | 'PRODUCT_TYPE_EXACT'
   | 'PRODUCT_LINE_EXACT'
   | 'VERSION_EXACT'
+  | 'VERSION_DEFAULT_COMPATIBLE'
   | 'FORM_EXACT'
   | 'SCALE_EXACT'
   | 'MODEL_CODE_EXACT'
@@ -103,6 +104,17 @@ const hasOverlap = (left: string[], right: string[]): boolean => {
   return compactSet(left).some(value => rightSet.has(value));
 };
 
+const DEFAULT_VERSION_TOKENS = new Set([
+  '一般版',
+  '普通版',
+  '通常版',
+  'standard',
+  'standardver',
+]);
+
+const isDefaultVersion = (versions: string[]): boolean => versions.length > 0
+  && versions.every(version => DEFAULT_VERSION_TOKENS.has(compact(version)));
+
 const compoundMembers = (identity: ProxyProductIdentityV2): string[] => identity.compoundSubjects
   .flatMap(compound => compound.members);
 
@@ -167,12 +179,19 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
 
   if (sourceIdentity.versions.length > 0 || candidateIdentity.versions.length > 0) {
     if (sourceIdentity.versions.length > 0 && candidateIdentity.versions.length === 0) {
-      return rejectedScore(candidate, 'version_missing', sourceIdentity, candidateIdentity, evidence);
+      const hasStrongStructuralMatch = evidence.includes('PRODUCT_LINE_EXACT')
+        || evidence.includes('PRODUCT_TYPE_EXACT');
+      const hasReliableSeriesOverlap = hasOverlap(sourceIdentity.series, candidateIdentity.series);
+      if (!isDefaultVersion(sourceIdentity.versions) || !hasStrongStructuralMatch || !hasReliableSeriesOverlap) {
+        return rejectedScore(candidate, 'version_missing', sourceIdentity, candidateIdentity, evidence);
+      }
+      evidence.push('VERSION_DEFAULT_COMPATIBLE');
+    } else {
+      if (!setsEqual(sourceIdentity.versions, candidateIdentity.versions)) {
+        return rejectedScore(candidate, 'version_conflict', sourceIdentity, candidateIdentity, evidence);
+      }
+      evidence.push('VERSION_EXACT');
     }
-    if (!setsEqual(sourceIdentity.versions, candidateIdentity.versions)) {
-      return rejectedScore(candidate, 'version_conflict', sourceIdentity, candidateIdentity, evidence);
-    }
-    evidence.push('VERSION_EXACT');
   }
 
   if (sourceIdentity.forms.length > 0 || candidateIdentity.forms.length > 0) {
@@ -204,6 +223,7 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
   if (evidence.includes('PRODUCT_TYPE_EXACT')) confidence += 0.1;
   if (evidence.includes('PRODUCT_LINE_EXACT')) confidence += 0.1;
   if (evidence.includes('VERSION_EXACT')) confidence += 0.1;
+  if (evidence.includes('VERSION_DEFAULT_COMPATIBLE')) confidence += 0.05;
   if (evidence.includes('FORM_EXACT')) confidence += 0.05;
   if (evidence.includes('SCALE_EXACT')) confidence += 0.05;
   if (evidence.includes('MODEL_CODE_EXACT')) confidence += 0.1;

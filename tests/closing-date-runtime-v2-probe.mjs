@@ -24,6 +24,14 @@ const cases = [
     expectedDecision: 'V2_PILOT',
   },
   {
+    id: 'kadokawa-holo-regular-missing-version',
+    title: '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 一般版',
+    expectedTitle: /PLASTIC MODEL SERIES.*赫蘿$/iu,
+    expectedDecision: 'V2_PILOT',
+    expectedRawDate: '2026-09-07',
+    expectedClosingDate: '2026-09-05',
+  },
+  {
     id: 'apex-yixuan',
     title: '代理版 APEX 1/7 絕區零 儀玄 獨步滄溟Ver 附特典',
     expectedTitle: /儀玄.*獨步滄溟/iu,

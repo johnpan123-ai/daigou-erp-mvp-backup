@@ -120,7 +120,8 @@ const VERSION_PATTERNS = [
   /black\s*barrel\s*edition/giu,
   /dx\s*ver\.?/giu,
   /\b\d+(?:st|nd|rd|th)\b/giu,
-  /(?:一般版|普通版|原作版|再版|再販|黑槍版|限定版)/gu,
+  /(?:一般版|普通版|通常版|原作版|再版|再販|黑槍版|限定版)/gu,
+  /\bstandard(?:\s*ver\.?)?/giu,
   /(?:^|\s)(dx|deluxe)(?=\s|$)/giu,
 ];
 

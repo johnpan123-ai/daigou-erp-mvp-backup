@@ -77,6 +77,13 @@ try {
         source: '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 DX Ver.',
         candidates: [candidate('KADOKAWA PLASTIC MODEL SERIES《狼與辛香料 MERCHANT MEETS THE WISE WOLF》赫蘿 DX Ver.', 'kadokawa-holo-dx')],
       },
+      kadokawaHoloRegularMissingVersion: {
+        source: '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 一般版',
+        candidates: [
+          candidate('KADOKAWA PLASTIC MODEL SERIES《狼與辛香料 MERCHANT MEETS THE WISE WOLF》赫蘿', 'kadokawa-holo-regular'),
+          candidate('KADOKAWA PLASTIC MODEL SERIES《狼與辛香料 MERCHANT MEETS THE WISE WOLF》赫蘿 DX Ver.', 'kadokawa-holo-dx-competing'),
+        ],
+      },
       apexYixuan: {
         source: '代理版 APEX 1/7 絕區零 儀玄 獨步滄溟Ver 附特典',
         candidates: [candidate('1/7 PVC 絕區零 儀玄·獨步滄溟 Ver.', 'apex-yixuan', 'wanrong', 'APEX')],
@@ -132,7 +139,26 @@ try {
         '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 DX Ver.',
         candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿 一般版 組裝模型', 'wrong-version'),
       ),
+      regularVsDx: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 一般版',
+        candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿 DX Ver.', 'regular-vs-dx'),
+      ),
+      regularWrongSubject: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 一般版',
+        candidate('KADOKAWA PLASTIC MODEL SERIES 咒術迴戰 兩面宿儺 一般版', 'regular-wrong-subject'),
+      ),
+      dxMissingVersion: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 DX Ver.',
+        candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿', 'dx-missing-version'),
+      ),
     };
+
+    const defaultVersionAliases = ['一般版', '普通版', '通常版', 'Standard', 'Standard Ver.'].map(version => (
+      pilot.scoreProxyCatalogCandidateV2Pilot(
+        `代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 ${version}`,
+        candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿', `default-${version}`),
+      )
+    ));
 
     const supplierSource = '代理版 角川 KDcolle 狼與辛香料 原作版 赫蘿 無比例模型';
     const supplierSelection = pilot.selectProxyCatalogCandidateV2Pilot(supplierSource, [
@@ -174,6 +200,7 @@ try {
     return {
       matched,
       rejected,
+      defaultVersionAliases,
       supplierSelection,
       ambiguitySelection,
       v1PriorityResolution,
@@ -209,7 +236,15 @@ try {
   assert.equal(result.rejected.smpDifferentSet.reason, 'compound_subject_conflict');
   assert.equal(result.rejected.productLineConflict.reason, 'product_line_conflict');
   assert.equal(result.rejected.versionConflict.reason, 'version_conflict');
+  assert.equal(result.rejected.regularVsDx.reason, 'version_conflict');
+  assert.equal(result.rejected.regularWrongSubject.reason, 'subject_conflict');
+  assert.equal(result.rejected.dxMissingVersion.reason, 'version_missing');
   for (const entry of Object.values(result.rejected)) assert.equal(entry.rejected, true);
+  for (const entry of result.defaultVersionAliases) {
+    assert.equal(entry.rejected, false, 'Default/Standard source version should be compatible with a missing candidate version');
+    assert.ok(entry.evidence.includes('VERSION_DEFAULT_COMPATIBLE'));
+    assert.ok(entry.confidence >= 0.9);
+  }
 
   assert.equal(result.supplierSelection.status, 'match');
   assert.equal(result.supplierSelection.candidate.id, 'wanrong-holo', 'Wanrong priority must remain unchanged');

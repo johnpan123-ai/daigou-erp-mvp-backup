@@ -26,6 +26,7 @@ import {
 import {
   resolveProxyCatalogDecision,
   canUseProxyIdentityPilot,
+  scoreProxyCatalogCandidateV2Pilot,
   type ProxyIdentityPilotEvidence,
 } from '../lib/proxyProductIdentityPilot';
 import { buildProxyCatalogQueriesV2 } from '../lib/proxyProductIdentityQueryV2';
@@ -88,7 +89,7 @@ type LookupDiagnostic = {
   source: 'proxy' | 'hololive' | 'vspo';
   originalTitle: string;
   decision: LookupDecision;
-  decisionSource?: 'V1' | 'V2_PILOT';
+  decisionSource?: 'V1' | 'V2_PILOT' | 'NO_MATCH_V1_ONLY' | 'NO_MATCH_AFTER_V2';
   score: number;
   reason?: string;
   sourceIdentity?: LookupIdentitySummary;
@@ -100,6 +101,8 @@ type LookupDiagnostic = {
   v1Queries?: string[];
   v2Queries?: string[];
   executedQueries?: string[];
+  v2Attempted?: boolean;
+  v2RejectReason?: string;
 };
 
 const summarizeIdentity = (identity: ReturnType<typeof normalizeProxyProductIdentity>): LookupIdentitySummary => ({
@@ -1718,7 +1721,7 @@ export default function PurchaseRecords() {
             source: 'proxy',
             originalTitle,
             decision: 'NOT_FOUND',
-            decisionSource: 'V1',
+            decisionSource: 'NO_MATCH_V1_ONLY',
             score: 0,
             reason: '商品識別資訊不足，需要人工確認',
             sourceIdentity: summarizeIdentity(identity),
@@ -1776,6 +1779,13 @@ export default function PurchaseRecords() {
         }
       }
       if (successfulQueries === 0 && lastQueryError) throw lastQueryError;
+      const v2Attempted = canUseProxyIdentityPilot(providerMode);
+      const bestPilotRejection = v2Attempted
+        ? candidates
+          .map(candidate => scoreProxyCatalogCandidateV2Pilot(originalTitle, candidate))
+          .filter(result => result.rejected)
+          .sort((left, right) => right.evidence.length - left.evidence.length)[0]
+        : undefined;
       const summarizeScoredCandidate = (candidate: ProxyCatalogCandidate) => summarizeCandidate(
         candidate,
         scoreProxyCatalogCandidate(originalTitle, candidate).confidence,
@@ -1795,7 +1805,8 @@ export default function PurchaseRecords() {
           : selection.status === 'ambiguous'
             ? 'AMBIGUOUS'
             : 'NOT_FOUND',
-        decisionSource: 'V1',
+        decisionSource: decisionResolution.match?.decisionSource
+          ?? (v2Attempted ? 'NO_MATCH_AFTER_V2' : 'NO_MATCH_V1_ONLY'),
         score: selection.confidence,
         reason: selection.status === 'match' ? undefined : selection.message,
         sourceIdentity: summarizeIdentity(identity),
@@ -1803,6 +1814,8 @@ export default function PurchaseRecords() {
         v1Queries: queries,
         v2Queries,
         executedQueries,
+        v2Attempted,
+        v2RejectReason: bestPilotRejection?.reason,
         candidates: selectionCandidates,
         ...overrides,
       });
@@ -3276,6 +3289,14 @@ export default function PurchaseRecords() {
                     <strong>Runtime Queries：</strong>{diagnostic.executedQueries.join(' → ')}
                     {diagnostic.v2Queries && diagnostic.v2Queries.length > 0 && (
                       <span style={{ color: '#6d28d9' }}>（含 Parser v2 fallback）</span>
+                    )}
+                  </div>
+                )}
+                {diagnostic.v2Attempted && (
+                  <div style={{ marginTop: '4px', color: '#6d28d9' }}>
+                    <strong>V2 attempted：</strong>YES
+                    {diagnostic.v2RejectReason && (
+                      <span> ・ V2 reject reason：{diagnostic.v2RejectReason}</span>
                     )}
                   </div>
                 )}
