@@ -52,6 +52,24 @@ export interface ProxyProductIdentityV2 {
   residualTokens: string[];
 }
 
+export type ProxySubjectResolutionV21 =
+  | 'RESOLVED_SUBJECT'
+  | 'COMPOUND_SUBJECT'
+  | 'UNRESOLVED_SUBJECT';
+
+export type ProxySubjectEvidenceV21 =
+  | 'PRODUCT_LINE_TITLE_GRAMMAR'
+  | 'ROLE_DELIMITED_SUBJECT'
+  | 'MULTI_TOKEN_PERSON_NAME'
+  | 'COMPOUND_SUBJECT_SET';
+
+export interface ProxyProductIdentityV21 extends ProxyProductIdentityV2 {
+  parserVersion: '2.1';
+  subjectResolution: ProxySubjectResolutionV21;
+  subjectEvidence: ProxySubjectEvidenceV21[];
+  unresolvedSubjectTokens: string[];
+}
+
 type ClassifiedPattern<T extends string> = {
   value: T;
   patterns: RegExp[];
@@ -67,6 +85,11 @@ const PRODUCT_TYPE_PATTERNS: Array<ClassifiedPattern<ProxySemanticProductType>> 
   { value: 'SCALE_FIGURE', patterns: [/scale\s*figure/giu, /スケールフィギュア/giu, /pvc\s*完成品/giu] },
   { value: 'ACTION_FIGURE', patterns: [/可動模型/gu, /action\s*figure/giu] },
   { value: 'PRIZE_FIGURE', patterns: [/景品/gu] },
+];
+
+const V21_PRODUCT_TYPE_PATTERNS: Array<ClassifiedPattern<ProxySemanticProductType>> = [
+  { value: 'ACTION_FIGURE', patterns: [/包膠可動/gu, /可動完成品/gu] },
+  ...PRODUCT_TYPE_PATTERNS,
 ];
 
 const PRODUCT_LINE_PATTERNS: Array<ClassifiedPattern<ProxySemanticProductLine>> = [
@@ -125,12 +148,22 @@ const VERSION_PATTERNS = [
   /(?:^|\s)(dx|deluxe)(?=\s|$)/giu,
 ];
 
+const V21_VERSION_PATTERNS = [
+  /\d+\s*週年紀念版/gu,
+  ...VERSION_PATTERNS,
+];
+
 const NUMBERED_VERSION_PATTERNS = [/ver(?:sion)?\.?\s*\d+/giu];
 
 const DIMENSION_PATTERNS = [
   /全高\s*約?\s*\d+(?:\.\d+)?\s*(?:公分|cm|mm)/giu,
   /\d+(?:\.\d+)?\s*(?:公分|cm|mm)(?:高|長|寬)?/giu,
   /(?:xxl|xl|l|m|s)\s*size/giu,
+];
+
+const V21_DIMENSION_PATTERNS = [
+  /(?:全高\s*)?約\s*\d+(?:\.\d+)?\s*(?:公分|cm|mm)(?:高|長|寬)?/giu,
+  ...DIMENSION_PATTERNS,
 ];
 
 const GENERIC_NON_IDENTITY = new Set([
@@ -257,6 +290,103 @@ const tokenizeResidual = (source: string): string[] => source
   .filter(Boolean)
   .filter(token => !GENERIC_NON_IDENTITY.has(token.toLocaleLowerCase()));
 
+type SubjectExtractionMode = 'legacy-v2' | 'v2.1';
+
+type SubjectExtractionV21 = {
+  subjects: string[];
+  series: string[];
+  forms: string[];
+  resolution: ProxySubjectResolutionV21;
+  evidence: ProxySubjectEvidenceV21[];
+  unresolvedTokens: string[];
+};
+
+const PRODUCT_LINE_TITLE_GRAMMAR = new Set<ProxySemanticProductLine>([
+  'KDCOLLE',
+  'KADOKAWA_PLASTIC_MODEL_SERIES',
+]);
+
+const meaningfulResidualTokens = (source: string): string[] => tokenizeResidual(source)
+  .filter(token => hasCjk(token) || /[\p{Letter}]/u.test(token));
+
+const extractSubjectV21 = (
+  remaining: string,
+  productLines: ProxySemanticProductLine[],
+  compoundSubjects: ProxyCompoundSubjectV2[],
+  existingSubjects: string[],
+): SubjectExtractionV21 => {
+  const unresolved = (): SubjectExtractionV21 => ({
+    subjects: [],
+    series: [],
+    forms: [],
+    resolution: 'UNRESOLVED_SUBJECT',
+    evidence: [],
+    unresolvedTokens: meaningfulResidualTokens(remaining),
+  });
+
+  if (compoundSubjects.length > 0 && existingSubjects.length > 0) {
+    return {
+      subjects: existingSubjects,
+      series: meaningfulResidualTokens(remaining),
+      forms: [],
+      resolution: 'COMPOUND_SUBJECT',
+      evidence: ['COMPOUND_SUBJECT_SET'],
+      unresolvedTokens: [],
+    };
+  }
+
+  if (productLines.includes('PLAMATEA')) {
+    const roleDelimited = remaining.match(
+      /([\p{Script=Latin}][\p{Letter}\p{Number}_-]*)\s*\/\s*([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}][\p{Letter}\p{Number}'’-]*(?:·[\p{Letter}\p{Number}'’-]+)*)/u,
+    );
+    if (roleDelimited && roleDelimited.index !== undefined) {
+      const before = remaining.slice(0, roleDelimited.index);
+      const after = remaining.slice(roleDelimited.index + roleDelimited[0].length);
+      return {
+        subjects: [cleanValue(roleDelimited[2])],
+        series: meaningfulResidualTokens(`${before} ${roleDelimited[1]} ${after}`),
+        forms: [],
+        resolution: 'RESOLVED_SUBJECT',
+        evidence: ['ROLE_DELIMITED_SUBJECT'],
+        unresolvedTokens: [],
+      };
+    }
+  }
+
+  const multiTokenPerson = remaining.match(
+    /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,})\s+([\p{Script=Latin}])\.?\s+([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{1,})/u,
+  );
+  if (multiTokenPerson && multiTokenPerson.index !== undefined) {
+    const before = remaining.slice(0, multiTokenPerson.index);
+    const after = remaining.slice(multiTokenPerson.index + multiTokenPerson[0].length);
+    return {
+      subjects: [`${multiTokenPerson[1]} ${multiTokenPerson[2]} ${multiTokenPerson[3]}`],
+      series: meaningfulResidualTokens(before),
+      forms: meaningfulResidualTokens(after),
+      resolution: 'RESOLVED_SUBJECT',
+      evidence: ['MULTI_TOKEN_PERSON_NAME'],
+      unresolvedTokens: [],
+    };
+  }
+
+  const residualTokens = meaningfulResidualTokens(remaining);
+  if (
+    productLines.some(line => PRODUCT_LINE_TITLE_GRAMMAR.has(line))
+    && residualTokens.length >= 2
+  ) {
+    return {
+      subjects: [residualTokens[residualTokens.length - 1]],
+      series: residualTokens.slice(0, -1),
+      forms: [],
+      resolution: 'RESOLVED_SUBJECT',
+      evidence: ['PRODUCT_LINE_TITLE_GRAMMAR'],
+      unresolvedTokens: [],
+    };
+  }
+
+  return unresolved();
+};
+
 /**
  * Test/evaluation-only semantic parser foundation.
  *
@@ -265,7 +395,11 @@ const tokenizeResidual = (source: string): string[] => source
  * the primary matcher; v2 may only support explicitly gated Next-only diagnostics
  * and pilot matching.
  */
-export function parseProxyProductIdentityV2(title: string, manufacturerName = ''): ProxyProductIdentityV2 {
+function parseProxyProductIdentityInternal(
+  title: string,
+  manufacturerName: string,
+  subjectMode: SubjectExtractionMode,
+): ProxyProductIdentityV2 | ProxyProductIdentityV21 {
   const normalizedTitle = normalizeTitle(title);
   const manufacturers: string[] = [];
   const productTypes: ProxySemanticProductType[] = [];
@@ -297,12 +431,24 @@ export function parseProxyProductIdentityV2(title: string, manufacturerName = ''
     if (matched) manufacturers.push(definition.value);
   }
   remaining = classifyAndRemove(remaining, PRODUCT_LINE_PATTERNS, productLines);
-  remaining = classifyAndRemove(remaining, PRODUCT_TYPE_PATTERNS, productTypes);
+  remaining = classifyAndRemove(
+    remaining,
+    subjectMode === 'v2.1' ? V21_PRODUCT_TYPE_PATTERNS : PRODUCT_TYPE_PATTERNS,
+    productTypes,
+  );
   remaining = extractScale(remaining, scales);
-  remaining = recordMatchesAndRemove(remaining, DIMENSION_PATTERNS, dimensions);
+  remaining = recordMatchesAndRemove(
+    remaining,
+    subjectMode === 'v2.1' ? V21_DIMENSION_PATTERNS : DIMENSION_PATTERNS,
+    dimensions,
+  );
   remaining = recordMatchesAndRemove(remaining, NUMBERED_VERSION_PATTERNS, versions);
   remaining = extractContextualVersions(remaining, versions);
-  remaining = recordMatchesAndRemove(remaining, VERSION_PATTERNS, versions);
+  remaining = recordMatchesAndRemove(
+    remaining,
+    subjectMode === 'v2.1' ? V21_VERSION_PATTERNS : VERSION_PATTERNS,
+    versions,
+  );
   remaining = recordMatchesAndRemove(remaining, QUALIFIER_PATTERNS, qualifiers);
   remaining = extractModelCodes(remaining, modelCodes, businessMetadata);
 
@@ -315,8 +461,19 @@ export function parseProxyProductIdentityV2(title: string, manufacturerName = ''
   remaining = extractCompoundSubjects(remaining, compoundSubjects, subjects);
   const residualTokens = tokenizeResidual(remaining);
   const meaningful = residualTokens.filter(token => hasCjk(token) || /[\p{Letter}]/u.test(token));
+  let subjectResolution: ProxySubjectResolutionV21 = 'UNRESOLVED_SUBJECT';
+  let subjectEvidence: ProxySubjectEvidenceV21[] = [];
+  let unresolvedSubjectTokens: string[] = [];
 
-  if (subjects.length === 0 && meaningful.length > 0) {
+  if (subjectMode === 'v2.1') {
+    const extraction = extractSubjectV21(remaining, productLines, compoundSubjects, subjects);
+    subjects.splice(0, subjects.length, ...extraction.subjects);
+    series.push(...extraction.series);
+    forms.push(...extraction.forms);
+    subjectResolution = extraction.resolution;
+    subjectEvidence = extraction.evidence;
+    unresolvedSubjectTokens = extraction.unresolvedTokens;
+  } else if (subjects.length === 0 && meaningful.length > 0) {
     if (hadTransformationForm && meaningful.length >= 2) {
       subjects.push(...meaningful.slice(-2));
       series.push(...meaningful.slice(0, -2));
@@ -332,7 +489,7 @@ export function parseProxyProductIdentityV2(title: string, manufacturerName = ''
     series.push(...meaningful);
   }
 
-  return {
+  const identity: ProxyProductIdentityV2 = {
     originalTitle: title,
     normalizedTitle,
     manufacturers: unique(manufacturers),
@@ -351,4 +508,31 @@ export function parseProxyProductIdentityV2(title: string, manufacturerName = ''
     separators,
     residualTokens,
   };
+
+  if (subjectMode === 'v2.1') {
+    return {
+      ...identity,
+      parserVersion: '2.1',
+      subjectResolution,
+      subjectEvidence,
+      unresolvedSubjectTokens: unique(unresolvedSubjectTokens),
+    };
+  }
+  return identity;
+}
+
+export function parseProxyProductIdentityV2(title: string, manufacturerName = ''): ProxyProductIdentityV2 {
+  return parseProxyProductIdentityInternal(title, manufacturerName, 'legacy-v2') as ProxyProductIdentityV2;
+}
+
+/**
+ * Parser v2.1 subject-extraction rewrite.
+ *
+ * This parser has no generic "last token becomes Subject" fallback. A Subject
+ * is emitted only from an explicit title grammar, role delimiter, multi-token
+ * person-name span, or compound set. All other residual text is reported as
+ * UNRESOLVED_SUBJECT for Next-only shadow evaluation.
+ */
+export function parseProxyProductIdentityV21(title: string, manufacturerName = ''): ProxyProductIdentityV21 {
+  return parseProxyProductIdentityInternal(title, manufacturerName, 'v2.1') as ProxyProductIdentityV21;
 }

@@ -111,6 +111,10 @@ try {
       takaratomyCandidate: 'T-SPARK LEGACYSOUL 彈珠超人 大福箱27[TAKARATOMY]',
       smpAliasSource: '萬代 盒玩 SMP 百獸戰隊 牙吠連者 巨大化 牙吠獅 & 牙吠象',
       smpAliasCandidate: 'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠海龜＆牙吠海象',
+      sophia: '第四季 代理版 核金重構 1/9 包膠可動 索菲亞 F 希琳 碧藍兔子 附特典',
+      louise: '代理版 角川 KDcolle 零之使魔 露易絲 20th 20週年紀念版 無比例 約23公分',
+      mashCandidate: 'PLAMATEA Shielder/瑪修·基利艾拉特[奧特瑙斯] Black Barrel Edition',
+      unresolved: '代理版 未知品牌 奇幻作品 神秘角色 藍色外套',
     };
     const diagnostics = Object.fromEntries(Object.entries(specialTitles).map(([key, title]) => {
       const v1 = matching.normalizeProxyProductIdentity(title);
@@ -157,6 +161,14 @@ try {
   assert.deepEqual(result.diagnostics.smpCompound.v2.subjects, ['牙吠孔雀王', '牙吠眼鏡蛇王']);
   assert.deepEqual(result.comparisons.takaratomy, ['STRUCTURE_OK', 'IDENTITY_EQUIVALENCE_UNPROVEN']);
   assert.deepEqual(result.comparisons.smpAlias, ['STRUCTURE_OK', 'IDENTITY_EQUIVALENCE_UNPROVEN']);
+  assert.deepEqual(result.diagnostics.sophia.v21.subjects, ['索菲亞 F 希琳']);
+  assert.ok(result.diagnostics.sophia.v21.forms.includes('碧藍兔子'));
+  assert.deepEqual(result.diagnostics.louise.v21.subjects, ['露易絲']);
+  assert.ok(result.diagnostics.louise.v21.dimensions.includes('約23公分'));
+  assert.deepEqual(result.diagnostics.mashCandidate.v21.subjects, ['瑪修·基利艾拉特']);
+  assert.equal(result.diagnostics.unresolved.v21.subjectResolution, 'UNRESOLVED_SUBJECT');
+  assert.deepEqual(result.diagnostics.unresolved.v21.subjects, []);
+  assert.ok(result.diagnostics.unresolved.v21Observations.includes('V21_UNRESOLVED_SUBJECT'));
   assert.deepEqual(forbiddenRequests, [], 'Shadow regression must issue 0 Catalog/Supabase requests');
 
   console.log('PASS 44-case v1 Decision/Selected Candidate/Score/Supplier/Raw Deadline/closing_date unchanged');
@@ -164,6 +176,8 @@ try {
   console.log('PASS Next-only mode gate; Cloud/Production/Test/Experimental diagnostics disabled');
   console.log('PASS special-case disagreement classification and compound subject diagnostics');
   console.log('PASS unresolved TAKARATOMY and SMP identity mappings remain IDENTITY_EQUIVALENCE_UNPROVEN');
+  console.log('PASS Parser v2.1 Subject Rewrite is visible in Next-only shadow diagnostics');
+  console.log('PASS unknown v2.1 structures remain UNRESOLVED_SUBJECT without last-token promotion');
   console.log('PASS Shadow helper has no Provider/IndexedDB/fetch/write dependency');
   console.log('PASS Production Supabase request = 0; unexpected DB write path = 0');
 } finally {

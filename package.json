@@ -38,6 +38,7 @@
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
     "test:proxy-product-identity": "node tests/proxy-product-identity-matching.mjs",
     "test:proxy-product-identity-v2": "node tests/proxy-product-identity-v2.mjs",
+    "test:proxy-product-identity-v21": "node tests/proxy-product-identity-v21.mjs",
     "test:proxy-product-identity-shadow": "node tests/proxy-product-identity-shadow.mjs",
     "test:proxy-product-identity-pilot": "node tests/proxy-product-identity-pilot.mjs",
     "test:proxy-product-identity-query-v2": "node tests/proxy-product-identity-query-v2.mjs",

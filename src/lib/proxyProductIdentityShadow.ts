@@ -1,7 +1,9 @@
 import type { ProxyProductIdentity } from './proxyProductIdentity';
 import {
   parseProxyProductIdentityV2,
+  parseProxyProductIdentityV21,
   type ProxyProductIdentityV2,
+  type ProxyProductIdentityV21,
 } from './proxyProductIdentityV2';
 import type { ProviderMode } from '../providers/providerMode';
 
@@ -20,9 +22,15 @@ export type ProxyIdentityShadowComparison =
   | 'STRUCTURE_OK'
   | 'IDENTITY_EQUIVALENCE_UNPROVEN';
 
+export type ProxyIdentityV21Observation =
+  | 'V21_SUBJECT_DISAGREEMENT'
+  | 'V21_UNRESOLVED_SUBJECT';
+
 export interface ProxyIdentityShadowDiagnostic {
   v2: ProxyProductIdentityV2;
+  v21: ProxyProductIdentityV21;
   disagreements: ProxyIdentityShadowDisagreement[];
+  v21Observations: ProxyIdentityV21Observation[];
 }
 
 const compact = (value: string): string => value
@@ -52,7 +60,9 @@ export function createProxyIdentityShadowDiagnostic(
   manufacturerName = '',
 ): ProxyIdentityShadowDiagnostic {
   const v2 = parseProxyProductIdentityV2(title, manufacturerName);
+  const v21 = parseProxyProductIdentityV21(title, manufacturerName);
   const disagreements: ProxyIdentityShadowDisagreement[] = [];
+  const v21Observations: ProxyIdentityV21Observation[] = [];
   const v1Types = v1.productType ? [v1.productType] : [];
   const v1Lines = v1.productLine ? [v1.productLine] : [];
 
@@ -71,7 +81,15 @@ export function createProxyIdentityShadowDiagnostic(
     && !v2.productTypes.includes('SCALE_FIGURE')
   ) disagreements.push('SCALE_TYPE_DISAGREEMENT');
 
-  return { v2, disagreements: Array.from(new Set(disagreements)) };
+  if (!setsEqual(v1.identityTokens, v21.subjects)) v21Observations.push('V21_SUBJECT_DISAGREEMENT');
+  if (v21.subjectResolution === 'UNRESOLVED_SUBJECT') v21Observations.push('V21_UNRESOLVED_SUBJECT');
+
+  return {
+    v2,
+    v21,
+    disagreements: Array.from(new Set(disagreements)),
+    v21Observations: Array.from(new Set(v21Observations)),
+  };
 }
 
 export function compareProxyIdentityShadows(

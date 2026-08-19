@@ -153,7 +153,9 @@ const summarizeCandidate = (
 
 const formatShadowValues = (values: string[]): string => values.join('、') || '—';
 
-const formatCompoundSubjects = (shadow: ProxyIdentityShadowDiagnostic): string => shadow.v2.compoundSubjects
+const formatCompoundSubjects = (
+  compounds: ProxyIdentityShadowDiagnostic['v2']['compoundSubjects'],
+): string => compounds
   .map(compound => compound.members.join(' + '))
   .join('；') || '—';
 
@@ -176,7 +178,7 @@ const IdentityShadowBlock = ({
     </div>
     <div>
       Subject {formatShadowValues(shadow.v2.subjects)} ・
-      Compound Subject {formatCompoundSubjects(shadow)} ・
+      Compound Subject {formatCompoundSubjects(shadow.v2.compoundSubjects)} ・
       Series {formatShadowValues(shadow.v2.series)}
     </div>
     <div>
@@ -192,6 +194,31 @@ const IdentityShadowBlock = ({
     <div style={{ marginTop: '3px', fontWeight: 700 }}>
       Parser disagreement：{shadow.disagreements.length > 0 ? 'YES' : 'NO'}
       {shadow.disagreements.length > 0 ? ` — ${shadow.disagreements.join('、')}` : ''}
+    </div>
+    <div style={{ marginTop: '7px', paddingTop: '7px', borderTop: '1px solid #c7d2fe' }}>
+      <div style={{ fontWeight: 700 }}>Parser v2.1 Subject Rewrite（NEXT ONLY・SHADOW ONLY）</div>
+      <div>
+        Resolution {shadow.v21.subjectResolution} ・
+        Evidence {formatShadowValues(shadow.v21.subjectEvidence)}
+      </div>
+      <div>
+        Subject {formatShadowValues(shadow.v21.subjects)} ・
+        Compound Subject {formatCompoundSubjects(shadow.v21.compoundSubjects)} ・
+        Series {formatShadowValues(shadow.v21.series)}
+      </div>
+      <div>
+        Version {formatShadowValues(shadow.v21.versions)} ・
+        Form {formatShadowValues(shadow.v21.forms)} ・
+        Dimension {formatShadowValues(shadow.v21.dimensions)}
+      </div>
+      <div>
+        Unresolved {formatShadowValues(shadow.v21.unresolvedSubjectTokens)}
+      </div>
+      <div style={{ marginTop: '3px', fontWeight: 700 }}>
+        v2.1 observations：{shadow.v21Observations.length > 0
+          ? shadow.v21Observations.join('、')
+          : 'NONE'}
+      </div>
     </div>
     {comparison && comparison.length > 0 && (
       <div style={{ marginTop: '3px', fontWeight: 700 }}>
