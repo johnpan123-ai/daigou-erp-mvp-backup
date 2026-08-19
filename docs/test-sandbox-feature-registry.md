@@ -150,6 +150,18 @@ large real-product field testing in Next. `product_groups.proxy_agent` supplier
 override behavior remains a separate business-rule review item; no override is
 inferred from missing source evidence.
 
+### Closing Date Evaluation Dataset expansion — 2026-08-19
+
+| Node | Evidence | Status | Production ready | Scope |
+| --- | --- | --- | --- | --- |
+| 44-case real-product dataset | `tests/fixtures/closing-date/dataset.json`; `test:closing-date-evaluation` | **Dataset Expanded / Awaiting Matching v2 Design** | **NO** | Read-only capture plus offline replay only |
+
+The expansion covers GSC/Nendoroid, figma, POP UP PARADE, scale figures,
+SEGA/prize lines, FuRyu, Chocopuni, Bandai, and other lines selected from the
+fixed Production JSON snapshot. New cases are `OBSERVE` until manually
+confirmed; no threshold, ambiguity guard, supplier priority, closing-date
+business rule, ERP DB, or Production data was changed.
+
 ## Test infrastructure nodes — never cherry-pick to Production
 
 | Infrastructure | Commit / range | Tag | Production ready | Purpose |

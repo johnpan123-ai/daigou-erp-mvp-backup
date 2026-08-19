@@ -74,7 +74,18 @@ try {
     return output;
   }, fixture);
 
-  const summary = { total: results.length, pass: 0, knownFailure: 0, ambiguous: 0, regression: 0 };
+  const summary = {
+    total: results.length,
+    pass: 0,
+    knownFailure: 0,
+    observed: 0,
+    observedMatch: 0,
+    observedAmbiguous: 0,
+    observedNotFound: 0,
+    ambiguous: 0,
+    notFound: 0,
+    regression: 0,
+  };
   for (const result of results) {
     const expected = fixture.cases.find(item => item.caseId === result.caseId).expected;
     if (expected.status === 'KNOWN_FAILURE') {
@@ -83,7 +94,18 @@ try {
       console.log(`KNOWN FAILURE ${result.caseId}: retrieval missing; no write candidate`);
       continue;
     }
+    if (expected.status === 'OBSERVE') {
+      summary.observed += 1;
+      if (result.status === 'MATCH') summary.observedMatch += 1;
+      if (result.status === 'AMBIGUOUS') summary.observedAmbiguous += 1;
+      if (result.status === 'NOT_FOUND') summary.observedNotFound += 1;
+      if (result.status === 'AMBIGUOUS') summary.ambiguous += 1;
+      if (result.status === 'NOT_FOUND') summary.notFound += 1;
+      console.log(`OBSERVED ${result.caseId}: ${result.status} ${result.candidateId || result.reason || ''}`.trim());
+      continue;
+    }
     if (result.status === 'AMBIGUOUS') summary.ambiguous += 1;
+    if (result.status === 'NOT_FOUND') summary.notFound += 1;
     const matches = expected.status === result.status
       && (expected.candidateId === undefined || expected.candidateId === result.candidateId)
       && (expected.supplier === undefined || expected.supplier === result.supplier)
