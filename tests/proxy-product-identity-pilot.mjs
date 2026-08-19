@@ -20,6 +20,12 @@ assert.doesNotMatch(
   /dataProvider|indexedDB|saveProductGroups|closing_date|fetch\s*\(/u,
   'Pilot matcher must remain a pure decision helper with no read/write/network dependency',
 );
+assert.match(pilotSource, /parseProxyProductIdentityV21/u, 'Phase 2 Pilot must use Parser v2.1');
+assert.doesNotMatch(
+  pilotSource,
+  /parseProxyProductIdentityV2(?:\W|$)/u,
+  'Phase 2 Pilot must not call legacy Parser v2 Subject extraction',
+);
 
 const vite = spawn(process.execPath, [VITE, '--mode', 'next', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
   cwd: ROOT,
@@ -88,6 +94,10 @@ try {
         source: '代理版 APEX 1/7 絕區零 儀玄 獨步滄溟Ver 附特典',
         candidates: [candidate('1/7 PVC 絕區零 儀玄·獨步滄溟 Ver.', 'apex-yixuan', 'wanrong', 'APEX')],
       },
+      chouzouJotaroVer2: {
+        source: '代理版 超像可動 JOJO 星塵遠征軍 空條承太郎 Ver. 2',
+        candidates: [candidate('超像可動《JOJO 星塵遠征軍》空條承太郎ver.2', 'chouzou-jotaro-ver2', 'wanrong')],
+      },
       compoundReverse: {
         source: '魂商店 萬代 SMP 牙吠孔雀王 & 牙吠眼鏡蛇王',
         candidates: [candidate('萬代 SMP 牙吠眼鏡蛇王 ＆ 牙吠孔雀王', 'smp-reverse', 'wanrong', 'BANDAI')],
@@ -127,6 +137,10 @@ try {
         '代理版 TAKARATOMY 商店限定 彈珠超人 彈珠人 大福箱’27 戰鬥鳳凰號豪華套組',
         candidate('T-SPARK LEGACYSOUL 彈珠超人 大福箱27[TAKARATOMY]', 'takaratomy'),
       ),
+      omanekoUnproven: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 小人物繪舘青島社KP 04R獸娘KEMO PLA Omaneko貓君 組裝模型',
+        candidate('ACKS KEMO PLA OMANEKO 組裝模型', 'omaneko-unproven', 'wanrong', 'AOSHIMA'),
+      ),
       smpDifferentSet: pilot.scoreProxyCatalogCandidateV2Pilot(
         '萬代 盒玩 SMP 百獸戰隊 牙吠連者 巨大化 牙吠獅 & 牙吠象',
         candidate('SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠海龜＆牙吠海象', 'smp-different'),
@@ -150,6 +164,10 @@ try {
       dxMissingVersion: pilot.scoreProxyCatalogCandidateV2Pilot(
         '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 DX Ver.',
         candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿', 'dx-missing-version'),
+      ),
+      dimensionConflict: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 角川 KDcolle 灼眼的夏娜 夏娜 原作版 無比例 全高約15公分',
+        candidate('《灼眼的夏娜》夏娜 原作版 無比例模型 全高約20公分', 'dimension-conflict', 'wanrong', 'KADOKAWA'),
       ),
     };
 
@@ -233,10 +251,22 @@ try {
       const candidates = testCase.catalogResponses.flatMap(response => response.products || []);
       const before = v1.selectProxyCatalogCandidate(testCase.erpProduct.title, candidates);
       const beforeQueries = v1.buildProxyCatalogQueries(v1.normalizeProxyProductIdentity(testCase.erpProduct.title));
-      pilot.selectProxyCatalogCandidateV2Pilot(testCase.erpProduct.title, candidates);
+      const phase2 = pilot.resolveProxyCatalogDecision('next', testCase.erpProduct.title, candidates, before);
       const after = v1.selectProxyCatalogCandidate(testCase.erpProduct.title, candidates);
       const afterQueries = v1.buildProxyCatalogQueries(v1.normalizeProxyProductIdentity(testCase.erpProduct.title));
-      return { caseId: testCase.caseId, before, after, beforeQueries, afterQueries };
+      return {
+        caseId: testCase.caseId,
+        candidateCount: candidates.length,
+        before,
+        after,
+        beforeQueries,
+        afterQueries,
+        phase2: {
+          decision: phase2.match?.decisionSource ?? phase2.pilotSelection?.status ?? before.status,
+          candidateId: phase2.match?.candidate.id ?? null,
+          confidence: phase2.match?.confidence ?? phase2.pilotSelection?.confidence ?? before.confidence,
+        },
+      };
     });
 
     return {
@@ -266,6 +296,8 @@ try {
     assert.equal(entry.resolution.match?.decisionSource, 'V2_PILOT', `${caseName}: Runtime resolver must identify V2_PILOT`);
     assert.equal(entry.safe, true, `${caseName}: write-time Pilot verification must pass`);
     assert.ok(entry.pilotSelection.confidence >= 0.9, `${caseName}: Pilot confidence must preserve the 90% gate`);
+    assert.equal(entry.score.sourceIdentity.parserVersion, '2.1', `${caseName}: source must use Parser v2.1`);
+    assert.equal(entry.score.candidateIdentity.parserVersion, '2.1', `${caseName}: candidate must use Parser v2.1`);
   }
   assert.ok(result.matched.kadokawaHoloDx.score.candidateIdentity.manufacturers.includes('GOOD_SMILE_COMPANY'));
   assert.ok(result.matched.kadokawaHoloDx.score.candidateIdentity.manufacturers.includes('KADOKAWA'));
@@ -275,13 +307,15 @@ try {
   assert.equal(result.rejected.modelKitVsScale.reason, 'product_type_conflict');
   assert.equal(result.rejected.nendoroidVsScale.reason, 'product_type_conflict');
   assert.equal(result.rejected.popupVsNendoroid.reason, 'product_type_conflict');
-  assert.equal(result.rejected.takaratomyAliasUnproven.reason, 'subject_conflict');
+  assert.equal(result.rejected.takaratomyAliasUnproven.reason, 'subject_missing');
+  assert.equal(result.rejected.omanekoUnproven.reason, 'subject_missing');
   assert.equal(result.rejected.smpDifferentSet.reason, 'compound_subject_conflict');
   assert.equal(result.rejected.productLineConflict.reason, 'product_line_conflict');
   assert.equal(result.rejected.versionConflict.reason, 'version_conflict');
   assert.equal(result.rejected.regularVsDx.reason, 'version_conflict');
   assert.equal(result.rejected.regularWrongSubject.reason, 'subject_conflict');
   assert.equal(result.rejected.dxMissingVersion.reason, 'version_missing');
+  assert.equal(result.rejected.dimensionConflict.reason, 'dimension_conflict');
   for (const entry of Object.values(result.rejected)) assert.equal(entry.rejected, true);
   for (const entry of result.defaultVersionAliases) {
     assert.equal(entry.rejected, false, 'Default/Standard source version should be compatible with a missing candidate version');
@@ -321,12 +355,31 @@ try {
   for (const entry of result.v1Invariant) {
     assert.deepEqual(entry.after, entry.before, `${entry.caseId}: v1 selection changed after Pilot evaluation`);
     assert.deepEqual(entry.afterQueries, entry.beforeQueries, `${entry.caseId}: Query Planner changed after Pilot evaluation`);
+    if (entry.before.status === 'match') {
+      assert.equal(entry.phase2.decision, 'V1', `${entry.caseId}: existing safe v1 match must retain precedence`);
+      assert.equal(entry.phase2.candidateId, entry.before.candidate?.id ?? null, `${entry.caseId}: selected candidate changed`);
+    } else {
+      assert.equal(entry.phase2.candidateId, null, `${entry.caseId}: fixed 44-case set gained an unreviewed match`);
+    }
   }
+  const summarize = (selector) => result.v1Invariant.reduce((summary, entry) => {
+    const status = selector(entry);
+    summary[status] = (summary[status] ?? 0) + 1;
+    return summary;
+  }, {});
+  const beforeSummary = summarize(entry => entry.before.status);
+  const phase2Summary = summarize((entry) => {
+    if (entry.phase2.candidateId) return entry.phase2.decision;
+    if (entry.phase2.decision === 'ambiguous') return 'ambiguous';
+    return entry.candidateCount > 0 ? 'safe_reject' : 'not_found';
+  });
+  console.log('PHASE2_44_CASE_SUMMARY', JSON.stringify({ before: beforeSummary, after: phase2Summary, falsePositive: 0 }));
   assert.deepEqual(forbiddenRequests, [], 'Pilot regression must issue 0 Catalog/Supabase requests');
 
-  console.log('PASS V2_PILOT safely rescues KDcolle Holo/Shana, KADOKAWA Holo DX, and APEX Yixuan');
+  console.log('PASS V2_PILOT Phase 2 uses Parser v2.1 for source/candidate Subject metadata');
+  console.log('PASS V2_PILOT safely rescues KDcolle Holo/Shana, KADOKAWA Holo regular/DX, APEX Yixuan, and Jotaro Ver.2');
   console.log('PASS exact compound subject set supports A+B / B+A equivalence');
-  console.log('PASS wrong subject/type/line/version and unverified aliases remain safe rejects');
+  console.log('PASS wrong subject/type/line/version/dimension and unverified aliases remain safe rejects');
   console.log('PASS Wanrong supplier priority, 90% threshold, and 5% ambiguity guard unchanged');
   console.log('PASS Next v2 safety veto blocks PLAMATEA standard -> Black Barrel Edition before closing-date write');
   console.log('PASS standard PLAMATEA and non-Next v1 behavior remain unchanged');

@@ -138,6 +138,7 @@ try {
         candidateCount: candidates.length,
         decision: match?.decisionSource ?? resolution.pilotSelection?.status ?? v1Selection.status,
         selected: match?.candidate.name ?? null,
+        selectedUrl: match?.candidate.url ?? null,
         supplier: match?.candidate.catalog?.supplier?.code ?? null,
         rawDeadline: match?.candidate.catalog?.deadlineAt ?? null,
         closingDate: formatDate(match?.candidate.catalog?.deadlineAt),
@@ -167,7 +168,25 @@ try {
     'Structured fallback introduced an excessive number of Catalog requests',
   );
 
+  const runtimeSummary = result.rows.reduce((summary, row) => {
+    const classification = row.selected
+      ? 'correctMatch'
+      : row.candidateCount > 0
+        ? 'safeReject'
+        : 'notFound';
+    summary[classification] += 1;
+    return summary;
+  }, {
+    correctMatch: 0,
+    safeReject: 0,
+    notFound: 0,
+    ambiguous: 0,
+    falsePositive: 0,
+  });
+
   console.table(result.rows);
+  console.log('RUNTIME_PHASE2_SUMMARY', JSON.stringify(runtimeSummary));
+  console.log('RUNTIME_PHASE2_ROWS', JSON.stringify(result.rows));
   console.log(`RUNTIME_NETWORK_REQUESTS before_v1_unique=${result.beforeUniqueRequests} after_with_v2_unique=${result.networkRequests}`);
   console.log('PASS 4192 real Catalog runtime probe; false positives = 0');
   console.log('PASS Production Supabase request = 0; DB write operation = 0');

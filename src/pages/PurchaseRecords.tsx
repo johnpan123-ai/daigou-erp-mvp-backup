@@ -3351,7 +3351,7 @@ export default function PurchaseRecords() {
                     <div>Supplier：{diagnostic.selected.supplier || '—'} ・ Raw Deadline：{diagnostic.selected.rawDeadline || '—'} ・ ERP 結單日：{diagnostic.finalClosingDate || '—'}</div>
                     {diagnostic.decisionSource === 'V2_PILOT' && diagnostic.pilotEvidence && (
                       <div style={{ marginTop: '4px', color: '#6d28d9', fontWeight: 700 }}>
-                        V2 Pilot Evidence：{diagnostic.pilotEvidence.join('、')}
+                        V2 Pilot Evidence（Parser v2.1）：{diagnostic.pilotEvidence.join('、')}
                       </div>
                     )}
                     {isNextIdentityShadowMode && diagnostic.selected.identityShadow && (

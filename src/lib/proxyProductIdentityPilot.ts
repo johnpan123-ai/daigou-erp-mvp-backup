@@ -8,8 +8,8 @@ import {
   type ProxyCatalogSelection,
 } from './proxyProductIdentity';
 import {
-  parseProxyProductIdentityV2,
-  type ProxyProductIdentityV2,
+  parseProxyProductIdentityV21,
+  type ProxyProductIdentityV21,
 } from './proxyProductIdentityV2';
 
 export type ProxyIdentityPilotEvidence =
@@ -21,6 +21,7 @@ export type ProxyIdentityPilotEvidence =
   | 'VERSION_DEFAULT_COMPATIBLE'
   | 'FORM_EXACT'
   | 'SCALE_EXACT'
+  | 'DIMENSION_EXACT'
   | 'MODEL_CODE_EXACT'
   | 'SERIES_OVERLAP';
 
@@ -34,6 +35,7 @@ export type ProxyIdentityPilotRejectReason =
   | 'version_conflict'
   | 'form_conflict'
   | 'scale_conflict'
+  | 'dimension_conflict'
   | 'model_code_conflict'
   | 'insufficient_evidence'
   | 'scored';
@@ -44,8 +46,8 @@ export interface ProxyIdentityPilotCandidateScore<T extends ProxyCatalogCandidat
   rejected: boolean;
   reason: ProxyIdentityPilotRejectReason;
   evidence: ProxyIdentityPilotEvidence[];
-  sourceIdentity: ProxyProductIdentityV2;
-  candidateIdentity: ProxyProductIdentityV2;
+  sourceIdentity: ProxyProductIdentityV21;
+  candidateIdentity: ProxyProductIdentityV21;
 }
 
 export type ProxyIdentityPilotSelection<T extends ProxyCatalogCandidate = ProxyCatalogCandidate> =
@@ -80,8 +82,8 @@ export type ProxyIdentitySafetyVetoReason = 'version_conflict';
 export interface ProxyIdentitySafetyVeto<T extends ProxyCatalogCandidate = ProxyCatalogCandidate> {
   candidate: T;
   reason: ProxyIdentitySafetyVetoReason;
-  sourceIdentity: ProxyProductIdentityV2;
-  candidateIdentity: ProxyProductIdentityV2;
+  sourceIdentity: ProxyProductIdentityV21;
+  candidateIdentity: ProxyProductIdentityV21;
   sourceVersions: string[];
   candidateVersions: string[];
 }
@@ -136,7 +138,7 @@ const identityBearingVersions = (versions: string[]): string[] => versions.filte
     && !RELEASE_STATUS_VERSION_TOKENS.has(normalized);
 });
 
-const subjectFamilyTokens = (identity: ProxyProductIdentityV2): string[] => [
+const subjectFamilyTokens = (identity: ProxyProductIdentityV21): string[] => [
   ...identity.subjects,
   ...identity.series,
   ...compoundMembers(identity),
@@ -145,7 +147,7 @@ const subjectFamilyTokens = (identity: ProxyProductIdentityV2): string[] => [
 /**
  * Next-only safety veto for a v1 MATCH.
  *
- * Parser v2 is not allowed to promote a match here. It may only stop a v1
+ * Parser v2.1 is not allowed to promote a match here. It may only stop a v1
  * result when both titles have reliable same-family evidence and exactly one
  * side carries an explicit identity-bearing version. This protects distinct
  * editions such as PLAMATEA standard vs Black Barrel Edition while leaving
@@ -155,8 +157,8 @@ export function evaluateProxyCatalogV2SafetyVeto<T extends ProxyCatalogCandidate
   sourceTitle: string,
   candidate: T,
 ): ProxyIdentitySafetyVeto<T> | null {
-  const sourceIdentity = parseProxyProductIdentityV2(sourceTitle);
-  const candidateIdentity = parseProxyProductIdentityV2(
+  const sourceIdentity = parseProxyProductIdentityV21(sourceTitle);
+  const candidateIdentity = parseProxyProductIdentityV21(
     candidate.name || '',
     candidate.manufacturer || candidate.brand?.name || '',
   );
@@ -200,14 +202,14 @@ export function evaluateProxyCatalogV2SafetyVeto<T extends ProxyCatalogCandidate
   };
 }
 
-const compoundMembers = (identity: ProxyProductIdentityV2): string[] => identity.compoundSubjects
+const compoundMembers = (identity: ProxyProductIdentityV21): string[] => identity.compoundSubjects
   .flatMap(compound => compound.members);
 
 const rejectedScore = <T extends ProxyCatalogCandidate>(
   candidate: T,
   reason: Exclude<ProxyIdentityPilotRejectReason, 'scored'>,
-  sourceIdentity: ProxyProductIdentityV2,
-  candidateIdentity: ProxyProductIdentityV2,
+  sourceIdentity: ProxyProductIdentityV21,
+  candidateIdentity: ProxyProductIdentityV21,
   evidence: ProxyIdentityPilotEvidence[] = [],
 ): ProxyIdentityPilotCandidateScore<T> => ({
   candidate,
@@ -225,14 +227,29 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
   sourceTitle: string,
   candidate: T,
 ): ProxyIdentityPilotCandidateScore<T> {
-  const sourceIdentity = parseProxyProductIdentityV2(sourceTitle);
-  const candidateIdentity = parseProxyProductIdentityV2(
+  const sourceIdentity = parseProxyProductIdentityV21(sourceTitle);
+  const candidateIdentity = parseProxyProductIdentityV21(
     candidate.name || '',
     candidate.manufacturer || candidate.brand?.name || '',
   );
   const evidence: ProxyIdentityPilotEvidence[] = [];
+
+  if (sourceIdentity.productTypes.length > 0 && candidateIdentity.productTypes.length > 0) {
+    if (!setsEqual(sourceIdentity.productTypes, candidateIdentity.productTypes)) {
+      return rejectedScore(candidate, 'product_type_conflict', sourceIdentity, candidateIdentity);
+    }
+    evidence.push('PRODUCT_TYPE_EXACT');
+  }
+
+  if (sourceIdentity.productLines.length > 0 && candidateIdentity.productLines.length > 0) {
+    if (!setsEqual(sourceIdentity.productLines, candidateIdentity.productLines)) {
+      return rejectedScore(candidate, 'product_line_conflict', sourceIdentity, candidateIdentity, evidence);
+    }
+    evidence.push('PRODUCT_LINE_EXACT');
+  }
+
   if (sourceIdentity.subjects.length === 0 || candidateIdentity.subjects.length === 0) {
-    return rejectedScore(candidate, 'subject_missing', sourceIdentity, candidateIdentity);
+    return rejectedScore(candidate, 'subject_missing', sourceIdentity, candidateIdentity, evidence);
   }
 
   const sourceCompound = compoundMembers(sourceIdentity);
@@ -246,20 +263,6 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
     return rejectedScore(candidate, 'subject_conflict', sourceIdentity, candidateIdentity);
   } else {
     evidence.push('SUBJECT_EXACT');
-  }
-
-  if (sourceIdentity.productTypes.length > 0 && candidateIdentity.productTypes.length > 0) {
-    if (!setsEqual(sourceIdentity.productTypes, candidateIdentity.productTypes)) {
-      return rejectedScore(candidate, 'product_type_conflict', sourceIdentity, candidateIdentity, evidence);
-    }
-    evidence.push('PRODUCT_TYPE_EXACT');
-  }
-
-  if (sourceIdentity.productLines.length > 0 && candidateIdentity.productLines.length > 0) {
-    if (!setsEqual(sourceIdentity.productLines, candidateIdentity.productLines)) {
-      return rejectedScore(candidate, 'product_line_conflict', sourceIdentity, candidateIdentity, evidence);
-    }
-    evidence.push('PRODUCT_LINE_EXACT');
   }
 
   if (sourceIdentity.versions.length > 0 || candidateIdentity.versions.length > 0) {
@@ -293,6 +296,13 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
     evidence.push('SCALE_EXACT');
   }
 
+  if (sourceIdentity.dimensions.length > 0 && candidateIdentity.dimensions.length > 0) {
+    if (!setsEqual(sourceIdentity.dimensions, candidateIdentity.dimensions)) {
+      return rejectedScore(candidate, 'dimension_conflict', sourceIdentity, candidateIdentity, evidence);
+    }
+    evidence.push('DIMENSION_EXACT');
+  }
+
   if (sourceIdentity.modelCodes.length > 0 && candidateIdentity.modelCodes.length > 0) {
     if (!hasOverlap(sourceIdentity.modelCodes, candidateIdentity.modelCodes)) {
       return rejectedScore(candidate, 'model_code_conflict', sourceIdentity, candidateIdentity, evidence);
@@ -302,7 +312,10 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
 
   if (hasOverlap(sourceIdentity.series, candidateIdentity.series)) evidence.push('SERIES_OVERLAP');
 
-  const corroboratingEvidence = evidence.filter(item => item !== 'SUBJECT_EXACT');
+  const corroboratingEvidence = evidence.filter(item => (
+    item !== 'SUBJECT_EXACT'
+    && item !== 'DIMENSION_EXACT'
+  ));
   let confidence = 0.7;
   if (evidence.includes('COMPOUND_SUBJECT_EXACT')) confidence += 0.1;
   if (evidence.includes('PRODUCT_TYPE_EXACT')) confidence += 0.1;
@@ -344,8 +357,8 @@ const candidateKey = (candidate: ProxyCatalogCandidate): string => {
 };
 
 const effectiveIdentityKey = (
-  source: ProxyProductIdentityV2,
-  candidate: ProxyProductIdentityV2,
+  source: ProxyProductIdentityV21,
+  candidate: ProxyProductIdentityV21,
 ): string => JSON.stringify({
   subjects: compactSet(candidate.subjects),
   productTypes: compactSet(candidate.productTypes.length > 0 ? candidate.productTypes : source.productTypes),
@@ -353,6 +366,7 @@ const effectiveIdentityKey = (
   versions: compactSet(candidate.versions.length > 0 ? candidate.versions : source.versions),
   forms: compactSet(candidate.forms.length > 0 ? candidate.forms : source.forms),
   scales: compactSet(candidate.scales.length > 0 ? candidate.scales : source.scales),
+  dimensions: compactSet(candidate.dimensions.length > 0 ? candidate.dimensions : source.dimensions),
   modelCodes: compactSet(candidate.modelCodes.length > 0 ? candidate.modelCodes : source.modelCodes),
 });
 
@@ -376,7 +390,7 @@ export function selectProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandida
   sourceTitle: string,
   candidates: T[],
 ): ProxyIdentityPilotSelection<T> {
-  const sourceIdentity = parseProxyProductIdentityV2(sourceTitle);
+  const sourceIdentity = parseProxyProductIdentityV21(sourceTitle);
   const deduped = Array.from(new Map(candidates.map(candidate => [candidateKey(candidate), candidate])).values());
   const scored = deduped
     .map(candidate => scoreProxyCatalogCandidateV2Pilot(sourceTitle, candidate))
@@ -402,7 +416,7 @@ export function selectProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandida
       confidence: top?.identityConfidence ?? 0,
       runnerUpConfidence: runnerUp?.identityConfidence ?? null,
       bestCandidate: top?.selectedListing.candidate,
-      message: 'Parser v2 Pilot 證據不足，需要人工確認',
+      message: 'Parser v2.1 Pilot 證據不足，需要人工確認',
     };
   }
   if (
@@ -416,7 +430,7 @@ export function selectProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandida
       confidence: top.identityConfidence,
       runnerUpConfidence: runnerUp.identityConfidence,
       candidates: [top.selectedListing.candidate, runnerUp.selectedListing.candidate],
-      message: 'Parser v2 Pilot 找到多筆相似商品，需要人工確認',
+      message: 'Parser v2.1 Pilot 找到多筆相似商品，需要人工確認',
     };
   }
   return {

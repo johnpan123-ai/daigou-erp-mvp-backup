@@ -59,6 +59,8 @@ export type ProxySubjectResolutionV21 =
 
 export type ProxySubjectEvidenceV21 =
   | 'PRODUCT_LINE_TITLE_GRAMMAR'
+  | 'QUOTED_SERIES_SUBJECT'
+  | 'VERSION_BOUNDED_TITLE_GRAMMAR'
   | 'ROLE_DELIMITED_SUBJECT'
   | 'MULTI_TOKEN_PERSON_NAME'
   | 'COMPOUND_SUBJECT_SET';
@@ -311,7 +313,11 @@ const meaningfulResidualTokens = (source: string): string[] => tokenizeResidual(
 
 const extractSubjectV21 = (
   remaining: string,
+  manufacturers: string[],
+  productTypes: ProxySemanticProductType[],
   productLines: ProxySemanticProductLine[],
+  versions: string[],
+  scales: string[],
   compoundSubjects: ProxyCompoundSubjectV2[],
   existingSubjects: string[],
 ): SubjectExtractionV21 => {
@@ -331,6 +337,26 @@ const extractSubjectV21 = (
       forms: [],
       resolution: 'COMPOUND_SUBJECT',
       evidence: ['COMPOUND_SUBJECT_SET'],
+      unresolvedTokens: [],
+    };
+  }
+
+  const quotedSeriesSubject = remaining.match(
+    /[《「]([^》」]+)[》」]\s*([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}][\p{Letter}\p{Number}'’·-]*)/u,
+  );
+  if (quotedSeriesSubject && quotedSeriesSubject.index !== undefined) {
+    const before = remaining.slice(0, quotedSeriesSubject.index);
+    const after = remaining.slice(quotedSeriesSubject.index + quotedSeriesSubject[0].length);
+    return {
+      subjects: [cleanValue(quotedSeriesSubject[2])],
+      series: unique([
+        cleanValue(quotedSeriesSubject[1]),
+        ...meaningfulResidualTokens(quotedSeriesSubject[1]),
+        ...meaningfulResidualTokens(`${before} ${after}`),
+      ]),
+      forms: [],
+      resolution: 'RESOLVED_SUBJECT',
+      evidence: ['QUOTED_SERIES_SUBJECT'],
       unresolvedTokens: [],
     };
   }
@@ -380,6 +406,24 @@ const extractSubjectV21 = (
       forms: [],
       resolution: 'RESOLVED_SUBJECT',
       evidence: ['PRODUCT_LINE_TITLE_GRAMMAR'],
+      unresolvedTokens: [],
+    };
+  }
+
+  const hasVersionBoundedStructure = versions.length > 0
+    && residualTokens.length >= 2
+    && (
+      productLines.length > 0
+      || (productTypes.length > 0 && scales.length > 0)
+      || (manufacturers.length > 0 && scales.length > 0)
+    );
+  if (hasVersionBoundedStructure) {
+    return {
+      subjects: [residualTokens[residualTokens.length - 1]],
+      series: residualTokens.slice(0, -1),
+      forms: [],
+      resolution: 'RESOLVED_SUBJECT',
+      evidence: ['VERSION_BOUNDED_TITLE_GRAMMAR'],
       unresolvedTokens: [],
     };
   }
@@ -466,7 +510,16 @@ function parseProxyProductIdentityInternal(
   let unresolvedSubjectTokens: string[] = [];
 
   if (subjectMode === 'v2.1') {
-    const extraction = extractSubjectV21(remaining, productLines, compoundSubjects, subjects);
+    const extraction = extractSubjectV21(
+      remaining,
+      manufacturers,
+      productTypes,
+      productLines,
+      versions,
+      scales,
+      compoundSubjects,
+      subjects,
+    );
     subjects.splice(0, subjects.length, ...extraction.subjects);
     series.push(...extraction.series);
     forms.push(...extraction.forms);
