@@ -23,6 +23,13 @@ import {
   fetchReadonlyCatalogJson,
   fetchReadonlyCatalogText,
 } from '../lib/readonlyCatalogApi';
+import { getProviderMode } from '../providers/providerMode';
+import { readNextRawCollections } from '../lib/nextRawDbIntegrityProbe';
+import {
+  assertNextFieldTestProductGroupsReadback,
+  canUseNextFieldTestClosingDateClear,
+  createNextFieldTestClosingDateClearPlan,
+} from '../lib/nextFieldTestClosingDate';
 
 const DEFAULT_COL_WIDTHS = {
   title: 350,
@@ -444,6 +451,7 @@ export default function PurchaseRecords() {
 
   // Batch edit states and datepicker refs
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [isClearingClosingDates, setIsClearingClosingDates] = useState(false);
   const [batchClosingDate, setBatchClosingDate] = useState('');
   const [batchReleaseMonth, setBatchReleaseMonth] = useState('');
 
@@ -2090,7 +2098,65 @@ export default function PurchaseRecords() {
       alert('批次刪除失敗，請重試。');
       console.error(e);
     }
-  };  const handleBatchUpdateShowInPurchaseList = async (show: boolean) => {
+  };
+
+  const handleNextFieldTestClearClosingDates = async () => {
+    if (!canUseNextFieldTestClosingDateClear(getProviderMode())) {
+      alert('此操作只允許在 NEXT SANDBOX 使用。');
+      return;
+    }
+    if (guardAgainstStaleWrite() || selectedGroupIds.size === 0 || isClearingClosingDates) return;
+
+    let plan;
+    try {
+      plan = createNextFieldTestClosingDateClearPlan(groups, selectedGroupIds);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '無法確認選取商品，請重新載入後再試。');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `確定要清除已選取 ${plan.selectedCount} 筆商品的結單日嗎？\n\n此操作只會清除結單日，不會刪除商品或其他資料。`,
+    );
+    if (!confirmed) return;
+
+    if (plan.modifiedCount === 0) {
+      alert(`已清除 0 筆結單日，${plan.alreadyEmptyCount} 筆原本未設定`);
+      return;
+    }
+
+    setIsClearingClosingDates(true);
+    try {
+      await dataProvider.saveProductGroups(plan.nextGroups);
+      const rawCollections = await readNextRawCollections();
+      assertNextFieldTestProductGroupsReadback(
+        plan.nextGroups,
+        rawCollections.productGroups as unknown as ProductGroup[],
+      );
+
+      setGroups(plan.nextGroups);
+      setDraftClosingDates(previous => {
+        const next = { ...previous };
+        selectedGroupIds.forEach(id => delete next[id]);
+        return next;
+      });
+      setSelectedGroupIds(new Set());
+      alert(`已清除 ${plan.modifiedCount} 筆結單日，${plan.alreadyEmptyCount} 筆原本未設定`);
+    } catch (error) {
+      if (error instanceof StaleDataError) {
+        alert(error.message);
+        setIsStale(true);
+      } else {
+        alert('清除結單日失敗，未顯示成功結果；請重新載入確認資料狀態。');
+        console.error('[Next Field Test] bulk closing-date clear failed:', error);
+      }
+      await loadData();
+    } finally {
+      setIsClearingClosingDates(false);
+    }
+  };
+
+  const handleBatchUpdateShowInPurchaseList = async (show: boolean) => {
     if (guardAgainstStaleWrite()) return;
     if (selectedGroupIds.size === 0) return;
     const actionName = show ? '加入採購總表' : '移出採購總表';
@@ -3121,6 +3187,34 @@ export default function PurchaseRecords() {
             >
               <span>移出採購總表</span>
             </button>
+            {canUseNextFieldTestClosingDateClear(getProviderMode()) && (
+              <button
+                data-testid="next-field-test-clear-closing-date"
+                onClick={handleNextFieldTestClearClosingDates}
+                disabled={isClearingClosingDates}
+                title="NEXT FIELD TEST ONLY"
+                style={{
+                  padding: '0 14px',
+                  height: '36px',
+                  backgroundColor: isClearingClosingDates ? '#a78bfa' : '#7c3aed',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: isClearingClosingDates ? 'wait' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Calendar size={14} />
+                <span>{isClearingClosingDates ? '清除中…' : '清除結單日'}</span>
+                <span style={{ fontSize: '9px', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' }}>
+                  NEXT ONLY
+                </span>
+              </button>
+            )}
             <button
               onClick={handleBatchDelete}
               style={{
