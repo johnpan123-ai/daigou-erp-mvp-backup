@@ -43,9 +43,14 @@ type LookupDecision = 'MATCH' | 'AMBIGUOUS' | 'NOT_FOUND' | 'SERVICE_ERROR';
 
 type LookupIdentitySummary = {
   productType: string | null;
+  productLine: string | null;
   identity: string[];
+  identityCandidates: string[];
+  aliases: string[];
   series: string[];
+  qualifiers: string[];
   size: string | null;
+  scale: string | null;
   manufacturer: string | null;
 };
 
@@ -71,9 +76,14 @@ type LookupDiagnostic = {
 
 const summarizeIdentity = (identity: ReturnType<typeof normalizeProxyProductIdentity>): LookupIdentitySummary => ({
   productType: identity.productType,
+  productLine: identity.productLine,
   identity: identity.identityTokens,
+  identityCandidates: identity.identityCandidates,
+  aliases: identity.identityAliases,
   series: identity.seriesTokens,
+  qualifiers: identity.versionTokens,
   size: identity.size,
+  scale: identity.scale,
   manufacturer: identity.manufacturer,
 });
 
@@ -1534,17 +1544,6 @@ export default function PurchaseRecords() {
     const diagnostics: LookupDiagnostic[] = [];
     const updatedGroups = [...groups];
 
-    // Keep the pre-v1 lookup unchanged for proxy products whose type is not yet
-    // covered by the deliberately small Product Type normalizer.
-    const stripLegacyProxyTitle = (t: string) => t
-      .replace(/代理版\s*/g, '')
-      .replace(/(GSC|MF|BANDAI|壽屋|Kotobukiya|ALTER|FREEing|Phat|WAVE|Aniplex|SEGA|Taito|Furyu|Myethos|Union Creative|Kadokawa|Medicom|Kaiyodo|Sentinel|Di molto bene|Hobby Max|eStream|BINDing|Ques Q|B-style|PLUM|AMAKUNI|AmiAmi|Chara-Ani|Broccoli|Megahouse|POP UP PARADE)\s*/gi, '')
-      .replace(/(Chocopuni|Nendoroid|figma|ARTFX|S\.H\.Figuarts)\s*/gi, '')
-      .replace(/(玩偶|黏土人|黏土娃|模型|景品)\s*/g, '')
-      .replace(/[！!？?/／《》「」【】\(\)（）]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
     const stripShopTitle = (t: string) => t
       .replace(/^(在庫|通販)\s*/g, '')
       .replace(/^(Hololive|hololive|VSPO|ぶいすぽっ！?)\s*/gi, '')
@@ -1554,130 +1553,62 @@ export default function PurchaseRecords() {
       .replace(/\s+/g, ' ')
       .trim();
 
-    const matchScore = (catalogName: string, originalTitle: string, strippedSegments: string[]) => {
-      const cn = catalogName.toLowerCase();
-      const ot = originalTitle.toLowerCase();
-      const cnCompact = cn.replace(/\s+/g, '');
-
+    const shopMatchScore = (catalogName: string, originalTitle: string, strippedSegments: string[]) => {
+      const catalogLower = catalogName.toLowerCase();
+      const originalLower = originalTitle.toLowerCase();
+      const catalogCompact = catalogLower.replace(/\s+/g, '');
       if (strippedSegments.length === 0) return 0;
       let hits = 0;
-      for (const w of strippedSegments) {
-        const wl = w.toLowerCase();
-        const wc = wl.replace(/\s+/g, '');
-        if (cn.includes(wl) || cnCompact.includes(wc)) hits++;
+      for (const word of strippedSegments) {
+        const lower = word.toLowerCase();
+        if (catalogLower.includes(lower) || catalogCompact.includes(lower.replace(/\s+/g, ''))) hits += 1;
       }
       let score = hits / strippedSegments.length;
-
-      const scaleRe = /(\d\/\d+)/;
-      const origScale = ot.match(scaleRe)?.[1];
-      const catScale = cn.match(scaleRe)?.[1];
-      if (origScale && catScale && origScale !== catScale) return 0;
-      if (origScale && !catScale) score *= 0.3;
-      if (!origScale && catScale) score *= 0.7;
+      const scalePattern = /(\d\/\d+)/;
+      const originalScale = originalLower.match(scalePattern)?.[1];
+      const catalogScale = catalogLower.match(scalePattern)?.[1];
+      if (originalScale && catalogScale && originalScale !== catalogScale) return 0;
+      if (originalScale && !catalogScale) score *= 0.3;
+      if (!originalScale && catalogScale) score *= 0.7;
 
       const mismatchTypes = ['泡麵蓋', '絨毛', '胸針', '鍵帽', '盲盒', '抱枕', '壓克力', '掛件', '徽章', '公仔', '吊飾'];
-      for (const pt of mismatchTypes) {
-        if (cn.includes(pt) && !ot.includes(pt)) { score *= 0.3; break; }
+      for (const productType of mismatchTypes) {
+        if (catalogLower.includes(productType) && !originalLower.includes(productType)) {
+          score *= 0.3;
+          break;
+        }
       }
 
       const tail = strippedSegments.slice(Math.max(0, strippedSegments.length - 2));
-      const tailHits = tail.filter(w => {
-        const wl = w.toLowerCase();
-        return cn.includes(wl) || cnCompact.includes(wl.replace(/\s+/g, ''));
+      const tailHits = tail.filter(word => {
+        const lower = word.toLowerCase();
+        return catalogLower.includes(lower) || catalogCompact.includes(lower.replace(/\s+/g, ''));
       }).length;
       if (tail.length > 0 && tailHits === 0) score *= 0.4;
-
       return score;
     };
 
     // --- Proxy (代理版) catalog lookup ---
+    const catalogQueryCache = new Map<string, Promise<{ products?: any[] }>>();
     const searchCatalog = async (query: string) => {
-      return fetchReadonlyCatalogJson<{ products?: any[] }>(
-        `/api/catalog/search?q=${encodeURIComponent(query)}&pageSize=8`,
+      const normalizedQuery = query.trim();
+      const cached = catalogQueryCache.get(normalizedQuery);
+      if (cached) return cached;
+      const request = fetchReadonlyCatalogJson<{ products?: any[] }>(
+        `/api/catalog/search?q=${encodeURIComponent(normalizedQuery)}&pageSize=8`,
       );
+      catalogQueryCache.set(normalizedQuery, request);
+      try {
+        return await request;
+      } catch (error) {
+        catalogQueryCache.delete(normalizedQuery);
+        throw error;
+      }
     };
 
     const lookupProxy = async (group: ProductGroup): Promise<LookupResult> => {
       const originalTitle = group.normalized_title || group.title;
       const identity = normalizeProxyProductIdentity(originalTitle);
-
-      if (!identity.productType) {
-        const cleaned = stripLegacyProxyTitle(originalTitle);
-        const segments = cleaned.split(/\s+/).filter(word => word.length >= 2);
-        if (segments.length === 0) {
-          return {
-            score: 0,
-            diagnostic: {
-              groupId: group.id,
-              source: 'proxy',
-              originalTitle,
-              decision: 'NOT_FOUND',
-              score: 0,
-              reason: '商品識別資訊不足，需要人工確認',
-              sourceIdentity: summarizeIdentity(identity),
-            },
-          };
-        }
-
-        const legacyQueries: string[] = [];
-        if (segments.length >= 3) legacyQueries.push(segments.slice(0, 3).join(' '));
-        if (segments.length >= 2) legacyQueries.push(segments.slice(0, 2).join(' '));
-        for (const segment of segments) {
-          if (!legacyQueries.includes(segment)) legacyQueries.push(segment);
-        }
-
-        let bestMatch: any = null;
-        let bestScore = 0;
-        for (const query of legacyQueries) {
-          const data = await searchCatalog(query);
-          if (!data.products || data.products.length === 0) continue;
-          for (const candidate of data.products) {
-            if (!candidate.catalog?.deadlineAt) continue;
-            const score = matchScore(candidate.name || '', originalTitle, segments);
-            if (score > bestScore) {
-              bestScore = score;
-              bestMatch = candidate;
-            }
-          }
-          if (bestScore >= 0.5) break;
-        }
-
-        if (bestMatch?.catalog?.deadlineAt && bestScore >= 0.4) {
-          const deadline = new Date(bestMatch.catalog.deadlineAt);
-          deadline.setDate(deadline.getDate() - 2);
-          const dateStr = `${deadline.getFullYear()}/${String(deadline.getMonth() + 1).padStart(2, '0')}/${String(deadline.getDate()).padStart(2, '0')}`;
-          return {
-            closing_date: dateStr,
-            matchName: bestMatch.name,
-            score: bestScore,
-            identityVerified: true,
-            diagnostic: {
-              groupId: group.id,
-              source: 'proxy',
-              originalTitle,
-              decision: 'MATCH',
-              score: bestScore,
-              sourceIdentity: summarizeIdentity(identity),
-              selected: summarizeCandidate(bestMatch, bestScore),
-              finalClosingDate: dateStr,
-            },
-          };
-        }
-        return {
-          matchName: bestMatch?.name,
-          score: bestScore,
-          diagnostic: {
-            groupId: group.id,
-            source: 'proxy',
-            originalTitle,
-            decision: 'NOT_FOUND',
-            score: bestScore,
-            reason: '舊版商品類型未能可靠辨識，需人工確認',
-            sourceIdentity: summarizeIdentity(identity),
-            candidates: bestMatch ? [summarizeCandidate(bestMatch, bestScore)] : [],
-          },
-        };
-      }
 
       const queries = buildProxyCatalogQueries(identity);
       if (queries.length === 0) {
@@ -1696,14 +1627,27 @@ export default function PurchaseRecords() {
         };
       }
 
-      const candidates: any[] = [];
+      const candidates: ProxyCatalogCandidate[] = [];
+      let selection = selectProxyCatalogCandidate(originalTitle, candidates);
+      let successfulQueries = 0;
+      let lastQueryError: unknown = null;
       for (const q of queries) {
-        const data = await searchCatalog(q);
-        if (!data.products || data.products.length === 0) continue;
-        candidates.push(...data.products);
+        let data: { products?: any[] };
+        try {
+          data = await searchCatalog(q);
+          successfulQueries += 1;
+        } catch (error) {
+          lastQueryError = error;
+          continue;
+        }
+        if (data.products && data.products.length > 0) candidates.push(...data.products);
+        selection = selectProxyCatalogCandidate(originalTitle, candidates);
+        if (
+          isSafeProxyCatalogSelection(originalTitle, selection)
+          && selection.candidate.catalog?.deadlineAt
+        ) break;
       }
-
-      const selection = selectProxyCatalogCandidate(originalTitle, candidates);
+      if (successfulQueries === 0 && lastQueryError) throw lastQueryError;
       const summarizeScoredCandidate = (candidate: ProxyCatalogCandidate) => summarizeCandidate(
         candidate,
         scoreProxyCatalogCandidate(originalTitle, candidate).confidence,
@@ -1731,7 +1675,7 @@ export default function PurchaseRecords() {
       if (!isSafeProxyCatalogSelection(originalTitle, selection)) {
         const bestName = selection.status === 'no_match' ? selection.bestCandidate?.name : undefined;
         return {
-          matchName: bestName,
+          matchName: bestName || undefined,
           score: selection.confidence,
           failureReason: selection.message,
           identityVerified: false,
@@ -1846,7 +1790,7 @@ export default function PurchaseRecords() {
       let bestMatch: any = null;
       let bestScore = 0;
       for (const p of products) {
-        const fwd = matchScore(p.title || '', originalTitle, segments);
+        const fwd = shopMatchScore(p.title || '', originalTitle, segments);
         const shopSegs = (p.title || '').replace(/^(hololive|VSPO|ぶいすぽっ！?)\s*/gi, '').split(/[\s「」【】（）]+/).filter((w: string) => w.length >= 2);
         let revHits = 0;
         for (const w of shopSegs) {

@@ -10,8 +10,9 @@
       },
       "queries": [
         "figma 路西法",
-        "地獄征服者 路西法",
         "地獄征服者 Helltaker 路西法",
+        "figma Helltaker",
+        "Helltaker",
         "路西法"
       ],
       "catalogResponses": [
@@ -22,6 +23,11 @@
             {
               "id": "a4022289-6fa1-4dbf-9b9e-511aad590925",
               "name": "figma 路西法",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
               "brand": {
                 "name": "Good Smile Company"
               },
@@ -41,7 +47,15 @@
         "supplier": "wanrong",
         "rawDeadline": "2026-09-18T08:00:00.000Z",
         "closingDate": "2026-09-16"
-      }
+      },
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 1,
+        "result": "match"
+      },
+      "capturedAt": "2026-08-19T05:28:28.337Z"
     },
     {
       "caseId": "popup-parade-orange-sheryl-l-size",
@@ -52,9 +66,7 @@
         "POP UP PARADE 橘雪莉 L Size",
         "POP UP PARADE 橘雪莉",
         "魔法少女的魔女審判 橘雪莉 L Size",
-        "魔法少女的魔女審判 橘雪莉",
-        "橘雪莉 L Size",
-        "橘雪莉"
+        "橘雪莉 L Size"
       ],
       "catalogResponses": [
         {
@@ -64,6 +76,11 @@
             {
               "id": "82800bc8-d0f4-4c6d-afab-ef27ddb0336e",
               "name": "POP UP PARADE 橘雪莉 L Size",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
               "brand": {
                 "name": "Good Smile Company"
               },
@@ -83,7 +100,15 @@
         "supplier": "wanrong",
         "rawDeadline": "2026-09-18T08:00:00.000Z",
         "closingDate": "2026-09-16"
-      }
+      },
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 1,
+        "result": "match"
+      },
+      "capturedAt": "2026-08-19T05:28:28.337Z"
     },
     {
       "caseId": "nendoroid-mutsuki-wanrong-priority",
@@ -94,18 +119,22 @@
         "黏土人 峰月律",
         "Nendoroid 峰月律",
         "ねんどろいど 峰月律",
-        "3121 BanG Dream! 夢限大MewType 峰月律",
-        "3121 BanG Dream! 峰月律",
+        "Dream 夢限大MewType 峰月律",
         "峰月律"
       ],
       "catalogResponses": [
         {
-          "query": "峰月律",
+          "query": "黏土人 峰月律",
           "status": 200,
           "products": [
             {
               "id": "dbaebb43-ffc6-4b58-b7ee-cce7bfd41b22",
               "name": "黏土人 峰月律",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
               "brand": {
                 "name": "Good Smile Company"
               },
@@ -117,21 +146,13 @@
               }
             },
             {
-              "id": "d4cf81b4-8195-4c56-865a-6256a5683755",
-              "name": "黏土人3121《BanG Dream!》峰月律",
-              "brand": {
-                "name": "Goodsmile"
-              },
-              "catalog": {
-                "supplier": {
-                  "code": "dreamlink"
-                },
-                "deadlineAt": "2026-09-09T15:00:00.000Z"
-              }
-            },
-            {
               "id": "6950cb75-af6d-4ed4-b25d-f762e2359106",
               "name": "黏土人 峰月律",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
               "brand": {
                 "name": "Good Smile Company"
               },
@@ -151,7 +172,15 @@
         "supplier": "wanrong",
         "rawDeadline": "2026-09-07T08:00:00.000Z",
         "closingDate": "2026-09-05"
-      }
+      },
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 2,
+        "result": "match"
+      },
+      "capturedAt": "2026-08-19T05:28:28.337Z"
     },
     {
       "caseId": "nendoroid-rejects-scale",
@@ -255,31 +284,44 @@
         "title": "代理版 SEGA 景品 Yumemirize BanG Dream Ave Mujica 若葉睦"
       },
       "queries": [
-        "Yumemirize BanG Dream",
-        "Yumemirize BanG",
-        "Yumemirize",
+        "Yumemirize 若葉睦",
+        "Ave Mujica 若葉睦",
         "若葉睦"
       ],
       "catalogResponses": [
         {
-          "query": "Yumemirize BanG Dream",
+          "query": "Yumemirize 若葉睦",
           "status": 200,
           "products": []
         },
         {
-          "query": "Yumemirize BanG",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Yumemirize",
+          "query": "Ave Mujica 若葉睦",
           "status": 200,
           "products": []
         },
         {
           "query": "若葉睦",
           "status": 200,
-          "products": []
+          "products": [
+            {
+              "id": "903efaca-8c96-423e-b41e-825082498860",
+              "name": "BanG Dream! Yumemirize公仔 若葉睦 睡衣派對ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "代理版SEGA景品"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-27T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
       "expected": {
@@ -287,7 +329,15 @@
         "reason": "retrieval_missing",
         "rawDeadline": "2026-08-27",
         "closingDate": "2026-08-25"
-      }
+      },
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 1,
+        "result": "match"
+      },
+      "capturedAt": "2026-08-19T05:28:28.337Z"
     },
     {
       "caseId": "sega-yumemirize-shouko-known-failure",
@@ -295,31 +345,44 @@
         "title": "代理版 SEGA 景品 Yumemirize BanG Dream Ave Mujica 豐川祥子"
       },
       "queries": [
-        "Yumemirize BanG Dream",
-        "Yumemirize BanG",
-        "Yumemirize",
+        "Yumemirize 豐川祥子",
+        "Ave Mujica 豐川祥子",
         "豐川祥子"
       ],
       "catalogResponses": [
         {
-          "query": "Yumemirize BanG Dream",
+          "query": "Yumemirize 豐川祥子",
           "status": 200,
           "products": []
         },
         {
-          "query": "Yumemirize BanG",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Yumemirize",
+          "query": "Ave Mujica 豐川祥子",
           "status": 200,
           "products": []
         },
         {
           "query": "豐川祥子",
           "status": 200,
-          "products": []
+          "products": [
+            {
+              "id": "ad59953f-2920-408e-8803-4a8fc1e89afa",
+              "name": "BanG Dream! Yumemirize公仔 豐川祥子 睡衣派對ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "代理版SEGA景品"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-27T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
       "expected": {
@@ -327,7 +390,15 @@
         "reason": "retrieval_missing",
         "rawDeadline": "2026-08-27",
         "closingDate": "2026-08-25"
-      }
+      },
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 1,
+        "result": "match"
+      },
+      "capturedAt": "2026-08-19T05:28:28.337Z"
     },
     {
       "caseId": "nendoroid-star-traveler-demon",
@@ -345,7 +416,9 @@
       "queries": [
         "黏土人 小魔王",
         "Nendoroid 小魔王",
-        "星塔旅人 小魔王"
+        "ねんどろいど 小魔王",
+        "星塔旅人 魔王 小魔王",
+        "小魔王"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -392,19 +465,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "Nendoroid 小魔王",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "星塔旅人 小魔王",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 2,
+        "result": "match"
+      }
     },
     {
       "caseId": "nendoroid-honkai-firefly",
@@ -422,7 +492,9 @@
       "queries": [
         "黏土人 流螢",
         "Nendoroid 流螢",
-        "崩壞 星穹鐵道 流螢"
+        "ねんどろいど 流螢",
+        "崩壞 星穹鐵道 流螢",
+        "流螢"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -487,19 +559,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "Nendoroid 流螢",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "崩壞 星穹鐵道 流螢",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 3,
+        "result": "match"
+      }
     },
     {
       "caseId": "nendoroid-fuwawa",
@@ -514,31 +583,86 @@
         "title": "【小河馬日本代購】預購 26年11月 代理版 GSC Hololive English 黏土人 軟軟‧阿比斯加德 Fuwawa Abyssgard"
       },
       "queries": [
+        "黏土人 軟軟‧阿比斯加德",
+        "Nendoroid 軟軟‧阿比斯加德",
+        "ねんどろいど 軟軟‧阿比斯加德",
+        "Fuwawa Abyssgard 軟軟‧阿比斯加德",
+        "黏土人 軟軟",
+        "黏土人 阿比斯加德",
         "黏土人 Fuwawa",
-        "Nendoroid Fuwawa",
-        "Hololive Fuwawa Abyssgard"
+        "軟軟‧阿比斯加德"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "黏土人 Fuwawa",
+          "query": "黏土人 軟軟‧阿比斯加德",
           "status": 200,
-          "products": []
-        },
-        {
-          "query": "Nendoroid Fuwawa",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Hololive Fuwawa Abyssgard",
-          "status": 200,
-          "products": []
+          "products": [
+            {
+              "id": "c6aee71a-a11c-4684-b87f-82d62197b525",
+              "name": "黏土人 軟軟‧阿比斯加德",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-10T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "4e49ac9c-cdc0-42e3-949d-8651d09fe24b",
+              "name": "黏土人 軟軟‧阿比斯加德",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-10T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "8d520600-9745-43bb-b195-35ab19aa1681",
+              "name": "黏土人 軟軟‧阿比斯加德",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-10T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 8,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 3,
+        "result": "match"
+      }
     },
     {
       "caseId": "nendoroid-estinien",
@@ -555,8 +679,10 @@
       },
       "queries": [
         "黏土人 艾斯蒂尼安",
-        "Nendoroid Estinien",
-        "FF14 艾斯蒂尼安"
+        "Nendoroid 艾斯蒂尼安",
+        "ねんどろいど 艾斯蒂尼安",
+        "FF14 最終幻想 艾斯蒂尼安",
+        "艾斯蒂尼安"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -603,19 +729,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "Nendoroid Estinien",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "FF14 艾斯蒂尼安",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 2,
+        "result": "match"
+      }
     },
     {
       "caseId": "nendoroid-kachina",
@@ -633,7 +756,9 @@
       "queries": [
         "黏土人 橘光",
         "Nendoroid 橘光",
-        "蔚藍檔案 橘光"
+        "ねんどろいど 橘光",
+        "蔚藍檔案 鐵道學園 橘光",
+        "橘光"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -650,12 +775,29 @@
           "products": []
         },
         {
-          "query": "蔚藍檔案 橘光",
+          "query": "ねんどろいど 橘光",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "蔚藍檔案 鐵道學園 橘光",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "橘光",
           "status": 200,
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 5,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "nendoroid-hibari",
@@ -671,8 +813,13 @@
       },
       "queries": [
         "黏土人 雲雀恭彌",
-        "Nendoroid Hibari Kyoya",
-        "家庭教師 雲雀恭彌"
+        "Nendoroid 雲雀恭彌",
+        "ねんどろいど 雲雀恭彌",
+        "家庭教師HITMAN REBORN 雲雀恭彌 10年後Ver",
+        "家庭教師HITMAN REBORN 雲雀恭彌",
+        "黏土人 REBORN",
+        "Nendoroid REBORN",
+        "雲雀恭彌"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -684,17 +831,86 @@
           "products": []
         },
         {
-          "query": "Nendoroid Hibari Kyoya",
+          "query": "Nendoroid 雲雀恭彌",
           "status": 200,
           "products": []
         },
         {
-          "query": "家庭教師 雲雀恭彌",
+          "query": "ねんどろいど 雲雀恭彌",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "家庭教師HITMAN REBORN 雲雀恭彌 10年後Ver",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "家庭教師HITMAN REBORN 雲雀恭彌",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "黏土人 REBORN",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "Nendoroid REBORN",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "雲雀恭彌",
+          "status": 200,
+          "products": [
+            {
+              "id": "c60caaf9-5e0b-45fc-a05d-3786f801792b",
+              "name": "《家教》4.雲雀恭彌 動物裝 玩偶",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Ensky"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-16T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "84b7321b-28ed-4375-9269-bc323576b16f",
+              "name": "POTEPOTTE 家庭教師HITMAN REBORN! 雲雀恭彌",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "萬代其他"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-07-29T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 8,
+        "executedQueryCount": 8,
+        "stoppedEarly": false,
+        "candidateCount": 2,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "nendoroid-tomori",
@@ -711,7 +927,12 @@
       "queries": [
         "黏土人 三角初華",
         "Nendoroid 三角初華",
-        "BanG Dream 三角初華"
+        "ねんどろいど 三角初華",
+        "Mujica Doloris 三角初華",
+        "黏土人 Doloris",
+        "Nendoroid Doloris",
+        "ねんどろいど Doloris",
+        "三角初華"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -728,12 +949,138 @@
           "products": []
         },
         {
-          "query": "BanG Dream 三角初華",
+          "query": "ねんどろいど 三角初華",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "Mujica Doloris 三角初華",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "黏土人 Doloris",
+          "status": 200,
+          "products": [
+            {
+              "id": "e672f873-6eca-41a7-873b-1afea825fcd1",
+              "name": "黏土人 Doloris",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "1c6c1c08-e803-4513-8c71-d68a478a0d72",
+              "name": "黏土人 Doloris",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "fb0a193e-23db-4708-b187-7498c2be66d0",
+              "name": "黏土人 Doloris",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "33c16548-11f7-4959-8f18-9d22bbefe5a2",
+              "name": "黏土人 Doloris",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "ddffea62-3fd4-4134-83b3-8f05d343a161",
+              "name": "黏土人 Doloris",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "c237b3af-73ae-451d-b71c-a8a5a8e0ded6",
+              "name": "黏土人 Doloris",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 8,
+        "executedQueryCount": 5,
+        "stoppedEarly": true,
+        "candidateCount": 6,
+        "result": "match"
+      }
     },
     {
       "caseId": "figma-sayaka",
@@ -749,8 +1096,8 @@
       },
       "queries": [
         "figma 百合園聖亞",
-        "figma Sena",
-        "Blue Archive 百合園聖亞"
+        "Blue Archive 百合園聖亞",
+        "百合園聖亞"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -851,19 +1198,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "figma Sena",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Blue Archive 百合園聖亞",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 5,
+        "result": "match"
+      }
     },
     {
       "caseId": "figma-nanachi",
@@ -879,8 +1223,8 @@
       },
       "queries": [
         "figma 奈奈祈",
-        "figma Nanachi",
-        "來自深淵 奈奈祈"
+        "來自深淵 烈日的黃金鄉 奈奈祈",
+        "奈奈祈"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -909,19 +1253,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "figma Nanachi",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "來自深淵 奈奈祈",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 1,
+        "result": "match"
+      }
     },
     {
       "caseId": "figma-yuriko",
@@ -937,8 +1278,9 @@
       },
       "queries": [
         "figma 岡田百合子",
-        "figma 電波人塔克爾",
-        "東島丹三郎 岡田百合子"
+        "東島丹三郎想成為假面騎士 岡田百合子 電波人塔克爾Ver",
+        "東島丹三郎想成為假面騎士 岡田百合子",
+        "岡田百合子"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -1039,19 +1381,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "figma 電波人塔克爾",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "東島丹三郎 岡田百合子",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 5,
+        "result": "match"
+      }
     },
     {
       "caseId": "figma-albedo",
@@ -1068,8 +1407,9 @@
       },
       "queries": [
         "figma 雅兒貝德",
-        "figma Albedo",
-        "OVERLORD 雅兒貝德"
+        "劇場版 聖王國篇 雅兒貝德 OVERLORD",
+        "劇場版 聖王國篇 雅兒貝德",
+        "雅兒貝德"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -1134,19 +1474,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "figma Albedo",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "OVERLORD 雅兒貝德",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 3,
+        "result": "match"
+      }
     },
     {
       "caseId": "popup-parade-nikaido",
@@ -1163,7 +1500,8 @@
       "queries": [
         "POP UP PARADE 二階堂希羅 L Size",
         "POP UP PARADE 二階堂希羅",
-        "魔法少女的魔女審判 二階堂希羅"
+        "魔法少女的魔女審判 二階堂希羅 L Size",
+        "二階堂希羅 L Size"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -1282,14 +1620,55 @@
               }
             }
           ]
+        }
+      ],
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 6,
+        "result": "match"
+      }
+    },
+    {
+      "caseId": "popup-parade-yamanokami",
+      "cluster": "GSC / POP UP PARADE",
+      "tags": [
+        "gsc",
+        "pop-up-parade",
+        "english-japanese-mixed"
+      ],
+      "sourceGroupId": "0dca7056-29ff-4ab9-8ee1-835ddefa3fb0",
+      "erpProduct": {
+        "title": "【小河馬日本代購】預購 27年02月 代理版 GSC POP UP PARADE SP Fate FGO Assassin 山之翁"
+      },
+      "queries": [
+        "POP UP PARADE 山之翁",
+        "FGO Assassin 山之翁",
+        "山之翁"
+      ],
+      "expected": {
+        "status": "OBSERVE"
+      },
+      "catalogResponses": [
+        {
+          "query": "POP UP PARADE 山之翁",
+          "status": 200,
+          "products": []
         },
         {
-          "query": "POP UP PARADE 二階堂希羅",
+          "query": "FGO Assassin 山之翁",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "山之翁",
           "status": 200,
           "products": [
             {
-              "id": "dd17a47d-4292-4521-9b84-e7a6ba6c78e9",
-              "name": "POP UP PARADE 二階堂希羅 L Size",
+              "id": "76bc53e1-e3ec-486e-81c9-cf4e56dd3451",
+              "name": "POP UP PARADE SP Assassin/“山之翁”",
               "url": null,
               "slug": null,
               "sku": null,
@@ -1306,8 +1685,8 @@
               }
             },
             {
-              "id": "cc9de757-17be-4a1d-8df0-f81f408c5767",
-              "name": "POP UP PARADE 二階堂希羅 L Size",
+              "id": "b1ca64bd-1e77-42ef-8e10-c4bd51e73759",
+              "name": "POP UP PARADE SP Assassin/“山之翁”",
               "url": null,
               "slug": null,
               "sku": null,
@@ -1324,8 +1703,8 @@
               }
             },
             {
-              "id": "a48f8b4b-cac6-44c8-afb8-645b9e015771",
-              "name": "POP UP PARADE 二階堂希羅 L Size",
+              "id": "16c45eda-ccb1-4d28-9efd-9c9d7d08b9ff",
+              "name": "POP UP PARADE SP Assassin/“山之翁”",
               "url": null,
               "slug": null,
               "sku": null,
@@ -1342,8 +1721,8 @@
               }
             },
             {
-              "id": "e69c8b66-4a1f-4a5b-8399-fa34d33dd305",
-              "name": "POP UP PARADE 二階堂希羅 L Size",
+              "id": "34c247ff-c38e-4629-886e-d9f0acae74ca",
+              "name": "POP UP PARADE SP Assassin/“山之翁”",
               "url": null,
               "slug": null,
               "sku": null,
@@ -1360,8 +1739,26 @@
               }
             },
             {
-              "id": "5cf7ef58-ee85-424c-ad35-5e93572293ac",
-              "name": "POP UP PARADE 二階堂希羅 L Size",
+              "id": "02fbcaaf-a817-4393-b4e5-d14ca66ea40b",
+              "name": "POP UP PARADE SP《FGO》Assassin/“山之翁”",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-09-23T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "902ffe1a-89ea-4231-9bc8-5b9b21c6b510",
+              "name": "POP UP PARADE SP Assassin/“山之翁”",
               "url": null,
               "slug": null,
               "sku": null,
@@ -1378,8 +1775,8 @@
               }
             },
             {
-              "id": "2821b1ba-b4d0-47ee-b5a4-d2e51a8f5231",
-              "name": "POP UP PARADE 二階堂希羅 L Size",
+              "id": "42807475-0aa3-4499-8055-3ec9940d8618",
+              "name": "POP UP PARADE SP Assassin/“山之翁”",
               "url": null,
               "slug": null,
               "sku": null,
@@ -1396,53 +1793,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "魔法少女的魔女審判 二階堂希羅",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
-    },
-    {
-      "caseId": "popup-parade-yamanokami",
-      "cluster": "GSC / POP UP PARADE",
-      "tags": [
-        "gsc",
-        "pop-up-parade",
-        "english-japanese-mixed"
-      ],
-      "sourceGroupId": "0dca7056-29ff-4ab9-8ee1-835ddefa3fb0",
-      "erpProduct": {
-        "title": "【小河馬日本代購】預購 27年02月 代理版 GSC POP UP PARADE SP Fate FGO Assassin 山之翁"
-      },
-      "queries": [
-        "POP UP PARADE 山之翁",
-        "POP UP PARADE King Hassan",
-        "Fate FGO 山之翁"
-      ],
-      "expected": {
-        "status": "OBSERVE"
-      },
-      "catalogResponses": [
-        {
-          "query": "POP UP PARADE 山之翁",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "POP UP PARADE King Hassan",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Fate FGO 山之翁",
-          "status": 200,
-          "products": []
-        }
-      ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 7,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "popup-parade-aura",
@@ -1458,8 +1818,8 @@
       },
       "queries": [
         "POP UP PARADE 阿烏拉",
-        "POP UP PARADE Aura",
-        "葬送的芙莉蓮 阿烏拉"
+        "葬送的芙莉蓮 阿烏拉",
+        "阿烏拉"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -1471,17 +1831,24 @@
           "products": []
         },
         {
-          "query": "POP UP PARADE Aura",
+          "query": "葬送的芙莉蓮 阿烏拉",
           "status": 200,
           "products": []
         },
         {
-          "query": "葬送的芙莉蓮 阿烏拉",
+          "query": "阿烏拉",
           "status": 200,
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "scale-polka",
@@ -1497,26 +1864,26 @@
         "title": "【小河馬日本代購】預購 27年02月 代理版 Claynel Hololive 5期生 尾丸波爾卡 1/7"
       },
       "queries": [
-        "1/7 尾丸波爾卡",
-        "尾丸波爾卡 1/7",
-        "Hololive 尾丸波爾卡"
+        "Scale Figure 尾丸波爾卡",
+        "Hololive 5期生 尾丸波爾卡",
+        "尾丸波爾卡"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "1/7 尾丸波爾卡",
+          "query": "Scale Figure 尾丸波爾卡",
           "status": 200,
           "products": []
         },
         {
-          "query": "尾丸波爾卡 1/7",
+          "query": "Hololive 5期生 尾丸波爾卡",
           "status": 200,
           "products": []
         },
         {
-          "query": "Hololive 尾丸波爾卡",
+          "query": "尾丸波爾卡",
           "status": 200,
           "products": [
             {
@@ -1556,6 +1923,22 @@
               }
             },
             {
+              "id": "74088f22-27fa-4d59-9516-b66b696266e7",
+              "name": "hololive Hikkake公仔 尾丸波爾卡 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
               "id": "f7ac20c3-badc-47f3-8c87-f169aa4f68ff",
               "name": "1/7 hololive 尾丸波爾卡",
               "url": null,
@@ -1592,6 +1975,24 @@
               }
             },
             {
+              "id": "8510b863-df9f-482a-8129-7d580f1126a1",
+              "name": "hololive Hikkake公仔 尾丸波爾卡 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "FuRyu"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
               "id": "a12f81a9-2f8c-4896-a0a5-e2c71cfd9d05",
               "name": "1/7 hololive 尾丸波爾卡",
               "url": null,
@@ -1608,11 +2009,36 @@
                 },
                 "deadlineAt": "2026-08-24T08:00:00.000Z"
               }
+            },
+            {
+              "id": "7e5dce32-5682-43f8-9254-c73082b79738",
+              "name": "1/7 PVC「hololive」尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-26T15:00:00.000Z"
+              }
             }
           ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 8,
+        "result": "match"
+      }
     },
     {
       "caseId": "scale-yoshino",
@@ -1628,31 +2054,171 @@
         "title": "【小河馬日本代購】預購 27年9月 代理版 Luminous Box 千戀＊萬花 朝武芳乃 制服獸耳Ver 1/7"
       },
       "queries": [
-        "1/7 朝武芳乃",
-        "朝武芳乃 1/7",
-        "千戀萬花 朝武芳乃"
+        "Scale Figure 朝武芳乃",
+        "Box 千戀＊萬花 朝武芳乃 制服獸耳Ver",
+        "Box 千戀＊萬花 朝武芳乃",
+        "朝武芳乃"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "1/7 朝武芳乃",
+          "query": "Scale Figure 朝武芳乃",
           "status": 200,
           "products": []
         },
         {
-          "query": "朝武芳乃 1/7",
+          "query": "Box 千戀＊萬花 朝武芳乃 制服獸耳Ver",
           "status": 200,
           "products": []
         },
         {
-          "query": "千戀萬花 朝武芳乃",
+          "query": "Box 千戀＊萬花 朝武芳乃",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "朝武芳乃",
+          "status": 200,
+          "products": [
+            {
+              "id": "57655410-7fdf-49a3-b5ca-f51d949d348a",
+              "name": "1/7 千戀＊萬花 朝武芳乃 制服獸耳Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "18ca038b-9c44-4623-8ff5-5a2480415395",
+              "name": "1/7 千戀＊萬花 朝武芳乃 制服獸耳Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "bdfd10c9-ea4d-4773-aca7-f137b01e5462",
+              "name": "1/7 千戀＊萬花 朝武芳乃 制服獸耳Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "54687a90-308c-4db0-9dc7-c9d2e4c3559b",
+              "name": "1/7 千戀＊萬花 朝武芳乃 制服獸耳Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "98e8455c-ad56-4d7c-8281-f854190fca83",
+              "name": "1/7 PVC《千戀＊萬花》朝武芳乃 制服獸耳ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-09-09T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "876fd806-2dd6-48f3-b91f-81eecfc67a20",
+              "name": "1/7 千戀＊萬花 朝武芳乃 制服獸耳Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "86fdea02-871c-4d50-85f9-b177e3d17b3f",
+              "name": "1/7 千戀＊萬花 朝武芳乃 制服獸耳Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 4,
+        "stoppedEarly": false,
+        "candidateCount": 7,
+        "result": "match"
+      }
     },
     {
       "caseId": "scale-hinata",
@@ -1668,21 +2234,363 @@
         "title": "【小河馬日本代購】預購 代理版 27年07月 GSC VTuber團體 WeatherPlanet 天晴Hinata 1/7 PVC"
       },
       "queries": [
-        "1/7 天晴 Hinata",
-        "WeatherPlanet 天晴Hinata",
-        "天晴Hinata 1/7"
+        "Scale Figure 天晴Hinata",
+        "VTuber團體 WeatherPlanet 天晴Hinata",
+        "Scale Figure WeatherPlanet",
+        "WeatherPlanet",
+        "天晴Hinata"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "1/7 天晴 Hinata",
+          "query": "Scale Figure 天晴Hinata",
           "status": 200,
           "products": []
         },
         {
-          "query": "WeatherPlanet 天晴Hinata",
+          "query": "VTuber團體 WeatherPlanet 天晴Hinata",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "Scale Figure WeatherPlanet",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "WeatherPlanet",
+          "status": 200,
+          "products": [
+            {
+              "id": "97aa6553-8300-415d-bfca-cd7bc9166903",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "2e151725-77df-4a0c-9dbc-ed79407e73ef",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "a2f7c95b-36f3-4d96-9c8d-bf72a389ceb8",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "26d1cad0-0453-4acc-b4e7-47c9381a6779",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "6e9c9fe2-e3a3-4527-93e3-3745ba091870",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "f569e34b-5b3b-409c-9233-d6b98c5e09e8",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "22204386-563f-463b-80e1-214fd954ff9f",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "ef9dabad-9701-4121-b8ea-e80b14054155",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "792af4b6-c438-453c-852f-b0734d6092a6",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "9807bd46-2c1a-4bae-947c-3de37dd69937",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "2adf2e00-ab99-49c5-bce7-9d7bcdfd29ff",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "84b3e8d1-c2ac-4c36-b24e-7b3acc180cf8",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "0c277705-fc9d-4394-b233-90f14f2ab39c",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "be962e52-b2d7-4c9d-a9b6-bcea7c6cb095",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "40adf973-8b2c-45af-90c7-9ee7ffcbd6aa",
+              "name": "1/7 PVC《WeatherPlanet》雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-09-23T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "fe7e1866-e5e3-4ea5-80ec-b2e4a84f7def",
+              "name": "1/7 PVC《WeatherPlanet》天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-09-23T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "a5424984-7a6d-4570-977e-7bb0b4fd2a53",
+              "name": "1/7 WeatherPlanet 雨海Ruka",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "1ce4435c-7f3f-4b52-b8c5-e7bc48facffa",
+              "name": "1/7 WeatherPlanet 天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-18T08:00:00.000Z"
+              }
+            }
+          ]
+        },
+        {
+          "query": "天晴Hinata",
           "status": 200,
           "products": [
             {
@@ -1812,6 +2720,24 @@
               }
             },
             {
+              "id": "fe7e1866-e5e3-4ea5-80ec-b2e4a84f7def",
+              "name": "1/7 PVC《WeatherPlanet》天晴Hinata",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-09-23T15:00:00.000Z"
+              }
+            },
+            {
               "id": "1ce4435c-7f3f-4b52-b8c5-e7bc48facffa",
               "name": "1/7 WeatherPlanet 天晴Hinata",
               "url": null,
@@ -1830,14 +2756,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "天晴Hinata 1/7",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 5,
+        "stoppedEarly": false,
+        "candidateCount": 27,
+        "result": "ambiguous"
+      }
     },
     {
       "caseId": "scale-bai-e",
@@ -1853,21 +2781,22 @@
         "title": "【小河馬日本代購】預購 27年6月 代理版 Myethos Gift+ 崩壞 星穹鐵道 白厄 列車環遊記Ver 1/8"
       },
       "queries": [
-        "1/8 白厄",
-        "Myethos 白厄",
-        "崩壞 星穹鐵道 白厄"
+        "Scale Figure 白厄",
+        "崩壞 星穹鐵道 白厄 列車環遊記Ver",
+        "崩壞 星穹鐵道 白厄",
+        "白厄"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "1/8 白厄",
+          "query": "Scale Figure 白厄",
           "status": 200,
           "products": []
         },
         {
-          "query": "Myethos 白厄",
+          "query": "崩壞 星穹鐵道 白厄 列車環遊記Ver",
           "status": 200,
           "products": []
         },
@@ -1875,9 +2804,40 @@
           "query": "崩壞 星穹鐵道 白厄",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "白厄",
+          "status": 200,
+          "products": [
+            {
+              "id": "3399b734-62fe-414c-aae8-e91d52b3a0cf",
+              "name": "1/8 PVC Gift+系列 崩壞:星穹鐵道 白厄 列車環遊記Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Myethos"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-10-11T15:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 4,
+        "stoppedEarly": false,
+        "candidateCount": 1,
+        "result": "match"
+      }
     },
     {
       "caseId": "prize-relax-time-okayu",
@@ -1894,8 +2854,9 @@
       },
       "queries": [
         "Relax time 貓又小粥",
-        "貓又小粥 Relax time",
-        "Hololive 貓又小粥"
+        "Hololive IF 貓又小粥 睡衣限定服 Ver",
+        "Hololive IF 貓又小粥",
+        "貓又小粥"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -1922,19 +2883,16 @@
               }
             }
           ]
-        },
-        {
-          "query": "貓又小粥 Relax time",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Hololive 貓又小粥",
-          "status": 200,
-          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 1,
+        "stoppedEarly": true,
+        "candidateCount": 1,
+        "result": "match"
+      }
     },
     {
       "caseId": "prize-relax-time-raden",
@@ -1950,21 +2908,28 @@
         "title": "【小河馬日本代購】預購 代理版 萬代 景品 Hololive IF Relax time 儒烏風亭らでん 儒烏風亭螺鈿 休息時光"
       },
       "queries": [
+        "Relax time 儒烏風亭螺鈿",
+        "IF 儒烏風亭らでん 儒烏風亭螺鈿",
         "Relax time 儒烏風亭らでん",
-        "Hololive 儒烏風亭螺鈿",
-        "儒烏風亭らでん"
+        "儒烏風亭らでん",
+        "儒烏風亭螺鈿"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "Relax time 儒烏風亭らでん",
+          "query": "Relax time 儒烏風亭螺鈿",
           "status": 200,
           "products": []
         },
         {
-          "query": "Hololive 儒烏風亭螺鈿",
+          "query": "IF 儒烏風亭らでん 儒烏風亭螺鈿",
+          "status": 200,
+          "products": []
+        },
+        {
+          "query": "Relax time 儒烏風亭らでん",
           "status": 200,
           "products": []
         },
@@ -1972,9 +2937,21 @@
           "query": "儒烏風亭らでん",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "儒烏風亭螺鈿",
+          "status": 200,
+          "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 5,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "prize-hikkake-polka",
@@ -1991,8 +2968,8 @@
       },
       "queries": [
         "Hikkake 尾丸波爾卡",
-        "Furyu 尾丸波爾卡",
-        "Hololive 尾丸波爾卡"
+        "Hololive 尾丸波爾卡",
+        "尾丸波爾卡"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2000,11 +2977,6 @@
       "catalogResponses": [
         {
           "query": "Hikkake 尾丸波爾卡",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Furyu 尾丸波爾卡",
           "status": 200,
           "products": []
         },
@@ -2103,9 +3075,164 @@
               }
             }
           ]
+        },
+        {
+          "query": "尾丸波爾卡",
+          "status": 200,
+          "products": [
+            {
+              "id": "10a9895a-9bd5-4277-a108-a58af55aea0c",
+              "name": "1/7 hololive 尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-24T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "ee0375d5-10df-47ed-8e71-638bb3d5fe37",
+              "name": "1/7 hololive 尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-24T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "74088f22-27fa-4d59-9516-b66b696266e7",
+              "name": "hololive Hikkake公仔 尾丸波爾卡 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "f7ac20c3-badc-47f3-8c87-f169aa4f68ff",
+              "name": "1/7 hololive 尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-24T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "4701ab70-ba49-40fc-a699-405906bae808",
+              "name": "1/7 hololive 尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-24T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "8510b863-df9f-482a-8129-7d580f1126a1",
+              "name": "hololive Hikkake公仔 尾丸波爾卡 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "FuRyu"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "a12f81a9-2f8c-4896-a0a5-e2c71cfd9d05",
+              "name": "1/7 hololive 尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-24T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "7e5dce32-5682-43f8-9254-c73082b79738",
+              "name": "1/7 PVC「hololive」尾丸波爾卡",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-26T15:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 13,
+        "result": "match"
+      }
     },
     {
       "caseId": "prize-hikkake-botan",
@@ -2122,8 +3249,8 @@
       },
       "queries": [
         "Hikkake 獅白牡丹",
-        "Furyu 獅白牡丹",
-        "Hololive 獅白牡丹"
+        "Hololive 獅白牡丹",
+        "獅白牡丹"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2135,17 +3262,59 @@
           "products": []
         },
         {
-          "query": "Furyu 獅白牡丹",
+          "query": "Hololive 獅白牡丹",
           "status": 200,
           "products": []
         },
         {
-          "query": "Hololive 獅白牡丹",
+          "query": "獅白牡丹",
           "status": 200,
-          "products": []
+          "products": [
+            {
+              "id": "26a0d8f7-23b2-4b8f-8f58-9daa0628c080",
+              "name": "hololive Hikkake公仔 獅白牡丹 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "cf5ca445-3006-4db9-a505-bfd8b7cfd38a",
+              "name": "hololive Hikkake公仔 獅白牡丹 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "FuRyu"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 2,
+        "result": "match"
+      }
     },
     {
       "caseId": "chocopuni-hoshino",
@@ -2162,8 +3331,8 @@
       },
       "queries": [
         "Chocopuni 星奈",
-        "GSC Chocopuni 星奈",
-        "蔚藍檔案 星奈"
+        "蔚藍檔案 星奈",
+        "星奈"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2175,17 +3344,24 @@
           "products": []
         },
         {
-          "query": "GSC Chocopuni 星奈",
+          "query": "蔚藍檔案 星奈",
           "status": 200,
           "products": []
         },
         {
-          "query": "蔚藍檔案 星奈",
+          "query": "星奈",
           "status": 200,
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "chocopuni-maple",
@@ -2202,8 +3378,8 @@
       },
       "queries": [
         "Chocopuni 楓",
-        "Chocopuni Maple",
-        "貓娘樂園 楓"
+        "貓娘樂園 世界連結 楓",
+        "楓"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2215,17 +3391,24 @@
           "products": []
         },
         {
-          "query": "Chocopuni Maple",
+          "query": "貓娘樂園 世界連結 楓",
           "status": 200,
           "products": []
         },
         {
-          "query": "貓娘樂園 楓",
+          "query": "楓",
           "status": 200,
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "chocopuni-nagisa",
@@ -2242,8 +3425,8 @@
       },
       "queries": [
         "Chocopuni 桐藤渚",
-        "Chocopuni Nagisa",
-        "Blue Archive 桐藤渚"
+        "Blue Archive 桐藤渚",
+        "桐藤渚"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2255,17 +3438,24 @@
           "products": []
         },
         {
-          "query": "Chocopuni Nagisa",
+          "query": "Blue Archive 桐藤渚",
           "status": 200,
           "products": []
         },
         {
-          "query": "Blue Archive 桐藤渚",
+          "query": "桐藤渚",
           "status": 200,
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "furyu-mochipico-lamy",
@@ -2282,8 +3472,8 @@
       },
       "queries": [
         "MOCHIPICO 雪花菈米",
-        "Furyu 雪花菈米",
-        "Hololive 雪花菈米"
+        "hololive production 雪花菈米",
+        "雪花菈米"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2295,17 +3485,93 @@
           "products": []
         },
         {
-          "query": "Furyu 雪花菈米",
+          "query": "hololive production 雪花菈米",
           "status": 200,
           "products": []
         },
         {
-          "query": "Hololive 雪花菈米",
+          "query": "雪花菈米",
           "status": 200,
-          "products": []
+          "products": [
+            {
+              "id": "0794c9b4-1021-4c9b-bb96-bf6afb7e9602",
+              "name": "hololive production MOCHIPICO 大型絨毛 雪花菈米",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "4eabd8ae-bdc7-4304-8620-84a404428872",
+              "name": "hololive Hikkake公仔 雪花菈米 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "8eb96561-514b-478d-aee3-b1c6b76d2959",
+              "name": "hololive production MOCHIPICO 大型絨毛 雪花菈米",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "FuRyu"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "70b284f9-efe3-4e97-8df3-e49997fc8685",
+              "name": "hololive Hikkake公仔 雪花菈米 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "FuRyu"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-12T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 4,
+        "result": "match"
+      }
     },
     {
       "caseId": "furyu-nikke-helen",
@@ -2321,28 +3587,82 @@
         "title": "【小河馬日本代購】預購 26年12月 代理版 Furyu 景品 勝利女神 妮姬 泡麵蓋公仔 海倫 吊帶洋裝ver 附特典"
       },
       "queries": [
-        "Furyu 海倫",
-        "妮姬 海倫 吊帶洋裝",
-        "泡麵蓋公仔 海倫"
+        "勝利女神 妮姬 海倫 吊帶洋裝ver",
+        "勝利女神 妮姬 海倫",
+        "海倫"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "Furyu 海倫",
+          "query": "勝利女神 妮姬 海倫 吊帶洋裝ver",
           "status": 200,
           "products": []
         },
         {
-          "query": "妮姬 海倫 吊帶洋裝",
+          "query": "勝利女神 妮姬 海倫",
           "status": 200,
           "products": []
         },
         {
-          "query": "泡麵蓋公仔 海倫",
+          "query": "海倫",
           "status": 200,
           "products": [
+            {
+              "id": "fcf260d3-ca70-490c-aafe-57bce0ea406f",
+              "name": "1/7 PVC《妮姬》海倫-浴後",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-09-02T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "9c319c7b-d0ac-4fde-8d91-f9c142ae026f",
+              "name": "1/7 勝利女神：妮姬 海倫 - 浴後",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-31T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "45ac2151-6823-44b8-acdf-3d107eeb09b6",
+              "name": "1/7 勝利女神：妮姬 海倫 - 浴後",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-31T08:00:00.000Z"
+              }
+            },
             {
               "id": "4ba93ea1-97f1-4451-b615-b13dbe930dbb",
               "name": "勝利女神:妮姬 泡麵蓋公仔 海倫 吊帶洋裝ver.(附特典)",
@@ -2358,11 +3678,36 @@
                 },
                 "deadlineAt": "2026-08-12T08:00:00.000Z"
               }
+            },
+            {
+              "id": "09cdd3e8-700a-4b6c-b73b-7c2bf776055f",
+              "name": "《妮姬》海倫-浴後 泡麵蓋公仔",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Furyu"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-07-26T15:00:00.000Z"
+              }
             }
           ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 5,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "furyu-sakura-miko",
@@ -2379,8 +3724,8 @@
       },
       "queries": [
         "Hikkake 櫻巫女",
-        "Furyu 櫻巫女",
-        "Hololive 櫻巫女"
+        "Hololive 櫻巫女",
+        "櫻巫女"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2388,11 +3733,6 @@
       "catalogResponses": [
         {
           "query": "Hikkake 櫻巫女",
-          "status": 200,
-          "products": []
-        },
-        {
-          "query": "Furyu 櫻巫女",
           "status": 200,
           "products": []
         },
@@ -2437,9 +3777,76 @@
               }
             }
           ]
+        },
+        {
+          "query": "櫻巫女",
+          "status": 200,
+          "products": [
+            {
+              "id": "d104180e-e627-4be4-919d-28bd1639e679",
+              "name": "1/7 hololive 櫻巫女 Date Style 私下服裝Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-17T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "2cff6c8c-ecbb-429b-9812-b762f3a6aa80",
+              "name": "1/7 hololive 櫻巫女 Date Style 私下服裝Ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-17T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "cab71ad4-48aa-438a-8887-28a18a31c88b",
+              "name": "1/7 PVC 櫻巫女 Date Style 私服ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 5,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "bandai-smp-gaoranger",
@@ -2456,8 +3863,10 @@
       },
       "queries": [
         "SMP 牙吠伊卡洛斯",
-        "萬代 SMP 牙吠連者",
-        "百獸戰隊 牙吠伊卡洛斯"
+        "百獸戰隊 牙吠連者 牙吠伊卡洛斯",
+        "SMP 牙吠連者",
+        "牙吠連者",
+        "牙吠伊卡洛斯"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2469,17 +3878,210 @@
           "products": []
         },
         {
-          "query": "萬代 SMP 牙吠連者",
+          "query": "百獸戰隊 牙吠連者 牙吠伊卡洛斯",
           "status": 200,
           "products": []
         },
         {
-          "query": "百獸戰隊 牙吠伊卡洛斯",
+          "query": "SMP 牙吠連者",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "牙吠連者",
+          "status": 200,
+          "products": [
+            {
+              "id": "cca1159d-38c8-405b-885e-f14c2629246c",
+              "name": "百獸戰隊牙吠連者 獸皇劍 紀念版(PB商店)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "PB"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-13T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "84a30223-f66e-4eb5-8947-0ca1a05e7cc4",
+              "name": "SD司令戰記 MISSION BOX 01 G-ARMS篇(PB商店)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "PB"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-13T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "a11cd0af-a8a6-42b3-9293-864ca576a516",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠神 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "05546a07-bd44-4b54-b0e4-30e76b7df83a",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠獅&amp;牙吠象 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "90118138-4dc2-4e7c-96f7-dddb91c7eb41",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠伊卡洛斯 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "3fb0aac0-8798-4899-b4e2-c5c36baafc87",
+              "name": "SMP  百獸戰隊牙吠連者  牙吠力士/牙吠犀牛&amp;牙吠犰狳 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "bb4035c4-df83-4a23-ac16-9798648789a5",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠獵人(再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "baef630a-497f-493a-a636-d19b0e018656",
+              "name": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠袋鼠",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "f835f0b7-6ad6-48a1-88c1-d9dd71e6547e",
+              "name": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠海龜＆牙吠海象",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "00a6bb38-decb-47da-9803-a39df007da3f",
+              "name": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "72cd830a-d071-41b2-9512-4d6fab9796fb",
+              "name": "SMP 百獸戰隊牙吠連者 牙吠王(再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-03T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 4,
+        "stoppedEarly": true,
+        "candidateCount": 11,
+        "result": "match"
+      }
     },
     {
       "caseId": "bandai-smp-gaoking",
@@ -2496,8 +4098,10 @@
       },
       "queries": [
         "SMP 牙吠王",
-        "萬代 SMP 牙吠連者 牙吠王",
-        "百獸戰隊 牙吠王"
+        "百獸戰隊 牙吠連者 牙吠王",
+        "SMP 牙吠連者",
+        "牙吠連者",
+        "牙吠王"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2509,17 +4113,210 @@
           "products": []
         },
         {
-          "query": "萬代 SMP 牙吠連者 牙吠王",
+          "query": "百獸戰隊 牙吠連者 牙吠王",
           "status": 200,
           "products": []
         },
         {
-          "query": "百獸戰隊 牙吠王",
+          "query": "SMP 牙吠連者",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "牙吠連者",
+          "status": 200,
+          "products": [
+            {
+              "id": "cca1159d-38c8-405b-885e-f14c2629246c",
+              "name": "百獸戰隊牙吠連者 獸皇劍 紀念版(PB商店)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "PB"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-13T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "84a30223-f66e-4eb5-8947-0ca1a05e7cc4",
+              "name": "SD司令戰記 MISSION BOX 01 G-ARMS篇(PB商店)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "PB"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-13T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "a11cd0af-a8a6-42b3-9293-864ca576a516",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠神 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "05546a07-bd44-4b54-b0e4-30e76b7df83a",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠獅&amp;牙吠象 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "90118138-4dc2-4e7c-96f7-dddb91c7eb41",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠伊卡洛斯 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "3fb0aac0-8798-4899-b4e2-c5c36baafc87",
+              "name": "SMP  百獸戰隊牙吠連者  牙吠力士/牙吠犀牛&amp;牙吠犰狳 (再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-10-05T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "bb4035c4-df83-4a23-ac16-9798648789a5",
+              "name": "SMP  百獸戰隊牙吠連者 牙吠獵人(再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "baef630a-497f-493a-a636-d19b0e018656",
+              "name": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠袋鼠",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "f835f0b7-6ad6-48a1-88c1-d9dd71e6547e",
+              "name": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠海龜＆牙吠海象",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "00a6bb38-decb-47da-9803-a39df007da3f",
+              "name": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-09-07T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "72cd830a-d071-41b2-9512-4d6fab9796fb",
+              "name": "SMP 百獸戰隊牙吠連者 牙吠王(再販)",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-03T08:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 4,
+        "stoppedEarly": true,
+        "candidateCount": 11,
+        "result": "match"
+      }
     },
     {
       "caseId": "bandai-robot-dam-bine",
@@ -2535,31 +4332,38 @@
         "title": "【小河馬日本代購】預購 26年11月 代理版 萬代 ROBOT魂 SIDE AB 聖戰士丹拜因 茲華斯 H.D."
       },
       "queries": [
-        "ROBOT魂 茲華斯",
-        "萬代 ROBOT魂 SIDE AB",
-        "聖戰士丹拜因 茲華斯"
+        "AB 聖戰士丹拜因 茲華斯 H.D.",
+        "AB 聖戰士丹拜因 茲華斯",
+        "茲華斯"
       ],
       "expected": {
         "status": "OBSERVE"
       },
       "catalogResponses": [
         {
-          "query": "ROBOT魂 茲華斯",
+          "query": "AB 聖戰士丹拜因 茲華斯 H.D.",
           "status": 200,
           "products": []
         },
         {
-          "query": "萬代 ROBOT魂 SIDE AB",
+          "query": "AB 聖戰士丹拜因 茲華斯",
           "status": 200,
           "products": []
         },
         {
-          "query": "聖戰士丹拜因 茲華斯",
+          "query": "茲華斯",
           "status": 200,
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "bandai-shf-gohan",
@@ -2576,8 +4380,10 @@
       },
       "queries": [
         "S.H.Figuarts 孫悟飯",
-        "BANDAI SHF 孫悟飯",
-        "七龍珠 孫悟飯 SUPER HERO"
+        "SHF 孫悟飯",
+        "七龍珠 孫悟飯 SUPER HERO",
+        "七龍珠 孫悟飯",
+        "孫悟飯"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2589,7 +4395,7 @@
           "products": []
         },
         {
-          "query": "BANDAI SHF 孫悟飯",
+          "query": "SHF 孫悟飯",
           "status": 200,
           "products": []
         },
@@ -2616,7 +4422,14 @@
           ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 5,
+        "executedQueryCount": 3,
+        "stoppedEarly": true,
+        "candidateCount": 1,
+        "result": "match"
+      }
     },
     {
       "caseId": "shf-motoko",
@@ -2632,8 +4445,9 @@
       },
       "queries": [
         "S.H.Figuarts 草薙素子",
-        "SHF Motoko Kusanagi",
-        "攻殻機動隊 草薙素子"
+        "SHF 草薙素子",
+        "攻殻機動隊 草薙素子",
+        "草薙素子"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2645,7 +4459,7 @@
           "products": []
         },
         {
-          "query": "SHF Motoko Kusanagi",
+          "query": "SHF 草薙素子",
           "status": 200,
           "products": []
         },
@@ -2653,9 +4467,290 @@
           "query": "攻殻機動隊 草薙素子",
           "status": 200,
           "products": []
+        },
+        {
+          "query": "草薙素子",
+          "status": 200,
+          "products": [
+            {
+              "id": "ef643bf9-41a8-419d-b93e-e826cf501c90",
+              "name": "S.H.F 攻殼機動隊 草薙素子",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": null,
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-10T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "07aef4ba-7b35-4221-99f2-0c0291454d39",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0865 草薙素子『IN MY GHOST』 Tシャツ/SUMI-XL",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "910fe1c5-c842-4179-bbf3-0762d7e72178",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0865 草薙素子『IN MY GHOST』 Tシャツ/SUMI-L",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "c52b0d3f-a0be-487e-9a60-5fee11f4c173",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0865 草薙素子『IN MY GHOST』 Tシャツ/SUMI-M",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "e4bf12d5-bd97-492b-b9cb-4d0346d29ab0",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0865 草薙素子『IN MY GHOST』 Tシャツ/SUMI-S",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "ea44dad0-b8ce-49e7-92c5-a4f1a4edd836",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/NAVY-XL",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "895c4b55-d4cd-4157-86c2-705bfe19dd89",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/NAVY-L",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "1ee682f2-8bf7-464d-8973-96a8ca3d8c34",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/NAVY-M",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "356525e3-a9ab-47d7-92cd-4df1d0da389f",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/NAVY-S",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "3849ce4b-e3f7-4500-bbd4-6686e58c9c79",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/WHITE-XL",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "55cc4db9-6f55-4ec5-8528-9adc7013262e",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/WHITE-L",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "271a4d28-5d55-40b3-8deb-bfd7ddedc7f0",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/WHITE-M",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "c8687e60-9c62-4c53-bc86-0357cb68b75e",
+              "name": "攻殻機動隊 STAND ALONE COMPLEX7265-0861 草薙素子 ピクセル Tシャツ/WHITE-S",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "COSPA"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "6e0abcac-4f1b-4aa7-9f71-87f5801ef55b",
+              "name": "E.S.S. 1/12 14.5cm 攻殼機動隊 草薙素子 戰鬥服ver. 可動  ESG0203",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "HIYA (海雅)"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-20T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "37ac0f7a-75b4-4469-8033-96ec33aaa458",
+              "name": "1/12 可動 ESG0203 E.S.S. 攻殼機動隊 草薙素子 戰鬥服ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "HIYA TOYS 海雅"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-26T15:00:00.000Z"
+              }
+            }
+          ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 4,
+        "executedQueryCount": 4,
+        "stoppedEarly": false,
+        "candidateCount": 15,
+        "result": "match"
+      }
     },
     {
       "caseId": "phat-shiroko",
@@ -2670,7 +4765,6 @@
         "title": "【小河馬日本代購】預購 27年06月 代理版 Phat! 蔚藍檔案 Blue Archive 砂狼白子"
       },
       "queries": [
-        "Phat 砂狼白子",
         "Blue Archive 砂狼白子",
         "砂狼白子"
       ],
@@ -2678,11 +4772,6 @@
         "status": "OBSERVE"
       },
       "catalogResponses": [
-        {
-          "query": "Phat 砂狼白子",
-          "status": 200,
-          "products": []
-        },
         {
           "query": "Blue Archive 砂狼白子",
           "status": 200,
@@ -2694,7 +4783,14 @@
           "products": []
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 2,
+        "executedQueryCount": 2,
+        "stoppedEarly": false,
+        "candidateCount": 0,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "plamatea-rei",
@@ -2711,8 +4807,8 @@
       },
       "queries": [
         "PLAMATEA 綾波零",
-        "GSC PLAMATEA Rei Ayanami",
-        "福音戰士 綾波零"
+        "福音戰士新劇場版 綾波零",
+        "綾波零"
       ],
       "expected": {
         "status": "OBSERVE"
@@ -2724,12 +4820,12 @@
           "products": []
         },
         {
-          "query": "GSC PLAMATEA Rei Ayanami",
+          "query": "福音戰士新劇場版 綾波零",
           "status": 200,
           "products": []
         },
         {
-          "query": "福音戰士 綾波零",
+          "query": "綾波零",
           "status": 200,
           "products": [
             {
@@ -2769,6 +4865,42 @@
               }
             },
             {
+              "id": "356f55cc-25a7-4019-bb1a-721a3b2c2b74",
+              "name": "福音戰士新劇場版 FIGURIZMα公仔 綾波零 作戰服ver.",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "代理版SEGA景品"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-27T08:00:00.000Z"
+              }
+            },
+            {
+              "id": "20c22473-5846-4eaf-83d6-0798efae1369",
+              "name": "POP UP PARADE BEACH QUEENS 綾波零（連身泳裝Style）L Size",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-17T08:00:00.000Z"
+              }
+            },
+            {
               "id": "6065e97d-60c9-40f8-8790-133238398fc1",
               "name": "1/6 PVC 新世紀福音戰士 綾波零·校服(TVver.)",
               "url": null,
@@ -2784,6 +4916,24 @@
                   "code": "dreamlink"
                 },
                 "deadlineAt": "2026-10-11T15:00:00.000Z"
+              }
+            },
+            {
+              "id": "a846bbc4-936e-4975-a746-bed3296d4fcf",
+              "name": "POP UP PARADE BEACH QUEENS 綾波零（連身泳裝Style）L Size",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Good Smile Company"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "wanrong"
+                },
+                "deadlineAt": "2026-08-17T08:00:00.000Z"
               }
             },
             {
@@ -2803,11 +4953,36 @@
                 },
                 "deadlineAt": "2026-09-08T08:00:00.000Z"
               }
+            },
+            {
+              "id": "19c72782-6c96-46fd-ab55-b09cb4b91963",
+              "name": "PUPBQ 綾波零[連身泳裝Style] L Size",
+              "url": null,
+              "slug": null,
+              "sku": null,
+              "janCode": null,
+              "manufacturer": null,
+              "brand": {
+                "name": "Goodsmile"
+              },
+              "catalog": {
+                "supplier": {
+                  "code": "dreamlink"
+                },
+                "deadlineAt": "2026-08-19T15:00:00.000Z"
+              }
             }
           ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 8,
+        "result": "no_match"
+      }
     },
     {
       "caseId": "luminous-box-chela77",
@@ -2822,8 +4997,8 @@
         "title": "【小河馬日本代購】預購 27年6月 代理版 Luminous Box CheLA77 原創插畫 兔女郎警官02 1/6"
       },
       "queries": [
-        "Luminous Box CheLA77",
-        "1/6 兔女郎警官02",
+        "Scale Figure 兔女郎警官02",
+        "Box CheLA77 兔女郎警官02",
         "兔女郎警官02"
       ],
       "expected": {
@@ -2831,12 +5006,12 @@
       },
       "catalogResponses": [
         {
-          "query": "Luminous Box CheLA77",
+          "query": "Scale Figure 兔女郎警官02",
           "status": 200,
           "products": []
         },
         {
-          "query": "1/6 兔女郎警官02",
+          "query": "Box CheLA77 兔女郎警官02",
           "status": 200,
           "products": []
         },
@@ -2901,7 +5076,14 @@
           ]
         }
       ],
-      "capturedAt": "2026-08-19T04:45:41.568Z"
+      "capturedAt": "2026-08-19T05:28:28.337Z",
+      "retrieval": {
+        "plannedQueryCount": 3,
+        "executedQueryCount": 3,
+        "stoppedEarly": false,
+        "candidateCount": 3,
+        "result": "match"
+      }
     }
   ]
 }

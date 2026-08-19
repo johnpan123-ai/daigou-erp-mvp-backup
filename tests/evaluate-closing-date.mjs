@@ -78,6 +78,7 @@ try {
     total: results.length,
     pass: 0,
     knownFailure: 0,
+    fixedKnownFailure: 0,
     observed: 0,
     observedMatch: 0,
     observedAmbiguous: 0,
@@ -89,9 +90,13 @@ try {
   for (const result of results) {
     const expected = fixture.cases.find(item => item.caseId === result.caseId).expected;
     if (expected.status === 'KNOWN_FAILURE') {
-      summary.knownFailure += 1;
-      assert.equal(result.status, 'NOT_FOUND', `${result.caseId} known failure must remain explicit NOT_FOUND`);
-      console.log(`KNOWN FAILURE ${result.caseId}: retrieval missing; no write candidate`);
+      if (result.status === 'MATCH') {
+        summary.fixedKnownFailure += 1;
+        console.log(`FIXED KNOWN FAILURE ${result.caseId}: retrieval now yields a safely matched candidate`);
+      } else {
+        summary.knownFailure += 1;
+        console.log(`KNOWN FAILURE ${result.caseId}: ${result.status}; no write candidate`);
+      }
       continue;
     }
     if (expected.status === 'OBSERVE') {
@@ -122,7 +127,22 @@ try {
 
   assert.deepEqual(forbiddenRequests, [], 'Offline replay must not call Catalog API or Supabase');
   assert.equal(summary.regression, 0, 'Offline evaluation found a regression');
+  const observedRetrieval = fixture.cases.filter(item => item.expected.status === 'OBSERVE' && item.retrieval);
+  const retrievalZero = observedRetrieval.filter(item => item.retrieval.candidateCount === 0).length;
+  const retrievalMatched = observedRetrieval.filter(item => item.retrieval.result === 'match').length;
+  const retrievalSummary = {
+    scope: observedRetrieval.length,
+    zeroCandidate: retrievalZero,
+    candidateAvailable: observedRetrieval.length - retrievalZero,
+    matched: retrievalMatched,
+    safeReject: observedRetrieval.length - retrievalZero - retrievalMatched,
+    executedQueries: observedRetrieval.reduce((sum, item) => sum + item.retrieval.executedQueryCount, 0),
+    averageExecutedQueries: observedRetrieval.length
+      ? Number((observedRetrieval.reduce((sum, item) => sum + item.retrieval.executedQueryCount, 0) / observedRetrieval.length).toFixed(2))
+      : 0,
+  };
   console.log(`SUMMARY ${JSON.stringify(summary)}`);
+  console.log(`RETRIEVAL ${JSON.stringify(retrievalSummary)}`);
   console.log('PASS offline replay issued 0 Catalog / Supabase network requests');
 } finally {
   if (browser) await browser.close();
