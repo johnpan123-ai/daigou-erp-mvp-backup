@@ -38,6 +38,8 @@
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
     "test:proxy-product-identity": "node tests/proxy-product-identity-matching.mjs",
     "test:catalog-api-availability": "node tests/catalog-api-availability.mjs",
+    "capture:closing-date-fixtures": "node tests/capture-closing-date-fixtures.mjs",
+    "test:closing-date-evaluation": "node tests/evaluate-closing-date.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },
   "dependencies": {

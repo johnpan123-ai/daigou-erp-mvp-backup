@@ -13,8 +13,10 @@ import {
   buildProxyCatalogQueries,
   isSafeProxyCatalogSelection,
   normalizeProxyProductIdentity,
+  scoreProxyCatalogCandidate,
   selectProxyCatalogCandidate,
 } from '../lib/proxyProductIdentity';
+import type { ProxyCatalogCandidate } from '../lib/proxyProductIdentity';
 import {
   CATALOG_SERVICE_UNAVAILABLE_MESSAGE,
   CatalogServiceError,
@@ -36,6 +38,61 @@ const DEFAULT_COL_WIDTHS = {
 };
 
 const DELETE_COLUMN_WIDTH = 64;
+
+type LookupDecision = 'MATCH' | 'AMBIGUOUS' | 'NOT_FOUND' | 'SERVICE_ERROR';
+
+type LookupIdentitySummary = {
+  productType: string | null;
+  identity: string[];
+  series: string[];
+  size: string | null;
+  manufacturer: string | null;
+};
+
+type LookupCandidateSummary = LookupIdentitySummary & {
+  title: string;
+  supplier: string | null;
+  rawDeadline: string | null;
+  score: number | null;
+};
+
+type LookupDiagnostic = {
+  groupId: string;
+  source: 'proxy' | 'hololive' | 'vspo';
+  originalTitle: string;
+  decision: LookupDecision;
+  score: number;
+  reason?: string;
+  sourceIdentity?: LookupIdentitySummary;
+  selected?: LookupCandidateSummary;
+  candidates?: LookupCandidateSummary[];
+  finalClosingDate?: string;
+};
+
+const summarizeIdentity = (identity: ReturnType<typeof normalizeProxyProductIdentity>): LookupIdentitySummary => ({
+  productType: identity.productType,
+  identity: identity.identityTokens,
+  series: identity.seriesTokens,
+  size: identity.size,
+  manufacturer: identity.manufacturer,
+});
+
+const summarizeCandidate = (
+  candidate: ProxyCatalogCandidate,
+  score: number | null = null,
+): LookupCandidateSummary => {
+  const identity = normalizeProxyProductIdentity(
+    candidate.name || '',
+    candidate.manufacturer || candidate.brand?.name || '',
+  );
+  return {
+    ...summarizeIdentity(identity),
+    title: candidate.name || '(未提供商品名稱)',
+    supplier: candidate.catalog?.supplier?.code || null,
+    rawDeadline: candidate.catalog?.deadlineAt || null,
+    score,
+  };
+};
 
 
 const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
@@ -1435,6 +1492,7 @@ export default function PurchaseRecords() {
   };
 
   const [isLookingUpDeadlines, setIsLookingUpDeadlines] = useState(false);
+  const [lookupDiagnostics, setLookupDiagnostics] = useState<LookupDiagnostic[]>([]);
 
   const handleAutoLookupDeadlines = async () => {
     if (guardAgainstStaleWrite()) return;
@@ -1448,6 +1506,7 @@ export default function PurchaseRecords() {
       score: number;
       failureReason?: string;
       identityVerified?: boolean;
+      diagnostic?: LookupDiagnostic;
     };
     const getSource = (g: ProductGroup): ProductSource | null => {
       if (isProxyProduct(g)) return 'proxy';
@@ -1468,9 +1527,11 @@ export default function PurchaseRecords() {
     }
 
     setIsLookingUpDeadlines(true);
+    setLookupDiagnostics([]);
     let matched = 0;
     let failed = 0;
     const details: string[] = [];
+    const diagnostics: LookupDiagnostic[] = [];
     const updatedGroups = [...groups];
 
     // Keep the pre-v1 lookup unchanged for proxy products whose type is not yet
@@ -1543,7 +1604,20 @@ export default function PurchaseRecords() {
       if (!identity.productType) {
         const cleaned = stripLegacyProxyTitle(originalTitle);
         const segments = cleaned.split(/\s+/).filter(word => word.length >= 2);
-        if (segments.length === 0) return { score: 0 };
+        if (segments.length === 0) {
+          return {
+            score: 0,
+            diagnostic: {
+              groupId: group.id,
+              source: 'proxy',
+              originalTitle,
+              decision: 'NOT_FOUND',
+              score: 0,
+              reason: '商品識別資訊不足，需要人工確認',
+              sourceIdentity: summarizeIdentity(identity),
+            },
+          };
+        }
 
         const legacyQueries: string[] = [];
         if (segments.length >= 3) legacyQueries.push(segments.slice(0, 3).join(' '));
@@ -1577,14 +1651,49 @@ export default function PurchaseRecords() {
             matchName: bestMatch.name,
             score: bestScore,
             identityVerified: true,
+            diagnostic: {
+              groupId: group.id,
+              source: 'proxy',
+              originalTitle,
+              decision: 'MATCH',
+              score: bestScore,
+              sourceIdentity: summarizeIdentity(identity),
+              selected: summarizeCandidate(bestMatch, bestScore),
+              finalClosingDate: dateStr,
+            },
           };
         }
-        return { matchName: bestMatch?.name, score: bestScore };
+        return {
+          matchName: bestMatch?.name,
+          score: bestScore,
+          diagnostic: {
+            groupId: group.id,
+            source: 'proxy',
+            originalTitle,
+            decision: 'NOT_FOUND',
+            score: bestScore,
+            reason: '舊版商品類型未能可靠辨識，需人工確認',
+            sourceIdentity: summarizeIdentity(identity),
+            candidates: bestMatch ? [summarizeCandidate(bestMatch, bestScore)] : [],
+          },
+        };
       }
 
       const queries = buildProxyCatalogQueries(identity);
       if (queries.length === 0) {
-        return { score: 0, failureReason: '商品識別資訊不足，需要人工確認' };
+        return {
+          score: 0,
+          failureReason: '商品識別資訊不足，需要人工確認',
+          diagnostic: {
+            groupId: group.id,
+            source: 'proxy',
+            originalTitle,
+            decision: 'NOT_FOUND',
+            score: 0,
+            reason: '商品識別資訊不足，需要人工確認',
+            sourceIdentity: summarizeIdentity(identity),
+          },
+        };
       }
 
       const candidates: any[] = [];
@@ -1595,6 +1704,30 @@ export default function PurchaseRecords() {
       }
 
       const selection = selectProxyCatalogCandidate(originalTitle, candidates);
+      const summarizeScoredCandidate = (candidate: ProxyCatalogCandidate) => summarizeCandidate(
+        candidate,
+        scoreProxyCatalogCandidate(originalTitle, candidate).confidence,
+      );
+      const selectionCandidates = selection.status === 'ambiguous'
+        ? selection.candidates.map(summarizeScoredCandidate)
+        : selection.status === 'no_match' && selection.bestCandidate
+          ? [summarizeScoredCandidate(selection.bestCandidate)]
+          : [];
+      const selectionDiagnostic = (overrides: Partial<LookupDiagnostic> = {}): LookupDiagnostic => ({
+        groupId: group.id,
+        source: 'proxy',
+        originalTitle,
+        decision: selection.status === 'match'
+          ? 'MATCH'
+          : selection.status === 'ambiguous'
+            ? 'AMBIGUOUS'
+            : 'NOT_FOUND',
+        score: selection.confidence,
+        reason: selection.status === 'match' ? undefined : selection.message,
+        sourceIdentity: summarizeIdentity(identity),
+        candidates: selectionCandidates,
+        ...overrides,
+      });
       if (!isSafeProxyCatalogSelection(originalTitle, selection)) {
         const bestName = selection.status === 'no_match' ? selection.bestCandidate?.name : undefined;
         return {
@@ -1602,6 +1735,7 @@ export default function PurchaseRecords() {
           score: selection.confidence,
           failureReason: selection.message,
           identityVerified: false,
+          diagnostic: selectionDiagnostic(),
         };
       }
 
@@ -1612,6 +1746,10 @@ export default function PurchaseRecords() {
           score: selection.confidence,
           failureReason: '已識別商品，但來源沒有有效結單日',
           identityVerified: true,
+          diagnostic: selectionDiagnostic({
+            selected: summarizeCandidate(selected, selection.confidence),
+            reason: '已識別商品，但來源沒有有效結單日',
+          }),
         };
       }
 
@@ -1626,9 +1764,22 @@ export default function PurchaseRecords() {
           matchName: selected.name || undefined,
           score: selection.confidence,
           identityVerified: true,
+          diagnostic: selectionDiagnostic({
+            selected: summarizeCandidate(selected, selection.confidence),
+            finalClosingDate: dateStr,
+          }),
         };
       }
-      return { score: 0, identityVerified: false, failureReason: '商品識別驗證未通過' };
+      return {
+        score: 0,
+        identityVerified: false,
+        failureReason: '商品識別驗證未通過',
+        diagnostic: selectionDiagnostic({
+          decision: 'NOT_FOUND',
+          score: 0,
+          reason: '商品識別驗證未通過',
+        }),
+      };
     };
 
     // --- Shopify store lookup (Hololive / VSPO) ---
@@ -1669,10 +1820,23 @@ export default function PurchaseRecords() {
       return { deadline, shippingMonth };
     };
 
-    const lookupShopify = async (group: ProductGroup, apiBase: string): Promise<{ closing_date?: string; release_month?: string; productUrl?: string; matchName?: string; score: number }> => {
+    const lookupShopify = async (group: ProductGroup, apiBase: string): Promise<{ closing_date?: string; release_month?: string; productUrl?: string; matchName?: string; score: number; diagnostic?: LookupDiagnostic }> => {
       const originalTitle = group.normalized_title || group.title;
       const cleaned = stripShopTitle(originalTitle);
-      if (cleaned.length < 2) return { score: 0 };
+      const source = apiBase === '/api/hololive' ? 'hololive' : 'vspo';
+      if (cleaned.length < 2) {
+        return {
+          score: 0,
+          diagnostic: {
+            groupId: group.id,
+            source,
+            originalTitle,
+            decision: 'NOT_FOUND',
+            score: 0,
+            reason: '商品名稱不足以建立查詢',
+          },
+        };
+      }
       const stopWords = new Set(['pop', 'up', 'in', 'at', 'of', 'the', 'and', 'or', 'for', 'to', 'vs', 'vol', 'ver', 'no']);
       const segments = cleaned.split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w.toLowerCase()));
       const products = await fetchShopifyProducts(apiBase);
@@ -1694,16 +1858,47 @@ export default function PurchaseRecords() {
         if (score > bestScore) { bestScore = score; bestMatch = p; }
       }
       const storeOrigin = apiBase === '/api/hololive' ? 'https://shop.hololivepro.com' : 'https://store.vspo.jp';
+      const candidateSummary = bestMatch
+        ? summarizeCandidate({
+          name: bestMatch.title,
+          catalog: { deadlineAt: null },
+        }, bestScore)
+        : undefined;
       if (!bestMatch || bestScore < 0.4) {
-        return { matchName: bestMatch?.title, score: bestScore };
+        return {
+          matchName: bestMatch?.title,
+          score: bestScore,
+          diagnostic: {
+            groupId: group.id,
+            source,
+            originalTitle,
+            decision: 'NOT_FOUND',
+            score: bestScore,
+            reason: '候選配對度不足，需要人工確認',
+            candidates: candidateSummary ? [candidateSummary] : [],
+          },
+        };
       }
       const dates = await parseShopifyPageDates(apiBase, bestMatch.handle);
+      const selected = summarizeCandidate({
+        name: bestMatch.title,
+        catalog: { deadlineAt: dates.deadline || null },
+      }, bestScore);
       return {
         closing_date: dates.deadline,
         release_month: dates.shippingMonth,
         productUrl: `${storeOrigin}/products/${bestMatch.handle}`,
         matchName: bestMatch.title,
         score: bestScore,
+        diagnostic: {
+          groupId: group.id,
+          source,
+          originalTitle,
+          decision: 'MATCH',
+          score: bestScore,
+          selected,
+          finalClosingDate: dates.deadline,
+        },
       };
     };
 
@@ -1721,6 +1916,8 @@ export default function PurchaseRecords() {
           const apiBase = source === 'hololive' ? '/api/hololive' : '/api/vspo';
           result = await lookupShopify(group, apiBase);
         }
+
+        if (result.diagnostic) diagnostics.push(result.diagnostic);
 
         const identityGuardPassed = source !== 'proxy' || result.identityVerified === true;
         if (result.closing_date && result.score >= 0.4 && identityGuardPassed) {
@@ -1756,6 +1953,14 @@ export default function PurchaseRecords() {
         failed++;
         console.error('[AutoLookup] Error:', err);
         if (err instanceof CatalogServiceError) {
+          diagnostics.push({
+            groupId: group.id,
+            source: getSource(group)!,
+            originalTitle: group.normalized_title || group.title,
+            decision: 'SERVICE_ERROR',
+            score: 0,
+            reason: err.message,
+          });
           catalogServiceFailed = true;
           break;
         }
@@ -1763,6 +1968,7 @@ export default function PurchaseRecords() {
     }
 
     if (catalogServiceFailed) {
+      setLookupDiagnostics(diagnostics);
       setIsLookingUpDeadlines(false);
       alert(CATALOG_SERVICE_UNAVAILABLE_MESSAGE);
       return;
@@ -1784,6 +1990,7 @@ export default function PurchaseRecords() {
     }
 
     setIsLookingUpDeadlines(false);
+    setLookupDiagnostics(diagnostics);
     console.log('[AutoLookup] Results:', details.join('\n'));
     alert(`自動查詢結單日完成！\n\n✅ 成功：${matched} 筆\n❌ 未找到：${failed} 筆\n\n${details.join('\n')}\n\n代理版 = 目錄 - 2天 / Hololive·VSPO = 官方 - 4天`);
   };
@@ -2837,6 +3044,78 @@ export default function PurchaseRecords() {
             </button>
           </div>
         </div>
+      )}
+
+      {lookupDiagnostics.length > 0 && (
+        <details
+          open
+          data-testid="closing-date-diagnostics"
+          style={{
+            marginBottom: '16px',
+            border: '1px solid #bfdbfe',
+            borderRadius: '12px',
+            backgroundColor: '#f8fbff',
+            overflow: 'hidden',
+          }}
+        >
+          <summary style={{
+            cursor: 'pointer',
+            padding: '12px 16px',
+            color: '#1e40af',
+            fontWeight: 700,
+            fontSize: '13px',
+          }}>
+            最近一次結單日查詢診斷（{lookupDiagnostics.length} 筆；僅供 Field Test，不寫入額外資料）
+          </summary>
+          <div style={{ maxHeight: '420px', overflowY: 'auto', padding: '0 16px 16px' }}>
+            {lookupDiagnostics.map((diagnostic) => (
+              <div
+                key={diagnostic.groupId}
+                style={{
+                  padding: '12px 0',
+                  borderTop: '1px solid #dbeafe',
+                  fontSize: '12px',
+                  color: '#334155',
+                }}
+              >
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <strong style={{ color: diagnostic.decision === 'MATCH' ? '#047857' : diagnostic.decision === 'SERVICE_ERROR' ? '#b91c1c' : '#b45309' }}>
+                    {diagnostic.decision}
+                  </strong>
+                  <span>{diagnostic.originalTitle}</span>
+                  <span style={{ color: '#64748b' }}>Score {Math.round(diagnostic.score * 100)}%</span>
+                </div>
+                {diagnostic.sourceIdentity && (
+                  <div style={{ marginTop: '6px', color: '#475569' }}>
+                    ERP Identity：類型 {diagnostic.sourceIdentity.productType || '—'} ・
+                    識別 {diagnostic.sourceIdentity.identity.join('、') || '—'} ・
+                    系列 {diagnostic.sourceIdentity.series.join('、') || '—'} ・
+                    尺寸 {diagnostic.sourceIdentity.size || '—'} ・
+                    製造商 {diagnostic.sourceIdentity.manufacturer || '—'}
+                  </div>
+                )}
+                {diagnostic.selected && (
+                  <div style={{ marginTop: '6px', padding: '8px 10px', backgroundColor: '#ecfdf5', borderRadius: '6px' }}>
+                    <div><strong>Catalog：</strong>{diagnostic.selected.title}</div>
+                    <div>類型 {diagnostic.selected.productType || '—'} ・ 識別 {diagnostic.selected.identity.join('、') || '—'} ・ 系列 {diagnostic.selected.series.join('、') || '—'} ・ 尺寸 {diagnostic.selected.size || '—'}</div>
+                    <div>Supplier：{diagnostic.selected.supplier || '—'} ・ Raw Deadline：{diagnostic.selected.rawDeadline || '—'} ・ ERP 結單日：{diagnostic.finalClosingDate || '—'}</div>
+                  </div>
+                )}
+                {diagnostic.candidates && diagnostic.candidates.length > 0 && (
+                  <div style={{ marginTop: '6px' }}>
+                    <div style={{ fontWeight: 600 }}>候選／未採用：</div>
+                    {diagnostic.candidates.map((candidate, index) => (
+                      <div key={`${diagnostic.groupId}-${index}`} style={{ marginTop: '3px', paddingLeft: '10px' }}>
+                        {candidate.title} ・ 類型 {candidate.productType || '—'} ・ 識別 {candidate.identity.join('、') || '—'} ・ 尺寸 {candidate.size || '—'} ・ Supplier {candidate.supplier || '—'} ・ Score {candidate.score === null ? '—' : `${Math.round(candidate.score * 100)}%`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {diagnostic.reason && <div style={{ marginTop: '6px', color: '#92400e' }}>原因：{diagnostic.reason}</div>}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {selectedGroupIds.size > 0 && (

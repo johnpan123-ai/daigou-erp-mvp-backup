@@ -135,6 +135,21 @@ For Sandbox performance work, record the following before any optimization:
 The current dual-Sandbox baseline is measurement-only. It does not claim that
 an optimization has been implemented.
 
+## Next-only Catalog Closing Date Field Test node
+
+| Scope | Integrated commits on `codex/next-sandbox` | Source commits | Status | Production ready | Dependencies |
+| --- | --- | --- | --- | --- | --- |
+| Product Identity Matching v1 | `308485b` | `be525c6` | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | Next catalog API |
+| Read-only Catalog API availability / fail-closed errors | `59d96c4` | `b63d4c8` | Implemented + automated test; real upstream availability remains environment-dependent | **NO** | Vite read-only proxy |
+| Size metadata and Golden Cases | `f579c67` | `dcc8ea0` | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | Identity v1 |
+| Same-identity supplier selection with Wanrong default priority | `37eaf94` | `079ce89` | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | Identity v1 |
+| Field-test diagnostics panel and log protocol | local follow-up | — | Implementation Passed / Awaiting Large-scale Manual Field Test | **NO** | The four nodes above |
+
+This node is intentionally not listed as Production-ready. It exists to support
+large real-product field testing in Next. `product_groups.proxy_agent` supplier
+override behavior remains a separate business-rule review item; no override is
+inferred from missing source evidence.
+
 ## Test infrastructure nodes — never cherry-pick to Production
 
 | Infrastructure | Commit / range | Tag | Production ready | Purpose |

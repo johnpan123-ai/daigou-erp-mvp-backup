@@ -1,0 +1,195 @@
+{
+  "formatVersion": 1,
+  "capturedAt": "2026-08-19T12:33:23+08:00",
+  "captureSource": "Next read-only Catalog API via http://127.0.0.1:4192",
+  "cases": [
+    {
+      "caseId": "figma-lucifer",
+      "erpProduct": { "title": "代理版 figma 地獄征服者 Helltaker 路西法" },
+      "queries": ["figma 路西法", "地獄征服者 路西法", "地獄征服者 Helltaker 路西法", "路西法"],
+      "catalogResponses": [
+        {
+          "query": "figma 路西法",
+          "status": 200,
+          "products": [
+            {
+              "id": "a4022289-6fa1-4dbf-9b9e-511aad590925",
+              "name": "figma 路西法",
+              "brand": { "name": "Good Smile Company" },
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-18T08:00:00.000Z" }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "status": "MATCH",
+        "candidateId": "a4022289-6fa1-4dbf-9b9e-511aad590925",
+        "supplier": "wanrong",
+        "rawDeadline": "2026-09-18T08:00:00.000Z",
+        "closingDate": "2026-09-16"
+      }
+    },
+    {
+      "caseId": "popup-parade-orange-sheryl-l-size",
+      "erpProduct": { "title": "代理版 GSC POP UP PARADE 魔法少女的魔女審判 橘雪莉 L Size" },
+      "queries": [
+        "POP UP PARADE 橘雪莉 L Size",
+        "POP UP PARADE 橘雪莉",
+        "魔法少女的魔女審判 橘雪莉 L Size",
+        "魔法少女的魔女審判 橘雪莉",
+        "橘雪莉 L Size",
+        "橘雪莉"
+      ],
+      "catalogResponses": [
+        {
+          "query": "POP UP PARADE 橘雪莉 L Size",
+          "status": 200,
+          "products": [
+            {
+              "id": "82800bc8-d0f4-4c6d-afab-ef27ddb0336e",
+              "name": "POP UP PARADE 橘雪莉 L Size",
+              "brand": { "name": "Good Smile Company" },
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-18T08:00:00.000Z" }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "status": "MATCH",
+        "candidateId": "82800bc8-d0f4-4c6d-afab-ef27ddb0336e",
+        "supplier": "wanrong",
+        "rawDeadline": "2026-09-18T08:00:00.000Z",
+        "closingDate": "2026-09-16"
+      }
+    },
+    {
+      "caseId": "nendoroid-mutsuki-wanrong-priority",
+      "erpProduct": { "title": "代理版 GSC 黏土人 3121 BanG Dream! 夢限大MewType 峰月律" },
+      "queries": [
+        "黏土人 峰月律",
+        "Nendoroid 峰月律",
+        "ねんどろいど 峰月律",
+        "3121 BanG Dream! 夢限大MewType 峰月律",
+        "3121 BanG Dream! 峰月律",
+        "峰月律"
+      ],
+      "catalogResponses": [
+        {
+          "query": "峰月律",
+          "status": 200,
+          "products": [
+            {
+              "id": "dbaebb43-ffc6-4b58-b7ee-cce7bfd41b22",
+              "name": "黏土人 峰月律",
+              "brand": { "name": "Good Smile Company" },
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-07T08:00:00.000Z" }
+            },
+            {
+              "id": "d4cf81b4-8195-4c56-865a-6256a5683755",
+              "name": "黏土人3121《BanG Dream!》峰月律",
+              "brand": { "name": "Goodsmile" },
+              "catalog": { "supplier": { "code": "dreamlink" }, "deadlineAt": "2026-09-09T15:00:00.000Z" }
+            },
+            {
+              "id": "6950cb75-af6d-4ed4-b25d-f762e2359106",
+              "name": "黏土人 峰月律",
+              "brand": { "name": "Good Smile Company" },
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-07T08:00:00.000Z" }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "status": "MATCH",
+        "candidateId": "dbaebb43-ffc6-4b58-b7ee-cce7bfd41b22",
+        "supplier": "wanrong",
+        "rawDeadline": "2026-09-07T08:00:00.000Z",
+        "closingDate": "2026-09-05"
+      }
+    },
+    {
+      "caseId": "nendoroid-rejects-scale",
+      "erpProduct": { "title": "代理版 GSC 黏土人 XXX" },
+      "queries": ["黏土人 XXX"],
+      "captureSource": "offline-regression-fixture",
+      "catalogResponses": [
+        {
+          "query": "黏土人 XXX",
+          "status": 200,
+          "products": [
+            {
+              "id": "scale-xxx",
+              "name": "XXX 1/7 Scale Figure",
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-20T08:00:00.000Z" }
+            }
+          ]
+        }
+      ],
+      "expected": { "status": "NOT_FOUND", "reason": "type_conflict" }
+    },
+    {
+      "caseId": "popup-rejects-nendoroid",
+      "erpProduct": { "title": "代理版 POP UP PARADE XXX" },
+      "queries": ["POP UP PARADE XXX"],
+      "captureSource": "offline-regression-fixture",
+      "catalogResponses": [
+        {
+          "query": "POP UP PARADE XXX",
+          "status": 200,
+          "products": [
+            {
+              "id": "nendoroid-xxx",
+              "name": "ねんどろいど XXX",
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-20T08:00:00.000Z" }
+            }
+          ]
+        }
+      ],
+      "expected": { "status": "NOT_FOUND", "reason": "type_conflict" }
+    },
+    {
+      "caseId": "same-type-different-character",
+      "erpProduct": { "title": "代理版 GSC 黏土人 峰月律" },
+      "queries": ["黏土人 峰月律"],
+      "captureSource": "offline-regression-fixture",
+      "catalogResponses": [
+        {
+          "query": "黏土人 峰月律",
+          "status": 200,
+          "products": [
+            {
+              "id": "nendoroid-other-character",
+              "name": "ねんどろいど 其他角色",
+              "catalog": { "supplier": { "code": "wanrong" }, "deadlineAt": "2026-09-20T08:00:00.000Z" }
+            }
+          ]
+        }
+      ],
+      "expected": { "status": "NOT_FOUND", "reason": "identity_missing" }
+    },
+    {
+      "caseId": "sega-yumemirize-mutsumi-known-failure",
+      "erpProduct": { "title": "代理版 SEGA 景品 Yumemirize BanG Dream Ave Mujica 若葉睦" },
+      "queries": ["Yumemirize BanG Dream", "Yumemirize BanG", "Yumemirize", "若葉睦"],
+      "catalogResponses": [
+        { "query": "Yumemirize BanG Dream", "status": 200, "products": [] },
+        { "query": "Yumemirize BanG", "status": 200, "products": [] },
+        { "query": "Yumemirize", "status": 200, "products": [] },
+        { "query": "若葉睦", "status": 200, "products": [] }
+      ],
+      "expected": { "status": "KNOWN_FAILURE", "reason": "retrieval_missing", "rawDeadline": "2026-08-27", "closingDate": "2026-08-25" }
+    },
+    {
+      "caseId": "sega-yumemirize-shouko-known-failure",
+      "erpProduct": { "title": "代理版 SEGA 景品 Yumemirize BanG Dream Ave Mujica 豐川祥子" },
+      "queries": ["Yumemirize BanG Dream", "Yumemirize BanG", "Yumemirize", "豐川祥子"],
+      "catalogResponses": [
+        { "query": "Yumemirize BanG Dream", "status": 200, "products": [] },
+        { "query": "Yumemirize BanG", "status": 200, "products": [] },
+        { "query": "Yumemirize", "status": 200, "products": [] },
+        { "query": "豐川祥子", "status": 200, "products": [] }
+      ],
+      "expected": { "status": "KNOWN_FAILURE", "reason": "retrieval_missing", "rawDeadline": "2026-08-27", "closingDate": "2026-08-25" }
+    }
+  ]
+}
