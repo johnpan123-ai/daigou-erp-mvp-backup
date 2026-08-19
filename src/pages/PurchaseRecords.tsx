@@ -3454,10 +3454,6 @@ export default function PurchaseRecords() {
                         checked={list.length > 0 && list.every(g => selectedGroupIds.has(g.id))}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            if (list.length > 50) {
-                              const confirmSelect = window.confirm(`您即將選取 ${list.length} 筆商品進行批次編輯，是否確定？`);
-                              if (!confirmSelect) return;
-                            }
                             setSelectedGroupIds(new Set(list.map(g => g.id)));
                           } else {
                             setSelectedGroupIds(new Set());
@@ -3889,10 +3885,6 @@ export default function PurchaseRecords() {
                         checked={list.length > 0 && list.every(g => selectedGroupIds.has(g.id))}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            if (list.length > 50) {
-                              const confirmSelect = window.confirm(`您即將選取 ${list.length} 筆商品進行批次編輯，是否確定？`);
-                              if (!confirmSelect) return;
-                            }
                             setSelectedGroupIds(new Set(list.map(g => g.id)));
                           } else {
                             setSelectedGroupIds(new Set());
