@@ -178,6 +178,48 @@ try {
       v1PriorityCandidates,
       v1PrioritySelection,
     );
+    const plamateaPlainSource = '代理版 PLAMATEA FGO Shielder/瑪修 [奧特瑙斯]';
+    const plamateaBlackCandidate = candidate(
+      'PLAMATEA Shielder/瑪修·基利艾拉特[奧特瑙斯] Black Barrel Edition',
+      'plamatea-black-barrel',
+      'wanrong',
+    );
+    const plamateaPlainCandidate = candidate(
+      'PLAMATEA Shielder/瑪修·基利艾拉特[奧特瑙斯]',
+      'plamatea-standard',
+      'dreamlink',
+    );
+    const plamateaWrongV1Selection = v1.selectProxyCatalogCandidate(
+      plamateaPlainSource,
+      [plamateaBlackCandidate],
+    );
+    const plamateaVersionVeto = {
+      v1Selection: plamateaWrongV1Selection,
+      nextResolution: pilot.resolveProxyCatalogDecision(
+        'next',
+        plamateaPlainSource,
+        [plamateaBlackCandidate],
+        plamateaWrongV1Selection,
+      ),
+      cloudResolution: pilot.resolveProxyCatalogDecision(
+        'cloud',
+        plamateaPlainSource,
+        [plamateaBlackCandidate],
+        plamateaWrongV1Selection,
+      ),
+      standardResolution: pilot.resolveProxyCatalogDecision(
+        'next',
+        plamateaPlainSource,
+        [plamateaPlainCandidate],
+        v1.selectProxyCatalogCandidate(plamateaPlainSource, [plamateaPlainCandidate]),
+      ),
+      competingListingsResolution: pilot.resolveProxyCatalogDecision(
+        'next',
+        plamateaPlainSource,
+        [plamateaBlackCandidate, plamateaPlainCandidate],
+        v1.selectProxyCatalogCandidate(plamateaPlainSource, [plamateaBlackCandidate, plamateaPlainCandidate]),
+      ),
+    };
     const cloudBlockedSource = shouldMatch.kdcolleHolo.source;
     const cloudBlockedCandidates = shouldMatch.kdcolleHolo.candidates;
     const cloudBlockedResolution = pilot.resolveProxyCatalogDecision(
@@ -204,6 +246,7 @@ try {
       supplierSelection,
       ambiguitySelection,
       v1PriorityResolution,
+      plamateaVersionVeto,
       cloudBlockedResolution,
       v1Invariant,
       modeGate: Object.fromEntries(
@@ -249,7 +292,18 @@ try {
   assert.equal(result.supplierSelection.status, 'match');
   assert.equal(result.supplierSelection.candidate.id, 'wanrong-holo', 'Wanrong priority must remain unchanged');
   assert.equal(result.ambiguitySelection.status, 'ambiguous', '5% ambiguity guard must remain fail-closed');
-  assert.equal(result.v1PriorityResolution.match?.decisionSource, 'V1', 'v1 MATCH must retain precedence over Pilot');
+  assert.equal(result.v1PriorityResolution.match?.decisionSource, 'V1', 'v1 MATCH without a reliable v2 conflict must retain precedence');
+  assert.equal(result.plamateaVersionVeto.v1Selection.status, 'match', 'Regression precondition: v1 must reproduce the wrong-version MATCH');
+  assert.equal(result.plamateaVersionVeto.nextResolution.match, null, 'Next must block standard PLAMATEA from Black Barrel Edition');
+  assert.equal(result.plamateaVersionVeto.nextResolution.safetyVeto?.reason, 'version_conflict');
+  assert.deepEqual(result.plamateaVersionVeto.nextResolution.safetyVeto?.sourceVersions, []);
+  assert.deepEqual(result.plamateaVersionVeto.nextResolution.safetyVeto?.candidateVersions, ['Black Barrel Edition']);
+  assert.equal(result.plamateaVersionVeto.competingListingsResolution.match, null, 'Wanrong priority must not override a version safety veto');
+  assert.equal(result.plamateaVersionVeto.competingListingsResolution.safetyVeto?.candidate.id, 'plamatea-black-barrel');
+  assert.equal(result.plamateaVersionVeto.standardResolution.match?.decisionSource, 'V1', 'Matching standard PLAMATEA listing must remain allowed');
+  assert.equal(result.plamateaVersionVeto.standardResolution.safetyVeto, null);
+  assert.equal(result.plamateaVersionVeto.cloudResolution.match?.decisionSource, 'V1', 'Next-only veto must not change non-Next runtime behavior');
+  assert.equal(result.plamateaVersionVeto.cloudResolution.safetyVeto, null);
   assert.equal(result.cloudBlockedResolution.match, null, 'Cloud mode must not use V2_PILOT fallback');
   assert.deepEqual(result.modeGate, {
     cloud: false,
@@ -274,6 +328,8 @@ try {
   console.log('PASS exact compound subject set supports A+B / B+A equivalence');
   console.log('PASS wrong subject/type/line/version and unverified aliases remain safe rejects');
   console.log('PASS Wanrong supplier priority, 90% threshold, and 5% ambiguity guard unchanged');
+  console.log('PASS Next v2 safety veto blocks PLAMATEA standard -> Black Barrel Edition before closing-date write');
+  console.log('PASS standard PLAMATEA and non-Next v1 behavior remain unchanged');
   console.log('PASS Manufacturer is diagnostic-only and cannot increase confidence');
   console.log('PASS 44-case v1 decisions and Query Planner outputs unchanged');
   console.log('PASS Next-only mode gate; Production/Cloud/Local/Test/Experimental disabled');

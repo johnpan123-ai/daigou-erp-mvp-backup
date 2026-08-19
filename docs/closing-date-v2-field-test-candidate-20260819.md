@@ -1,6 +1,27 @@
-# Closing Date Lookup v2 Field-Test Candidate
+# Closing Date Lookup v2 Development
 
-Status: **Closing Date Lookup v2 Field-Test Candidate / Awaiting Human Acceptance**
+Status: **Closing Date Lookup v2 Development / Confirmed Version False Positive Blocker**
+
+## Field-test correction: P21-11
+
+The earlier fixed-set probe was not broad enough to establish zero false
+positives. Real Field Test later confirmed that v1 treated the PLAMATEA standard
+product as the same identity as `Black Barrel Edition`, then returned before v2
+could inspect the explicit candidate-only version. That path could write the
+wrong deadline.
+
+The current Next-only mitigation lets Parser v2 veto a v1 MATCH only when all of
+the following are true:
+
+- both titles have the same explicit Product Line;
+- Product Type and Form do not conflict when both are known;
+- the parsed subject family has an exact overlap; and
+- exactly one side carries an identity-bearing version such as Black Barrel or
+  DX (default/standard and re-release labels do not trigger this veto).
+
+The veto cannot create a MATCH, change the 90% threshold, change the 5%
+ambiguity guard, or override Supplier Priority. The status remains a blocker
+until the visible Next flow is manually accepted.
 
 Scope is Next Sandbox only. Production, Production Supabase, schema, the 90%
 threshold, 5% ambiguity guard, Wanrong priority, and the existing two-day closing
@@ -8,8 +29,9 @@ date offset were not changed.
 
 ## Before / After
 
-The fixed real-runtime set contains nine cases: five safely decidable cases and
-four intentionally unresolved cases.
+The historical fixed real-runtime set contains nine cases: five safely
+decidable cases and four intentionally unresolved cases. P21-11 was outside
+that set and supersedes its earlier global zero-false-positive assumption.
 
 | Metric | Before | After |
 | --- | ---: | ---: |

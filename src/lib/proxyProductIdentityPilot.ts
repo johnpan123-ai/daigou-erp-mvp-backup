@@ -75,6 +75,17 @@ export type ProxyIdentityPilotSelection<T extends ProxyCatalogCandidate = ProxyC
 
 export type ProxyCatalogDecisionSource = 'V1' | 'V2_PILOT';
 
+export type ProxyIdentitySafetyVetoReason = 'version_conflict';
+
+export interface ProxyIdentitySafetyVeto<T extends ProxyCatalogCandidate = ProxyCatalogCandidate> {
+  candidate: T;
+  reason: ProxyIdentitySafetyVetoReason;
+  sourceIdentity: ProxyProductIdentityV2;
+  candidateIdentity: ProxyProductIdentityV2;
+  sourceVersions: string[];
+  candidateVersions: string[];
+}
+
 export interface ProxyCatalogDecisionResolution<T extends ProxyCatalogCandidate = ProxyCatalogCandidate> {
   match: {
     decisionSource: ProxyCatalogDecisionSource;
@@ -83,6 +94,7 @@ export interface ProxyCatalogDecisionResolution<T extends ProxyCatalogCandidate 
     pilotEvidence?: ProxyIdentityPilotEvidence[];
   } | null;
   pilotSelection: ProxyIdentityPilotSelection<T> | null;
+  safetyVeto: ProxyIdentitySafetyVeto<T> | null;
 }
 
 const compact = (value: string): string => value
@@ -114,6 +126,79 @@ const DEFAULT_VERSION_TOKENS = new Set([
 
 const isDefaultVersion = (versions: string[]): boolean => versions.length > 0
   && versions.every(version => DEFAULT_VERSION_TOKENS.has(compact(version)));
+
+const RELEASE_STATUS_VERSION_TOKENS = new Set(['再版', '再販']);
+
+const identityBearingVersions = (versions: string[]): string[] => versions.filter((version) => {
+  const normalized = compact(version);
+  return normalized
+    && !DEFAULT_VERSION_TOKENS.has(normalized)
+    && !RELEASE_STATUS_VERSION_TOKENS.has(normalized);
+});
+
+const subjectFamilyTokens = (identity: ProxyProductIdentityV2): string[] => [
+  ...identity.subjects,
+  ...identity.series,
+  ...compoundMembers(identity),
+];
+
+/**
+ * Next-only safety veto for a v1 MATCH.
+ *
+ * Parser v2 is not allowed to promote a match here. It may only stop a v1
+ * result when both titles have reliable same-family evidence and exactly one
+ * side carries an explicit identity-bearing version. This protects distinct
+ * editions such as PLAMATEA standard vs Black Barrel Edition while leaving
+ * unresolved aliases and release-status labels for manual review.
+ */
+export function evaluateProxyCatalogV2SafetyVeto<T extends ProxyCatalogCandidate>(
+  sourceTitle: string,
+  candidate: T,
+): ProxyIdentitySafetyVeto<T> | null {
+  const sourceIdentity = parseProxyProductIdentityV2(sourceTitle);
+  const candidateIdentity = parseProxyProductIdentityV2(
+    candidate.name || '',
+    candidate.manufacturer || candidate.brand?.name || '',
+  );
+
+  if (
+    sourceIdentity.productLines.length === 0
+    || candidateIdentity.productLines.length === 0
+    || !setsEqual(sourceIdentity.productLines, candidateIdentity.productLines)
+  ) return null;
+
+  if (
+    sourceIdentity.productTypes.length > 0
+    && candidateIdentity.productTypes.length > 0
+    && !setsEqual(sourceIdentity.productTypes, candidateIdentity.productTypes)
+  ) return null;
+
+  if (
+    sourceIdentity.forms.length > 0
+    && candidateIdentity.forms.length > 0
+    && !setsEqual(sourceIdentity.forms, candidateIdentity.forms)
+  ) return null;
+
+  const hasSubjectFamilyEvidence = hasOverlap(
+    subjectFamilyTokens(sourceIdentity),
+    subjectFamilyTokens(candidateIdentity),
+  );
+  if (!hasSubjectFamilyEvidence) return null;
+
+  const sourceVersions = identityBearingVersions(sourceIdentity.versions);
+  const candidateVersions = identityBearingVersions(candidateIdentity.versions);
+  const hasOneSidedExplicitVersion = (sourceVersions.length === 0) !== (candidateVersions.length === 0);
+  if (!hasOneSidedExplicitVersion) return null;
+
+  return {
+    candidate,
+    reason: 'version_conflict',
+    sourceIdentity,
+    candidateIdentity,
+    sourceVersions,
+    candidateVersions,
+  };
+}
 
 const compoundMembers = (identity: ProxyProductIdentityV2): string[] => identity.compoundSubjects
   .flatMap(compound => compound.members);
@@ -361,20 +446,41 @@ export function resolveProxyCatalogDecision<T extends ProxyCatalogCandidate>(
   v1Selection: ProxyCatalogSelection<T>,
 ): ProxyCatalogDecisionResolution<T> {
   if (isSafeProxyCatalogSelection(sourceTitle, v1Selection)) {
+    const safetyVeto = canUseProxyIdentityPilot(mode)
+      ? evaluateProxyCatalogV2SafetyVeto(sourceTitle, v1Selection.candidate)
+      : null;
+    if (!safetyVeto) {
+      return {
+        match: {
+          decisionSource: 'V1',
+          candidate: v1Selection.candidate,
+          confidence: v1Selection.confidence,
+        },
+        pilotSelection: null,
+        safetyVeto: null,
+      };
+    }
+
+    const pilotSelection = selectProxyCatalogCandidateV2Pilot(sourceTitle, candidates);
+    if (!isSafeProxyCatalogPilotSelection(sourceTitle, pilotSelection)) {
+      return { match: null, pilotSelection, safetyVeto };
+    }
     return {
       match: {
-        decisionSource: 'V1',
-        candidate: v1Selection.candidate,
-        confidence: v1Selection.confidence,
+        decisionSource: 'V2_PILOT',
+        candidate: pilotSelection.candidate,
+        confidence: pilotSelection.confidence,
+        pilotEvidence: pilotSelection.evidence,
       },
-      pilotSelection: null,
+      pilotSelection,
+      safetyVeto,
     };
   }
-  if (!canUseProxyIdentityPilot(mode)) return { match: null, pilotSelection: null };
+  if (!canUseProxyIdentityPilot(mode)) return { match: null, pilotSelection: null, safetyVeto: null };
 
   const pilotSelection = selectProxyCatalogCandidateV2Pilot(sourceTitle, candidates);
   if (!isSafeProxyCatalogPilotSelection(sourceTitle, pilotSelection)) {
-    return { match: null, pilotSelection };
+    return { match: null, pilotSelection, safetyVeto: null };
   }
   return {
     match: {
@@ -384,5 +490,6 @@ export function resolveProxyCatalogDecision<T extends ProxyCatalogCandidate>(
       pilotEvidence: pilotSelection.evidence,
     },
     pilotSelection,
+    safetyVeto: null,
   };
 }

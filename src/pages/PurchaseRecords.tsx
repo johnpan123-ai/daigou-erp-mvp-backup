@@ -28,6 +28,7 @@ import {
   canUseProxyIdentityPilot,
   scoreProxyCatalogCandidateV2Pilot,
   type ProxyIdentityPilotEvidence,
+  type ProxyIdentitySafetyVetoReason,
 } from '../lib/proxyProductIdentityPilot';
 import { buildProxyCatalogQueriesV2 } from '../lib/proxyProductIdentityQueryV2';
 import {
@@ -103,6 +104,7 @@ type LookupDiagnostic = {
   executedQueries?: string[];
   v2Attempted?: boolean;
   v2RejectReason?: string;
+  v2SafetyVetoReason?: ProxyIdentitySafetyVetoReason;
 };
 
 const summarizeIdentity = (identity: ReturnType<typeof normalizeProxyProductIdentity>): LookupIdentitySummary => ({
@@ -1816,21 +1818,27 @@ export default function PurchaseRecords() {
         executedQueries,
         v2Attempted,
         v2RejectReason: bestPilotRejection?.reason,
+        v2SafetyVetoReason: decisionResolution.safetyVeto?.reason,
         candidates: selectionCandidates,
         ...overrides,
       });
       const effectiveMatch = decisionResolution.match;
       if (!effectiveMatch) {
         const bestName = selection.status === 'no_match' ? selection.bestCandidate?.name : undefined;
-        const failureMessage = selection.status === 'match'
-          ? '商品識別驗證未通過'
+        const failureMessage = decisionResolution.safetyVeto?.reason === 'version_conflict'
+          ? '商品版本不一致，為避免套用錯誤結單日，本次自動配對已取消'
+          : selection.status === 'match'
+            ? '商品識別驗證未通過'
           : selection.message;
         return {
           matchName: bestName || undefined,
           score: selection.confidence,
           failureReason: failureMessage,
           identityVerified: false,
-          diagnostic: selectionDiagnostic(),
+          diagnostic: selectionDiagnostic({
+            decision: 'NOT_FOUND',
+            reason: failureMessage,
+          }),
         };
       }
 
@@ -3298,6 +3306,12 @@ export default function PurchaseRecords() {
                     {diagnostic.v2RejectReason && (
                       <span> ・ V2 reject reason：{diagnostic.v2RejectReason}</span>
                     )}
+                  </div>
+                )}
+                {diagnostic.v2SafetyVetoReason && (
+                  <div style={{ marginTop: '4px', color: '#b91c1c', fontWeight: 700 }}>
+                    <strong>V2 Safety Veto：</strong>{diagnostic.v2SafetyVetoReason}
+                    （已阻止 v1 自動套用結單日）
                   </div>
                 )}
                 {isNextIdentityShadowMode && diagnostic.sourceIdentityShadow && (
