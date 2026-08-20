@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-16 23:10（Asia/Taipei，UTC+8）
+最後更新：2026-08-21 06:57（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -263,3 +263,9 @@ Nightly stage 的自動測試不等同人工 Accepted。
 | 2026-08-19 23:33 | Next | `checkpoint-20260819-2333-closing-date-version-safety-veto-awaiting-manual` | `7407525a385c35092f6727bbdc7a48ab2e0de644` | Next-only v2 Safety Veto：同商品家族只有一側帶明確 identity-bearing version 時，阻止 v1 MATCH 寫入錯誤結單日；新增 Field Test 診斷與 PLAMATEA 一般版／Black Barrel 回歸 | `build:next`、v1/v2/Shadow/Query/Pilot、44-case evaluation、core、Sandbox guard／architecture、Next raw integrity 全通過；Production Supabase request 0；等待人工驗收 | 否 | 既有 44-case fixture 與唯讀 PLAMATEA regression；Next／Production DB 皆無批次修改 | 無 | 無 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
 | 2026-08-19 23:41 | Next | `checkpoint-20260819-2341-before-parser-v21-subject-rewrite` | `582014893e0b8d43183eebd7288d43402649d773` | Parser v2.1 Subject Extraction Rewrite 前乾淨點；凍結 Matching v2、Supplier、Query 與 closing-date 行為 | 建立前 `git status` clean；既有 Version Safety Veto 與測試證據完整保留 | 否 | 無新增 Snapshot／DB 操作 | 無 | 無 | **是：Parser v2.1 Shadow Foundation 實作前回復點** |
 | 2026-08-19 23:52 | Next | `checkpoint-20260819-2352-parser-v21-subject-rewrite-awaiting-manual` | `c979ccc5449dd87343e2eecbdbd1c950e0e15dd3` | Parser v2.1 Subject Extraction Rewrite：移除 v2.1 generic last-token fallback，以明確 semantic evidence 解析 Subject；Next-only Shadow，不參與 Matching／Query／Supplier／deadline／write | `build:next`、v1/v2/v2.1/Shadow/Query/Pilot、44-case evaluation、core、Sandbox guard／architecture、Next raw integrity、diff check 全通過；Production Supabase request 0 | 否 | 固定 44-case fixture 與五組 Subject Golden；Next raw collection hash 與 orphan counts 一致 | 無 | 無 | **是：Implementation Passed / Awaiting Manual Acceptance；尚未 Accepted** |
+
+## Closing Date Resolution Workbench Domain Foundation（2026-08-21）
+
+| 台灣日期時間 | 環境 | Tag | Commit Hash | 建立原因／當時功能 | Build／Test | 曾部署 Production | JSON Snapshot | Database Dump | Storage Backup | 是否建議 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-21 06:57 | Next-only development | `checkpoint-20260821-0657-closing-date-domain-foundation-awaiting-storage` | `1d7bc27b194f7c645543ae95ed44585cd642ebf3` | 從 recovery 基準 `a5bd05a` 建立獨立 Domain Foundation；新增 Verified Mapping、Resolution Batch／Result、Top 3、Job state、Apply audit／conflict／rollback、supplier-scoped source identity、rule／snapshot／idempotency 純 TypeScript contracts；未接 UI、Provider、DB 或 API runtime | `build:next`、專用 offline contract、v1/v2/v2.1/Shadow/Pilot/Query、44-case evaluation、core、Sandbox guard／architecture、Next raw integrity、`git diff --check` 全通過；Production Supabase request 0 | 否 | 無新增；Next integrity 僅使用既有 `workbench-backup-2026-08-15.json` 隔離驗證 | 無 | 無 | **是：Domain Foundation 回復點；Storage Integration Not Started，非 Production Ready** |
