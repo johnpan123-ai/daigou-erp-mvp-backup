@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-21 06:57（Asia/Taipei，UTC+8）
+最後更新：2026-08-21 06:58（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -268,4 +268,4 @@ Nightly stage 的自動測試不等同人工 Accepted。
 
 | 台灣日期時間 | 環境 | Tag | Commit Hash | 建立原因／當時功能 | Build／Test | 曾部署 Production | JSON Snapshot | Database Dump | Storage Backup | 是否建議 Restore Point |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-08-21 06:57 | Next-only development | `checkpoint-20260821-0657-closing-date-domain-foundation-awaiting-storage` | `1d7bc27b194f7c645543ae95ed44585cd642ebf3` | 從 recovery 基準 `a5bd05a` 建立獨立 Domain Foundation；新增 Verified Mapping、Resolution Batch／Result、Top 3、Job state、Apply audit／conflict／rollback、supplier-scoped source identity、rule／snapshot／idempotency 純 TypeScript contracts；未接 UI、Provider、DB 或 API runtime | `build:next`、專用 offline contract、v1/v2/v2.1/Shadow/Pilot/Query、44-case evaluation、core、Sandbox guard／architecture、Next raw integrity、`git diff --check` 全通過；Production Supabase request 0 | 否 | 無新增；Next integrity 僅使用既有 `workbench-backup-2026-08-15.json` 隔離驗證 | 無 | 無 | **是：Domain Foundation 回復點；Storage Integration Not Started，非 Production Ready** |
+| 2026-08-21 06:58（Tag 名稱為 0657） | Next-only development | `checkpoint-20260821-0657-closing-date-domain-foundation-awaiting-storage` | `1d7bc27b194f7c645543ae95ed44585cd642ebf3` | 從 recovery 基準 `a5bd05a` 建立獨立 Domain Foundation；新增 Verified Mapping、Resolution Batch／Result、Top 3、Job state、Apply audit／conflict／rollback、supplier-scoped source identity、rule／snapshot／idempotency 純 TypeScript contracts；未接 UI、Provider、DB 或 API runtime | `build:next`、專用 offline contract、v1/v2/v2.1/Shadow/Pilot/Query、44-case evaluation、core、Sandbox guard／architecture、Next raw integrity、`git diff --check` 全通過；Production Supabase request 0 | 否 | 無新增；Next integrity 僅使用既有 `workbench-backup-2026-08-15.json` 隔離驗證 | 無 | 無 | **是：Domain Foundation 回復點；Storage Integration Not Started，非 Production Ready** |
