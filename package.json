@@ -47,6 +47,7 @@
     "capture:closing-date-fixtures": "node tests/capture-closing-date-fixtures.mjs",
     "test:closing-date-evaluation": "node tests/evaluate-closing-date.mjs",
     "test:closing-date-domain": "node tests/closing-date-resolution-domain.mjs",
+    "test:closing-date-sidecar-storage": "node tests/closing-date-resolution-sidecar-storage.mjs",
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },
