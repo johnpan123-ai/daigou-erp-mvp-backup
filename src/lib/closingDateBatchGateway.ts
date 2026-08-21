@@ -402,6 +402,7 @@ export interface ClosingDateBatchGateway {
     options?: RetryClosingDateBatchOptions,
   ): Promise<RetryResolutionJobResponse>;
   waitForJob(jobId: string): Promise<ClosingDateBatchPollResponse>;
+  hasInMemoryRunner(jobId: string): boolean;
   clearCatalogCache(): void;
 }
 
@@ -531,6 +532,10 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
     const job = this.jobs.get(jobId);
     if (job) await job.completion;
     return this.pollJob(jobId);
+  }
+
+  hasInMemoryRunner(jobId: string): boolean {
+    return this.jobs.has(jobId);
   }
 
   clearCatalogCache(): void {

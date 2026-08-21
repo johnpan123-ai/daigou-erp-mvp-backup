@@ -50,6 +50,7 @@
     "test:closing-date-sidecar-storage": "node tests/closing-date-resolution-sidecar-storage.mjs",
     "test:closing-date-batch-gateway": "node tests/closing-date-batch-gateway.mjs",
     "benchmark:closing-date-batch-gateway": "node tests/closing-date-batch-gateway-performance.mjs",
+    "test:closing-date-workbench-ui": "node tests/closing-date-workbench-ui.mjs",
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs"
   },

@@ -115,9 +115,11 @@ export interface ClosingDateResolutionSidecarRepository {
     revokedReason: string,
   ): Promise<VerifiedMappingRegistryEntry>;
   findBatchByIdempotencyKey(idempotencyKey: string): Promise<ResolutionBatch | null>;
+  listResolutionBatches(limit?: number): Promise<readonly ResolutionBatch[]>;
   getResolutionBatch(batchId: string): Promise<ResolutionBatch | null>;
   getResolutionResult(resultId: string): Promise<ResolutionResult | null>;
   saveApplyAudit(audit: ApplyAuditBundle): Promise<SaveApplyAuditResult>;
+  replaceApplyAudit(audit: ApplyAuditBundle): Promise<ApplyAuditBundle>;
   getApplyAudit(applyBatchId: string): Promise<ApplyAuditBundle | null>;
   close(): void;
 }
@@ -951,6 +953,28 @@ implements ClosingDateResolutionSidecarRepository {
     return record?.batch ?? null;
   }
 
+  async listResolutionBatches(limit = 20): Promise<readonly ResolutionBatch[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+      throw new ClosingDateSidecarIntegrityError('Resolution batch list limit must be 1..200');
+    }
+    const database = await this.adapter.open();
+    const transaction = database.transaction(
+      CLOSING_DATE_SIDECAR_STORES.resolutionBatches,
+      'readonly',
+    );
+    const completion = transactionCompletion(transaction);
+    const records = await requestResult(
+      transaction
+        .objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionBatches)
+        .getAll() as IDBRequest<StoredResolutionBatch[]>,
+    );
+    await completion;
+    return records
+      .map(record => record.batch)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, limit);
+  }
+
   async getResolutionBatch(batchId: string): Promise<ResolutionBatch | null> {
     const database = await this.adapter.open();
     const transaction = database.transaction(
@@ -1090,6 +1114,108 @@ implements ClosingDateResolutionSidecarRepository {
           failure = error;
           abortTransaction(transaction);
         }
+      };
+    });
+  }
+
+  async replaceApplyAudit(audit: ApplyAuditBundle): Promise<ApplyAuditBundle> {
+    ensureNonEmpty(audit.batch.id, 'apply batch id');
+    ensureNonEmpty(audit.batch.idempotencyKey, 'apply idempotency key');
+    if (audit.items.some(item => item.applyBatchId !== audit.batch.id)) {
+      throw new ClosingDateSidecarIntegrityError('Apply audit contains an item for another batch');
+    }
+    const database = await this.adapter.open();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        [...CLOSING_DATE_APPLY_AUDIT_TRANSACTION_STORES],
+        'readwrite',
+      );
+      let failure: unknown;
+      let replaced = false;
+      const batchStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.applyBatches);
+      const itemStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.applyItems);
+      const batchRequest = batchStore.get(audit.batch.id) as IDBRequest<StoredApplyBatch | undefined>;
+      const itemsRequest = itemStore
+        .index(CLOSING_DATE_SIDECAR_INDEXES.applyItemByBatch)
+        .getAll(audit.batch.id) as IDBRequest<StoredApplyItem[]>;
+      let existingBatch: StoredApplyBatch | undefined;
+      let existingItems: StoredApplyItem[] | undefined;
+
+      const fail = (error: unknown): void => {
+        failure = error;
+        abortTransaction(transaction);
+      };
+      const replaceWhenReady = (): void => {
+        if (!existingBatch || !existingItems || failure) return;
+        try {
+          if (
+            existingBatch.idempotencyKey !== audit.batch.idempotencyKey
+            || existingBatch.resolutionBatchId !== audit.batch.resolutionBatchId
+          ) {
+            throw new ClosingDateSidecarIntegrityError(
+              `Apply audit identity changed during replacement: ${audit.batch.id}`,
+            );
+          }
+          const previousIds = existingItems
+            .sort((left, right) => left.itemOrder - right.itemOrder)
+            .map(item => item.id);
+          const nextIds = audit.items.map(item => item.id);
+          if (JSON.stringify(previousIds) !== JSON.stringify(nextIds)) {
+            throw new ClosingDateSidecarIntegrityError(
+              `Apply audit item identity changed during replacement: ${audit.batch.id}`,
+            );
+          }
+          batchStore.put({
+            ...existingBatch,
+            itemIds: nextIds,
+            audit: audit.batch,
+          });
+          this.inject('AFTER_APPLY_BATCH_WRITE', { recordId: audit.batch.id });
+          audit.items.forEach((item, index) => {
+            itemStore.put({
+              id: item.id,
+              applyBatchId: item.applyBatchId,
+              resolutionResultId: item.resolutionResultId,
+              itemOrder: index,
+              audit: item,
+            });
+            this.inject('AFTER_APPLY_ITEM_WRITE', { recordId: item.id, recordIndex: index });
+          });
+          this.inject('BEFORE_APPLY_AUDIT_COMMIT');
+          replaced = true;
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      transaction.oncomplete = () => {
+        if (!replaced) {
+          reject(new ClosingDateSidecarIntegrityError('Apply audit replacement completed without write'));
+          return;
+        }
+        resolve(audit);
+      };
+      transaction.onerror = () => {
+        if (!failure && transaction.error) failure = transaction.error;
+      };
+      transaction.onabort = () => reject(
+        failure instanceof Error
+          ? failure
+          : transaction.error ?? new Error('Apply audit replacement aborted'),
+      );
+      batchRequest.onerror = () => fail(batchRequest.error);
+      itemsRequest.onerror = () => fail(itemsRequest.error);
+      batchRequest.onsuccess = () => {
+        if (!batchRequest.result) {
+          fail(new ClosingDateSidecarIntegrityError(`Apply audit does not exist: ${audit.batch.id}`));
+          return;
+        }
+        existingBatch = batchRequest.result;
+        replaceWhenReady();
+      };
+      itemsRequest.onsuccess = () => {
+        existingItems = itemsRequest.result;
+        replaceWhenReady();
       };
     });
   }

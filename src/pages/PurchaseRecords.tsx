@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { lazy, Suspense, useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
@@ -44,6 +44,11 @@ import {
   canUseNextFieldTestClosingDateClear,
   createNextFieldTestClosingDateClearPlan,
 } from '../lib/nextFieldTestClosingDate';
+import { canUseClosingDateWorkbenchUi } from '../lib/closingDateWorkbenchAccess';
+
+const ClosingDateResolutionWorkbench = lazy(
+  () => import('../components/closingDateResolution/ClosingDateResolutionWorkbench'),
+);
 
 const DEFAULT_COL_WIDTHS = {
   title: 350,
@@ -294,6 +299,7 @@ export default function PurchaseRecords() {
   const { isMobile } = useViewport();
   const providerMode = getProviderMode();
   const isNextIdentityShadowMode = canUseProxyIdentityShadow(providerMode);
+  const isClosingDateWorkbenchAvailable = canUseClosingDateWorkbenchUi(providerMode);
 
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -571,8 +577,14 @@ export default function PurchaseRecords() {
   // Batch edit states and datepicker refs
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [isClearingClosingDates, setIsClearingClosingDates] = useState(false);
+  const [showClosingDateWorkbench, setShowClosingDateWorkbench] = useState(false);
   const [batchClosingDate, setBatchClosingDate] = useState('');
   const [batchReleaseMonth, setBatchReleaseMonth] = useState('');
+
+  const closingDateWorkbenchSelection = useMemo(
+    () => groups.filter(group => selectedGroupIds.has(group.id)),
+    [groups, selectedGroupIds],
+  );
 
   const datePickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -3233,25 +3245,27 @@ export default function PurchaseRecords() {
               套用至勾選商品
             </button>
 
-            <button
-              onClick={handleAutoLookupDeadlines}
-              disabled={selectedGroupIds.size === 0 || isLookingUpDeadlines}
-              style={{
-                padding: '0 16px',
-                height: '36px',
-                backgroundColor: selectedGroupIds.size > 0 ? '#059669' : '#9ca3af',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '8px',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: selectedGroupIds.size > 0 ? 'pointer' : 'not-allowed',
-                transition: 'all 0.2s',
-                opacity: isLookingUpDeadlines ? 0.7 : 1,
-              }}
-            >
-              {isLookingUpDeadlines ? '查詢中...' : '🔍 自動查詢結單日'}
-            </button>
+            {!isClosingDateWorkbenchAvailable && (
+              <button
+                onClick={handleAutoLookupDeadlines}
+                disabled={selectedGroupIds.size === 0 || isLookingUpDeadlines}
+                style={{
+                  padding: '0 16px',
+                  height: '36px',
+                  backgroundColor: selectedGroupIds.size > 0 ? '#059669' : '#9ca3af',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: selectedGroupIds.size > 0 ? 'pointer' : 'not-allowed',
+                  transition: 'all 0.2s',
+                  opacity: isLookingUpDeadlines ? 0.7 : 1,
+                }}
+              >
+                {isLookingUpDeadlines ? '查詢中...' : '🔍 自動查詢結單日'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -3404,6 +3418,34 @@ export default function PurchaseRecords() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {isClosingDateWorkbenchAvailable && (
+              <button
+                type="button"
+                data-testid="open-closing-date-workbench"
+                onClick={() => setShowClosingDateWorkbench(true)}
+                title="NEXT FIELD TEST ONLY"
+                style={{
+                  padding: '0 14px',
+                  height: '36px',
+                  backgroundColor: '#059669',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <Search size={14} />
+                <span>分析結單日</span>
+                <span style={{ fontSize: '9px', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' }}>
+                  NEXT ONLY
+                </span>
+              </button>
+            )}
             <button
               onClick={() => handleBatchUpdateShowInPurchaseList(true)}
               style={{
@@ -3570,6 +3612,7 @@ export default function PurchaseRecords() {
                       <div className="card-checkbox-wrapper" onClick={e => e.stopPropagation()} style={{ marginTop: '2px', flexShrink: 0 }}>
                         <input 
                           type="checkbox"
+                          data-testid={`purchase-record-select-${g.id}`}
                           checked={isChecked}
                           onChange={(e) => {
                             const next = new Set(selectedGroupIds);
@@ -3798,6 +3841,7 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                           <input 
                             type="checkbox"
+                            data-testid={`purchase-record-select-${g.id}`}
                             checked={selectedGroupIds.has(g.id)}
                             onChange={(e) => {
                               const next = new Set(selectedGroupIds);
@@ -4233,6 +4277,7 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                           <input 
                             type="checkbox"
+                            data-testid={`purchase-record-select-${g.id}`}
                             checked={selectedGroupIds.has(g.id)}
                             onChange={(e) => {
                               const next = new Set(selectedGroupIds);
@@ -4704,6 +4749,24 @@ export default function PurchaseRecords() {
             </div>
           </div>
         </div>
+      )}
+
+      {isClosingDateWorkbenchAvailable && showClosingDateWorkbench && (
+        <Suspense fallback={(
+          <div style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'grid', placeItems: 'center', background: 'rgba(15,23,42,0.55)', color: '#fff', fontWeight: 700 }}>
+            載入結單日工作台…
+          </div>
+        )}>
+          <ClosingDateResolutionWorkbench
+            selectedGroups={closingDateWorkbenchSelection}
+            allGroups={groups}
+            onClose={() => setShowClosingDateWorkbench(false)}
+            onApplied={async () => {
+              await loadData();
+              setSelectedGroupIds(new Set());
+            }}
+          />
+        </Suspense>
       )}
       
       {/* Floating Action Button (FAB) */}
