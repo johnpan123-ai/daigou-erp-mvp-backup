@@ -1,6 +1,6 @@
 # ERP Restore Point Index
 
-最後更新：2026-08-21 06:58（Asia/Taipei，UTC+8）
+最後更新：2026-08-21 09:01（Asia/Taipei，UTC+8）
 
 本文件是 Git 回復點、資料快照與外部備份的集中索引。Feature readiness tag 仍由 `docs/test-sandbox-feature-registry.md` 管理；除非同時是可回復的完整狀態，否則不重複列為 Restore Point。
 
@@ -275,3 +275,11 @@ Nightly stage 的自動測試不等同人工 Accepted。
 | 台灣日期時間 | 環境 | Tag | Commit Hash | 建立原因／當時功能 | Build／Test | 曾部署 Production | JSON Snapshot | Database Dump | Storage Backup | 是否建議 Restore Point |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-08-21 07:28:39 | Next-only development | `checkpoint-20260821-0728-closing-date-sidecar-storage-awaiting-batch-gateway` | `326a3d853aa6b7d1ce4d16c0956711f9caa77fb9` | Migration 2：新增獨立 `daigou-erp-closing-date-sidecar-next-v1` v1 與六個初始空集合、repository／adapter、supplier-scoped Mapping、Resolution／Candidate round-trip、Apply audit-only plan、idempotency 與 atomic rollback；feature flag 預設關閉，未接 UI、Provider、Catalog、closing_date apply 或 Production | `build:next`、TypeScript、sidecar atomic/fault-injection、Domain、core、Sandbox guard／architecture、Snapshot Import、Next↔Experimental parity、44-case Closing Date、Next nightly integrity、`git diff --check` 全通過；559 Groups／2438 Variants、collection hashes、Golden VSPO、orphan counts 不變；Production Supabase request 0 | 否 | 無格式升級；僅以既有 `workbench-backup-2026-08-15.json` 做隔離 readback／parity 驗證 | 無 | 無 | **是：Sidecar Storage 自動測試完成回復點；Batch Gateway Not Started，非 Production Ready** |
+
+## Closing Date Resolution Workbench Batch Gateway / UI（2026-08-21）
+
+| 台灣日期時間 | 環境 | Tag | Commit Hash | 建立原因／當時功能 | Build／Test | 曾部署 Production | JSON Snapshot | Database Dump | Storage Backup | 是否建議 Restore Point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-08-21 08:06:32 | Next-only development | `checkpoint-20260821-0806-closing-date-batch-gateway-awaiting-workbench-ui` | `1d796057a993c5781abac765b85e351705e8d46d` | Migration 3：Next-only read-only Batch Gateway；Batch Job＋polling、Catalog snapshot/cache、query dedupe、single-flight、limited concurrency、cancel/retry；結果僅寫 Sidecar，尚未接 Workbench UI 或 closing_date apply | `build:next`、Gateway／Domain／Sidecar、core、Sandbox guard／architecture、Next integrity、10／50／100 cold/warm performance 與 diff check 通過；warm upstream 0；Production Supabase request 0 | 否 | 既有 `workbench-backup-2026-08-15.json` 僅供 Next integrity；無格式變更 | 無 | 無 | **是：Migration 4 的乾淨基準；Workbench UI Not Started** |
+| 2026-08-21 08:14（本地建立紀錄；lightweight tag 無 tagger timestamp） | Next-only development | `checkpoint-20260821-0814-before-closing-date-workbench-ui` | `1d796057a993c5781abac765b85e351705e8d46d` | Migration 4 實作前 checkpoint；內容與 08:06 Batch Gateway 基準相同，未加入 UI、apply 或其他功能 | 起始 branch／worktree clean；沿用 Migration 3 全部通過證據 | 否 | 同上 | 無 | 無 | 是：Migration 4 實作前回復點；Tag 本身為 lightweight，後續 checkpoint 已改回 annotated |
+| 2026-08-21 09:01 | Next-only development | `checkpoint-20260821-0901-closing-date-workbench-ui-awaiting-manual` | `ddbfed40957595d619516e50dcb80bb2d08a5346` | Migration 4：PurchaseRecords lazy-loaded Workbench、Batch progress、GREEN／YELLOW／RED Review、Top 3、選擇並記住、completed review reload、cancel/retry、interrupted runner recovery 與 Next-only atomic closing_date apply；未接 Cloud／Production | `build:next`、Domain／Sidecar／Gateway／Workbench、core、Sandbox guard／architecture、Next integrity、atomic conflict/rollback、10／50／100 deterministic benchmark 與真正 4192 Browser field test通過；Console 0；Production Supabase request 0。詳見 `docs/closing-date-workbench-migration4.md` | 否 | 無格式升級；Main collection hashes／Golden VSPO／orphans 不變；4192 僅新增 Sidecar Batch 與一筆人工確認 Mapping，未執行 final apply | 無 | 無 | **是：Closing Date Workbench UI Implemented + Automated Tested / Awaiting Manual Acceptance；不是 Production Ready** |

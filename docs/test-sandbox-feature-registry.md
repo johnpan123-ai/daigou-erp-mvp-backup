@@ -186,6 +186,20 @@ positives. Version-less Star Platinum, unverified TAKARATOMY naming, special SMP
 product-set mapping, and Omaneko remain fail-closed. This is not Manual Accepted
 and must not be promoted to Production Candidate or Production Ready.
 
+### Closing Date Resolution Workbench migration line — 2026-08-21
+
+| Migration | Commit | Checkpoint | Status | Production ready | Boundary |
+| --- | --- | --- | --- | --- | --- |
+| Domain Foundation | `1d7bc27` | `checkpoint-20260821-0657-closing-date-domain-foundation-awaiting-storage` | Automated Tested | **NO** | Pure TypeScript contracts only |
+| Next Sidecar Storage | `326a3d8` | `checkpoint-20260821-0728-closing-date-sidecar-storage-awaiting-batch-gateway` | Automated Tested | **NO** | Six Next-only Sidecar stores; no ProductGroup schema change |
+| Read-only Batch Gateway | `1d79605` | `checkpoint-20260821-0806-closing-date-batch-gateway-awaiting-workbench-ui` | Automated / Performance Tested | **NO** | Batch, polling, snapshot/cache, dedupe, single-flight, cancel/retry; no ERP write |
+| Next Workbench UI + atomic apply | `ddbfed4` | `checkpoint-20260821-0901-closing-date-workbench-ui-awaiting-manual` | **Implemented + Automated Tested / Awaiting Manual Acceptance** | **NO** | Next-only lazy UI; analysis/remember are Sidecar-only; final apply is guarded Next IndexedDB transaction |
+
+The Workbench line is not a Production candidate. It depends on Next-only
+storage and feature flags, has no Cloud RPC/Supabase implementation, and must
+not be cherry-picked as an ordinary Production feature. Migration 5 has not
+started.
+
 ## Test infrastructure nodes — never cherry-pick to Production
 
 | Infrastructure | Commit / range | Tag | Production ready | Purpose |
