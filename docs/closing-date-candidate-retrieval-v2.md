@@ -1,6 +1,9 @@
 # Closing Date Workbench Candidate Retrieval v2
 
-Status: **Implemented + Automated/Runtime Contract Tested / Awaiting Manual Acceptance**
+Status: **Candidate Retrieval v2 Implemented + Runtime Tested / Awaiting Manual Acceptance**
+
+- Implementation commit: `5e70bff`
+- Checkpoint: `checkpoint-20260821-1019-closing-date-candidate-retrieval-v2-awaiting-manual`
 
 本階段只調整 Next-only Closing Date Workbench 的候選取得與排序證據。Parser、Matcher、90% threshold、5% ambiguity guard、Wanrong priority、closing-date 規則、Provider、ERP Schema 與 Production 均未修改。
 
