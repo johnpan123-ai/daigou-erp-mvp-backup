@@ -65,6 +65,16 @@ export interface CommitResolutionAnalysisResult {
   batch: ResolutionBatch;
 }
 
+export interface CreateResolutionJobStorageResult {
+  created: boolean;
+  batch: ResolutionBatch;
+}
+
+export interface AppendResolutionResultStorageResult {
+  created: boolean;
+  result: ResolutionResult;
+}
+
 export interface SaveApplyAuditResult {
   created: boolean;
   audit: ApplyAuditBundle;
@@ -85,6 +95,13 @@ export interface ClosingDateResolutionSidecarRepository {
   commitResolutionAnalysis(
     aggregate: ResolutionAnalysisAggregate,
   ): Promise<CommitResolutionAnalysisResult>;
+  createResolutionJob(batch: ResolutionBatch): Promise<CreateResolutionJobStorageResult>;
+  updateResolutionJob(batch: ResolutionBatch): Promise<void>;
+  appendResolutionResult(
+    batch: ResolutionBatch,
+    result: ResolutionResult,
+  ): Promise<AppendResolutionResultStorageResult>;
+  listResolutionResults(batchId: string): Promise<readonly ResolutionResult[]>;
   findActiveMappings(
     erpProductGroupIds: readonly string[],
   ): Promise<readonly VerifiedMappingRegistryEntry[]>;
@@ -225,6 +242,35 @@ const toStoredBatch = (batch: ResolutionBatch): StoredResolutionBatch => ({
   batch,
 });
 
+const validateBatch = (batch: ResolutionBatch): StoredResolutionBatch => {
+  ensureNonEmpty(batch.id, 'resolution batch id');
+  ensureNonEmpty(batch.idempotencyKey, 'resolution batch idempotency key');
+  ensureNonEmpty(batch.inputHash, 'resolution batch input hash');
+  ensureNonEmpty(batch.snapshotVersion, 'resolution batch snapshot version');
+  ensureNonEmpty(batch.ruleVersion, 'resolution batch rule version');
+  if (new Set(batch.productGroupIds).size !== batch.productGroupIds.length) {
+    throw new ClosingDateSidecarIntegrityError(
+      `Resolution batch ${batch.id} contains duplicate ProductGroup IDs`,
+    );
+  }
+  return toStoredBatch(batch);
+};
+
+const assertSameLogicalBatch = (
+  existing: StoredResolutionBatch,
+  incoming: StoredResolutionBatch,
+): void => {
+  if (
+    existing.idempotencyKey !== incoming.idempotencyKey
+    || existing.inputHash !== incoming.inputHash
+    || existing.ruleVersion !== incoming.ruleVersion
+    || existing.snapshotVersion !== incoming.snapshotVersion
+    || JSON.stringify(existing.batch.productGroupIds) !== JSON.stringify(incoming.batch.productGroupIds)
+  ) {
+    throw new ClosingDateSidecarIdempotencyConflictError(incoming.idempotencyKey);
+  }
+};
+
 const toStoredResult = (result: ResolutionResult): {
   result: StoredResolutionResult;
   candidates: readonly StoredResolutionCandidate[];
@@ -257,9 +303,7 @@ const validateAggregate = (aggregate: ResolutionAnalysisAggregate): {
     candidates: readonly StoredResolutionCandidate[];
   }[];
 } => {
-  ensureNonEmpty(aggregate.batch.id, 'resolution batch id');
-  ensureNonEmpty(aggregate.batch.idempotencyKey, 'resolution batch idempotency key');
-  ensureNonEmpty(aggregate.batch.inputHash, 'resolution batch input hash');
+  const batch = validateBatch(aggregate.batch);
   const resultIds = new Set<string>();
   const results = aggregate.results.map(result => {
     if (resultIds.has(result.id)) {
@@ -305,7 +349,7 @@ const validateAggregate = (aggregate: ResolutionAnalysisAggregate): {
   });
   return {
     mappings: aggregate.mappings.map(toStoredMapping),
-    batch: toStoredBatch(aggregate.batch),
+    batch,
     results,
   };
 };
@@ -527,6 +571,254 @@ implements ClosingDateResolutionSidecarRepository {
         }
       };
     });
+  }
+
+  async createResolutionJob(
+    batch: ResolutionBatch,
+  ): Promise<CreateResolutionJobStorageResult> {
+    const normalized = validateBatch(batch);
+    const database = await this.adapter.open();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        CLOSING_DATE_SIDECAR_STORES.resolutionBatches,
+        'readwrite',
+      );
+      let failure: unknown;
+      let outcome: CreateResolutionJobStorageResult | null = null;
+      const store = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionBatches);
+      const request = store
+        .index(CLOSING_DATE_SIDECAR_INDEXES.batchByIdempotency)
+        .get(normalized.idempotencyKey) as IDBRequest<StoredResolutionBatch | undefined>;
+
+      transaction.oncomplete = () => {
+        if (!outcome) {
+          reject(new ClosingDateSidecarIntegrityError('Job creation completed without result'));
+          return;
+        }
+        resolve(outcome);
+      };
+      transaction.onerror = () => {
+        if (!failure && transaction.error) failure = transaction.error;
+      };
+      transaction.onabort = () => reject(
+        failure instanceof Error
+          ? failure
+          : transaction.error ?? new Error('Resolution job creation aborted'),
+      );
+      request.onerror = () => {
+        failure = request.error;
+      };
+      request.onsuccess = () => {
+        try {
+          if (request.result) {
+            assertSameLogicalBatch(request.result, normalized);
+            outcome = { created: false, batch: request.result.batch };
+            return;
+          }
+          store.add(normalized);
+          outcome = { created: true, batch: normalized.batch };
+        } catch (error) {
+          failure = error;
+          abortTransaction(transaction);
+        }
+      };
+    });
+  }
+
+  async updateResolutionJob(batch: ResolutionBatch): Promise<void> {
+    const normalized = validateBatch(batch);
+    const database = await this.adapter.open();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        CLOSING_DATE_SIDECAR_STORES.resolutionBatches,
+        'readwrite',
+      );
+      let failure: unknown;
+      let updated = false;
+      const store = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionBatches);
+      const request = store.get(normalized.id) as IDBRequest<StoredResolutionBatch | undefined>;
+      transaction.oncomplete = () => {
+        if (!updated) {
+          reject(new ClosingDateSidecarIntegrityError('Job update completed without write'));
+          return;
+        }
+        resolve();
+      };
+      transaction.onerror = () => {
+        if (!failure && transaction.error) failure = transaction.error;
+      };
+      transaction.onabort = () => reject(
+        failure instanceof Error
+          ? failure
+          : transaction.error ?? new Error('Resolution job update aborted'),
+      );
+      request.onerror = () => {
+        failure = request.error;
+      };
+      request.onsuccess = () => {
+        try {
+          if (!request.result) {
+            throw new ClosingDateSidecarIntegrityError(
+              `Resolution job does not exist: ${normalized.id}`,
+            );
+          }
+          assertSameLogicalBatch(request.result, normalized);
+          store.put(normalized);
+          updated = true;
+        } catch (error) {
+          failure = error;
+          abortTransaction(transaction);
+        }
+      };
+    });
+  }
+
+  async appendResolutionResult(
+    batch: ResolutionBatch,
+    result: ResolutionResult,
+  ): Promise<AppendResolutionResultStorageResult> {
+    const normalized = validateAggregate({ mappings: [], batch, results: [result] });
+    const storedResult = normalized.results[0];
+    const database = await this.adapter.open();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([
+        CLOSING_DATE_SIDECAR_STORES.resolutionBatches,
+        CLOSING_DATE_SIDECAR_STORES.resolutionResults,
+        CLOSING_DATE_SIDECAR_STORES.resolutionCandidates,
+      ], 'readwrite');
+      let failure: unknown;
+      let outcome: AppendResolutionResultStorageResult | null = null;
+      let pendingReads = 3;
+      let existingBatch: StoredResolutionBatch | undefined;
+      let existingResult: StoredResolutionResult | undefined;
+      let existingCandidates: StoredResolutionCandidate[] = [];
+      const batchStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionBatches);
+      const resultStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionResults);
+      const candidateStore = transaction.objectStore(
+        CLOSING_DATE_SIDECAR_STORES.resolutionCandidates,
+      );
+      const batchRequest = batchStore.get(normalized.batch.id) as IDBRequest<
+        StoredResolutionBatch | undefined
+      >;
+      const resultRequest = resultStore.get(storedResult.result.id) as IDBRequest<
+        StoredResolutionResult | undefined
+      >;
+      const candidatesRequest = candidateStore
+        .index(CLOSING_DATE_SIDECAR_INDEXES.candidateByResult)
+        .getAll(storedResult.result.id) as IDBRequest<StoredResolutionCandidate[]>;
+
+      const fail = (error: unknown): void => {
+        failure = error;
+        abortTransaction(transaction);
+      };
+      const finishRead = (): void => {
+        pendingReads -= 1;
+        if (pendingReads !== 0 || failure) return;
+        try {
+          if (!existingBatch) {
+            throw new ClosingDateSidecarIntegrityError(
+              `Resolution job does not exist: ${normalized.batch.id}`,
+            );
+          }
+          assertSameLogicalBatch(existingBatch, normalized.batch);
+          if (existingResult) {
+            const reconstructed = reconstructResult(existingResult, existingCandidates);
+            if (JSON.stringify(reconstructed) !== JSON.stringify(result)) {
+              throw new ClosingDateSidecarIntegrityError(
+                `Resolution result idempotency conflict: ${result.id}`,
+              );
+            }
+            outcome = { created: false, result: reconstructed };
+            return;
+          }
+          batchStore.put(normalized.batch);
+          this.inject('AFTER_BATCH_WRITE', { recordId: normalized.batch.id });
+          resultStore.add(storedResult.result);
+          this.inject('AFTER_RESULT_WRITE', { recordId: storedResult.result.id });
+          storedResult.candidates.forEach((candidate, index) => {
+            candidateStore.add(candidate);
+            this.inject('AFTER_CANDIDATE_WRITE', {
+              recordId: candidate.storageId,
+              recordIndex: index,
+            });
+          });
+          outcome = { created: true, result };
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      transaction.oncomplete = () => {
+        if (!outcome) {
+          reject(new ClosingDateSidecarIntegrityError('Result append completed without result'));
+          return;
+        }
+        resolve(outcome);
+      };
+      transaction.onerror = () => {
+        if (!failure && transaction.error) failure = transaction.error;
+      };
+      transaction.onabort = () => reject(
+        failure instanceof Error
+          ? failure
+          : transaction.error ?? new Error('Resolution result append aborted'),
+      );
+      batchRequest.onerror = () => fail(batchRequest.error);
+      resultRequest.onerror = () => fail(resultRequest.error);
+      candidatesRequest.onerror = () => fail(candidatesRequest.error);
+      batchRequest.onsuccess = () => {
+        existingBatch = batchRequest.result;
+        finishRead();
+      };
+      resultRequest.onsuccess = () => {
+        existingResult = resultRequest.result;
+        finishRead();
+      };
+      candidatesRequest.onsuccess = () => {
+        existingCandidates = candidatesRequest.result;
+        finishRead();
+      };
+    });
+  }
+
+  async listResolutionResults(batchId: string): Promise<readonly ResolutionResult[]> {
+    const database = await this.adapter.open();
+    const transaction = database.transaction([
+      CLOSING_DATE_SIDECAR_STORES.resolutionBatches,
+      CLOSING_DATE_SIDECAR_STORES.resolutionResults,
+      CLOSING_DATE_SIDECAR_STORES.resolutionCandidates,
+    ], 'readonly');
+    const completion = transactionCompletion(transaction);
+    const batchRequest = transaction
+      .objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionBatches)
+      .get(batchId) as IDBRequest<StoredResolutionBatch | undefined>;
+    const resultRequest = transaction
+      .objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionResults)
+      .index(CLOSING_DATE_SIDECAR_INDEXES.resultByBatch)
+      .getAll(batchId) as IDBRequest<StoredResolutionResult[]>;
+    const candidateRequest = transaction
+      .objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionCandidates)
+      .index(CLOSING_DATE_SIDECAR_INDEXES.candidateByBatch)
+      .getAll(batchId) as IDBRequest<StoredResolutionCandidate[]>;
+    const [storedBatch, storedResults, storedCandidates] = await Promise.all([
+      requestResult(batchRequest),
+      requestResult(resultRequest),
+      requestResult(candidateRequest),
+    ]);
+    await completion;
+    if (!storedBatch) return [];
+    const productOrder = new Map(
+      storedBatch.batch.productGroupIds.map((productGroupId, index) => [productGroupId, index]),
+    );
+    return storedResults
+      .map(stored => reconstructResult(
+        stored,
+        storedCandidates.filter(candidate => candidate.resolutionResultId === stored.id),
+      ))
+      .sort((left, right) => (
+        (productOrder.get(left.erpProductGroupId) ?? Number.MAX_SAFE_INTEGER)
+        - (productOrder.get(right.erpProductGroupId) ?? Number.MAX_SAFE_INTEGER)
+      ));
   }
 
   async findActiveMappings(
