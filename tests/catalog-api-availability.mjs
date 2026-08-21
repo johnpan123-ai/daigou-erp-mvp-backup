@@ -43,13 +43,23 @@ try {
   await waitForVite();
 
   const endpoints = [
-    '/api/catalog/search?q=figma%20%E8%B7%AF%E8%A5%BF%E6%B3%95&pageSize=2',
+    '/api/catalog/search?q=figma%20%E8%B7%AF%E8%A5%BF%E6%B3%95&limit=2',
     '/api/hololive/products.json?limit=1&page=1',
     '/api/vspo/products.json?limit=1&page=1',
   ];
   const responses = [];
   for (const endpoint of endpoints) {
     const response = await fetch(`${BASE_URL}${endpoint}`);
+    if (!response.ok) {
+      const body = await response.text();
+      responses.push({
+        endpoint,
+        status: response.status,
+        hasProducts: false,
+        errorBody: body.slice(0, 200),
+      });
+      continue;
+    }
     const body = await response.json();
     responses.push({ endpoint, status: response.status, hasProducts: Array.isArray(body.products) });
   }

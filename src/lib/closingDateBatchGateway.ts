@@ -4,6 +4,7 @@ import {
   createResolutionBatch,
   createResolutionResult,
   isActiveVerifiedMapping,
+  rankTopThreeCandidates,
   sameSourceProduct,
   transitionResolutionBatch,
 } from './closingDateResolutionDomain';
@@ -13,6 +14,7 @@ import type {
   CreateResolutionJobRequest,
   CreateResolutionJobResponse,
   ResolutionBatch,
+  ResolutionCandidateRetrievalEvidence,
   ResolutionJobResponse,
   ResolutionResult,
   RetryResolutionJobResponse,
@@ -31,8 +33,6 @@ import type {
   ReadonlyCatalogClient,
 } from './closingDateCatalogBatchCache';
 import {
-  buildProxyCatalogQueries,
-  normalizeProxyProductIdentity,
   scoreProxyCatalogCandidate,
   selectProxyCatalogCandidate,
 } from './proxyProductIdentity';
@@ -41,7 +41,11 @@ import {
   resolveProxyCatalogDecision,
   scoreProxyCatalogCandidateV2Pilot,
 } from './proxyProductIdentityPilot';
-import { buildProxyCatalogQueriesV2 } from './proxyProductIdentityQueryV2';
+import {
+  buildClosingDateCandidateRetrievalQueries,
+  CLOSING_DATE_CATALOG_NATIVE_LIMIT,
+  CLOSING_DATE_RELIABLE_NATIVE_TOP_N,
+} from './closingDateCandidateRetrievalV2';
 import { getBuildSandboxMode } from './testSandboxEnvironment';
 
 export const CLOSING_DATE_BATCH_GATEWAY_FEATURE_FLAG = 'VITE_ENABLE_CLOSING_DATE_BATCH_GATEWAY';
@@ -208,10 +212,6 @@ const isAbortError = (error: unknown): boolean => (
   error instanceof DOMException && error.name === 'AbortError'
 );
 
-const uniqueQueries = (queries: readonly string[]): string[] => Array.from(new Set(
-  queries.map(query => query.trim()).filter(Boolean),
-));
-
 const candidateSupplier = (candidate: ProxyCatalogCandidate): string => (
   candidate.catalog?.supplier?.code?.trim().toLocaleLowerCase() || 'unknown'
 );
@@ -274,26 +274,46 @@ const catalogCandidateKey = (candidate: ProxyCatalogCandidate): string => JSON.s
   candidateSourceProductId(candidate),
 ]);
 
+interface RetrievedCatalogCandidate {
+  candidate: ProxyCatalogCandidate;
+  firstSeenOrder: number;
+  queryHits: ResolutionCandidateRetrievalEvidence[];
+}
+
 export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnalyzer => (
   async context => {
     const title = context.item.title;
-    const v1Queries = buildProxyCatalogQueries(normalizeProxyProductIdentity(title));
-    const queries = uniqueQueries([
-      ...v1Queries,
-      ...buildProxyCatalogQueriesV2(title),
-    ]);
-    const candidateMap = new Map<string, ProxyCatalogCandidate>();
+    const queries = buildClosingDateCandidateRetrievalQueries(title);
+    const candidateMap = new Map<string, RetrievedCatalogCandidate>();
     let lastServiceError: ClosingDateCatalogGatewayError | null = null;
     let selectedCandidate: ProxyCatalogCandidate | null = null;
     let selectedConfidence = 0;
+    let firstSeenOrder = 0;
 
     for (const query of queries) {
       if (context.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
+      const currentQueryCandidateKeys = new Set<string>();
       try {
-        const products = await context.search(query);
-        for (const product of products) {
+        const products = await context.search(query.text);
+        for (const [nativeIndex, product] of products.entries()) {
+          const sourceProductId = candidateSourceProductId(product);
+          if (!sourceProductId) continue;
           const key = catalogCandidateKey(product);
-          if (!candidateMap.has(key)) candidateMap.set(key, product);
+          currentQueryCandidateKeys.add(key);
+          let retrieved = candidateMap.get(key);
+          if (!retrieved) {
+            firstSeenOrder += 1;
+            retrieved = { candidate: product, firstSeenOrder, queryHits: [] };
+            candidateMap.set(key, retrieved);
+          }
+          retrieved.queryHits.push({
+            queryText: query.text,
+            queryPriority: query.priority,
+            queryKind: query.kind,
+            nativeRank: nativeIndex + 1,
+            sourceSupplier: candidateSupplier(product),
+            sourceProductId,
+          });
         }
       } catch (error) {
         if (isAbortError(error)) throw error;
@@ -303,7 +323,7 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         }
         throw error;
       }
-      const candidates = [...candidateMap.values()];
+      const candidates = [...candidateMap.values()].map(entry => entry.candidate);
       const v1Selection = selectProxyCatalogCandidate(title, candidates);
       const decision = resolveProxyCatalogDecision('next', title, candidates, v1Selection);
       if (decision.match?.candidate) {
@@ -311,10 +331,15 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         selectedConfidence = decision.match.confidence;
         const supplier = candidateSupplier(selectedCandidate);
         if (supplier === 'wanrong' && selectedCandidate.catalog?.deadlineAt) break;
+      } else {
+        selectedCandidate = null;
+        selectedConfidence = 0;
       }
+      if (currentQueryCandidateKeys.size >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) break;
     }
 
-    const domainCandidates = [...candidateMap.values()].flatMap(candidate => {
+    const domainCandidates = [...candidateMap.values()].flatMap(retrieved => {
+      const candidate = retrieved.candidate;
       const source = sourceReferenceForCandidate(candidate, context.snapshot.version);
       if (!source) return [];
       const isSelected = candidate === selectedCandidate;
@@ -345,10 +370,16 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
           activeMappings: context.activeMappings,
           selected: isSelected,
         }),
+        retrieval: {
+          strategy: 'CATALOG_NATIVE_SEARCH_V2' as const,
+          firstSeenOrder: retrieved.firstSeenOrder,
+          queryHits: retrieved.queryHits,
+        },
       }];
     });
+    const rankedCandidates = rankTopThreeCandidates(domainCandidates);
     const selectedDomainCandidate = selectedCandidate
-      ? domainCandidates.find(candidate => (
+      ? rankedCandidates.find(candidate => (
         candidate.source.sourceSupplier === candidateSupplier(selectedCandidate)
         && candidate.source.sourceProductId === candidateSourceProductId(selectedCandidate)
       ))
@@ -368,6 +399,7 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       productUpdatedAtAtAnalysis: context.item.updatedAt,
       closingDateAtAnalysis: context.item.currentClosingDate,
       candidates: domainCandidates,
+      recommendedCandidateId: selectedDomainCandidate?.id ?? null,
       activeVerifiedMapping,
       serviceError: lastServiceError ? {
         code: lastServiceError.code,
@@ -720,7 +752,7 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
       const lookup: CatalogCacheLookupResult = await this.queryCache.lookup({
         snapshot: job.snapshot,
         query,
-        pageSize: 8,
+        limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
         signal: job.controller.signal,
       });
       job.metrics.uniqueQueryKeys.add(lookup.cacheKey);

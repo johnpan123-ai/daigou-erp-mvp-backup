@@ -12,7 +12,7 @@ export interface CatalogSnapshotDescriptor {
 
 export interface ReadonlyCatalogSearchRequest {
   query: string;
-  pageSize: number;
+  limit: number;
   snapshotVersion: string;
   signal?: AbortSignal;
 }
@@ -165,13 +165,13 @@ export class CatalogSnapshotQueryCache {
   async lookup(input: {
     snapshot: CatalogSnapshotDescriptor;
     query: string;
-    pageSize?: number;
+    limit?: number;
     signal?: AbortSignal;
   }): Promise<CatalogCacheLookupResult> {
     const normalizedQuery = normalizeCatalogCacheQuery(input.query);
     if (!normalizedQuery) throw new Error('Catalog query must not be empty');
-    const pageSize = input.pageSize ?? 8;
-    const cacheKey = JSON.stringify([input.snapshot.version, pageSize, normalizedQuery]);
+    const limit = input.limit ?? 5;
+    const cacheKey = JSON.stringify([input.snapshot.version, limit, normalizedQuery]);
     const now = this.nowMs();
     const cached = this.cached.get(cacheKey);
     if (cached && cached.expiresAtMs > now) {
@@ -200,7 +200,7 @@ export class CatalogSnapshotQueryCache {
     const request = this.concurrency.run(async () => {
       const response = await this.client.search({
         query: normalizedQuery,
-        pageSize,
+        limit,
         snapshotVersion: input.snapshot.version,
       });
       if (response.snapshotVersion !== input.snapshot.version) {
@@ -285,7 +285,7 @@ export function createReadonlyCatalogHttpClient(
       };
     },
     async search(request) {
-      const url = `/api/catalog/search?q=${encodeURIComponent(request.query)}&pageSize=${request.pageSize}`;
+      const url = `/api/catalog/search?q=${encodeURIComponent(request.query)}&limit=${request.limit}`;
       try {
         const payload = await fetchReadonlyCatalogJson<{ products?: ProxyCatalogCandidate[] }>(
           url,

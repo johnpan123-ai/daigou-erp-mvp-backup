@@ -78,6 +78,27 @@ export interface ResolutionCandidateIdentifiers {
   modelCode?: string | null;
 }
 
+export type ResolutionCandidateQueryKind =
+  | 'PRODUCT_LINE_SUBJECT'
+  | 'SERIES_SUBJECT'
+  | 'SUBJECT_VERSION_FORM'
+  | 'SUBJECT';
+
+export interface ResolutionCandidateRetrievalEvidence {
+  queryText: string;
+  queryPriority: number;
+  queryKind: ResolutionCandidateQueryKind;
+  nativeRank: number;
+  sourceSupplier: string;
+  sourceProductId: string;
+}
+
+export interface ResolutionCandidateRetrievalMetadata {
+  strategy: 'CATALOG_NATIVE_SEARCH_V2';
+  firstSeenOrder: number;
+  queryHits: readonly ResolutionCandidateRetrievalEvidence[];
+}
+
 export interface ResolutionCandidate {
   id: string;
   source: SourceProductReference;
@@ -91,6 +112,7 @@ export interface ResolutionCandidate {
   snapshotVersion: string;
   confidence: number;
   matchMethod: CandidateMatchMethod;
+  retrieval?: ResolutionCandidateRetrievalMetadata;
 }
 
 export interface RankedResolutionCandidate extends ResolutionCandidate {
@@ -176,6 +198,7 @@ export interface CreateResolutionResultInput {
   productUpdatedAtAtAnalysis?: string | null;
   closingDateAtAnalysis?: string | null;
   candidates?: readonly ResolutionCandidate[];
+  recommendedCandidateId?: string | null;
   selectedCandidateId?: string | null;
   activeVerifiedMapping?: VerifiedMappingRegistryEntry | null;
   serviceError?: ResolutionServiceError | null;
@@ -435,7 +458,43 @@ const normalizeClosingDate = (value: string | null | undefined): string => value
 
 const candidateCatalogKey = (candidate: ResolutionCandidate): string => sourceProductKey(candidate.source);
 
+const isTrustedCandidateMethod = (method: CandidateMatchMethod): boolean => (
+  GREEN_MATCH_METHODS.has(method) || method === 'ACTIVE_VERIFIED_MAPPING'
+);
+
+const bestNativeEvidence = (
+  candidate: ResolutionCandidate,
+): ResolutionCandidateRetrievalEvidence | null => {
+  const hits = candidate.retrieval?.queryHits ?? [];
+  return [...hits].sort((left, right) => (
+    left.queryPriority - right.queryPriority
+    || left.nativeRank - right.nativeRank
+  ))[0] ?? null;
+};
+
+const nativeQuerySupportCount = (candidate: ResolutionCandidate): number => new Set(
+  (candidate.retrieval?.queryHits ?? []).map(hit => `${hit.queryPriority}:${hit.queryText}`),
+).size;
+
 const compareCandidates = (left: ResolutionCandidate, right: ResolutionCandidate): number => {
+  const leftNative = bestNativeEvidence(left);
+  const rightNative = bestNativeEvidence(right);
+  if (leftNative && rightNative) {
+    const trustedDifference = Number(isTrustedCandidateMethod(right.matchMethod))
+      - Number(isTrustedCandidateMethod(left.matchMethod));
+    if (trustedDifference !== 0) return trustedDifference;
+    const queryPriorityDifference = leftNative.queryPriority - rightNative.queryPriority;
+    if (queryPriorityDifference !== 0) return queryPriorityDifference;
+    const nativeRankDifference = leftNative.nativeRank - rightNative.nativeRank;
+    if (nativeRankDifference !== 0) return nativeRankDifference;
+    const querySupportDifference = nativeQuerySupportCount(right) - nativeQuerySupportCount(left);
+    if (querySupportDifference !== 0) return querySupportDifference;
+    const firstSeenDifference = (left.retrieval?.firstSeenOrder ?? Number.MAX_SAFE_INTEGER)
+      - (right.retrieval?.firstSeenOrder ?? Number.MAX_SAFE_INTEGER);
+    if (firstSeenDifference !== 0) return firstSeenDifference;
+    return right.confidence - left.confidence;
+  }
+  if (leftNative || rightNative) return leftNative ? -1 : 1;
   const priorityDifference = CANDIDATE_PRIORITY[right.matchMethod] - CANDIDATE_PRIORITY[left.matchMethod];
   if (priorityDifference !== 0) return priorityDifference;
   const confidenceDifference = right.confidence - left.confidence;
@@ -571,7 +630,13 @@ export function createResolutionResult(input: CreateResolutionResultInput): Reso
   if (input.selectedCandidateId && !explicitlySelected) {
     throw new Error(`Selected candidate is not present in Top 3: ${input.selectedCandidateId}`);
   }
-  const recommended = explicitlySelected ?? candidates[0];
+  const explicitlyRecommended = input.recommendedCandidateId
+    ? candidates.find(candidate => candidate.id === input.recommendedCandidateId)
+    : undefined;
+  if (input.recommendedCandidateId && !explicitlyRecommended) {
+    throw new Error(`Recommended candidate is not present in Top 3: ${input.recommendedCandidateId}`);
+  }
+  const recommended = explicitlySelected ?? explicitlyRecommended ?? candidates[0];
   const decision = classifyResolutionCandidate({
     erpProductGroupId: input.erpProductGroupId,
     candidate: recommended,
