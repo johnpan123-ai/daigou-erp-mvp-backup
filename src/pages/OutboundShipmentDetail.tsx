@@ -1078,6 +1078,99 @@ export default function OutboundShipmentDetail() {
 
   return (
     <div style={{ padding: isMobile ? '12px' : '20px 28px', maxWidth: 1400, margin: '0 auto' }}>
+      <style>{`
+        .outbound-group-header-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+        }
+
+        .outbound-group-title-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex: 1;
+          min-width: 0;
+        }
+
+        .outbound-group-title {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .outbound-group-meta-row,
+        .outbound-group-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+
+        .outbound-group-source-summary {
+          color: #475569;
+          font-size: 12px;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+
+        .outbound-group-progress {
+          padding-left: 22px;
+          margin-top: 4px;
+        }
+
+        @media (max-width: 768px) {
+          .outbound-group-header-row {
+            display: block;
+          }
+
+          .outbound-group-title-row {
+            align-items: flex-start;
+          }
+
+          .outbound-group-title {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            line-height: 1.4;
+            text-overflow: clip;
+          }
+
+          .outbound-group-meta-row {
+            padding-left: 22px;
+            margin-top: 8px;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px 10px;
+          }
+
+          .outbound-group-source-separator {
+            display: none;
+          }
+
+          .outbound-group-source-summary {
+            white-space: normal;
+            line-height: 1.35;
+          }
+
+          .outbound-group-actions {
+            margin-left: auto;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+          }
+
+          .outbound-group-progress {
+            margin-top: 8px;
+          }
+        }
+      `}</style>
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
         <button onClick={() => navigate('/outbound-shipments')} style={{
@@ -1344,57 +1437,62 @@ export default function OutboundShipmentDetail() {
                         minHeight: 44,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {isCollapsed ? <ChevronDown size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <ChevronUp size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
-                        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                          <span title={groupName} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 14, fontWeight: 700 }}>
+                      <div className="outbound-group-header-row">
+                        <div className="outbound-group-title-row">
+                          {isCollapsed ? <ChevronDown size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <ChevronUp size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
+                          <span className="outbound-group-title" title={groupName}>
                             {groupName}
                           </span>
-                          <span style={{ flexShrink: 0, color: '#475569', fontSize: 12, fontWeight: 700 }}>
-                            ｜買動漫{sourceSummary.myacg}・WACA{sourceSummary.waca}・私人{sourceSummary.privateOrder}
-                          </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void copyGroupName(groupName);
-                          }}
-                          title="複製商品名稱"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '4px 8px', borderRadius: 6,
-                            border: '1px solid #cbd5e1', background: '#fff',
-                            color: copiedGroupName === groupName ? '#15803d' : '#475569',
-                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                            whiteSpace: 'nowrap', flexShrink: 0,
-                          }}
-                        >
-                          {copiedGroupName === groupName ? <Check size={13} /> : <Copy size={13} />}
-                          {copiedGroupName === groupName ? '已複製' : '複製名稱'}
-                        </button>
-                        {canEditGroup && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeGroupItems(groupName, items);
-                            }}
-                            title="刪除此群組的全部商品"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 4,
-                              padding: '4px 8px', borderRadius: 6,
-                              border: '1px solid #fecaca', background: '#fff7f7',
-                              color: '#dc2626', fontSize: 12, fontWeight: 700,
-                              cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
-                            }}
-                          >
-                            <Trash2 size={13} />
-                            全部刪除
-                          </button>
-                        )}
+                        <div className="outbound-group-meta-row">
+                          <span className="outbound-group-source-summary">
+                            <span className="outbound-group-source-separator">｜</span>
+                            買動漫 {sourceSummary.myacg}・WACA {sourceSummary.waca}・私人 {sourceSummary.privateOrder}
+                          </span>
+                          <div className="outbound-group-actions">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void copyGroupName(groupName);
+                              }}
+                              title="複製商品名稱"
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                padding: '4px 8px', borderRadius: 6,
+                                border: '1px solid #cbd5e1', background: '#fff',
+                                color: copiedGroupName === groupName ? '#15803d' : '#475569',
+                                fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                whiteSpace: 'nowrap', flexShrink: 0,
+                              }}
+                            >
+                              {copiedGroupName === groupName ? <Check size={13} /> : <Copy size={13} />}
+                              {copiedGroupName === groupName ? '已複製' : '複製名稱'}
+                            </button>
+                            {canEditGroup && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeGroupItems(groupName, items);
+                                }}
+                                title="刪除此群組的全部商品"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '4px 8px', borderRadius: 6,
+                                  border: '1px solid #fecaca', background: '#fff7f7',
+                                  color: '#dc2626', fontSize: 12, fontWeight: 700,
+                                  cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                                }}
+                              >
+                                <Trash2 size={13} />
+                                全部刪除
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ paddingLeft: 22, marginTop: 4 }}>
+                      <div className="outbound-group-progress">
                         <span style={{ fontSize: 12, color: '#64748b' }}>
                           {shipment.status === 'received'
                             ? `完成 ${groupChecked}/${items.length} (${groupPercent}%)`
