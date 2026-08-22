@@ -194,7 +194,7 @@ and must not be promoted to Production Candidate or Production Ready.
 | Next Sidecar Storage | `326a3d8` | `checkpoint-20260821-0728-closing-date-sidecar-storage-awaiting-batch-gateway` | Automated Tested | **NO** | Six Next-only Sidecar stores; no ProductGroup schema change |
 | Read-only Batch Gateway | `1d79605` | `checkpoint-20260821-0806-closing-date-batch-gateway-awaiting-workbench-ui` | Automated / Performance Tested | **NO** | Batch, polling, snapshot/cache, dedupe, single-flight, cancel/retry; no ERP write |
 | Next Workbench UI + atomic apply | `ddbfed4` | `checkpoint-20260821-0901-closing-date-workbench-ui-awaiting-manual` | **Implemented + Automated Tested / Awaiting Manual Acceptance** | **NO** | Next-only lazy UI; analysis/remember are Sidecar-only; final apply is guarded Next IndexedDB transaction |
-| Candidate Retrieval v2 | `5e70bff` | `checkpoint-20260821-1019-closing-date-candidate-retrieval-v2-awaiting-manual` | **Implemented + Runtime Tested / Awaiting Manual Acceptance** | **NO** | Native Catalog `limit=5`、高資訊 query、progressive stop、native rank/query evidence；Analysis 0 ERP write。公開 Catalog 最終 live gate 因 upstream HTTP 500 待重測 |
+| Candidate Retrieval v2 | `5e70bff` + `0807d13` | `checkpoint-20260822-1106-closing-date-candidate-retrieval-v2-runtime-awaiting-manual` | **Implemented + Runtime Tested / Awaiting Manual Acceptance** | **NO** | Native Catalog `limit=5`、最多四個高資訊 query、conflict-only safety filter、reliable progressive stop、native rank/query evidence；隔離 Catalog Preview + 真正 4192 四案例 runtime 通過，Analysis 0 ERP write |
 
 The Workbench line is not a Production candidate. It depends on Next-only
 storage and feature flags, has no Cloud RPC/Supabase implementation, and must
