@@ -28,7 +28,7 @@ interface ClosingDateResolutionWorkbenchProps {
   selectedGroups: readonly ProductGroup[];
   allGroups: readonly ProductGroup[];
   onClose: () => void;
-  onApplied: () => Promise<void> | void;
+  onApplied: (appliedCount: number) => Promise<void> | void;
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string } | null;
@@ -96,6 +96,17 @@ const bestNativeQueryHit = (candidate: RankedResolutionCandidate) => (
   ))[0] ?? null
 );
 
+const formatWorkbenchDate = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/u);
+  return match ? `${match[1]}/${match[2]}/${match[3]}` : value;
+};
+
+const supplierDisplayName = (supplier: string): string => ({
+  dreamlink: 'DreamLink',
+  wanrong: '萬榮',
+}[supplier.toLowerCase()] ?? supplier);
+
 const ResultCard = ({
   result,
   selectedCandidateId,
@@ -121,11 +132,8 @@ const ResultCard = ({
         <div>
           <strong style={{ color: '#111827' }}>{result.erpTitleAtAnalysis}</strong>
           <div style={{ color: colors.text, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
-            {classificationLabel[result.classification]}・{result.classificationReason}
+            {classificationLabel[result.classification]}
           </div>
-        </div>
-        <div style={{ fontSize: 12, color: '#475569' }}>
-          信心 {Math.round(result.confidence * 100)}%
         </div>
       </div>
 
@@ -148,11 +156,11 @@ const ResultCard = ({
             const canChoose = result.classification !== 'RED';
             const bestHit = bestNativeQueryHit(candidate);
             const queryHits = candidate.retrieval?.queryHits ?? [];
-            const identifiers = [
-              candidate.identifiers?.jan ? `JAN: ${candidate.identifiers.jan}` : '',
-              candidate.identifiers?.modelCode ? `Model Code: ${candidate.identifiers.modelCode}` : '',
-            ].filter(Boolean);
             const catalogBrand = candidate.brandName || candidate.manufacturerName || '未提供';
+            const rawDeadlineDisplay = formatWorkbenchDate(candidate.rawDeadline);
+            const suggestedClosingDateDisplay = formatWorkbenchDate(candidate.suggestedClosingDate);
+            const isVerified = result.classification === 'GREEN'
+              && result.selectedCandidateId === candidate.id;
             return (
               <div
                 key={candidate.id}
@@ -174,39 +182,38 @@ const ResultCard = ({
                     onChange={() => onSelect(candidate)}
                   />
                   <span style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 700 }}>#{candidate.rank} {candidate.catalogTitle}</span>
-                    <span data-testid={`closing-date-brand-${candidate.id}`} style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 3 }}>
-                      廠牌：{catalogBrand}
-                    </span>
-                    <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
-                      Supplier：{candidate.source.sourceSupplier}
-                    </span>
-                    <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
-                      Raw Deadline：{candidate.rawDeadline || '未提供'}
-                    </span>
-                    <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
-                      Suggested Closing Date：{candidate.suggestedClosingDate || '不可套用'}・{candidate.matchMethod}・{Math.round(candidate.confidence * 100)}%
-                    </span>
-                    {bestHit && (
-                      <span data-testid={`closing-date-native-rank-${candidate.id}`} style={{ display: 'block', color: '#334155', fontSize: 11, marginTop: 3 }}>
-                        Native Rank #{bestHit.nativeRank}・Query P{bestHit.queryPriority}: {bestHit.queryText}
+                    <span
+                      data-testid={`closing-date-primary-${candidate.id}`}
+                      style={{ display: 'block' }}
+                    >
+                      {isVerified && (
+                        <span style={{ display: 'block', color: '#166534', fontSize: 12, fontWeight: 800, marginBottom: 3 }}>
+                          ✓ 已驗證
+                        </span>
+                      )}
+                      <span style={{ display: 'block', fontWeight: 700 }}>#{candidate.rank} {candidate.catalogTitle}</span>
+                      <span data-testid={`closing-date-brand-${candidate.id}`} style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 5 }}>
+                        廠牌：{catalogBrand}
                       </span>
-                    )}
-                    {queryHits.length > 1 && (
-                      <span style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                        命中 Query：{queryHits.map(hit => `${hit.queryText} (#${hit.nativeRank})`).join('、')}
+                      <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
+                        供應商：{supplierDisplayName(candidate.source.sourceSupplier)}
                       </span>
-                    )}
-                    {identifiers.length > 0 && (
-                      <span data-testid={`closing-date-identifiers-${candidate.id}`} style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                        {identifiers.join('・')}
+                      {candidate.identifiers?.jan && (
+                        <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
+                          JAN：{candidate.identifiers.jan}
+                        </span>
+                      )}
+                      {candidate.identifiers?.modelCode && (
+                        <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
+                          型號：{candidate.identifiers.modelCode}
+                        </span>
+                      )}
+                      <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
+                        官方結單：{rawDeadlineDisplay || '未提供'}
                       </span>
-                    )}
-                    <span data-testid={`closing-date-match-evidence-${candidate.id}`} style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                      Match Evidence: {candidate.matchMethod}・{queryHits.length} 個高資訊 Query・{candidate.retrieval?.metadataCompatibilityCount ?? 0} 項結構相容
-                    </span>
-                    <span style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                      Source ID: {candidate.source.sourceProductId}
+                      <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
+                        建議結單：{suggestedClosingDateDisplay || '不可套用'}
+                      </span>
                     </span>
                   </span>
                   {candidate.catalogUrl && (
@@ -221,6 +228,26 @@ const ResultCard = ({
                     </a>
                   )}
                 </label>
+                <details
+                  data-testid={`closing-date-details-${candidate.id}`}
+                  style={{ marginTop: 8, marginLeft: 27, color: '#64748b', fontSize: 11 }}
+                >
+                  <summary style={{ cursor: 'pointer', width: 'fit-content', color: '#64748b' }}>查看詳細資訊</summary>
+                  <div style={{ display: 'grid', gap: 3, marginTop: 6, padding: '8px 10px', background: '#f8fafc', borderRadius: 6 }}>
+                    <span>Supplier：{candidate.source.sourceSupplier}</span>
+                    <span>Source Product ID：{candidate.source.sourceProductId}</span>
+                    <span>Native Rank：{bestHit ? `#${bestHit.nativeRank}` : '未提供'}</span>
+                    <span>Matched Query：{bestHit ? `P${bestHit.queryPriority} ${bestHit.queryText}` : '未提供'}</span>
+                    {queryHits.length > 1 && (
+                      <span>All Query Hits：{queryHits.map(hit => `${hit.queryText} (#${hit.nativeRank})`).join('、')}</span>
+                    )}
+                    <span>Match Evidence：{queryHits.length} 個高資訊 Query・{candidate.retrieval?.metadataCompatibilityCount ?? 0} 項結構相容</span>
+                    <span>Confidence：{Math.round(candidate.confidence * 100)}%</span>
+                    <span>Raw Deadline：{candidate.rawDeadline || '未提供'}</span>
+                    <span>Resolution Method：{candidate.matchMethod}</span>
+                    <span>Result Reason：{result.classificationReason}</span>
+                  </div>
+                </details>
                 {result.classification === 'YELLOW' && selected && (
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
                     <button
@@ -524,8 +551,10 @@ export default function ClosingDateResolutionWorkbench({
         appliedAt: new Date().toISOString(),
       });
       if (response.status === 'APPLIED') {
-        setNotice({ kind: 'success', text: `已 atomic 套用 ${response.audit.batch.appliedCount} 筆結單日。` });
-        await onApplied();
+        const appliedCount = response.audit.batch.appliedCount;
+        setNotice({ kind: 'success', text: `已成功套用 ${appliedCount} 筆結單日。` });
+        await onApplied(appliedCount);
+        onClose();
       } else if (response.status === 'CONFLICT') {
         const codes = [...new Set(response.audit.items.flatMap(item => (
           item.conflictInformation?.map(conflict => conflict.code) ?? []

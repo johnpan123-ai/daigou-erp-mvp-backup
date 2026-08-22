@@ -578,6 +578,7 @@ export default function PurchaseRecords() {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
   const [isClearingClosingDates, setIsClearingClosingDates] = useState(false);
   const [showClosingDateWorkbench, setShowClosingDateWorkbench] = useState(false);
+  const [closingDateApplyNotice, setClosingDateApplyNotice] = useState<string | null>(null);
   const [batchClosingDate, setBatchClosingDate] = useState('');
   const [batchReleaseMonth, setBatchReleaseMonth] = useState('');
 
@@ -587,6 +588,12 @@ export default function PurchaseRecords() {
   );
 
   const datePickerRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  useEffect(() => {
+    if (!closingDateApplyNotice) return undefined;
+    const timeoutId = window.setTimeout(() => setClosingDateApplyNotice(null), 3500);
+    return () => window.clearTimeout(timeoutId);
+  }, [closingDateApplyNotice]);
 
 
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('erp_search_term') || '');
@@ -4761,12 +4768,35 @@ export default function PurchaseRecords() {
             selectedGroups={closingDateWorkbenchSelection}
             allGroups={groups}
             onClose={() => setShowClosingDateWorkbench(false)}
-            onApplied={async () => {
+            onApplied={async appliedCount => {
               await loadData();
               setSelectedGroupIds(new Set());
+              setClosingDateApplyNotice(`已成功套用 ${appliedCount} 筆結單日`);
             }}
           />
         </Suspense>
+      )}
+
+      {closingDateApplyNotice && (
+        <div
+          role="status"
+          data-testid="closing-date-apply-success"
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 2100,
+            padding: '11px 16px',
+            border: '1px solid #86efac',
+            borderRadius: '9px',
+            background: '#f0fdf4',
+            color: '#166534',
+            boxShadow: '0 10px 30px rgba(15, 23, 42, 0.16)',
+            fontWeight: 700,
+          }}
+        >
+          {closingDateApplyNotice}
+        </div>
       )}
       
       {/* Floating Action Button (FAB) */}

@@ -531,18 +531,25 @@ try {
     1,
     JSON.stringify(classificationHeadings),
   );
+  const greenResult = page.locator('[data-testid="closing-date-result-ui-green"]');
+  assert.equal(await greenResult.getByText('✓ 已驗證', { exact: true }).count(), 1);
 
   const yellowCandidate = page.locator('[data-testid^="closing-date-candidate-"]').filter({ hasText: '黏土人 峰月律' });
-  const yellowCandidateText = await yellowCandidate.textContent();
-  assert.match(yellowCandidateText, /#1/u);
-  assert.match(yellowCandidateText, /Native Rank #1/u);
-  assert.match(yellowCandidateText, /Query P/u);
-  assert.match(yellowCandidateText, /JAN: 4580590200002/u);
-  assert.match(yellowCandidateText, /Model Code: NENDOROID-3121/u);
-  assert.match(yellowCandidateText, /廠牌：Good Smile Company/u);
-  assert.match(yellowCandidateText, /Supplier：wanrong/u);
-  assert.match(yellowCandidateText, /Raw Deadline：2026-09-07/u);
-  assert.match(yellowCandidateText, /Match Evidence:/u);
+  const yellowPrimaryText = await yellowCandidate.locator('[data-testid^="closing-date-primary-"]').textContent();
+  const yellowDetailsText = await yellowCandidate.locator('[data-testid^="closing-date-details-"]').textContent();
+  assert.match(yellowPrimaryText, /#1/u);
+  assert.match(yellowPrimaryText, /廠牌：Good Smile Company/u);
+  assert.match(yellowPrimaryText, /供應商：萬榮/u);
+  assert.match(yellowPrimaryText, /JAN：4580590200002/u);
+  assert.match(yellowPrimaryText, /型號：NENDOROID-3121/u);
+  assert.match(yellowPrimaryText, /官方結單：2026\/09\/07/u);
+  assert.match(yellowPrimaryText, /建議結單：2026\/09\/05/u);
+  assert.doesNotMatch(yellowPrimaryText, /PARSER_INFERRED|Native Rank|Query P|Match Evidence|Source ID|T08:00:00/u);
+  assert.match(yellowDetailsText, /Supplier：wanrong/u);
+  assert.match(yellowDetailsText, /Native Rank：#1/u);
+  assert.match(yellowDetailsText, /Matched Query：P/u);
+  assert.match(yellowDetailsText, /Match Evidence：/u);
+  assert.match(yellowDetailsText, /Raw Deadline：2026-09-07T08:00:00.000Z/u);
   await yellowCandidate.locator('input[type="radio"]').check();
   const mainBeforeRemember = await page.evaluate(async () => {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
@@ -556,9 +563,20 @@ try {
   });
   assert.deepEqual(mainAfterRemember, mainBeforeRemember);
 
+  page.once('dialog', dialog => dialog.accept());
   const requestsBeforeClose = catalogRequests.length;
-  await page.getByTestId('closing-date-workbench-close').click();
+  await page.getByTestId('closing-date-workbench-apply').click();
   await page.getByTestId('closing-date-workbench').waitFor({ state: 'detached' });
+  await page.getByTestId('closing-date-apply-success').waitFor();
+  assert.match(await page.getByTestId('closing-date-apply-success').textContent(), /已成功套用 2 筆結單日/u);
+  const datesAfterUiApply = await page.evaluate(async () => {
+    const environment = await import('/src/lib/testSandboxEnvironment.ts');
+    const snapshot = await environment.readPhysicalIndexedDbSnapshot(environment.NEXT_SANDBOX_INDEXED_DB_NAME);
+    return Object.fromEntries(snapshot.erp_product_groups.map(group => [group.id, group.closing_date]));
+  });
+  assert.equal(datesAfterUiApply['ui-green'], '2026/09/16');
+  assert.equal(datesAfterUiApply['ui-yellow'], '2026/09/05');
+  assert.equal(datesAfterUiApply['ui-red'], '');
   await sleep(900);
   assert.equal(catalogRequests.length, requestsBeforeClose, 'Closing Workbench must stop UI polling/network work');
 
@@ -579,6 +597,34 @@ try {
   await page.getByTestId('closing-date-workbench-retry').click();
   await page.getByText('分析完成').first().waitFor({ timeout: 30_000 });
 
+  await page.evaluate(async () => {
+    const environment = await import('/src/lib/testSandboxEnvironment.ts');
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(environment.NEXT_SANDBOX_INDEXED_DB_NAME, 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      const request = store.get('erp_product_groups');
+      request.onsuccess = () => {
+        const groups = request.result;
+        const staleGroup = groups.find(group => group.id === 'ui-green');
+        staleGroup.closing_date = '2026/12/31';
+        store.put(groups, 'erp_product_groups');
+      };
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByTestId('closing-date-workbench-apply').click();
+  await page.getByText(/偵測到資料衝突，整批 0 write/u).waitFor();
+  assert.equal(await page.getByTestId('closing-date-workbench').count(), 1, 'Conflict must keep Workbench open');
+
   assert.equal(productionSupabaseRequests.length, 0);
   assert.deepEqual(pageErrors, []);
   console.log(JSON.stringify({
@@ -589,6 +635,9 @@ try {
       completedReviewReload: true,
       cancelRetry: true,
       chooseAndRememberMainWrite: 0,
+      successfulApplyAutoClose: true,
+      successfulApplyToast: true,
+      conflictKeepsWorkbenchOpen: true,
       catalogRequests: catalogRequests.length,
       productionSupabaseRequests: 0,
     },
