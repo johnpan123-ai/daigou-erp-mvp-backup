@@ -82,6 +82,7 @@ export interface ResolutionCandidateIdentifiers {
 export type ResolutionCandidateQueryKind =
   | 'PRODUCT_LINE_SUBJECT'
   | 'SERIES_SUBJECT'
+  | 'UNRESOLVED_CONTEXT_SUBJECT'
   | 'SUBJECT_VERSION_FORM'
   | 'SUBJECT'
   | 'COMPOUND_MEMBER'
@@ -99,6 +100,8 @@ export interface ResolutionCandidateRetrievalEvidence {
 export interface ResolutionCandidateRetrievalMetadata {
   strategy: 'CATALOG_NATIVE_SEARCH_V2';
   firstSeenOrder: number;
+  /** Explicit type/line/scale/model/manufacturer agreement used only for retrieval ranking. */
+  metadataCompatibilityCount?: number;
   queryHits: readonly ResolutionCandidateRetrievalEvidence[];
 }
 
@@ -108,6 +111,9 @@ export interface ResolutionCandidate {
   resolutionIdentityId?: string | null;
   catalogTitle: string;
   catalogUrl?: string | null;
+  /** Raw Catalog brand/manufacturer metadata; never inferred from the title. */
+  brandName?: string | null;
+  manufacturerName?: string | null;
   identifiers?: ResolutionCandidateIdentifiers;
   rawDeadline?: string | null;
   suggestedClosingDate?: string | null;
@@ -487,6 +493,9 @@ const compareCandidates = (left: ResolutionCandidate, right: ResolutionCandidate
     const trustedDifference = Number(isTrustedCandidateMethod(right.matchMethod))
       - Number(isTrustedCandidateMethod(left.matchMethod));
     if (trustedDifference !== 0) return trustedDifference;
+    const compatibilityDifference = (right.retrieval?.metadataCompatibilityCount ?? 0)
+      - (left.retrieval?.metadataCompatibilityCount ?? 0);
+    if (compatibilityDifference !== 0) return compatibilityDifference;
     const queryPriorityDifference = leftNative.queryPriority - rightNative.queryPriority;
     if (queryPriorityDifference !== 0) return queryPriorityDifference;
     const nativeRankDifference = leftNative.nativeRank - rightNative.nativeRank;

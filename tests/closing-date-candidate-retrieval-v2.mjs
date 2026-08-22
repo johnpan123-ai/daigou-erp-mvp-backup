@@ -72,6 +72,7 @@ try {
       omaneko: '代理版 小人物繪舘青島社KP 04R獸娘KEMO PLA Omaneko貓君 組裝模型',
       smp: '魂商店 萬代 SMP 牙吠孔雀王 & 牙吠眼鏡蛇王',
       kangaroo: '魂商店 萬代 SMP 百獸戰隊 牙吠連者 牙吠袋鼠',
+      redHood: '代理版 26年第四季 和模線 勝利女神：妮姬 小紅帽 1/12 組裝模型',
       reliable: '代理版 角川 KDcolle 狼與辛香料 赫蘿 原作版 無比例模型',
       unresolved: '代理版 無比例 約23公分',
     };
@@ -145,6 +146,43 @@ try {
       query === '希琳' ? sophiaCandidates : []
     ));
     const omaneko = await analyze('omaneko', titles.omaneko, () => []);
+    const redHoodCorrect = {
+      id: 'red-hood-model-kit',
+      name: '1/12 組裝 HMX2026002 勝利女神:妮姬 小紅帽',
+      janCode: '6976038440412',
+      brand: { name: '和模線' },
+      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-08-26T15:00:00.000Z' },
+    };
+    const redHoodWrong = [
+      {
+        id: 'red-hood-noodle-stopper',
+        name: '《妮姬》小紅帽：荒誕紅 泡麵杯蓋公仔',
+        brand: { name: 'FuRyu' },
+        catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-08-23T15:00:00.000Z' },
+      },
+      {
+        id: 'red-hood-scale',
+        name: '1/7 PVC 勝利女神:妮姬 小紅帽:懷舊時光 豪華版',
+        brand: { name: 'HobbySakura' },
+        catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-08-26T15:00:00.000Z' },
+      },
+      {
+        id: 'red-hood-fig-life',
+        name: 'fig life!《妮姬》小紅帽',
+        brand: { name: 'BANPRESTO' },
+        catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-08-04T15:00:00.000Z' },
+      },
+    ];
+    const redHood = await analyze('red-hood', titles.redHood, query => {
+      if (query === '妮姬 小紅帽') return [redHoodCorrect, ...redHoodWrong];
+      if (query === '小紅帽') return redHoodWrong;
+      return [];
+    });
+    const redHoodDelayed = await analyze('red-hood-delayed', titles.redHood, query => {
+      if (query === '妮姬 小紅帽') return redHoodWrong;
+      if (query === '小紅帽') return [redHoodCorrect];
+      return [];
+    });
     const smpCandidate = {
       id: 'smp-peacock-cobra-wanrong',
       name: 'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇',
@@ -297,6 +335,8 @@ try {
       louise,
       sophia,
       omaneko,
+      redHood,
+      redHoodDelayed,
       smp,
       kangaroo,
       familyFallback,
@@ -339,6 +379,7 @@ try {
   assert.ok(report.plans.louise.some(query => query.text === '露易絲'));
   assert.ok(report.plans.sophia.some(query => query.text.includes('索菲亞 F 希琳')));
   assert.ok(report.plans.sophia.some(query => query.text === '希琳'));
+  assert.deepEqual(report.plans.redHood.map(query => query.text), ['妮姬 小紅帽', '小紅帽']);
   assert.equal(report.plans.omaneko.some(query => query.text === 'PLA'), false);
   assert.deepEqual(report.plans.unresolved, [], 'low-information subject fallback must fail closed');
 
@@ -384,11 +425,26 @@ try {
   assert.equal(report.retrievedButRejected.result.classificationReason, 'RETRIEVED_BUT_REJECTED');
   assert.equal(report.retrievedButRejected.queries.includes('牙吠'), false);
   assert.equal(report.omaneko.result.classificationReason, 'NO_CANDIDATE');
+  assert.deepEqual(report.redHood.queries, ['妮姬 小紅帽']);
   assert.equal(
-    report.unreliableProgressive.queries.length,
-    report.plans.sophia.length,
-    'three raw but unverified candidates must not trigger progressive stop',
+    report.redHood.result.candidates[0].catalogTitle,
+    '1/12 組裝 HMX2026002 勝利女神:妮姬 小紅帽',
   );
+  assert.equal(
+    report.redHood.result.candidates.some(candidate => candidate.catalogTitle.includes('1/7 PVC')),
+    false,
+    'explicit SCALE_FIGURE conflict must not enter the model-kit Top 3',
+  );
+  assert.equal(report.redHood.result.candidates[0].brandName, '和模線');
+  assert.equal(report.redHood.result.candidates[0].manufacturerName, null);
+  assert.equal(report.redHood.result.candidates[0].retrieval.queryHits[0].nativeRank, 1);
+  assert.deepEqual(report.redHoodDelayed.queries, ['妮姬 小紅帽', '小紅帽']);
+  assert.equal(
+    report.redHoodDelayed.result.candidates[0].catalogTitle,
+    '1/12 組裝 HMX2026002 勝利女神:妮姬 小紅帽',
+    'three incompatible same-character candidates must not trigger progressive stop',
+  );
+  assert.equal(report.unreliableProgressive.queries.length, 1);
   assert.deepEqual(
     report.unreliableProgressive.result.candidates.map(candidate => candidate.catalogTitle),
     report.sophia.result.candidates.map(candidate => candidate.catalogTitle),
@@ -425,6 +481,18 @@ try {
       recommendedCandidateId: report.sophia.result.recommendedCandidateId,
     },
     omaneko: { executedQueries: report.omaneko.queries, candidateCount: report.omaneko.result.candidates.length },
+    redHood: {
+      executedQueries: report.redHood.queries,
+      top3: report.redHood.result.candidates.map(candidate => ({
+        title: candidate.catalogTitle,
+        brand: candidate.brandName,
+        nativeRank: candidate.retrieval.queryHits[0].nativeRank,
+      })),
+    },
+    redHoodDelayed: {
+      executedQueries: report.redHoodDelayed.queries,
+      top3: report.redHoodDelayed.result.candidates.map(candidate => candidate.catalogTitle),
+    },
     smp: {
       executedQueries: report.smp.queryCalls,
       top3: report.smp.result.candidates.map(candidate => candidate.catalogTitle),
@@ -453,6 +521,7 @@ try {
   console.log('PASS one family-stem fallback uses limit=12; unrelated native #3 is rejected while correct native #11 remains YELLOW');
   console.log('PASS NO_CANDIDATE and RETRIEVED_BUT_REJECTED remain distinct fail-closed outcomes');
   console.log('PASS progressive search ignores raw conflicts and stops only after a reliable native Top 3');
+  console.log('PASS unresolved context query retrieves the compatible Red Hood model kit and preserves raw Catalog brand');
   console.log('PASS native rank and multi-query evidence survive dedupe, Top 3, and Sidecar round-trip');
   console.log('PASS zero-confidence candidates are never reordered by source UUID');
   console.log('PASS Production Supabase requests = 0; Next/Production ERP DB unchanged');

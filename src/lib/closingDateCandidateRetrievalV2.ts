@@ -12,6 +12,7 @@ export const CLOSING_DATE_RELIABLE_NATIVE_TOP_N = 3;
 export type ClosingDateCandidateQueryKind =
   | 'PRODUCT_LINE_SUBJECT'
   | 'SERIES_SUBJECT'
+  | 'UNRESOLVED_CONTEXT_SUBJECT'
   | 'SUBJECT_VERSION_FORM'
   | 'SUBJECT'
   | 'COMPOUND_MEMBER'
@@ -185,6 +186,32 @@ const versionFormQuery = (identity: ProxyProductIdentityV21): string => normaliz
 );
 
 /**
+ * Retrieval-only context for a v2.1 unresolved subject. This does not promote
+ * the context token to Series or Subject and does not affect matching. It
+ * merely keeps the nearest distinctive Catalog term beside the conservative
+ * v1 subject fallback (for example `妮姬 小紅帽`).
+ */
+const unresolvedContextSubjectQuery = (
+  identity: ProxyProductIdentityV21,
+  subject: string,
+): string => {
+  if (identity.subjectResolution !== 'UNRESOLVED_SUBJECT') return '';
+  const normalizedSubject = normalizeQuery(subject);
+  const subjectKey = compactQuery(normalizedSubject);
+  const tokens = identity.unresolvedSubjectTokens.map(normalizeQuery).filter(Boolean);
+  const subjectIndex = tokens.findLastIndex(token => compactQuery(token) === subjectKey);
+  if (subjectIndex < 1) return '';
+  const context = tokens[subjectIndex - 1];
+  if (
+    !context
+    || isLowInformationCatalogQuery(context)
+    || isBusinessSeriesToken(context)
+    || cjkCharacters(context).length < 2
+  ) return '';
+  return normalizeQuery(`${context} ${normalizedSubject}`);
+};
+
+/**
  * Candidate Retrieval v2 deliberately produces only a few high-information
  * native Catalog queries. It never falls back to a bare product type,
  * qualifier, full ERP title, or residual token.
@@ -202,6 +229,7 @@ export function buildClosingDateCandidateRetrievalQueries(
     .map(line => PRODUCT_LINE_QUERY_LABELS[line])
     .find(Boolean) ?? '';
   const series = seriesQuery(identity);
+  const unresolvedContext = unresolvedContextSubjectQuery(identity, subject);
   const versionForm = versionFormQuery(identity);
   const subjectFallback = nativeSubjectFallbackQuery(identity, subject);
   const planned: ClosingDateCandidateRetrievalQuery[] = [
@@ -215,6 +243,12 @@ export function buildClosingDateCandidateRetrievalQueries(
       text: series ? `${series} ${subject}` : '',
       priority: 2,
       kind: 'SERIES_SUBJECT',
+      limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
+    },
+    {
+      text: unresolvedContext,
+      priority: 2,
+      kind: 'UNRESOLVED_CONTEXT_SUBJECT',
       limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
     },
     {

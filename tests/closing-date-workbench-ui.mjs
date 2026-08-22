@@ -93,6 +93,7 @@ try {
         id: 'candidate-yellow',
         name: '黏土人 峰月律',
         url: 'https://catalog.invalid/nendoroid-ritsu',
+        brand: { name: 'Good Smile Company' },
         janCode: '4580590200002',
         sku: 'NENDOROID-3121',
         catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
@@ -538,6 +539,9 @@ try {
   assert.match(yellowCandidateText, /Query P/u);
   assert.match(yellowCandidateText, /JAN: 4580590200002/u);
   assert.match(yellowCandidateText, /Model Code: NENDOROID-3121/u);
+  assert.match(yellowCandidateText, /廠牌：Good Smile Company/u);
+  assert.match(yellowCandidateText, /Supplier：wanrong/u);
+  assert.match(yellowCandidateText, /Raw Deadline：2026-09-07/u);
   assert.match(yellowCandidateText, /Match Evidence:/u);
   await yellowCandidate.locator('input[type="radio"]').check();
   const mainBeforeRemember = await page.evaluate(async () => {

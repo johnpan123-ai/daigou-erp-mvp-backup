@@ -371,6 +371,39 @@ const hasExplicitIdentityConflict = (
       && hasDefiniteSubjectConflict(source.subjects, candidate.subjects));
 };
 
+const hasExactSafetyOverlap = (left: readonly string[], right: readonly string[]): boolean => {
+  const normalizedLeft = normalizedSafetySet(left);
+  const normalizedRight = normalizedSafetySet(right);
+  return normalizedLeft.some(value => normalizedRight.includes(value));
+};
+
+/**
+ * Progressive search may stop only after Catalog returned candidates with
+ * explicit structural agreement. Candidate quantity by itself is not proof
+ * that retrieval succeeded (three same-character products can all be the
+ * wrong product type).
+ */
+const progressiveMetadataEvidenceCount = (
+  score: ProxyIdentityPilotCandidateScore,
+  item: CreateResolutionJobRequest['items'][number],
+  candidate: ProxyCatalogCandidate,
+): number => {
+  if (hasExplicitIdentityConflict(score)) return 0;
+  const source = score.sourceIdentity;
+  const catalog = score.candidateIdentity;
+  let evidence = 0;
+  if (hasExactSafetyOverlap(source.productTypes, catalog.productTypes)) evidence += 1;
+  if (hasExactSafetyOverlap(source.productLines, catalog.productLines)) evidence += 1;
+  if (hasExactSafetyOverlap(source.scales, catalog.scales)) evidence += 1;
+  if (hasExactSafetyOverlap(source.modelCodes, catalog.modelCodes)) evidence += 1;
+  if (hasExactSafetyOverlap(source.manufacturers, catalog.manufacturers)) evidence += 1;
+  const itemJan = compactIdentifier(item.jan);
+  if (itemJan && itemJan === compactIdentifier(candidate.janCode)) evidence += 2;
+  const itemModelCode = compactIdentifier(item.modelCode);
+  if (itemModelCode && itemModelCode === compactIdentifier(candidate.sku)) evidence += 2;
+  return evidence;
+};
+
 export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnalyzer => (
   async context => {
     const title = context.item.title;
@@ -437,15 +470,43 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         selectedCandidate = decision.match.candidate;
         selectedConfidence = decision.match.confidence;
         const supplier = candidateSupplier(selectedCandidate);
-        if (allowProgressiveStop && supplier === 'wanrong' && selectedCandidate.catalog?.deadlineAt) {
+        const selectedScore = scoredCandidates.find(entry => (
+          entry.retrieved.candidate === selectedCandidate
+        ));
+        if (
+          allowProgressiveStop
+          && supplier === 'wanrong'
+          && selectedCandidate.catalog?.deadlineAt
+          && selectedScore
+          && progressiveMetadataEvidenceCount(
+            selectedScore.v2,
+            context.item,
+            selectedCandidate,
+          ) > 0
+        ) {
           return true;
         }
       } else {
         selectedCandidate = null;
         selectedConfidence = 0;
       }
+      const compatibleCandidates = scoredCandidates.filter(entry => (
+        progressiveMetadataEvidenceCount(
+          entry.v2,
+          context.item,
+          entry.retrieved.candidate,
+        ) > 0
+      ));
+      const strongMetadataCandidate = compatibleCandidates.some(entry => (
+        progressiveMetadataEvidenceCount(
+          entry.v2,
+          context.item,
+          entry.retrieved.candidate,
+        ) >= 2
+      ));
+      if (allowProgressiveStop && strongMetadataCandidate) return true;
       const reliableCandidateCount = new Set(
-        scoredCandidates.filter(entry => !entry.v2.rejected).map(entry => entry.key),
+        compatibleCandidates.map(entry => entry.key),
       ).size;
       if (allowProgressiveStop && reliableCandidateCount >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) {
         return true;
@@ -481,6 +542,8 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         source,
         catalogTitle: candidate.name?.trim() || '(untitled catalog product)',
         catalogUrl: candidate.url ?? null,
+        brandName: candidate.brand?.name?.trim() || null,
+        manufacturerName: candidate.manufacturer?.trim() || null,
         identifiers: {
           jan: candidate.janCode ?? null,
           modelCode: candidate.sku ?? null,
@@ -500,6 +563,11 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         retrieval: {
           strategy: 'CATALOG_NATIVE_SEARCH_V2' as const,
           firstSeenOrder: retrieved.firstSeenOrder,
+          metadataCompatibilityCount: progressiveMetadataEvidenceCount(
+            v2,
+            context.item,
+            candidate,
+          ),
           queryHits: retrieved.queryHits,
         },
       }];
