@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const catalogProxyTarget = process.env.CATALOG_API_PROXY_TARGET?.trim()
+  || 'https://xiaohebo-catalog-beta.comiindex-hippo.workers.dev'
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -8,7 +11,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api/catalog': {
-        target: 'https://xiaohebo-catalog-beta.comiindex-hippo.workers.dev',
+        target: catalogProxyTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/catalog/, '/api'),
       },

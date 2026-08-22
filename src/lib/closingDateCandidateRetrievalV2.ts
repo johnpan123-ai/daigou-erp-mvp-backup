@@ -62,6 +62,8 @@ const LOW_INFORMATION_TOKENS = new Set([
   '再販',
   '重販',
   '限定版',
+  '限定',
+  '約',
   'dx',
   'ver',
   'version',
@@ -117,20 +119,21 @@ const subjectQuery = (identity: ProxyProductIdentityV21): string => {
   return normalizeQuery(identity.subjects.join(' '));
 };
 
+const nativeSubjectFallbackQuery = (
+  identity: ProxyProductIdentityV21,
+  subject: string,
+): string => {
+  if (identity.compoundSubjects.length > 0) return subject;
+  const tokens = normalizeQuery(subject).split(/\s+/u).filter(Boolean);
+  if (tokens.length <= 1) return subject;
+  const finalToken = tokens.at(-1) ?? '';
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]{2,}/u.test(finalToken)
+    ? finalToken
+    : subject;
+};
+
 const isBusinessSeriesToken = (token: string): boolean => (
   /^(?:第?[一二三四1234]季|(?:19|20)\d{2}|\d{2}年第?[一二三四1234]季)$/u.test(token.trim())
-);
-
-const fallbackSeriesQuery = (tokens: readonly string[]): string => normalizeQuery(
-  tokens
-    .filter(token => (
-      token.trim().length > 1
-      && !LOW_INFORMATION_TOKENS.has(compactQuery(token))
-      && !isBusinessSeriesToken(token)
-      && !/^\d{2,8}$/u.test(token.trim())
-    ))
-    .slice(-2)
-    .join(' '),
 );
 
 const seriesQuery = (identity: ProxyProductIdentityV21): string => normalizeQuery(
@@ -161,16 +164,16 @@ export function buildClosingDateCandidateRetrievalQueries(
 ): readonly ClosingDateCandidateRetrievalQuery[] {
   const identity = parseProxyProductIdentityV21(title);
   const fallbackIdentity = normalizeProxyProductIdentity(title);
-  const structuredSubject = subjectQuery(identity);
-  const subject = structuredSubject || normalizeQuery(fallbackIdentity.identityTokens[0] ?? '');
+  const subject = subjectQuery(identity)
+    || normalizeQuery(fallbackIdentity.identityTokens[0] ?? '');
   if (!subject || isLowInformationCatalogQuery(subject)) return [];
 
   const productLine = identity.productLines
     .map(line => PRODUCT_LINE_QUERY_LABELS[line])
     .find(Boolean) ?? '';
-  const series = seriesQuery(identity)
-    || (!structuredSubject && !productLine ? fallbackSeriesQuery(fallbackIdentity.seriesTokens) : '');
+  const series = seriesQuery(identity);
   const versionForm = versionFormQuery(identity);
+  const subjectFallback = nativeSubjectFallbackQuery(identity, subject);
   const planned: ClosingDateCandidateRetrievalQuery[] = [
     {
       text: productLine ? `${productLine} ${subject}` : '',
@@ -187,7 +190,7 @@ export function buildClosingDateCandidateRetrievalQueries(
       priority: 3,
       kind: 'SUBJECT_VERSION_FORM',
     },
-    { text: subject, priority: 4, kind: 'SUBJECT' },
+    { text: subjectFallback, priority: 4, kind: 'SUBJECT' },
   ];
 
   const seen = new Set<string>();

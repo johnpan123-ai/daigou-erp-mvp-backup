@@ -77,13 +77,15 @@ try {
     const url = new URL(route.request().url());
     const query = url.searchParams.get('q') || '';
     catalogRequests.push(query);
-    await sleep(35);
+    await sleep(250);
     let products = [];
     if (query.includes('路西法')) {
       products = [{
         id: 'candidate-green',
         name: 'figma 路西法',
         url: 'https://catalog.invalid/figma-lucifer',
+        janCode: '4580590200001',
+        sku: 'FIGMA-LUCIFER',
         catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-18T08:00:00.000Z' },
       }];
     } else if (query.includes('峰月律')) {
@@ -91,6 +93,8 @@ try {
         id: 'candidate-yellow',
         name: '黏土人 峰月律',
         url: 'https://catalog.invalid/nendoroid-ritsu',
+        janCode: '4580590200002',
+        sku: 'NENDOROID-3121',
         catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
       }];
     }
@@ -355,11 +359,31 @@ try {
   await page.getByTestId('closing-date-workbench').waitFor();
   await page.getByTestId('closing-date-workbench-analyze').click();
   await page.getByText('分析完成').first().waitFor({ timeout: 30_000 });
-  assert.equal(await page.getByText(/綠色｜可驗證來源（1）/u).count(), 1);
-  assert.equal(await page.getByText(/黃色｜需要人工確認（1）/u).count(), 1);
-  assert.equal(await page.getByText(/紅色｜不可套用（1）/u).count(), 1);
+  const classificationHeadings = await page.locator('h3').allTextContents();
+  assert.equal(
+    await page.getByText(/綠色｜可驗證來源（1）/u).count(),
+    1,
+    JSON.stringify(classificationHeadings),
+  );
+  assert.equal(
+    await page.getByText(/黃色｜需要人工確認（1）/u).count(),
+    1,
+    JSON.stringify(classificationHeadings),
+  );
+  assert.equal(
+    await page.getByText(/紅色｜不可套用（1）/u).count(),
+    1,
+    JSON.stringify(classificationHeadings),
+  );
 
   const yellowCandidate = page.locator('[data-testid^="closing-date-candidate-"]').filter({ hasText: '黏土人 峰月律' });
+  const yellowCandidateText = await yellowCandidate.textContent();
+  assert.match(yellowCandidateText, /#1/u);
+  assert.match(yellowCandidateText, /Native Rank #1/u);
+  assert.match(yellowCandidateText, /Query P/u);
+  assert.match(yellowCandidateText, /JAN: 4580590200002/u);
+  assert.match(yellowCandidateText, /Model Code: NENDOROID-3121/u);
+  assert.match(yellowCandidateText, /Match Evidence:/u);
   await yellowCandidate.locator('input[type="radio"]').check();
   const mainBeforeRemember = await page.evaluate(async () => {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');

@@ -71,6 +71,8 @@ try {
       sophia: '第四季 代理版 核金重構 1/9 包膠可動 索菲亞 F 希琳 碧藍兔子 附特典',
       omaneko: '代理版 小人物繪舘青島社KP 04R獸娘KEMO PLA Omaneko貓君 組裝模型',
       smp: '魂商店 萬代 SMP 牙吠孔雀王 & 牙吠眼鏡蛇王',
+      reliable: '代理版 角川 KDcolle 狼與辛香料 赫蘿 原作版 無比例模型',
+      unresolved: '代理版 無比例 約23公分',
     };
     const plans = Object.fromEntries(Object.entries(titles).map(([key, title]) => [
       key,
@@ -137,16 +139,33 @@ try {
       query === '露易絲' ? [louiseCandidate] : []
     ));
     const sophia = await analyze('sophia', titles.sophia, query => (
-      query === '索菲亞 F 希琳' ? sophiaCandidates : []
+      query === '希琳' ? sophiaCandidates : []
     ));
     const omaneko = await analyze('omaneko', titles.omaneko, () => []);
     const smp = await analyze('smp', titles.smp, () => []);
-    const progressive = await analyze('progressive', titles.sophia, () => sophiaCandidates);
-    const repeatedEvidence = await analyze('repeated-evidence', titles.omaneko, () => [{
-      id: 'omaneko-dreamlink',
-      name: 'KEMO PLA おまねこ',
-      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: null },
-    }]);
+    const unreliableProgressive = await analyze(
+      'unreliable-progressive',
+      titles.sophia,
+      () => sophiaCandidates,
+    );
+    const reliableCandidates = ['wanrong-a', 'dreamlink-b', 'dreamlink-c'].map((id, index) => ({
+      id,
+      name: 'KDcolle 狼與辛香料 赫蘿 原作版 無比例模型',
+      catalog: {
+        supplier: { code: index === 0 ? 'wanrong' : 'dreamlink' },
+        deadlineAt: '2026-09-07T00:00:00.000Z',
+      },
+    }));
+    const reliableProgressive = await analyze(
+      'reliable-progressive',
+      titles.reliable,
+      () => reliableCandidates,
+    );
+    const repeatedEvidence = await analyze(
+      'repeated-evidence',
+      titles.louise,
+      () => [louiseCandidate],
+    );
 
     let capturedUrl = '';
     const httpClient = cacheModule.createReadonlyCatalogHttpClient({
@@ -205,7 +224,7 @@ try {
       async openSnapshot() { return snapshot; },
       async search(request) {
         return {
-          products: request.query === '索菲亞 F 希琳' ? sophiaCandidates : [],
+          products: request.query === '希琳' ? sophiaCandidates : [],
           snapshotVersion: request.snapshotVersion,
         };
       },
@@ -238,14 +257,15 @@ try {
     return {
       plans,
       lowInformationQueries: Object.fromEntries(
-        ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分']
+        ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分', '約', '限定']
           .map(query => [query, planner.isLowInformationCatalogQuery(query)]),
       ),
       louise,
       sophia,
       omaneko,
       smp,
-      progressive,
+      unreliableProgressive,
+      reliableProgressive,
       repeatedEvidence,
       capturedUrl,
       zeroConfidenceRanked,
@@ -264,35 +284,45 @@ try {
   assert.equal(allQueries.includes('無比例'), false);
   assert.equal(allQueries.includes('魂商店 &'), false);
   assert.equal(allQueries.includes('&'), false);
-  for (const generic of ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分']) {
+  for (const generic of ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分', '約', '限定']) {
     assert.equal(report.lowInformationQueries[generic], true, `${generic} must remain a blocked bare query`);
   }
   assert.ok(report.plans.louise.some(query => query.text === '露易絲'));
-  assert.ok(report.plans.sophia.some(query => query.text === '索菲亞 F 希琳'));
+  assert.ok(report.plans.sophia.some(query => query.text.includes('索菲亞 F 希琳')));
+  assert.ok(report.plans.sophia.some(query => query.text === '希琳'));
   assert.equal(report.plans.omaneko.some(query => query.text === 'PLA'), false);
+  assert.deepEqual(report.plans.unresolved, [], 'low-information subject fallback must fail closed');
 
   assert.deepEqual(report.louise.result.candidates.map(candidate => candidate.catalogTitle), [
     '露易絲 20th Anniversary non scale model',
   ]);
   assert.equal(report.louise.result.candidates[0].retrieval.queryHits[0].nativeRank, 1);
   assert.deepEqual(report.sophia.result.candidates.map(candidate => candidate.catalogTitle), [
-    '1/6 PVC 兔女郎服裝計畫 索菲亞· F· 希琳 機甲修女 亮色特別版',
     '1/9 索菲亞·F·希琳 碧藍兔子Ver. 包膠可動公仔',
     '1/9 可動 索菲亞·F·希琳 碧藍兔子Ver.',
   ]);
   assert.deepEqual(
     report.sophia.result.candidates.map(candidate => candidate.retrieval.queryHits[0].nativeRank),
-    [1, 2, 3],
+    [2, 3],
   );
   assert.equal(report.omaneko.queries.includes('PLA'), false);
   assert.equal(report.smp.queries.includes('魂商店 &'), false);
-  assert.equal(report.progressive.queries.length, 1);
+  assert.equal(
+    report.unreliableProgressive.queries.length,
+    report.plans.sophia.length,
+    'three raw but unverified candidates must not trigger progressive stop',
+  );
   assert.deepEqual(
-    report.progressive.result.candidates.map(candidate => candidate.catalogTitle),
+    report.unreliableProgressive.result.candidates.map(candidate => candidate.catalogTitle),
     report.sophia.result.candidates.map(candidate => candidate.catalogTitle),
   );
+  assert.equal(report.reliableProgressive.queries.length, 1);
+  assert.equal(report.reliableProgressive.result.candidates.length, 3);
   assert.equal(report.repeatedEvidence.result.candidates.length, 1);
-  assert.equal(report.repeatedEvidence.result.candidates[0].retrieval.queryHits.length, 2);
+  assert.equal(
+    report.repeatedEvidence.result.candidates[0].retrieval.queryHits.length,
+    report.plans.louise.length,
+  );
   assert.match(report.capturedUrl, /[?&]limit=5(?:&|$)/u);
   assert.doesNotMatch(report.capturedUrl, /[?&]pageSize=/u);
   assert.deepEqual(report.zeroConfidenceRanked, ['native-1', 'native-2', 'native-3']);
@@ -320,8 +350,9 @@ try {
     omaneko: { executedQueries: report.omaneko.queries, candidateCount: report.omaneko.result.candidates.length },
     smp: { executedQueries: report.smp.queries, candidateCount: report.smp.result.candidates.length },
     progressive: {
-      executedQueries: report.progressive.queries,
-      top3: report.progressive.result.candidates.map(candidate => candidate.catalogTitle),
+      unsafeExecutedQueries: report.unreliableProgressive.queries,
+      reliableExecutedQueries: report.reliableProgressive.queries,
+      safeTop3: report.reliableProgressive.result.candidates.map(candidate => candidate.catalogTitle),
     },
     repeatedEvidence: {
       executedQueries: report.repeatedEvidence.queries,
@@ -330,7 +361,7 @@ try {
   }, null, 2));
   console.log('PASS Catalog API uses limit=5, never pageSize');
   console.log('PASS high-information query planner blocks generic PLA / 無比例 / 魂商店 & / & fallbacks');
-  console.log('PASS progressive search stops after a high-information query yields a reliable native Top 3');
+  console.log('PASS progressive search ignores raw conflicts and stops only after a reliable native Top 3');
   console.log('PASS native rank and multi-query evidence survive dedupe, Top 3, and Sidecar round-trip');
   console.log('PASS zero-confidence candidates are never reordered by source UUID');
   console.log('PASS Production Supabase requests = 0; Next/Production ERP DB unchanged');

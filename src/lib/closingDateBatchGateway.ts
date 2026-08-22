@@ -41,6 +41,9 @@ import {
   resolveProxyCatalogDecision,
   scoreProxyCatalogCandidateV2Pilot,
 } from './proxyProductIdentityPilot';
+import type {
+  ProxyIdentityPilotCandidateScore,
+} from './proxyProductIdentityPilot';
 import {
   buildClosingDateCandidateRetrievalQueries,
   CLOSING_DATE_CATALOG_NATIVE_LIMIT,
@@ -280,6 +283,69 @@ interface RetrievedCatalogCandidate {
   queryHits: ResolutionCandidateRetrievalEvidence[];
 }
 
+const compactSafetyValue = (value: string): string => value
+  .normalize('NFKC')
+  .toLocaleLowerCase()
+  .replace(/[\s・‧·._-]+/gu, '');
+
+const normalizedSafetySet = (values: readonly string[]): string[] => Array.from(new Set(
+  values.map(compactSafetyValue).filter(Boolean),
+)).sort();
+
+const hasExactSetConflict = (left: readonly string[], right: readonly string[]): boolean => {
+  const normalizedLeft = normalizedSafetySet(left);
+  const normalizedRight = normalizedSafetySet(right);
+  return normalizedLeft.length > 0
+    && normalizedRight.length > 0
+    && (normalizedLeft.length !== normalizedRight.length
+      || normalizedLeft.some((value, index) => value !== normalizedRight[index]));
+};
+
+const hasDisjointSetConflict = (left: readonly string[], right: readonly string[]): boolean => {
+  const normalizedLeft = normalizedSafetySet(left);
+  const normalizedRight = normalizedSafetySet(right);
+  return normalizedLeft.length > 0
+    && normalizedRight.length > 0
+    && !normalizedLeft.some(value => normalizedRight.includes(value));
+};
+
+const hasDefiniteSubjectConflict = (left: readonly string[], right: readonly string[]): boolean => {
+  const normalizedLeft = normalizedSafetySet(left);
+  const normalizedRight = normalizedSafetySet(right);
+  if (normalizedLeft.length === 0 || normalizedRight.length === 0) return false;
+  return !normalizedLeft.some(leftValue => normalizedRight.some(rightValue => (
+    leftValue === rightValue
+    || leftValue.includes(rightValue)
+    || rightValue.includes(leftValue)
+  )));
+};
+
+/**
+ * Retrieval safety is intentionally conservative. It removes only conflicts
+ * that both v2.1 parses can prove. Missing or partially parsed metadata stays
+ * available as a YELLOW manual-review candidate and never gains confidence.
+ */
+const hasExplicitIdentityConflict = (
+  score: ProxyIdentityPilotCandidateScore,
+): boolean => {
+  const source = score.sourceIdentity;
+  const candidate = score.candidateIdentity;
+  const sourceCompound = source.compoundSubjects.flatMap(item => item.members);
+  const candidateCompound = candidate.compoundSubjects.flatMap(item => item.members);
+  return hasDisjointSetConflict(source.productTypes, candidate.productTypes)
+    || hasDisjointSetConflict(source.productLines, candidate.productLines)
+    || hasDisjointSetConflict(source.versions, candidate.versions)
+    || hasDisjointSetConflict(source.forms, candidate.forms)
+    || hasDisjointSetConflict(source.scales, candidate.scales)
+    || hasDisjointSetConflict(source.modelCodes, candidate.modelCodes)
+    || (sourceCompound.length > 0
+      && candidateCompound.length > 0
+      && hasExactSetConflict(sourceCompound, candidateCompound))
+    || (sourceCompound.length === 0
+      && candidateCompound.length === 0
+      && hasDefiniteSubjectConflict(source.subjects, candidate.subjects));
+};
+
 export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnalyzer => (
   async context => {
     const title = context.item.title;
@@ -292,14 +358,12 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
 
     for (const query of queries) {
       if (context.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
-      const currentQueryCandidateKeys = new Set<string>();
       try {
         const products = await context.search(query.text);
         for (const [nativeIndex, product] of products.entries()) {
           const sourceProductId = candidateSourceProductId(product);
           if (!sourceProductId) continue;
           const key = catalogCandidateKey(product);
-          currentQueryCandidateKeys.add(key);
           let retrieved = candidateMap.get(key);
           if (!retrieved) {
             firstSeenOrder += 1;
@@ -323,9 +387,21 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         }
         throw error;
       }
-      const candidates = [...candidateMap.values()].map(entry => entry.candidate);
-      const v1Selection = selectProxyCatalogCandidate(title, candidates);
-      const decision = resolveProxyCatalogDecision('next', title, candidates, v1Selection);
+      const scoredCandidates = [...candidateMap.entries()].map(([key, retrieved]) => ({
+        key,
+        retrieved,
+        v2: scoreProxyCatalogCandidateV2Pilot(title, retrieved.candidate),
+      }));
+      const safetyFilteredCandidates = scoredCandidates
+        .filter(entry => !hasExplicitIdentityConflict(entry.v2))
+        .map(entry => entry.retrieved.candidate);
+      const v1Selection = selectProxyCatalogCandidate(title, safetyFilteredCandidates);
+      const decision = resolveProxyCatalogDecision(
+        'next',
+        title,
+        safetyFilteredCandidates,
+        v1Selection,
+      );
       if (decision.match?.candidate) {
         selectedCandidate = decision.match.candidate;
         selectedConfidence = decision.match.confidence;
@@ -335,16 +411,20 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         selectedCandidate = null;
         selectedConfidence = 0;
       }
-      if (currentQueryCandidateKeys.size >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) break;
+      const reliableCandidateCount = new Set(
+        scoredCandidates.filter(entry => !entry.v2.rejected).map(entry => entry.key),
+      ).size;
+      if (reliableCandidateCount >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) break;
     }
 
     const domainCandidates = [...candidateMap.values()].flatMap(retrieved => {
       const candidate = retrieved.candidate;
+      const v2 = scoreProxyCatalogCandidateV2Pilot(title, candidate);
+      if (hasExplicitIdentityConflict(v2)) return [];
       const source = sourceReferenceForCandidate(candidate, context.snapshot.version);
       if (!source) return [];
       const isSelected = candidate === selectedCandidate;
       const v1 = scoreProxyCatalogCandidate(title, candidate);
-      const v2 = scoreProxyCatalogCandidateV2Pilot(title, candidate);
       const confidence = isSelected
         ? selectedConfidence
         : Math.max(v1.rejected ? 0 : v1.confidence, v2.rejected ? 0 : v2.confidence);

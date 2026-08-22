@@ -194,16 +194,19 @@ try {
     '露易絲 20th Anniversary non scale model',
   ]);
   assert.deepEqual(sophia.after.top3.map(candidate => candidate.title), [
-    '1/6 PVC 兔女郎服裝計畫 索菲亞· F· 希琳 機甲修女 亮色特別版',
     '1/9 索菲亞·F·希琳 碧藍兔子Ver. 包膠可動公仔',
     '1/9 可動 索菲亞·F·希琳 碧藍兔子Ver.',
   ]);
+  assert.deepEqual(
+    sophia.after.top3.map(candidate => candidate.nativeEvidence[0]?.nativeRank),
+    [2, 3],
+  );
   assert.equal(omaneko.after.responses.some(response => response.query === 'PLA'), false);
   assert.equal(smp.after.responses.some(response => response.query === '魂商店 &' || response.query === '&'), false);
   assert.deepEqual(supabaseRequests, []);
 
   console.log('PASS Louise native search yields only the correct product in Workbench Top 3');
-  console.log('PASS Sophia native 1/6 -> Wanrong 1/9 -> Dreamlink 1/9 order is preserved');
+  console.log('PASS Sophia rejects conflicting 1/6 and preserves Wanrong 1/9 #2 -> Dreamlink 1/9 #3 evidence');
   console.log('PASS Omaneko and SMP never execute generic PLA / 魂商店 & / & queries');
   console.log('PASS Production Supabase requests = 0; live comparison is Catalog GET only');
 } finally {

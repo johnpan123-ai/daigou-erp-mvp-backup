@@ -86,6 +86,13 @@ const candidateDate = (candidate: RankedResolutionCandidate): string => (
   `${candidate.rawDeadline || '無 Raw Deadline'} → ${candidate.suggestedClosingDate || '不可套用'}`
 );
 
+const bestNativeQueryHit = (candidate: RankedResolutionCandidate) => (
+  [...(candidate.retrieval?.queryHits ?? [])].sort((left, right) => (
+    left.queryPriority - right.queryPriority
+    || left.nativeRank - right.nativeRank
+  ))[0] ?? null
+);
+
 const ResultCard = ({
   result,
   selectedCandidateId,
@@ -132,6 +139,12 @@ const ResultCard = ({
           {result.candidates.map(candidate => {
             const selected = selectedCandidateId === candidate.id;
             const canChoose = result.classification !== 'RED';
+            const bestHit = bestNativeQueryHit(candidate);
+            const queryHits = candidate.retrieval?.queryHits ?? [];
+            const identifiers = [
+              candidate.identifiers?.jan ? `JAN: ${candidate.identifiers.jan}` : '',
+              candidate.identifiers?.modelCode ? `Model Code: ${candidate.identifiers.modelCode}` : '',
+            ].filter(Boolean);
             return (
               <div
                 key={candidate.id}
@@ -153,9 +166,27 @@ const ResultCard = ({
                     onChange={() => onSelect(candidate)}
                   />
                   <span style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 700 }}>{candidate.rank}. {candidate.catalogTitle}</span>
+                    <span style={{ fontWeight: 700 }}>#{candidate.rank} {candidate.catalogTitle}</span>
                     <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 3 }}>
                       {candidate.source.sourceSupplier}・{candidateDate(candidate)}・{candidate.matchMethod}・{Math.round(candidate.confidence * 100)}%
+                    </span>
+                    {bestHit && (
+                      <span data-testid={`closing-date-native-rank-${candidate.id}`} style={{ display: 'block', color: '#334155', fontSize: 11, marginTop: 3 }}>
+                        Native Rank #{bestHit.nativeRank}・Query P{bestHit.queryPriority}: {bestHit.queryText}
+                      </span>
+                    )}
+                    {queryHits.length > 1 && (
+                      <span style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                        命中 Query：{queryHits.map(hit => `${hit.queryText} (#${hit.nativeRank})`).join('、')}
+                      </span>
+                    )}
+                    {identifiers.length > 0 && (
+                      <span data-testid={`closing-date-identifiers-${candidate.id}`} style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                        {identifiers.join('・')}
+                      </span>
+                    )}
+                    <span data-testid={`closing-date-match-evidence-${candidate.id}`} style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                      Match Evidence: {candidate.matchMethod}・{queryHits.length} 個高資訊 Query
                     </span>
                     <span style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
                       Source ID: {candidate.source.sourceProductId}

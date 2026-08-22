@@ -136,6 +136,20 @@ try {
             snapshotVersion: request.snapshotVersion,
           };
         }
+        if (request.query.includes('露易絲')) {
+          return {
+            products: [{
+              id: 'louise-wanrong',
+              name: '露易絲 20th Anniversary non scale model',
+              jan: '4550687084382',
+              catalog: {
+                supplier: { code: 'wanrong' },
+                deadlineAt: '2026-09-18T08:00:00.000Z',
+              },
+            }],
+            snapshotVersion: request.snapshotVersion,
+          };
+        }
         return { products: [], snapshotVersion: request.snapshotVersion };
       },
     };
@@ -252,7 +266,7 @@ try {
       ...makeRequest('default', 1),
       items: [{
         ...makeRequest('default', 1).items[0],
-        title: '代理版 figma 地獄征服者 Helltaker 路西法',
+        title: '代理版 角川 KDcolle 零之使魔 露易絲 20th 20週年紀念版 無比例 約23公分',
       }],
     };
     const defaultCreated = await defaultGateway.createJob(defaultRequest);
@@ -262,7 +276,7 @@ try {
     const partialServiceResult = await gatewayModule.createProxyClosingDateBatchAnalyzer()({
       item: {
         ...makeRequest('partial-service', 1).items[0],
-        title: '代理版 figma 地獄征服者 Helltaker 路西法',
+        title: '代理版 角川 KDcolle 零之使魔 露易絲 20th 20週年紀念版 無比例 約23公分',
       },
       batchId: 'partial-service-batch',
       ruleVersion: 'closing-date-minus-two-v1',
@@ -283,8 +297,8 @@ try {
           });
         }
         return [{
-          id: 'partial-lucifer-wanrong',
-          name: 'figma 路西法',
+          id: 'partial-louise-wanrong',
+          name: '露易絲 20th Anniversary non scale model',
           catalog: {
             supplier: { code: 'wanrong' },
             deadlineAt: '2026-09-18T08:00:00.000Z',
