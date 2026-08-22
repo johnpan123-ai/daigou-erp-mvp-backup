@@ -227,7 +227,9 @@ export interface CurrentProductClosingDateState {
 export interface ResolutionApplySelection {
   result: ResolutionResult;
   approval: ApplyApproval;
+  selectedCandidateId?: string | null;
   mappingId?: string | null;
+  pendingMapping?: VerifiedMappingRegistryEntry | null;
 }
 
 export interface ApplyConflict {
@@ -815,10 +817,19 @@ export function planAtomicClosingDateApply(input: {
     if (result.batchId !== input.resolutionBatchId) {
       addConflict('BATCH_MISMATCH', input.resolutionBatchId, result.batchId);
     }
-    if (result.classification !== 'GREEN') {
+    const selectedCandidateId = selection.selectedCandidateId ?? result.selectedCandidateId;
+    const selectedCandidate = result.candidates.find(candidate => candidate.id === selectedCandidateId);
+    const pendingMapping = selection.pendingMapping ?? null;
+    const isPersistedGreen = result.classification === 'GREEN'
+      && selection.approval === 'GREEN_AUTO';
+    const isManualYellow = result.classification === 'YELLOW'
+      && selection.approval === 'MANUAL_CONFIRMED'
+      && selectedCandidate !== undefined
+      && pendingMapping !== null
+      && mappingVerifiesCandidate(pendingMapping, selectedCandidate, result.erpProductGroupId);
+    if (!isPersistedGreen && !isManualYellow) {
       addConflict('RESULT_NOT_APPLICABLE', result.classification, selection.approval);
     }
-    const selectedCandidate = result.candidates.find(candidate => candidate.id === result.selectedCandidateId);
     if (!selectedCandidate) {
       addConflict('MISSING_SELECTED_CANDIDATE');
     } else if (!selectedCandidate.suggestedClosingDate || !selectedCandidate.rawDeadline) {
@@ -848,7 +859,7 @@ export function planAtomicClosingDateApply(input: {
       erpProductGroupId: result.erpProductGroupId,
       resolutionResultId: result.id,
       candidateId: selectedCandidate?.id ?? null,
-      mappingId: selection.mappingId ?? result.selectedMappingId ?? null,
+      mappingId: selection.mappingId ?? selection.pendingMapping?.id ?? result.selectedMappingId ?? null,
       beforeClosingDate: current?.closingDate ?? null,
       afterClosingDate: selectedCandidate?.suggestedClosingDate ?? null,
       source: selectedCandidate?.source ?? null,
@@ -867,7 +878,7 @@ export function planAtomicClosingDateApply(input: {
         erpProductGroupId: result.erpProductGroupId,
         resolutionResultId: result.id,
         candidateId: selectedCandidate.id,
-        mappingId: selection.mappingId ?? result.selectedMappingId ?? null,
+        mappingId: selection.mappingId ?? selection.pendingMapping?.id ?? result.selectedMappingId ?? null,
         beforeClosingDate: current.closingDate ?? null,
         afterClosingDate: selectedCandidate.suggestedClosingDate,
         source: selectedCandidate.source,
@@ -910,25 +921,48 @@ export function planAtomicClosingDateApply(input: {
   };
 }
 
+export interface ManualResolutionApplySelection {
+  selectedCandidateId: string;
+  pendingMapping: VerifiedMappingRegistryEntry;
+}
+
 /**
- * The persisted ResolutionResult is the single source of truth for Apply.
- * A transient radio selection must never promote a YELLOW result to an
- * applyable result. Manual verification first persists an active mapping and
- * recomputes the result as GREEN/ACTIVE_VERIFIED_MAPPING.
+ * GREEN results remain immediately applyable. A YELLOW result becomes part of
+ * an apply plan only when the caller supplies an explicit in-memory candidate
+ * selection and its not-yet-persisted Verified Mapping. Persisting that mapping
+ * is the responsibility of the final atomic transaction; selecting a radio is
+ * therefore still a zero-write operation.
  */
 export function createApplySelectionFromResolutionResult(
   result: ResolutionResult,
+  manualSelection?: ManualResolutionApplySelection | null,
 ): ResolutionApplySelection | null {
-  if (result.classification !== 'GREEN' || !result.selectedCandidateId) return null;
-  const candidate = result.candidates.find(item => item.id === result.selectedCandidateId);
-  if (!candidate?.rawDeadline || !candidate.suggestedClosingDate) return null;
-  if (result.classificationReason === 'ACTIVE_VERIFIED_MAPPING' && !result.selectedMappingId) {
-    return null;
+  if (result.classification === 'GREEN' && result.selectedCandidateId) {
+    const candidate = result.candidates.find(item => item.id === result.selectedCandidateId);
+    if (!candidate?.rawDeadline || !candidate.suggestedClosingDate) return null;
+    if (result.classificationReason === 'ACTIVE_VERIFIED_MAPPING' && !result.selectedMappingId) {
+      return null;
+    }
+    return {
+      result,
+      approval: 'GREEN_AUTO',
+      selectedCandidateId: candidate.id,
+      mappingId: result.selectedMappingId ?? null,
+      pendingMapping: null,
+    };
   }
+
+  if (result.classification !== 'YELLOW' || !manualSelection) return null;
+  const candidate = result.candidates.find(item => item.id === manualSelection.selectedCandidateId);
+  if (!candidate?.rawDeadline || !candidate.suggestedClosingDate) return null;
+  const pendingMapping = createVerifiedMapping(manualSelection.pendingMapping);
+  if (!mappingVerifiesCandidate(pendingMapping, candidate, result.erpProductGroupId)) return null;
   return {
     result,
-    approval: 'GREEN_AUTO',
-    mappingId: result.selectedMappingId ?? null,
+    approval: 'MANUAL_CONFIRMED',
+    selectedCandidateId: candidate.id,
+    mappingId: pendingMapping.id,
+    pendingMapping,
   };
 }
 

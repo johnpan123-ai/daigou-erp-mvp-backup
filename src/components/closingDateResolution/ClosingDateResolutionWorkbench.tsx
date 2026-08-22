@@ -5,9 +5,11 @@ import type {
   RankedResolutionCandidate,
   ResolutionBatch,
   ResolutionResult,
+  VerifiedMappingRegistryEntry,
 } from '../../lib/closingDateResolutionDomain';
 import {
   createApplySelectionFromResolutionResult,
+  createResolutionResult,
   createVerifiedMapping,
   sameSourceProduct,
 } from '../../lib/closingDateResolutionDomain';
@@ -22,7 +24,9 @@ import {
 import {
   applyClosingDateResolutionBatch,
   createClosingDateApplyIdentity,
+  findAtomicClosingDateVerifiedMappings,
 } from '../../lib/closingDateWorkbenchAtomicApply';
+import { orderClosingDateReviewCandidates } from '../../lib/closingDateWorkbenchReviewOrder';
 
 interface ClosingDateResolutionWorkbenchProps {
   selectedGroups: readonly ProductGroup[];
@@ -110,19 +114,14 @@ const supplierDisplayName = (supplier: string): string => ({
 const ResultCard = ({
   result,
   selectedCandidateId,
-  rememberedMappingId,
   onSelect,
-  onRemember,
-  remembering,
 }: {
   result: ResolutionResult;
   selectedCandidateId: string | null;
-  rememberedMappingId: string | null;
   onSelect: (candidate: RankedResolutionCandidate) => void;
-  onRemember: (candidate: RankedResolutionCandidate) => void;
-  remembering: boolean;
 }) => {
   const colors = classificationColors[result.classification];
+  const reviewCandidates = orderClosingDateReviewCandidates(result.candidates);
   return (
     <article
       data-testid={`closing-date-result-${result.erpProductGroupId}`}
@@ -151,9 +150,9 @@ const ResultCard = ({
         </div>
       ) : (
         <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-          {result.candidates.map(candidate => {
+          {reviewCandidates.map((candidate, reviewIndex) => {
             const selected = selectedCandidateId === candidate.id;
-            const canChoose = result.classification !== 'RED';
+            const canChoose = result.classification === 'YELLOW';
             const bestHit = bestNativeQueryHit(candidate);
             const queryHits = candidate.retrieval?.queryHits ?? [];
             const catalogBrand = candidate.brandName || candidate.manufacturerName || '未提供';
@@ -191,7 +190,7 @@ const ResultCard = ({
                           ✓ 已驗證
                         </span>
                       )}
-                      <span style={{ display: 'block', fontWeight: 700 }}>#{candidate.rank} {candidate.catalogTitle}</span>
+                      <span style={{ display: 'block', fontWeight: 700 }}>#{reviewIndex + 1} {candidate.catalogTitle}</span>
                       <span data-testid={`closing-date-brand-${candidate.id}`} style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 5 }}>
                         廠牌：{catalogBrand}
                       </span>
@@ -249,24 +248,8 @@ const ResultCard = ({
                   </div>
                 </details>
                 {result.classification === 'YELLOW' && selected && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-                    <button
-                      type="button"
-                      data-testid={`closing-date-remember-${result.id}`}
-                      disabled={remembering || Boolean(rememberedMappingId)}
-                      onClick={() => onRemember(candidate)}
-                      style={{
-                        border: '1px solid #7c3aed',
-                        color: rememberedMappingId ? '#166534' : '#6d28d9',
-                        background: '#fff',
-                        borderRadius: 7,
-                        padding: '6px 10px',
-                        fontWeight: 700,
-                        cursor: remembering ? 'wait' : 'pointer',
-                      }}
-                    >
-                      {rememberedMappingId ? '✓ 已選擇並記住' : remembering ? '儲存中…' : '選擇並記住'}
-                    </button>
+                  <div style={{ color: '#6d28d9', fontSize: 12, fontWeight: 700, marginTop: 8, marginLeft: 27 }}>
+                    ✓ 本批次已選定；將於最後套用時記住此選擇
                   </div>
                 )}
               </div>
@@ -291,8 +274,7 @@ export default function ClosingDateResolutionWorkbench({
   const [metrics, setMetrics] = useState<ClosingDateBatchGatewayMetrics | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [selectedCandidates, setSelectedCandidates] = useState<Record<string, string>>({});
-  const [rememberedMappings, setRememberedMappings] = useState<Record<string, string>>({});
-  const [rememberingResultId, setRememberingResultId] = useState<string | null>(null);
+  const [pendingMappings, setPendingMappings] = useState<Record<string, VerifiedMappingRegistryEntry>>({});
   const [applying, setApplying] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const mountedRef = useRef(true);
@@ -309,10 +291,17 @@ export default function ClosingDateResolutionWorkbench({
     let displayResults = poll.results;
     if (poll.batch.status === 'COMPLETED' && poll.results.some(result => result.classification === 'YELLOW')) {
       const repository = getClosingDateWorkbenchRuntime().repository;
-      const activeMappings = await repository.findActiveMappings(
-        poll.results.map(result => result.erpProductGroupId),
-      );
-      displayResults = await Promise.all(poll.results.map(async result => {
+      const productGroupIds = poll.results.map(result => result.erpProductGroupId);
+      const [atomicMappings, legacySidecarMappings] = await Promise.all([
+        findAtomicClosingDateVerifiedMappings(productGroupIds),
+        repository.findActiveMappings(productGroupIds),
+      ]);
+      const atomicGroups = new Set(atomicMappings.map(mapping => mapping.erpProductGroupId));
+      const activeMappings = [
+        ...atomicMappings,
+        ...legacySidecarMappings.filter(mapping => !atomicGroups.has(mapping.erpProductGroupId)),
+      ];
+      displayResults = poll.results.map(result => {
         if (result.classification !== 'YELLOW') return result;
         const mapping = activeMappings.find(item => (
           item.erpProductGroupId === result.erpProductGroupId
@@ -321,13 +310,23 @@ export default function ClosingDateResolutionWorkbench({
         if (!mapping) return result;
         const candidate = result.candidates.find(item => sameSourceProduct(item.source, mapping.source));
         if (!candidate) return result;
-        const verified = await repository.verifyResolutionCandidate(
-          mapping,
-          result.id,
-          candidate.id,
-        );
-        return verified.result;
-      }));
+        return createResolutionResult({
+          id: result.id,
+          batchId: result.batchId,
+          erpProductGroupId: result.erpProductGroupId,
+          erpTitleAtAnalysis: result.erpTitleAtAnalysis,
+          productUpdatedAtAtAnalysis: result.productUpdatedAtAtAnalysis,
+          closingDateAtAnalysis: result.closingDateAtAnalysis,
+          candidates: result.candidates,
+          recommendedCandidateId: candidate.id,
+          selectedCandidateId: candidate.id,
+          activeVerifiedMapping: mapping,
+          ruleVersion: result.ruleVersion,
+          snapshotVersion: result.snapshotVersion,
+          serviceError: result.serviceError,
+          analyzedAt: result.analyzedAt,
+        });
+      });
     }
     setCurrentBatch(poll.batch);
     setResults(displayResults);
@@ -336,13 +335,6 @@ export default function ClosingDateResolutionWorkbench({
       const next = { ...previous };
       displayResults.forEach(result => {
         if (!next[result.id] && result.selectedCandidateId) next[result.id] = result.selectedCandidateId;
-      });
-      return next;
-    });
-    setRememberedMappings(previous => {
-      const next = { ...previous };
-      displayResults.forEach(result => {
-        if (!next[result.id] && result.selectedMappingId) next[result.id] = result.selectedMappingId;
       });
       return next;
     });
@@ -408,7 +400,7 @@ export default function ClosingDateResolutionWorkbench({
     }
     setNotice({ kind: 'info', text: `正在建立 ${groupsToAnalyze.length} 筆商品的唯讀分析 Batch…` });
     setSelectedCandidates({});
-    setRememberedMappings({});
+    setPendingMappings({});
     setResults([]);
     setMetrics(null);
     try {
@@ -444,6 +436,8 @@ export default function ClosingDateResolutionWorkbench({
 
   const openBatch = async (batch: ResolutionBatch) => {
     try {
+      setSelectedCandidates({});
+      setPendingMappings({});
       const poll = await getClosingDateWorkbenchRuntime().gateway.pollJob(batch.id);
       await displayPoll(poll);
       setActiveJobId(terminalStatuses.has(poll.batch.status) ? null : poll.batch.id);
@@ -477,55 +471,43 @@ export default function ClosingDateResolutionWorkbench({
     await startAnalysis(retryGroups);
   };
 
-  const rememberCandidate = async (
+  const selectCandidate = (
     result: ResolutionResult,
     candidate: RankedResolutionCandidate,
   ) => {
-    setRememberingResultId(result.id);
-    try {
-      const mapping = createVerifiedMapping({
-        id: uuid('verified-mapping'),
-        erpProductGroupId: result.erpProductGroupId,
-        source: candidate.source,
-        resolutionIdentityId: candidate.resolutionIdentityId ?? null,
-        verificationMethod: 'MANUAL_TOP3_SELECTION',
-        verificationEvidence: {
-          resolutionBatchId: result.batchId,
-          resolutionResultId: result.id,
-          candidateId: candidate.id,
-        },
-        sourceTitleAtVerification: candidate.catalogTitle,
-        erpTitleFingerprint: result.erpTitleAtAnalysis,
-        verifiedAt: new Date().toISOString(),
-        verifiedBy: 'next-owner',
-      });
-      const saved = await getClosingDateWorkbenchRuntime().repository.verifyResolutionCandidate(
-        mapping,
-        result.id,
-        candidate.id,
-      );
-      setResults(previous => previous.map(item => (
-        item.id === result.id ? saved.result : item
-      )));
-      setRememberedMappings(previous => ({ ...previous, [result.id]: saved.mapping.id }));
-      setSelectedCandidates(previous => ({ ...previous, [result.id]: candidate.id }));
-      setNotice({
-        kind: 'success',
-        text: saved.mappingCreated
-          ? '已建立 Verified Mapping；尚未修改結單日。'
-          : '已套用既有 Verified Mapping；尚未修改結單日。',
-      });
-    } catch (error) {
-      setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setRememberingResultId(null);
-    }
+    if (result.classification !== 'YELLOW') return;
+    const mapping = createVerifiedMapping({
+      id: uuid('verified-mapping'),
+      erpProductGroupId: result.erpProductGroupId,
+      source: candidate.source,
+      resolutionIdentityId: candidate.resolutionIdentityId ?? null,
+      verificationMethod: 'MANUAL_TOP3_SELECTION',
+      verificationEvidence: {
+        resolutionBatchId: result.batchId,
+        resolutionResultId: result.id,
+        candidateId: candidate.id,
+      },
+      sourceTitleAtVerification: candidate.catalogTitle,
+      erpTitleFingerprint: result.erpTitleAtAnalysis,
+      verifiedAt: new Date().toISOString(),
+      verifiedBy: 'next-owner',
+    });
+    setSelectedCandidates(previous => ({ ...previous, [result.id]: candidate.id }));
+    setPendingMappings(previous => ({ ...previous, [result.id]: mapping }));
+    setNotice({ kind: 'info', text: '已選定候選；將於最後 Atomic 套用時一併建立 Verified Mapping。' });
   };
 
   const applicableSelections = useMemo(() => results.flatMap(result => {
-    const selection = createApplySelectionFromResolutionResult(result);
+    const selectedCandidateId = selectedCandidates[result.id] ?? null;
+    const pendingMapping = pendingMappings[result.id] ?? null;
+    const selection = createApplySelectionFromResolutionResult(
+      result,
+      selectedCandidateId && pendingMapping
+        ? { selectedCandidateId, pendingMapping }
+        : null,
+    );
     return selection ? [selection] : [];
-  }), [results]);
+  }), [pendingMappings, results, selectedCandidates]);
 
   const apply = async () => {
     if (!currentBatch || applicableSelections.length === 0 || applying) return;
@@ -542,7 +524,6 @@ export default function ClosingDateResolutionWorkbench({
     try {
       const identity = createClosingDateApplyIdentity(currentBatch, applicableSelections);
       const response = await applyClosingDateResolutionBatch({
-        repository: getClosingDateWorkbenchRuntime().repository,
         resolutionBatch: currentBatch,
         selections: applicableSelections,
         applyBatchId: identity.applyBatchId,
@@ -663,10 +644,7 @@ export default function ClosingDateResolutionWorkbench({
                           key={result.id}
                           result={result}
                           selectedCandidateId={selectedCandidates[result.id] ?? result.selectedCandidateId ?? null}
-                          rememberedMappingId={rememberedMappings[result.id] ?? null}
-                          remembering={rememberingResultId === result.id}
-                          onSelect={candidate => setSelectedCandidates(previous => ({ ...previous, [result.id]: candidate.id }))}
-                          onRemember={candidate => void rememberCandidate(result, candidate)}
+                          onSelect={candidate => selectCandidate(result, candidate)}
                         />
                       ))}
                     </div>
@@ -677,7 +655,7 @@ export default function ClosingDateResolutionWorkbench({
               {currentBatch?.status === 'COMPLETED' && (
                 <div style={{ position: 'sticky', bottom: 0, background: 'rgba(248,250,252,0.96)', borderTop: '1px solid #cbd5e1', padding: '12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                   <span style={{ color: '#475569', fontSize: 13 }}>
-                    可套用 {applicableSelections.length} 筆；紅色與未確認黃色不會套用。
+                    已選 {applicableSelections.length} / {results.length} 筆；紅色與未選黃色不會套用。
                   </span>
                   <button
                     type="button"
