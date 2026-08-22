@@ -806,10 +806,7 @@ export function planAtomicClosingDateApply(input: {
     if (result.batchId !== input.resolutionBatchId) {
       addConflict('BATCH_MISMATCH', input.resolutionBatchId, result.batchId);
     }
-    if (
-      result.classification === 'RED'
-      || (result.classification === 'YELLOW' && selection.approval !== 'MANUAL_CONFIRMED')
-    ) {
+    if (result.classification !== 'GREEN') {
       addConflict('RESULT_NOT_APPLICABLE', result.classification, selection.approval);
     }
     const selectedCandidate = result.candidates.find(candidate => candidate.id === result.selectedCandidateId);
@@ -901,6 +898,28 @@ export function planAtomicClosingDateApply(input: {
       rolledBack: false,
       writeCount: 0,
     },
+  };
+}
+
+/**
+ * The persisted ResolutionResult is the single source of truth for Apply.
+ * A transient radio selection must never promote a YELLOW result to an
+ * applyable result. Manual verification first persists an active mapping and
+ * recomputes the result as GREEN/ACTIVE_VERIFIED_MAPPING.
+ */
+export function createApplySelectionFromResolutionResult(
+  result: ResolutionResult,
+): ResolutionApplySelection | null {
+  if (result.classification !== 'GREEN' || !result.selectedCandidateId) return null;
+  const candidate = result.candidates.find(item => item.id === result.selectedCandidateId);
+  if (!candidate?.rawDeadline || !candidate.suggestedClosingDate) return null;
+  if (result.classificationReason === 'ACTIVE_VERIFIED_MAPPING' && !result.selectedMappingId) {
+    return null;
+  }
+  return {
+    result,
+    approval: 'GREEN_AUTO',
+    mappingId: result.selectedMappingId ?? null,
   };
 }
 

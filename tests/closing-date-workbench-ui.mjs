@@ -155,6 +155,7 @@ try {
     const groups = [
       { id: 'contract-green', title: 'ERP Green', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', created_at: now, updated_at: now },
       { id: 'contract-yellow', title: 'ERP Yellow', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', created_at: now, updated_at: now },
+      { id: 'contract-exact', title: 'ERP Exact', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', created_at: now, updated_at: now },
     ];
     const mainName = makeName('main');
     const sidecarName = `${schema.NEXT_CLOSING_DATE_SIDECAR_DB_NAME}-workbench-${crypto.randomUUID()}`;
@@ -196,8 +197,18 @@ try {
           confidence: 1, matchMethod: 'FUZZY_INFERRED' }],
         ruleVersion: batch.ruleVersion, snapshotVersion: batch.snapshotVersion, analyzedAt: now,
       });
-      batch = { ...batch, progress: { totalCount: 2, completedCount: 2, greenCount: 1, yellowCount: 1, redCount: 0, serviceErrorCount: 0, retryableServiceErrorCount: 0 } };
-      return { batch, results: [green, yellow] };
+      const exact = domain.createResolutionResult({
+        id: `${id}:exact`, batchId: id, erpProductGroupId: groups[2].id,
+        erpTitleAtAnalysis: groups[2].title, productUpdatedAtAtAnalysis: now,
+        closingDateAtAnalysis: closingDates[2] || null,
+        candidates: [{ id: `${id}:candidate-exact`, source: { sourceSupplier: 'wanrong', sourceProductId: 'exact-source' }, catalogTitle: 'Catalog Exact',
+          rawDeadline: '2026-09-22', suggestedClosingDate: '2026-09-20',
+          ruleVersion: batch.ruleVersion, snapshotVersion: batch.snapshotVersion,
+          confidence: 1, matchMethod: 'EXACT_MODEL_CODE' }],
+        ruleVersion: batch.ruleVersion, snapshotVersion: batch.snapshotVersion, analyzedAt: now,
+      });
+      batch = { ...batch, progress: { totalCount: 3, completedCount: 3, greenCount: 2, yellowCount: 1, redCount: 0, serviceErrorCount: 0, retryableServiceErrorCount: 0 } };
+      return { batch, results: [green, yellow, exact] };
     };
 
     const original = clone(await readGroups(mainName));
@@ -209,26 +220,87 @@ try {
       source: first.results[1].candidates[0].source,
       verificationMethod: 'MANUAL_TOP3_SELECTION', verifiedAt: now, verifiedBy: 'next-owner',
     });
-    await repository.saveVerifiedMapping(manualMapping);
+    const unconfirmedYellowSelection = domain.createApplySelectionFromResolutionResult(first.results[1]);
+    const redResult = domain.createResolutionResult({
+      id: 'contract-red', batchId: first.batch.id, erpProductGroupId: groups[1].id,
+      erpTitleAtAnalysis: groups[1].title, productUpdatedAtAtAnalysis: now,
+      closingDateAtAnalysis: null, candidates: [], ruleVersion: first.batch.ruleVersion,
+      snapshotVersion: first.batch.snapshotVersion, analyzedAt: now,
+    });
+    const redSelection = domain.createApplySelectionFromResolutionResult(redResult);
+    const verified = await repository.verifyResolutionCandidate(
+      manualMapping,
+      first.results[1].id,
+      first.results[1].candidates[0].id,
+    );
+    const duplicateVerification = await repository.verifyResolutionCandidate(
+      { ...manualMapping, id: 'mapping-contract-yellow-duplicate' },
+      first.results[1].id,
+      first.results[1].candidates[0].id,
+    );
+    const persistedVerifiedResult = await repository.getResolutionResult(first.results[1].id);
+    const activeMappingsAfterVerify = await repository.findActiveMappings([groups[1].id]);
     const afterRemember = clone(await readGroups(mainName));
     const selections = [
-      { result: first.results[0], approval: 'GREEN_AUTO', mappingId: mapping.id },
-      { result: { ...first.results[1], selectedCandidateId: first.results[1].candidates[0].id }, approval: 'MANUAL_CONFIRMED', mappingId: manualMapping.id },
+      domain.createApplySelectionFromResolutionResult(first.results[0]),
+      domain.createApplySelectionFromResolutionResult(verified.result),
+      domain.createApplySelectionFromResolutionResult(first.results[2]),
     ];
+    if (!selections.every(Boolean)) throw new Error('Expected three apply-eligible selections');
+    const applyIdentity = applyModule.createClosingDateApplyIdentity(first.batch, selections);
     const applied = await applyModule.applyClosingDateResolutionBatch({
       repository, resolutionBatch: first.batch, selections,
-      applyBatchId: 'contract-apply-1', applyItemIds: ['contract-apply-item-1', 'contract-apply-item-2'],
-      idempotencyKey: 'contract-apply-idempotency-1', databaseName: mainName, appliedAt: now,
+      ...applyIdentity, databaseName: mainName, appliedAt: now,
     });
     const afterApply = clone(await readGroups(mainName));
     const duplicate = await applyModule.applyClosingDateResolutionBatch({
       repository, resolutionBatch: first.batch, selections,
-      applyBatchId: 'contract-apply-1', applyItemIds: ['contract-apply-item-1', 'contract-apply-item-2'],
-      idempotencyKey: 'contract-apply-idempotency-1', databaseName: mainName, appliedAt: now,
+      ...applyIdentity, databaseName: mainName, appliedAt: now,
     });
+    const countsAfterDuplicate = await repository.getStoreCounts();
 
-    const second = makeCompleted('contract-batch-2', ['2026/09/16', '2026/09/18']);
+    const singleGroups = clone(await readGroups(mainName));
+    singleGroups[2].closing_date = '';
+    await putGroups(mainName, singleGroups);
+    let singleBatch = domain.createResolutionBatch({
+      id: 'contract-batch-single', idempotencyKey: 'idempotency-contract-batch-single',
+      inputHash: 'input-contract-batch-single', snapshotVersion: 'snapshot-1',
+      ruleVersion: 'closing-date-minus-two-v1', productGroupIds: [groups[2].id], createdAt: now,
+    });
+    singleBatch = domain.transitionResolutionBatch(singleBatch, 'RUNNING', now);
+    singleBatch = domain.transitionResolutionBatch(singleBatch, 'COMPLETED', now);
+    singleBatch = { ...singleBatch, progress: { totalCount: 1, completedCount: 1, greenCount: 1, yellowCount: 0, redCount: 0, serviceErrorCount: 0, retryableServiceErrorCount: 0 } };
+    const singleResult = domain.createResolutionResult({
+      id: 'contract-batch-single:exact', batchId: singleBatch.id,
+      erpProductGroupId: groups[2].id, erpTitleAtAnalysis: groups[2].title,
+      productUpdatedAtAtAnalysis: now, closingDateAtAnalysis: null,
+      candidates: [{ id: 'contract-batch-single:candidate-exact', source: { sourceSupplier: 'wanrong', sourceProductId: 'single-exact-source' }, catalogTitle: 'Catalog Single Exact',
+        rawDeadline: '2026-09-22', suggestedClosingDate: '2026-09-20',
+        ruleVersion: singleBatch.ruleVersion, snapshotVersion: singleBatch.snapshotVersion,
+        confidence: 1, matchMethod: 'EXACT_MODEL_CODE' }],
+      ruleVersion: singleBatch.ruleVersion, snapshotVersion: singleBatch.snapshotVersion, analyzedAt: now,
+    });
+    await repository.commitResolutionAnalysis({ mappings: [], batch: singleBatch, results: [singleResult] });
+    const singleSelections = [domain.createApplySelectionFromResolutionResult(singleResult)];
+    if (!singleSelections.every(Boolean)) throw new Error('Expected one apply-eligible selection');
+    const singleIdentity = applyModule.createClosingDateApplyIdentity(singleBatch, singleSelections);
+    const singleApplied = await applyModule.applyClosingDateResolutionBatch({
+      repository, resolutionBatch: singleBatch, selections: singleSelections,
+      ...singleIdentity, databaseName: mainName, appliedAt: now,
+    });
+    const afterSingleApply = clone(await readGroups(mainName));
+
+    const second = makeCompleted('contract-batch-2', ['2026/09/16', '2026/09/18', '2026/09/20']);
     await repository.commitResolutionAnalysis({ mappings: [mapping], batch: second.batch, results: second.results });
+    const verifiedSecond = await repository.verifyResolutionCandidate(
+      domain.createVerifiedMapping({
+        id: 'mapping-contract-yellow-second', erpProductGroupId: groups[1].id,
+        source: second.results[1].candidates[0].source,
+        verificationMethod: 'MANUAL_TOP3_SELECTION', verifiedAt: now, verifiedBy: 'next-owner',
+      }),
+      second.results[1].id,
+      second.results[1].candidates[0].id,
+    );
     const staleGroups = clone(await readGroups(mainName));
     staleGroups[1].closing_date = '2026/10/01';
     await putGroups(mainName, staleGroups);
@@ -236,10 +308,11 @@ try {
     const conflict = await applyModule.applyClosingDateResolutionBatch({
       repository, resolutionBatch: second.batch,
       selections: [
-        { result: second.results[0], approval: 'GREEN_AUTO' },
-        { result: { ...second.results[1], selectedCandidateId: second.results[1].candidates[0].id }, approval: 'MANUAL_CONFIRMED' },
+        domain.createApplySelectionFromResolutionResult(second.results[0]),
+        domain.createApplySelectionFromResolutionResult(verifiedSecond.result),
+        domain.createApplySelectionFromResolutionResult(second.results[2]),
       ],
-      applyBatchId: 'contract-apply-2', applyItemIds: ['contract-conflict-item-1', 'contract-conflict-item-2'],
+      applyBatchId: 'contract-apply-2', applyItemIds: ['contract-conflict-item-1', 'contract-conflict-item-2', 'contract-conflict-item-3'],
       idempotencyKey: 'contract-apply-idempotency-2', databaseName: mainName, appliedAt: now,
     });
     const afterConflict = clone(await readGroups(mainName));
@@ -255,6 +328,51 @@ try {
       faultInjector(point) { if (point === 'AFTER_PRODUCT_GROUPS_PUT') throw new Error('TEST_ATOMIC_ROLLBACK'); },
     });
     const afterRollback = clone(await readGroups(mainName));
+
+    let verificationFaultBatch = domain.createResolutionBatch({
+      id: 'contract-verify-fault', idempotencyKey: 'idempotency-contract-verify-fault',
+      inputHash: 'input-contract-verify-fault', snapshotVersion: 'snapshot-1',
+      ruleVersion: 'closing-date-minus-two-v1', productGroupIds: [groups[2].id], createdAt: now,
+    });
+    verificationFaultBatch = domain.transitionResolutionBatch(verificationFaultBatch, 'RUNNING', now);
+    verificationFaultBatch = domain.transitionResolutionBatch(verificationFaultBatch, 'COMPLETED', now);
+    const verificationFaultResult = domain.createResolutionResult({
+      id: 'contract-verify-fault:yellow', batchId: verificationFaultBatch.id,
+      erpProductGroupId: groups[2].id, erpTitleAtAnalysis: groups[2].title,
+      productUpdatedAtAtAnalysis: now, closingDateAtAnalysis: afterRollback[2].closing_date || null,
+      candidates: [{ id: 'contract-verify-fault:candidate', source: { sourceSupplier: 'dreamlink', sourceProductId: 'verify-fault-source' }, catalogTitle: 'Catalog Verify Fault',
+        rawDeadline: '2026-09-25', suggestedClosingDate: '2026-09-23',
+        ruleVersion: verificationFaultBatch.ruleVersion, snapshotVersion: verificationFaultBatch.snapshotVersion,
+        confidence: 0.95, matchMethod: 'FUZZY_INFERRED' }],
+      ruleVersion: verificationFaultBatch.ruleVersion,
+      snapshotVersion: verificationFaultBatch.snapshotVersion, analyzedAt: now,
+    });
+    await repository.commitResolutionAnalysis({
+      mappings: [], batch: verificationFaultBatch, results: [verificationFaultResult],
+    });
+    const faultRepository = repositoryModule.createNextClosingDateResolutionRepository({
+      databaseName: sidecarName,
+      faultInjector(point) {
+        if (point === 'AFTER_RESULT_WRITE') throw new Error('TEST_VERIFICATION_ROLLBACK');
+      },
+    });
+    repositories.push(faultRepository);
+    let verificationFaultRejected = false;
+    try {
+      await faultRepository.verifyResolutionCandidate(
+        domain.createVerifiedMapping({
+          id: 'mapping-contract-verify-fault', erpProductGroupId: groups[2].id,
+          source: verificationFaultResult.candidates[0].source,
+          verificationMethod: 'MANUAL_TOP3_SELECTION', verifiedAt: now, verifiedBy: 'next-owner',
+        }),
+        verificationFaultResult.id,
+        verificationFaultResult.candidates[0].id,
+      );
+    } catch (error) {
+      verificationFaultRejected = String(error).includes('TEST_VERIFICATION_ROLLBACK');
+    }
+    const verificationFaultPersisted = await repository.getResolutionResult(verificationFaultResult.id);
+    const verificationFaultMappings = await repository.findActiveMappings([groups[2].id]);
 
     let interrupted = domain.createResolutionBatch({
       id: 'contract-interrupted', idempotencyKey: 'contract-interrupted-idem', inputHash: 'contract-interrupted-input',
@@ -274,14 +392,35 @@ try {
     const result = {
       analysisZeroWrite: JSON.stringify(original) === JSON.stringify(afterAnalysis),
       rememberZeroWrite: JSON.stringify(original) === JSON.stringify(afterRemember),
+      unconfirmedYellowBlocked: unconfirmedYellowSelection === null,
+      redBlocked: redSelection === null,
+      verifiedClassification: verified.result.classification,
+      verifiedReason: verified.result.classificationReason,
+      verifiedCandidateId: verified.result.selectedCandidateId,
+      verifiedMappingId: verified.result.selectedMappingId,
+      persistedVerified: persistedVerifiedResult?.selectedMappingId === verified.mapping.id,
+      activeMappingReadable: activeMappingsAfterVerify.some(item => item.id === verified.mapping.id),
+      duplicateMappingPrevented: !duplicateVerification.mappingCreated
+        && duplicateVerification.mapping.id === verified.mapping.id,
       applyStatus: applied.status,
       appliedDates: afterApply.map(group => group.closing_date),
       nonClosingFieldsUnchanged: JSON.stringify(productFieldsExceptClosing(original)) === JSON.stringify(productFieldsExceptClosing(afterApply)),
       duplicateStatus: duplicate.status,
+      duplicateApplyBatchCount: countsAfterDuplicate.closing_date_apply_batches,
+      duplicateApplyItemCount: countsAfterDuplicate.closing_date_apply_items,
+      singleApplyStatus: singleApplied.status,
+      singleApplyDate: afterSingleApply[2].closing_date,
       conflictStatus: conflict.status,
       conflictZeroWrite: JSON.stringify(beforeConflict) === JSON.stringify(afterConflict),
       rollbackStatus: rolledBack.status,
       rollbackZeroWrite: JSON.stringify(beforeRollback) === JSON.stringify(afterRollback),
+      verificationFaultRejected,
+      verificationFaultResultUnchanged: verificationFaultPersisted?.classification === 'YELLOW'
+        && verificationFaultPersisted.selectedCandidateId === null,
+      verificationFaultMappingRolledBack: !verificationFaultMappings.some(item => (
+        item.source.sourceSupplier === 'dreamlink'
+        && item.source.sourceProductId === 'verify-fault-source'
+      )),
       interruptedStatus: interruptedAfter?.status,
       interruptedRetryable: interruptedAfter?.failure?.retryable,
       completedReviewListed: listed.some(batch => batch.id === first.batch.id && batch.status === 'COMPLETED'),
@@ -293,14 +432,30 @@ try {
 
   assert.equal(contractResult.analysisZeroWrite, true);
   assert.equal(contractResult.rememberZeroWrite, true);
+  assert.equal(contractResult.unconfirmedYellowBlocked, true);
+  assert.equal(contractResult.redBlocked, true);
+  assert.equal(contractResult.verifiedClassification, 'GREEN');
+  assert.equal(contractResult.verifiedReason, 'ACTIVE_VERIFIED_MAPPING');
+  assert.equal(contractResult.verifiedCandidateId, 'contract-batch-1:candidate-yellow');
+  assert.equal(contractResult.verifiedMappingId, 'mapping-contract-yellow');
+  assert.equal(contractResult.persistedVerified, true);
+  assert.equal(contractResult.activeMappingReadable, true);
+  assert.equal(contractResult.duplicateMappingPrevented, true);
   assert.equal(contractResult.applyStatus, 'APPLIED');
-  assert.deepEqual(contractResult.appliedDates, ['2026/09/16', '2026/09/18']);
+  assert.deepEqual(contractResult.appliedDates, ['2026/09/16', '2026/09/18', '2026/09/20']);
   assert.equal(contractResult.nonClosingFieldsUnchanged, true);
   assert.equal(contractResult.duplicateStatus, 'APPLIED');
+  assert.equal(contractResult.duplicateApplyBatchCount, 1);
+  assert.equal(contractResult.duplicateApplyItemCount, 3);
+  assert.equal(contractResult.singleApplyStatus, 'APPLIED');
+  assert.equal(contractResult.singleApplyDate, '2026/09/20');
   assert.equal(contractResult.conflictStatus, 'CONFLICT');
   assert.equal(contractResult.conflictZeroWrite, true);
   assert.equal(contractResult.rollbackStatus, 'ROLLED_BACK');
   assert.equal(contractResult.rollbackZeroWrite, true);
+  assert.equal(contractResult.verificationFaultRejected, true);
+  assert.equal(contractResult.verificationFaultResultUnchanged, true);
+  assert.equal(contractResult.verificationFaultMappingRolledBack, true);
   assert.equal(contractResult.interruptedStatus, 'FAILED');
   assert.equal(contractResult.interruptedRetryable, true);
   assert.equal(contractResult.completedReviewListed, true);

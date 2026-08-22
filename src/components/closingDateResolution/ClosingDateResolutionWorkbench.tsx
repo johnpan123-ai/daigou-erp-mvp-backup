@@ -6,7 +6,11 @@ import type {
   ResolutionBatch,
   ResolutionResult,
 } from '../../lib/closingDateResolutionDomain';
-import { createVerifiedMapping } from '../../lib/closingDateResolutionDomain';
+import {
+  createApplySelectionFromResolutionResult,
+  createVerifiedMapping,
+  sameSourceProduct,
+} from '../../lib/closingDateResolutionDomain';
 import type {
   ClosingDateBatchGatewayMetrics,
   ClosingDateBatchPollResponse,
@@ -15,7 +19,10 @@ import {
   getClosingDateWorkbenchRuntime,
   reconcileInterruptedClosingDateJobs,
 } from '../../lib/closingDateWorkbenchRuntime';
-import { applyClosingDateResolutionBatch } from '../../lib/closingDateWorkbenchAtomicApply';
+import {
+  applyClosingDateResolutionBatch,
+  createClosingDateApplyIdentity,
+} from '../../lib/closingDateWorkbenchAtomicApply';
 
 interface ClosingDateResolutionWorkbenchProps {
   selectedGroups: readonly ProductGroup[];
@@ -265,14 +272,44 @@ export default function ClosingDateResolutionWorkbench({
     return batches;
   }, []);
 
-  const displayPoll = useCallback((poll: ClosingDateBatchPollResponse) => {
+  const displayPoll = useCallback(async (poll: ClosingDateBatchPollResponse) => {
+    let displayResults = poll.results;
+    if (poll.batch.status === 'COMPLETED' && poll.results.some(result => result.classification === 'YELLOW')) {
+      const repository = getClosingDateWorkbenchRuntime().repository;
+      const activeMappings = await repository.findActiveMappings(
+        poll.results.map(result => result.erpProductGroupId),
+      );
+      displayResults = await Promise.all(poll.results.map(async result => {
+        if (result.classification !== 'YELLOW') return result;
+        const mapping = activeMappings.find(item => (
+          item.erpProductGroupId === result.erpProductGroupId
+          && result.candidates.some(candidate => sameSourceProduct(item.source, candidate.source))
+        ));
+        if (!mapping) return result;
+        const candidate = result.candidates.find(item => sameSourceProduct(item.source, mapping.source));
+        if (!candidate) return result;
+        const verified = await repository.verifyResolutionCandidate(
+          mapping,
+          result.id,
+          candidate.id,
+        );
+        return verified.result;
+      }));
+    }
     setCurrentBatch(poll.batch);
-    setResults(poll.results);
+    setResults(displayResults);
     setMetrics(poll.metrics);
     setSelectedCandidates(previous => {
       const next = { ...previous };
-      poll.results.forEach(result => {
+      displayResults.forEach(result => {
         if (!next[result.id] && result.selectedCandidateId) next[result.id] = result.selectedCandidateId;
+      });
+      return next;
+    });
+    setRememberedMappings(previous => {
+      const next = { ...previous };
+      displayResults.forEach(result => {
+        if (!next[result.id] && result.selectedMappingId) next[result.id] = result.selectedMappingId;
       });
       return next;
     });
@@ -310,7 +347,7 @@ export default function ClosingDateResolutionWorkbench({
       try {
         const response = await getClosingDateWorkbenchRuntime().gateway.pollJob(activeJobId);
         if (cancelled) return;
-        displayPoll(response);
+        await displayPoll(response);
         if (terminalStatuses.has(response.batch.status)) {
           setActiveJobId(null);
           await refreshHistory();
@@ -364,7 +401,7 @@ export default function ClosingDateResolutionWorkbench({
         })),
       });
       const initial = await runtime.gateway.pollJob(response.jobId);
-      displayPoll(initial);
+      await displayPoll(initial);
       setActiveJobId(response.jobId);
       setNotice({ kind: 'info', text: '分析已開始；此階段不會修改任何 ProductGroup。' });
     } catch (error) {
@@ -375,7 +412,7 @@ export default function ClosingDateResolutionWorkbench({
   const openBatch = async (batch: ResolutionBatch) => {
     try {
       const poll = await getClosingDateWorkbenchRuntime().gateway.pollJob(batch.id);
-      displayPoll(poll);
+      await displayPoll(poll);
       setActiveJobId(terminalStatuses.has(poll.batch.status) ? null : poll.batch.id);
       setNotice({ kind: 'info', text: `已開啟 ${statusLabel(poll.batch.status)}的既有 Batch。` });
     } catch (error) {
@@ -429,10 +466,22 @@ export default function ClosingDateResolutionWorkbench({
         verifiedAt: new Date().toISOString(),
         verifiedBy: 'next-owner',
       });
-      const saved = await getClosingDateWorkbenchRuntime().repository.saveVerifiedMapping(mapping);
-      setRememberedMappings(previous => ({ ...previous, [result.id]: saved.id }));
+      const saved = await getClosingDateWorkbenchRuntime().repository.verifyResolutionCandidate(
+        mapping,
+        result.id,
+        candidate.id,
+      );
+      setResults(previous => previous.map(item => (
+        item.id === result.id ? saved.result : item
+      )));
+      setRememberedMappings(previous => ({ ...previous, [result.id]: saved.mapping.id }));
       setSelectedCandidates(previous => ({ ...previous, [result.id]: candidate.id }));
-      setNotice({ kind: 'success', text: '已建立 Verified Mapping；尚未修改結單日。' });
+      setNotice({
+        kind: 'success',
+        text: saved.mappingCreated
+          ? '已建立 Verified Mapping；尚未修改結單日。'
+          : '已套用既有 Verified Mapping；尚未修改結單日。',
+      });
     } catch (error) {
       setNotice({ kind: 'error', text: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -441,18 +490,9 @@ export default function ClosingDateResolutionWorkbench({
   };
 
   const applicableSelections = useMemo(() => results.flatMap(result => {
-    if (result.classification === 'RED') return [];
-    const candidateId = selectedCandidates[result.id]
-      ?? (result.classification === 'GREEN' ? result.selectedCandidateId : null);
-    if (!candidateId) return [];
-    const candidate = result.candidates.find(item => item.id === candidateId);
-    if (!candidate?.rawDeadline || !candidate.suggestedClosingDate) return [];
-    return [{
-      result: { ...result, selectedCandidateId: candidate.id },
-      approval: result.classification === 'GREEN' ? 'GREEN_AUTO' as const : 'MANUAL_CONFIRMED' as const,
-      mappingId: rememberedMappings[result.id] ?? result.selectedMappingId ?? null,
-    }];
-  }), [rememberedMappings, results, selectedCandidates]);
+    const selection = createApplySelectionFromResolutionResult(result);
+    return selection ? [selection] : [];
+  }), [results]);
 
   const apply = async () => {
     if (!currentBatch || applicableSelections.length === 0 || applying) return;
@@ -467,14 +507,14 @@ export default function ClosingDateResolutionWorkbench({
     if (!confirmed) return;
     setApplying(true);
     try {
-      const applyBatchId = uuid('closing-date-apply');
+      const identity = createClosingDateApplyIdentity(currentBatch, applicableSelections);
       const response = await applyClosingDateResolutionBatch({
         repository: getClosingDateWorkbenchRuntime().repository,
         resolutionBatch: currentBatch,
         selections: applicableSelections,
-        applyBatchId,
-        applyItemIds: applicableSelections.map(() => uuid('closing-date-apply-item')),
-        idempotencyKey: uuid('closing-date-apply-idempotency'),
+        applyBatchId: identity.applyBatchId,
+        applyItemIds: identity.applyItemIds,
+        idempotencyKey: identity.idempotencyKey,
         appliedAt: new Date().toISOString(),
       });
       if (response.status === 'APPLIED') {

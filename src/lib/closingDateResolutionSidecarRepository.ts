@@ -1,7 +1,9 @@
 import {
+  createResolutionResult,
   createVerifiedMapping,
   isActiveVerifiedMapping,
   revokeVerifiedMapping as markVerifiedMappingRevoked,
+  sameSourceProduct,
   sourceProductKey,
 } from './closingDateResolutionDomain';
 import type {
@@ -80,6 +82,12 @@ export interface SaveApplyAuditResult {
   audit: ApplyAuditBundle;
 }
 
+export interface VerifyResolutionCandidateStorageResult {
+  mappingCreated: boolean;
+  mapping: VerifiedMappingRegistryEntry;
+  result: ResolutionResult;
+}
+
 export interface ClosingDateSidecarSchemaMetadata {
   databaseName: string;
   version: number;
@@ -109,6 +117,11 @@ export interface ClosingDateResolutionSidecarRepository {
   saveVerifiedMapping(
     mapping: VerifiedMappingRegistryEntry,
   ): Promise<VerifiedMappingRegistryEntry>;
+  verifyResolutionCandidate(
+    mapping: VerifiedMappingRegistryEntry,
+    resultId: string,
+    candidateId: string,
+  ): Promise<VerifyResolutionCandidateStorageResult>;
   revokeVerifiedMapping(
     mappingId: string,
     revokedAt: string,
@@ -878,6 +891,134 @@ implements ClosingDateResolutionSidecarRepository {
     );
     await completion;
     return stored.mapping;
+  }
+
+  async verifyResolutionCandidate(
+    mapping: VerifiedMappingRegistryEntry,
+    resultId: string,
+    candidateId: string,
+  ): Promise<VerifyResolutionCandidateStorageResult> {
+    const proposedMapping = createVerifiedMapping(mapping);
+    ensureNonEmpty(resultId, 'resolution result id');
+    ensureNonEmpty(candidateId, 'resolution candidate id');
+    const database = await this.adapter.open();
+
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction([
+        CLOSING_DATE_SIDECAR_STORES.verifiedMappings,
+        CLOSING_DATE_SIDECAR_STORES.resolutionResults,
+        CLOSING_DATE_SIDECAR_STORES.resolutionCandidates,
+      ], 'readwrite');
+      let failure: unknown;
+      let outcome: VerifyResolutionCandidateStorageResult | null = null;
+      let pendingReads = 3;
+      let storedResult: StoredResolutionResult | undefined;
+      let storedCandidates: StoredResolutionCandidate[] = [];
+      let productMappings: StoredVerifiedMapping[] = [];
+      const mappingStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.verifiedMappings);
+      const resultStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionResults);
+      const candidateStore = transaction.objectStore(CLOSING_DATE_SIDECAR_STORES.resolutionCandidates);
+
+      const fail = (error: unknown): void => {
+        failure = error;
+        abortTransaction(transaction);
+      };
+      const finishRead = (): void => {
+        pendingReads -= 1;
+        if (pendingReads !== 0 || failure) return;
+        try {
+          if (!storedResult) {
+            throw new ClosingDateSidecarIntegrityError(`Resolution result does not exist: ${resultId}`);
+          }
+          const currentResult = reconstructResult(storedResult, storedCandidates);
+          const candidate = currentResult.candidates.find(item => item.id === candidateId);
+          if (!candidate) {
+            throw new ClosingDateSidecarIntegrityError(
+              `Resolution candidate does not exist in result ${resultId}: ${candidateId}`,
+            );
+          }
+          if (
+            proposedMapping.erpProductGroupId !== currentResult.erpProductGroupId
+            || !sameSourceProduct(proposedMapping.source, candidate.source)
+          ) {
+            throw new ClosingDateSidecarIntegrityError(
+              `Verified mapping does not identify the selected candidate: ${candidateId}`,
+            );
+          }
+
+          const existing = productMappings
+            .map(item => item.mapping)
+            .find(item => isActiveVerifiedMapping(item) && sameSourceProduct(item.source, candidate.source));
+          const persistedMapping = existing ?? proposedMapping;
+          const mappingCreated = !existing;
+          if (mappingCreated) {
+            mappingStore.add(toStoredMapping(persistedMapping));
+            this.inject('AFTER_MAPPING_WRITE', { recordId: persistedMapping.id });
+          }
+
+          const verifiedResult = createResolutionResult({
+            id: currentResult.id,
+            batchId: currentResult.batchId,
+            erpProductGroupId: currentResult.erpProductGroupId,
+            erpTitleAtAnalysis: currentResult.erpTitleAtAnalysis,
+            productUpdatedAtAtAnalysis: currentResult.productUpdatedAtAtAnalysis ?? null,
+            closingDateAtAnalysis: currentResult.closingDateAtAnalysis ?? null,
+            candidates: currentResult.candidates,
+            recommendedCandidateId: candidate.id,
+            selectedCandidateId: candidate.id,
+            activeVerifiedMapping: persistedMapping,
+            serviceError: currentResult.serviceError ?? null,
+            ruleVersion: currentResult.ruleVersion,
+            snapshotVersion: currentResult.snapshotVersion,
+            analyzedAt: currentResult.analyzedAt,
+          });
+          resultStore.put(toStoredResult(verifiedResult).result);
+          this.inject('AFTER_RESULT_WRITE', { recordId: verifiedResult.id });
+          outcome = { mappingCreated, mapping: persistedMapping, result: verifiedResult };
+        } catch (error) {
+          fail(error);
+        }
+      };
+
+      transaction.oncomplete = () => {
+        if (!outcome) {
+          reject(new ClosingDateSidecarIntegrityError('Candidate verification completed without result'));
+          return;
+        }
+        resolve(outcome);
+      };
+      transaction.onerror = () => {
+        if (!failure && transaction.error) failure = transaction.error;
+      };
+      transaction.onabort = () => reject(
+        failure instanceof Error
+          ? failure
+          : transaction.error ?? new Error('Candidate verification transaction aborted'),
+      );
+
+      const resultRequest = resultStore.get(resultId) as IDBRequest<StoredResolutionResult | undefined>;
+      const candidatesRequest = candidateStore
+        .index(CLOSING_DATE_SIDECAR_INDEXES.candidateByResult)
+        .getAll(resultId) as IDBRequest<StoredResolutionCandidate[]>;
+      const mappingsRequest = mappingStore
+        .index(CLOSING_DATE_SIDECAR_INDEXES.mappingByProductGroup)
+        .getAll(proposedMapping.erpProductGroupId) as IDBRequest<StoredVerifiedMapping[]>;
+      resultRequest.onerror = () => fail(resultRequest.error);
+      candidatesRequest.onerror = () => fail(candidatesRequest.error);
+      mappingsRequest.onerror = () => fail(mappingsRequest.error);
+      resultRequest.onsuccess = () => {
+        storedResult = resultRequest.result;
+        finishRead();
+      };
+      candidatesRequest.onsuccess = () => {
+        storedCandidates = candidatesRequest.result;
+        finishRead();
+      };
+      mappingsRequest.onsuccess = () => {
+        productMappings = mappingsRequest.result;
+        finishRead();
+      };
+    });
   }
 
   async revokeVerifiedMapping(

@@ -35,6 +35,40 @@ export interface ClosingDateAtomicApplyOptions {
   faultInjector?: (point: ClosingDateAtomicApplyFaultPoint) => void;
 }
 
+export interface ClosingDateApplyIdentity {
+  applyBatchId: string;
+  applyItemIds: readonly string[];
+  idempotencyKey: string;
+}
+
+const fnv1a32 = (value: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+export function createClosingDateApplyIdentity(
+  resolutionBatch: ResolutionBatch,
+  selections: readonly ResolutionApplySelection[],
+): ClosingDateApplyIdentity {
+  const signature = selections.map(selection => [
+    selection.result.id,
+    selection.result.selectedCandidateId,
+    selection.mappingId ?? selection.result.selectedMappingId ?? null,
+  ]);
+  const hash = fnv1a32(JSON.stringify([resolutionBatch.id, signature]));
+  return {
+    applyBatchId: `closing-date-apply:${resolutionBatch.id}:${hash}`,
+    applyItemIds: selections.map((selection, index) => (
+      `closing-date-apply-item:${hash}:${index}:${fnv1a32(selection.result.id)}`
+    )),
+    idempotencyKey: `closing-date-apply-idempotency:${resolutionBatch.id}:${hash}`,
+  };
+}
+
 interface MainTransactionOutcome {
   plan: AtomicApplyPlan;
   transactionResult: AtomicTransactionResult;
