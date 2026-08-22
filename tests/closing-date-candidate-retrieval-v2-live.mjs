@@ -138,11 +138,12 @@ try {
         ruleVersion: 'closing-date-minus-two-v1',
         snapshot,
         activeMappings: [],
-        search: async query => {
+        search: async (query, options) => {
           try {
-            const products = await fetchProducts(query, 'limit=5');
+            const limit = options?.limit ?? 5;
+            const products = await fetchProducts(query, `limit=${limit}`);
             products.forEach(product => newPool.add(keyFor(product)));
-            newResponses.push({ query, count: products.length });
+            newResponses.push({ query, limit, count: products.length });
             return products;
           } catch (error) {
             newResponses.push({
@@ -203,11 +204,30 @@ try {
   );
   assert.equal(omaneko.after.responses.some(response => response.query === 'PLA'), false);
   assert.equal(smp.after.responses.some(response => response.query === '魂商店 &' || response.query === '&'), false);
+  assert.deepEqual(
+    smp.after.responses.filter(response => response.query === '牙吠孔雀' || response.query === '牙吠眼鏡蛇'),
+    [
+      { query: '牙吠孔雀', limit: 5, count: 1 },
+      { query: '牙吠眼鏡蛇', limit: 5, count: 1 },
+    ],
+  );
+  assert.equal(smp.after.responses.some(response => response.query === '牙吠'), false);
+  assert.equal(
+    smp.after.top3[0]?.title,
+    'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇',
+  );
+  assert.equal(
+    smp.after.top3[0]?.nativeEvidence.some(evidence => (
+      evidence.queryKind === 'COMPOUND_MEMBER' && evidence.nativeRank === 1
+    )),
+    true,
+  );
   assert.deepEqual(supabaseRequests, []);
 
   console.log('PASS Louise native search yields only the correct product in Workbench Top 3');
   console.log('PASS Sophia rejects conflicting 1/6 and preserves Wanrong 1/9 #2 -> Dreamlink 1/9 #3 evidence');
   console.log('PASS Omaneko and SMP never execute generic PLA / 魂商店 & / & queries');
+  console.log('PASS SMP compound-member native searches find the correct product at #1 and skip family fallback');
   console.log('PASS Production Supabase requests = 0; live comparison is Catalog GET only');
 } finally {
   await browser?.close();

@@ -133,7 +133,11 @@ const ResultCard = ({
       )}
 
       {result.candidates.length === 0 ? (
-        <div style={{ marginTop: 10, color: '#64748b', fontSize: 13 }}>沒有可供確認的 Catalog Candidate。</div>
+        <div style={{ marginTop: 10, color: '#64748b', fontSize: 13 }}>
+          {result.classificationReason === 'RETRIEVED_BUT_REJECTED'
+            ? 'Catalog 有回傳候選，但全部因安全衝突被排除，未套用任何結果。'
+            : '所有允許的 Catalog Query 均未取得候選。'}
+        </div>
       ) : (
         <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
           {result.candidates.map(candidate => {

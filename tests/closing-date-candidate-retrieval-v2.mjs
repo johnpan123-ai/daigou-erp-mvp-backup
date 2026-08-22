@@ -71,6 +71,7 @@ try {
       sophia: '第四季 代理版 核金重構 1/9 包膠可動 索菲亞 F 希琳 碧藍兔子 附特典',
       omaneko: '代理版 小人物繪舘青島社KP 04R獸娘KEMO PLA Omaneko貓君 組裝模型',
       smp: '魂商店 萬代 SMP 牙吠孔雀王 & 牙吠眼鏡蛇王',
+      kangaroo: '魂商店 萬代 SMP 百獸戰隊 牙吠連者 牙吠袋鼠',
       reliable: '代理版 角川 KDcolle 狼與辛香料 赫蘿 原作版 無比例模型',
       unresolved: '代理版 無比例 約23公分',
     };
@@ -120,20 +121,22 @@ try {
     ];
     const analyze = async (key, title, resolver) => {
       const queries = [];
+      const queryCalls = [];
       const result = await gatewayModule.createProxyClosingDateBatchAnalyzer()({
         item: makeItem(key, title),
         batchId: `batch-${key}`,
         ruleVersion: 'closing-date-minus-two-v1',
         snapshot,
         activeMappings: [],
-        search: async query => {
+        search: async (query, options) => {
           queries.push(query);
-          return resolver(query);
+          queryCalls.push({ query, limit: options?.limit ?? null });
+          return resolver(query, options);
         },
         signal: new AbortController().signal,
         analyzedAt: '2026-08-21T00:00:00.000Z',
       });
-      return { queries, result };
+      return { queries, queryCalls, result };
     };
     const louise = await analyze('louise', titles.louise, query => (
       query === '露易絲' ? [louiseCandidate] : []
@@ -142,7 +145,38 @@ try {
       query === '希琳' ? sophiaCandidates : []
     ));
     const omaneko = await analyze('omaneko', titles.omaneko, () => []);
-    const smp = await analyze('smp', titles.smp, () => []);
+    const smpCandidate = {
+      id: 'smp-peacock-cobra-wanrong',
+      name: 'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇',
+      janCode: '4570117926228',
+      catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
+    };
+    const smp = await analyze('smp', titles.smp, query => (
+      query === '牙吠孔雀' || query === '牙吠眼鏡蛇' ? [smpCandidate] : []
+    ));
+    const kangarooCandidate = {
+      id: 'smp-kangaroo-wanrong',
+      name: 'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠袋鼠',
+      janCode: '4570117926259',
+      catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
+    };
+    const kangaroo = await analyze('kangaroo', titles.kangaroo, query => (
+      query === '牙吠袋鼠' ? [kangarooCandidate] : []
+    ));
+    const unrelatedFamilyCandidate = index => ({
+      id: `unrelated-family-${index}`,
+      name: `S.H.Figuarts 假面騎士 無關商品 ${index}`,
+      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-30T00:00:00.000Z' },
+    });
+    const familyProducts = Array.from({ length: 12 }, (_, index) => (
+      index === 10 ? smpCandidate : unrelatedFamilyCandidate(index + 1)
+    ));
+    const familyFallback = await analyze('smp-family', titles.smp, query => (
+      query === '牙吠' ? familyProducts : []
+    ));
+    const retrievedButRejected = await analyze('smp-rejected', titles.smp, query => (
+      query === '牙吠孔雀' ? [unrelatedFamilyCandidate(3)] : []
+    ));
     const unreliableProgressive = await analyze(
       'unreliable-progressive',
       titles.sophia,
@@ -264,6 +298,21 @@ try {
       sophia,
       omaneko,
       smp,
+      kangaroo,
+      familyFallback,
+      retrievedButRejected,
+      familyPlanner: {
+        members: planner.buildClosingDateCompoundMemberQueries(titles.smp),
+        family: planner.buildClosingDateFamilyStemFallbackQuery(titles.smp),
+        blocked: [
+          '代理版 PLA & PLA',
+          '代理版 PVC & PVC',
+          '代理版 無比例 & 無比例',
+          '代理版 限定 & 限定',
+          '代理版 組裝模型 & 組裝模型',
+          '代理版 & & &',
+        ].map(title => planner.buildClosingDateFamilyStemFallbackQuery(title)),
+      },
       unreliableProgressive,
       reliableProgressive,
       repeatedEvidence,
@@ -307,6 +356,34 @@ try {
   );
   assert.equal(report.omaneko.queries.includes('PLA'), false);
   assert.equal(report.smp.queries.includes('魂商店 &'), false);
+  assert.deepEqual(report.familyPlanner.members.map(query => query.text), ['牙吠孔雀', '牙吠眼鏡蛇']);
+  assert.equal(report.familyPlanner.family.text, '牙吠');
+  assert.equal(report.familyPlanner.family.limit, 12);
+  assert.deepEqual(report.familyPlanner.blocked, [null, null, null, null, null, null]);
+  assert.deepEqual(report.smp.result.candidates.map(candidate => candidate.catalogTitle), [
+    'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇',
+  ]);
+  assert.equal(report.smp.result.classification, 'YELLOW');
+  assert.equal(report.smp.queries.includes('牙吠'), false, 'member hit must skip family fallback');
+  assert.deepEqual(report.smp.queryCalls.slice(-2), [
+    { query: '牙吠孔雀', limit: 5 },
+    { query: '牙吠眼鏡蛇', limit: 5 },
+  ]);
+  assert.deepEqual(report.kangaroo.result.candidates.map(candidate => candidate.catalogTitle), [
+    'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠袋鼠',
+  ]);
+  assert.ok(report.kangaroo.queryCalls.some(call => call.query === '牙吠袋鼠' && call.limit === 5));
+  assert.equal(report.familyFallback.queryCalls.at(-1).query, '牙吠');
+  assert.equal(report.familyFallback.queryCalls.at(-1).limit, 12);
+  assert.deepEqual(report.familyFallback.result.candidates.map(candidate => candidate.catalogTitle), [
+    'SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇',
+  ]);
+  assert.equal(report.familyFallback.result.candidates[0].retrieval.queryHits[0].nativeRank, 11);
+  assert.equal(report.familyFallback.result.classification, 'YELLOW');
+  assert.equal(report.retrievedButRejected.result.classification, 'RED');
+  assert.equal(report.retrievedButRejected.result.classificationReason, 'RETRIEVED_BUT_REJECTED');
+  assert.equal(report.retrievedButRejected.queries.includes('牙吠'), false);
+  assert.equal(report.omaneko.result.classificationReason, 'NO_CANDIDATE');
   assert.equal(
     report.unreliableProgressive.queries.length,
     report.plans.sophia.length,
@@ -348,7 +425,18 @@ try {
       recommendedCandidateId: report.sophia.result.recommendedCandidateId,
     },
     omaneko: { executedQueries: report.omaneko.queries, candidateCount: report.omaneko.result.candidates.length },
-    smp: { executedQueries: report.smp.queries, candidateCount: report.smp.result.candidates.length },
+    smp: {
+      executedQueries: report.smp.queryCalls,
+      top3: report.smp.result.candidates.map(candidate => candidate.catalogTitle),
+      classification: report.smp.result.classification,
+    },
+    familyFallback: {
+      executedQueries: report.familyFallback.queryCalls,
+      top3: report.familyFallback.result.candidates.map(candidate => ({
+        title: candidate.catalogTitle,
+        nativeRank: candidate.retrieval.queryHits[0].nativeRank,
+      })),
+    },
     progressive: {
       unsafeExecutedQueries: report.unreliableProgressive.queries,
       reliableExecutedQueries: report.reliableProgressive.queries,
@@ -361,6 +449,9 @@ try {
   }, null, 2));
   console.log('PASS Catalog API uses limit=5, never pageSize');
   console.log('PASS high-information query planner blocks generic PLA / 無比例 / 魂商店 & / & fallbacks');
+  console.log('PASS compound member search uses limit=5, preserves native #1, and skips family fallback after a raw hit');
+  console.log('PASS one family-stem fallback uses limit=12; unrelated native #3 is rejected while correct native #11 remains YELLOW');
+  console.log('PASS NO_CANDIDATE and RETRIEVED_BUT_REJECTED remain distinct fail-closed outcomes');
   console.log('PASS progressive search ignores raw conflicts and stops only after a reliable native Top 3');
   console.log('PASS native rank and multi-query evidence survive dedupe, Top 3, and Sidecar round-trip');
   console.log('PASS zero-confidence candidates are never reordered by source UUID');

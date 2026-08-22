@@ -36,6 +36,7 @@ export type CandidateMatchMethod =
 export type ResolutionFailureCode =
   | 'SERVICE_ERROR'
   | 'NO_CANDIDATE'
+  | 'RETRIEVED_BUT_REJECTED'
   | 'MISSING_DEADLINE'
   | 'IDENTITY_CONFLICT';
 
@@ -82,7 +83,9 @@ export type ResolutionCandidateQueryKind =
   | 'PRODUCT_LINE_SUBJECT'
   | 'SERIES_SUBJECT'
   | 'SUBJECT_VERSION_FORM'
-  | 'SUBJECT';
+  | 'SUBJECT'
+  | 'COMPOUND_MEMBER'
+  | 'FAMILY_STEM_FALLBACK';
 
 export interface ResolutionCandidateRetrievalEvidence {
   queryText: string;
@@ -203,6 +206,7 @@ export interface CreateResolutionResultInput {
   activeVerifiedMapping?: VerifiedMappingRegistryEntry | null;
   serviceError?: ResolutionServiceError | null;
   identityConflict?: boolean;
+  retrievedButRejected?: boolean;
   ruleVersion: string;
   snapshotVersion: string;
   analyzedAt: string;
@@ -598,9 +602,13 @@ export function classifyResolutionCandidate(input: {
   activeVerifiedMapping?: VerifiedMappingRegistryEntry | null;
   serviceError?: ResolutionServiceError | null;
   identityConflict?: boolean;
+  retrievedButRejected?: boolean;
 }): { classification: ResolutionClassification; reason: CandidateMatchMethod | ResolutionFailureCode } {
   if (input.serviceError) return { classification: 'RED', reason: 'SERVICE_ERROR' };
   if (input.identityConflict) return { classification: 'RED', reason: 'IDENTITY_CONFLICT' };
+  if (!input.candidate && input.retrievedButRejected) {
+    return { classification: 'RED', reason: 'RETRIEVED_BUT_REJECTED' };
+  }
   if (!input.candidate) return { classification: 'RED', reason: 'NO_CANDIDATE' };
   if (!input.candidate.rawDeadline || !input.candidate.suggestedClosingDate) {
     return { classification: 'RED', reason: 'MISSING_DEADLINE' };
@@ -643,6 +651,7 @@ export function createResolutionResult(input: CreateResolutionResultInput): Reso
     activeVerifiedMapping: input.activeVerifiedMapping,
     serviceError: input.serviceError,
     identityConflict: input.identityConflict,
+    retrievedButRejected: input.retrievedButRejected,
   });
   const selectedCandidateId = explicitlySelected?.id
     ?? (decision.classification === 'GREEN' ? recommended?.id : null);

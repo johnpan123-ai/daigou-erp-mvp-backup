@@ -46,6 +46,8 @@ import type {
 } from './proxyProductIdentityPilot';
 import {
   buildClosingDateCandidateRetrievalQueries,
+  buildClosingDateCompoundMemberQueries,
+  buildClosingDateFamilyStemFallbackQuery,
   CLOSING_DATE_CATALOG_NATIVE_LIMIT,
   CLOSING_DATE_RELIABLE_NATIVE_TOP_N,
 } from './closingDateCandidateRetrievalV2';
@@ -116,7 +118,7 @@ export interface RetryClosingDateBatchOptions {
 }
 
 export interface ClosingDateBatchSearch {
-  (query: string): Promise<readonly ProxyCatalogCandidate[]>;
+  (query: string, options?: { limit?: number }): Promise<readonly ProxyCatalogCandidate[]>;
 }
 
 export interface ClosingDateBatchAnalysisContext {
@@ -301,6 +303,29 @@ const hasExactSetConflict = (left: readonly string[], right: readonly string[]):
       || normalizedLeft.some((value, index) => value !== normalizedRight[index]));
 };
 
+const stripSharedSingleCjkSuffix = (values: readonly string[]): string[] => {
+  if (values.length < 2) return [...values];
+  const normalized = normalizedSafetySet(values);
+  const suffix = Array.from(normalized[0] ?? '').at(-1) ?? '';
+  if (
+    !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(suffix)
+    || !normalized.every(value => value.endsWith(suffix))
+  ) return normalized;
+  const stripped = normalized.map(value => value.slice(0, -suffix.length));
+  return stripped.every(value => Array.from(value).length >= 2) ? stripped.sort() : normalized;
+};
+
+const hasCompoundSetConflict = (left: readonly string[], right: readonly string[]): boolean => {
+  if (!hasExactSetConflict(left, right)) return false;
+  const normalizedLeft = normalizedSafetySet(left);
+  const normalizedRight = normalizedSafetySet(right);
+  const leftWithoutSuffix = stripSharedSingleCjkSuffix(left);
+  const rightWithoutSuffix = stripSharedSingleCjkSuffix(right);
+  return hasExactSetConflict(leftWithoutSuffix, normalizedRight)
+    && hasExactSetConflict(normalizedLeft, rightWithoutSuffix)
+    && hasExactSetConflict(leftWithoutSuffix, rightWithoutSuffix);
+};
+
 const hasDisjointSetConflict = (left: readonly string[], right: readonly string[]): boolean => {
   const normalizedLeft = normalizedSafetySet(left);
   const normalizedRight = normalizedSafetySet(right);
@@ -340,7 +365,7 @@ const hasExplicitIdentityConflict = (
     || hasDisjointSetConflict(source.modelCodes, candidate.modelCodes)
     || (sourceCompound.length > 0
       && candidateCompound.length > 0
-      && hasExactSetConflict(sourceCompound, candidateCompound))
+      && hasCompoundSetConflict(sourceCompound, candidateCompound))
     || (sourceCompound.length === 0
       && candidateCompound.length === 0
       && hasDefiniteSubjectConflict(source.subjects, candidate.subjects));
@@ -350,16 +375,22 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
   async context => {
     const title = context.item.title;
     const queries = buildClosingDateCandidateRetrievalQueries(title);
+    const compoundMemberQueries = buildClosingDateCompoundMemberQueries(title);
+    const familyStemQuery = buildClosingDateFamilyStemFallbackQuery(title);
     const candidateMap = new Map<string, RetrievedCatalogCandidate>();
     let lastServiceError: ClosingDateCatalogGatewayError | null = null;
     let selectedCandidate: ProxyCatalogCandidate | null = null;
     let selectedConfidence = 0;
     let firstSeenOrder = 0;
 
-    for (const query of queries) {
+    const runQueryStage = async (
+      stageQueries: readonly ReturnType<typeof buildClosingDateCandidateRetrievalQueries>[number][],
+      allowProgressiveStop: boolean,
+    ): Promise<boolean> => {
+      for (const query of stageQueries) {
       if (context.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
       try {
-        const products = await context.search(query.text);
+        const products = await context.search(query.text, { limit: query.limit });
         for (const [nativeIndex, product] of products.entries()) {
           const sourceProductId = candidateSourceProductId(product);
           if (!sourceProductId) continue;
@@ -406,7 +437,9 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         selectedCandidate = decision.match.candidate;
         selectedConfidence = decision.match.confidence;
         const supplier = candidateSupplier(selectedCandidate);
-        if (supplier === 'wanrong' && selectedCandidate.catalog?.deadlineAt) break;
+        if (allowProgressiveStop && supplier === 'wanrong' && selectedCandidate.catalog?.deadlineAt) {
+          return true;
+        }
       } else {
         selectedCandidate = null;
         selectedConfidence = 0;
@@ -414,8 +447,22 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       const reliableCandidateCount = new Set(
         scoredCandidates.filter(entry => !entry.v2.rejected).map(entry => entry.key),
       ).size;
-      if (reliableCandidateCount >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) break;
+      if (allowProgressiveStop && reliableCandidateCount >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) {
+        return true;
+      }
+      }
+      return false;
+    };
+
+    await runQueryStage(queries, true);
+    if (candidateMap.size === 0 && compoundMemberQueries.length > 0) {
+      await runQueryStage(compoundMemberQueries, false);
     }
+    if (candidateMap.size === 0 && familyStemQuery) {
+      await runQueryStage([familyStemQuery], false);
+    }
+    const finalSelectedCandidate = selectedCandidate as ProxyCatalogCandidate | null;
+    const finalServiceError = lastServiceError as ClosingDateCatalogGatewayError | null;
 
     const domainCandidates = [...candidateMap.values()].flatMap(retrieved => {
       const candidate = retrieved.candidate;
@@ -423,7 +470,7 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       if (hasExplicitIdentityConflict(v2)) return [];
       const source = sourceReferenceForCandidate(candidate, context.snapshot.version);
       if (!source) return [];
-      const isSelected = candidate === selectedCandidate;
+      const isSelected = candidate === finalSelectedCandidate;
       const v1 = scoreProxyCatalogCandidate(title, candidate);
       const confidence = isSelected
         ? selectedConfidence
@@ -458,10 +505,10 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       }];
     });
     const rankedCandidates = rankTopThreeCandidates(domainCandidates);
-    const selectedDomainCandidate = selectedCandidate
+    const selectedDomainCandidate = finalSelectedCandidate
       ? rankedCandidates.find(candidate => (
-        candidate.source.sourceSupplier === candidateSupplier(selectedCandidate)
-        && candidate.source.sourceProductId === candidateSourceProductId(selectedCandidate)
+        candidate.source.sourceSupplier === candidateSupplier(finalSelectedCandidate)
+        && candidate.source.sourceProductId === candidateSourceProductId(finalSelectedCandidate)
       ))
       : undefined;
     const activeVerifiedMapping = selectedDomainCandidate
@@ -481,11 +528,12 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       candidates: domainCandidates,
       recommendedCandidateId: selectedDomainCandidate?.id ?? null,
       activeVerifiedMapping,
-      serviceError: lastServiceError ? {
-        code: lastServiceError.code,
-        message: lastServiceError.message,
-        retryable: lastServiceError.retryable,
+      serviceError: finalServiceError ? {
+        code: finalServiceError.code,
+        message: finalServiceError.message,
+        retryable: finalServiceError.retryable,
       } : null,
+      retrievedButRejected: candidateMap.size > 0 && domainCandidates.length === 0,
       ruleVersion: context.ruleVersion,
       snapshotVersion: context.snapshot.version,
       analyzedAt: context.analyzedAt,
@@ -827,12 +875,12 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
     job: InternalResolutionJob,
     item: CreateResolutionJobRequest['items'][number],
   ): Promise<ResolutionResult> {
-    const search: ClosingDateBatchSearch = async query => {
+    const search: ClosingDateBatchSearch = async (query, options) => {
       job.metrics.logicalQueryCount += 1;
       const lookup: CatalogCacheLookupResult = await this.queryCache.lookup({
         snapshot: job.snapshot,
         query,
-        limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
+        limit: options?.limit ?? CLOSING_DATE_CATALOG_NATIVE_LIMIT,
         signal: job.controller.signal,
       });
       job.metrics.uniqueQueryKeys.add(lookup.cacheKey);

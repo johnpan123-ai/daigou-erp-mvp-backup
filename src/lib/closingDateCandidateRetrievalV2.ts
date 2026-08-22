@@ -6,18 +6,22 @@ import {
 import { normalizeProxyProductIdentity } from './proxyProductIdentity';
 
 export const CLOSING_DATE_CATALOG_NATIVE_LIMIT = 5;
+export const CLOSING_DATE_FAMILY_FALLBACK_NATIVE_LIMIT = 12;
 export const CLOSING_DATE_RELIABLE_NATIVE_TOP_N = 3;
 
 export type ClosingDateCandidateQueryKind =
   | 'PRODUCT_LINE_SUBJECT'
   | 'SERIES_SUBJECT'
   | 'SUBJECT_VERSION_FORM'
-  | 'SUBJECT';
+  | 'SUBJECT'
+  | 'COMPOUND_MEMBER'
+  | 'FAMILY_STEM_FALLBACK';
 
 export interface ClosingDateCandidateRetrievalQuery {
   text: string;
-  priority: 1 | 2 | 3 | 4;
+  priority: 1 | 2 | 3 | 4 | 5 | 6;
   kind: ClosingDateCandidateQueryKind;
+  limit: number;
 }
 
 const PRODUCT_LINE_QUERY_LABELS: Partial<Record<ProxySemanticProductLine, string>> = {
@@ -100,6 +104,32 @@ const normalizeQuery = (value: string): string => value
 
 const compactQuery = (value: string): string => normalizeQuery(value).toLocaleLowerCase();
 
+const cjkCharacters = (value: string): string[] => (
+  Array.from(normalizeQuery(value)).filter(character => (
+    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(character)
+  ))
+);
+
+const commonCjkPrefix = (values: readonly string[]): string => {
+  const characterSets = values.map(cjkCharacters);
+  if (characterSets.length < 2 || characterSets.some(characters => characters.length < 2)) return '';
+  const shortestLength = Math.min(...characterSets.map(characters => characters.length));
+  let index = 0;
+  while (
+    index < shortestLength
+    && characterSets.every(characters => characters[index] === characterSets[0][index])
+  ) index += 1;
+  return characterSets[0].slice(0, index).join('');
+};
+
+const sharedSingleCjkSuffix = (values: readonly string[]): string => {
+  if (values.length < 2) return '';
+  const normalized = values.map(value => normalizeQuery(value));
+  const suffix = Array.from(normalized[0]).at(-1) ?? '';
+  if (!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(suffix)) return '';
+  return normalized.every(value => value.endsWith(suffix)) ? suffix : '';
+};
+
 export const isLowInformationCatalogQuery = (query: string): boolean => {
   const normalized = compactQuery(query);
   if (!normalized) return true;
@@ -179,18 +209,26 @@ export function buildClosingDateCandidateRetrievalQueries(
       text: productLine ? `${productLine} ${subject}` : '',
       priority: 1,
       kind: 'PRODUCT_LINE_SUBJECT',
+      limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
     },
     {
       text: series ? `${series} ${subject}` : '',
       priority: 2,
       kind: 'SERIES_SUBJECT',
+      limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
     },
     {
       text: versionForm ? `${subject} ${versionForm}` : '',
       priority: 3,
       kind: 'SUBJECT_VERSION_FORM',
+      limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
     },
-    { text: subjectFallback, priority: 4, kind: 'SUBJECT' },
+    {
+      text: subjectFallback,
+      priority: 4,
+      kind: 'SUBJECT',
+      limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
+    },
   ];
 
   const seen = new Set<string>();
@@ -201,4 +239,62 @@ export function buildClosingDateCandidateRetrievalQueries(
     seen.add(key);
     return [{ ...query, text }];
   });
+}
+
+/**
+ * Compound member search is a retrieval-only fallback. A shared one-character
+ * CJK suffix is removed only when every member also shares a distinctive CJK
+ * family prefix. This converts catalog-family labels such as
+ * `牙吠孔雀王 + 牙吠眼鏡蛇王` into the native-search terms
+ * `牙吠孔雀` and `牙吠眼鏡蛇` without any character-specific registry.
+ */
+export function buildClosingDateCompoundMemberQueries(
+  title: string,
+): readonly ClosingDateCandidateRetrievalQuery[] {
+  const identity = parseProxyProductIdentityV21(title);
+  const members = identity.compoundSubjects[0]?.members.map(normalizeQuery).filter(Boolean) ?? [];
+  const familyPrefix = commonCjkPrefix(members);
+  const sharedSuffix = familyPrefix.length >= 2 ? sharedSingleCjkSuffix(members) : '';
+  const seen = new Set<string>();
+  return members.flatMap(member => {
+    const text = normalizeQuery(
+      sharedSuffix && cjkCharacters(member.slice(0, -sharedSuffix.length)).length >= 2
+        ? member.slice(0, -sharedSuffix.length)
+        : member,
+    );
+    const key = compactQuery(text);
+    if (!text || seen.has(key) || isLowInformationCatalogQuery(text)) return [];
+    seen.add(key);
+    return [{
+      text,
+      priority: 5 as const,
+      kind: 'COMPOUND_MEMBER' as const,
+      limit: CLOSING_DATE_CATALOG_NATIVE_LIMIT,
+    }];
+  });
+}
+
+/**
+ * The family stem is allowed only for two or more explicit compound members
+ * with a shared, distinctive CJK prefix. It never reads product type, product
+ * line, manufacturer, qualifier, or business metadata.
+ */
+export function buildClosingDateFamilyStemFallbackQuery(
+  title: string,
+): ClosingDateCandidateRetrievalQuery | null {
+  const identity = parseProxyProductIdentityV21(title);
+  const members = identity.compoundSubjects[0]?.members.map(normalizeQuery).filter(Boolean) ?? [];
+  const stem = commonCjkPrefix(members);
+  if (
+    members.length < 2
+    || Array.from(stem).length < 2
+    || members.some(member => compactQuery(member) === compactQuery(stem))
+    || isLowInformationCatalogQuery(stem)
+  ) return null;
+  return {
+    text: stem,
+    priority: 6,
+    kind: 'FAMILY_STEM_FALLBACK',
+    limit: CLOSING_DATE_FAMILY_FALLBACK_NATIVE_LIMIT,
+  };
 }

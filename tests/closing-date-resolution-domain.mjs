@@ -206,6 +206,10 @@ try {
         serviceError: { code: 'UPSTREAM', message: 'unavailable', retryable: true },
       }),
       empty: domain.classifyResolutionCandidate({ erpProductGroupId: 'group-1' }),
+      retrievedButRejected: domain.classifyResolutionCandidate({
+        erpProductGroupId: 'group-1',
+        retrievedButRejected: true,
+      }),
       missingDeadline: domain.classifyResolutionCandidate({
         erpProductGroupId: 'group-1',
         candidate: makeCandidate({ rawDeadline: null }),
@@ -388,6 +392,10 @@ try {
   });
   assert.equal(result.redClassifications.service.classification, 'RED');
   assert.equal(result.redClassifications.empty.classification, 'RED');
+  assert.deepEqual(result.redClassifications.retrievedButRejected, {
+    classification: 'RED',
+    reason: 'RETRIEVED_BUT_REJECTED',
+  });
   assert.equal(result.redClassifications.missingDeadline.classification, 'RED');
 
   assert.deepEqual(result.jobState.statuses, ['QUEUED', 'RUNNING', 'CANCELLING', 'CANCELLED']);
