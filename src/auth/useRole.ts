@@ -49,11 +49,11 @@ export function useRole(): UserRole {
     canViewPage: (path: string) => {
       // Unauthenticated (role is null)
       if (!role) {
-        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/unlisted-items' || path === '/login';
+        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/recent-purchases' || path === '/inventory' || path === '/unlisted-items' || path === '/login';
       }
       // Viewer
       if (role === 'viewer') {
-        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/inventory' || path === '/purchasing' || path === '/login' || path === '/japan-packages' || path.startsWith('/japan-packages/') || path === '/unlisted-items' || path === '/outbound-shipments' || path.startsWith('/outbound-shipments/');
+        return path === '/' || path === '/dashboard' || path === '/purchase-records' || path === '/recent-purchases' || path === '/inventory' || path === '/purchasing' || path === '/login' || path === '/japan-packages' || path.startsWith('/japan-packages/') || path === '/unlisted-items' || path === '/outbound-shipments' || path.startsWith('/outbound-shipments/');
       }
       // Helper (cannot view settings)
       if (role === 'helper') {
