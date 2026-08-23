@@ -613,9 +613,10 @@ try {
   await reloadedYellowCandidate.locator('input[type="radio"]').check();
   await page.getByText(/已選 2 \/ 3 筆/u).waitFor();
 
-  page.once('dialog', dialog => dialog.accept());
   const requestsBeforeClose = catalogRequests.length;
   await page.getByTestId('closing-date-workbench-apply').click();
+  await page.getByTestId('closing-date-apply-confirmation').waitFor();
+  await page.getByTestId('closing-date-apply-confirm').click();
   await page.getByTestId('closing-date-workbench').waitFor({ state: 'detached' });
   await page.getByTestId('closing-date-apply-success').waitFor();
   assert.match(await page.getByTestId('closing-date-apply-success').textContent(), /已成功套用 2 筆結單日/u);
@@ -670,8 +671,9 @@ try {
     });
     database.close();
   });
-  page.once('dialog', dialog => dialog.accept());
   await page.getByTestId('closing-date-workbench-apply').click();
+  await page.getByTestId('closing-date-apply-confirmation').waitFor();
+  await page.getByTestId('closing-date-apply-confirm').click();
   await page.getByText(/偵測到資料衝突，整批 0 write/u).waitFor();
   assert.equal(await page.getByTestId('closing-date-workbench').count(), 1, 'Conflict must keep Workbench open');
 
@@ -686,6 +688,7 @@ try {
       cancelRetry: true,
       radioSelectionPersistentWrite: 0,
       preApplyReloadMappingWrite: 0,
+      customApplyConfirmation: true,
       successfulApplyAutoClose: true,
       successfulApplyToast: true,
       conflictKeepsWorkbenchOpen: true,

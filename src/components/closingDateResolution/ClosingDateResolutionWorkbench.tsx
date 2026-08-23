@@ -276,6 +276,7 @@ export default function ClosingDateResolutionWorkbench({
   const [selectedCandidates, setSelectedCandidates] = useState<Record<string, string>>({});
   const [pendingMappings, setPendingMappings] = useState<Record<string, VerifiedMappingRegistryEntry>>({});
   const [applying, setApplying] = useState(false);
+  const [showApplyConfirmation, setShowApplyConfirmation] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const mountedRef = useRef(true);
   const pollingRef = useRef(false);
@@ -401,6 +402,7 @@ export default function ClosingDateResolutionWorkbench({
     setNotice({ kind: 'info', text: `正在建立 ${groupsToAnalyze.length} 筆商品的唯讀分析 Batch…` });
     setSelectedCandidates({});
     setPendingMappings({});
+    setShowApplyConfirmation(false);
     setResults([]);
     setMetrics(null);
     try {
@@ -438,6 +440,7 @@ export default function ClosingDateResolutionWorkbench({
     try {
       setSelectedCandidates({});
       setPendingMappings({});
+      setShowApplyConfirmation(false);
       const poll = await getClosingDateWorkbenchRuntime().gateway.pollJob(batch.id);
       await displayPoll(poll);
       setActiveJobId(terminalStatuses.has(poll.batch.status) ? null : poll.batch.id);
@@ -509,17 +512,13 @@ export default function ClosingDateResolutionWorkbench({
     return selection ? [selection] : [];
   }), [pendingMappings, results, selectedCandidates]);
 
+  const skippedYellowCount = results.filter(result => (
+    result.classification === 'YELLOW' && !selectedCandidates[result.id]
+  )).length;
+
   const apply = async () => {
     if (!currentBatch || applicableSelections.length === 0 || applying) return;
-    const skippedYellow = results.filter(result => (
-      result.classification === 'YELLOW' && !selectedCandidates[result.id]
-    )).length;
-    const confirmed = window.confirm(
-      `確定套用 ${applicableSelections.length} 筆結單日嗎？\n\n`
-      + `紅色結果不會套用；未選擇的黃色結果 ${skippedYellow} 筆也會略過。\n`
-      + '套用前會重新檢查商品與結單日；任一衝突將整批取消（0 write）。',
-    );
-    if (!confirmed) return;
+    setShowApplyConfirmation(false);
     setApplying(true);
     try {
       const identity = createClosingDateApplyIdentity(currentBatch, applicableSelections);
@@ -661,7 +660,7 @@ export default function ClosingDateResolutionWorkbench({
                     type="button"
                     data-testid="closing-date-workbench-apply"
                     disabled={applicableSelections.length === 0 || applying}
-                    onClick={() => void apply()}
+                    onClick={() => setShowApplyConfirmation(true)}
                     style={{ border: 0, borderRadius: 8, background: applicableSelections.length ? '#059669' : '#94a3b8', color: '#fff', padding: '10px 16px', fontWeight: 800, cursor: applying ? 'wait' : 'pointer' }}
                   >
                     {applying ? 'Atomic 套用中…' : '最後確認並 Atomic 套用'}
@@ -700,6 +699,46 @@ export default function ClosingDateResolutionWorkbench({
           </div>
         </div>
       </section>
+
+      {showApplyConfirmation && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="closing-date-apply-confirm-title"
+          data-testid="closing-date-apply-confirmation"
+          style={{ position: 'fixed', inset: 0, zIndex: 2100, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}
+        >
+          <section style={{ width: 'min(460px, 100%)', borderRadius: 14, background: '#fff', boxShadow: '0 24px 80px rgba(15,23,42,0.38)', padding: 20 }}>
+            <h3 id="closing-date-apply-confirm-title" style={{ margin: 0, fontSize: 18 }}>確認 Atomic 套用</h3>
+            <p style={{ margin: '12px 0 0', color: '#334155', lineHeight: 1.65 }}>
+              確定套用 <strong>{applicableSelections.length}</strong> 筆結單日嗎？
+            </p>
+            <div style={{ marginTop: 10, borderRadius: 8, background: '#f8fafc', padding: '10px 12px', color: '#475569', fontSize: 13, lineHeight: 1.65 }}>
+              <div>紅色結果不會套用；未選擇的黃色結果 {skippedYellowCount} 筆也會略過。</div>
+              <div>套用前會重新檢查商品與結單日；任一衝突將整批取消（0 write）。</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                data-testid="closing-date-apply-cancel"
+                onClick={() => setShowApplyConfirmation(false)}
+                style={{ border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', color: '#334155', padding: '9px 14px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                data-testid="closing-date-apply-confirm"
+                disabled={applying}
+                onClick={() => void apply()}
+                style={{ border: 0, borderRadius: 8, background: '#059669', color: '#fff', padding: '9px 14px', fontWeight: 800, cursor: applying ? 'wait' : 'pointer' }}
+              >
+                {applying ? 'Atomic 套用中…' : `確認套用 ${applicableSelections.length} 筆`}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
