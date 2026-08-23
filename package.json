@@ -50,6 +50,8 @@
     "test:closing-date-sidecar-storage": "node tests/closing-date-resolution-sidecar-storage.mjs",
     "test:closing-date-batch-gateway": "node tests/closing-date-batch-gateway.mjs",
     "test:closing-date-candidate-retrieval-v2": "node tests/closing-date-candidate-retrieval-v2.mjs",
+    "test:closing-date-generalized-retrieval": "node tests/closing-date-generalized-retrieval.mjs",
+    "test:closing-date-residual-minimal-fix": "node tests/closing-date-residual-minimal-fix.mjs",
     "benchmark:closing-date-candidate-retrieval-v2": "node tests/closing-date-candidate-retrieval-v2-performance.mjs",
     "benchmark:closing-date-candidate-retrieval-v2-live": "node tests/closing-date-candidate-retrieval-v2-live.mjs",
     "benchmark:closing-date-batch-gateway": "node tests/closing-date-batch-gateway-performance.mjs",

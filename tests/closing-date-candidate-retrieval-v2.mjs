@@ -75,6 +75,13 @@ try {
       redHood: '代理版 26年第四季 和模線 勝利女神：妮姬 小紅帽 1/12 組裝模型',
       reliable: '代理版 角川 KDcolle 狼與辛香料 赫蘿 原作版 無比例模型',
       unresolved: '代理版 無比例 約23公分',
+      elaina: '預購 27年09月 代理版 GSC 魔女之旅 伊蕾娜 Azure 插畫 1/7',
+      awayuki: '預購 27年05月 代理版 QuesQ SWAV 原畫 Tactical Bride 淡雪 1/7',
+      nendoroid3059: '預購 27年03月 代理版 GSC 黏土人 3059 Monster Hunter 魔物獵人 火龍 雄火龍',
+      mixedScriptMx: '預購 27年01月 代理版 GSC 組裝模型 PLAMATEA 繪師toridamono MX醬 約16公分',
+      shortMixedForm: '代理版 PLAMATEA F型',
+      versionMixedForm: '代理版 PLAMATEA DX版',
+      loneCjkSuffix: '代理版 PLAMATEA 醬',
     };
     const plans = Object.fromEntries(Object.entries(titles).map(([key, title]) => [
       key,
@@ -238,6 +245,77 @@ try {
       titles.louise,
       () => [louiseCandidate],
     );
+    const elainaCandidate = {
+      id: 'elaina-wanrong-native-1',
+      name: '1/7 魔女之旅 伊蕾娜',
+      catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-08-24T08:00:00.000Z' },
+    };
+    const elaina = await analyze('elaina', titles.elaina, query => (
+      query === '魔女之旅 伊蕾娜' ? [elainaCandidate] : []
+    ));
+    const awayukiWrong = Array.from({ length: 10 }, (_, index) => ({
+      id: `awayuki-wrong-${index + 1}`,
+      name: `${5406 + index}-${1896 + index} 戀上換裝娃娃 淡雪陽彩 商品 ${index + 1}`,
+      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-30T00:00:00.000Z' },
+    }));
+    const awayukiCorrect = {
+      id: 'awayuki-dreamlink-native-11',
+      name: '1/7 PVC「Tactical Bride」淡雪 by SWAV',
+      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-06T15:00:00.000Z' },
+    };
+    const awayukiNativeWindow = [...awayukiWrong, awayukiCorrect, {
+      id: 'awayuki-native-12',
+      name: '其他商品',
+      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-30T00:00:00.000Z' },
+    }];
+    const awayuki = await analyze('awayuki', titles.awayuki, (query, options) => (
+      query === '淡雪' ? awayukiNativeWindow.slice(0, options?.limit ?? 5) : []
+    ));
+    const fireDragonWrong = [
+      {
+        id: 'plafig-pf-sp05',
+        name: '*PLAfig PF-SP05 魔物獵人 雄火龍 限定版(模型)',
+        catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
+      },
+      {
+        id: 'plafig-pf-05',
+        name: '*PLAfig PF-05 魔物獵人 雄火龍(模型)',
+        catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
+      },
+    ];
+    const fireDragonCorrect = {
+      id: 'nendoroid-3059-dreamlink',
+      name: '黏土人3059《魔物獵人》火龍',
+      brand: { name: 'Goodsmile' },
+      catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-09T15:00:00.000Z' },
+    };
+    const modelCodeNativeWindow = [
+      { id: 'numeric-noise-1', name: '無關商品8684-1445', catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-08-26T15:00:00.000Z' } },
+      ...fireDragonWrong,
+      fireDragonCorrect,
+    ];
+    const fireDragon = await analyze('nendoroid-3059', titles.nendoroid3059, (query, options) => {
+      if (query === '3059') return modelCodeNativeWindow.slice(0, options?.limit ?? 5);
+      if (query === '雄火龍') return fireDragonWrong;
+      return [];
+    });
+    const mxCandidates = [
+      {
+        id: 'plamatea-mx-wanrong',
+        name: 'PLAMATEA MX醬',
+        brand: { name: 'Good Smile Company' },
+        catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
+      },
+      {
+        id: 'plamatea-mx-dreamlink',
+        name: 'PLAMATEA MX醬',
+        brand: { name: 'Goodsmile' },
+        catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-09T15:00:00.000Z' },
+      },
+    ];
+    const mixedScriptMx = await analyze('mixed-script-mx', titles.mixedScriptMx, query => (
+      query === 'PLAMATEA MX醬' || query === 'MX醬' ? mxCandidates : []
+    ));
 
     let capturedUrl = '';
     const httpClient = cacheModule.createReadonlyCatalogHttpClient({
@@ -296,7 +374,11 @@ try {
       async openSnapshot() { return snapshot; },
       async search(request) {
         return {
-          products: request.query === '希琳' ? sophiaCandidates : [],
+          products: request.query === '希琳'
+            ? sophiaCandidates
+            : request.query === '淡雪'
+              ? awayukiNativeWindow.slice(0, request.limit)
+              : [],
           snapshotVersion: request.snapshotVersion,
         };
       },
@@ -316,6 +398,16 @@ try {
     });
     const completed = await gateway.waitForJob(created.jobId);
     const stored = await repository.listResolutionResults(created.jobId);
+    const awayukiCreated = await gateway.createJob({
+      clientBatchId: 'retrieval-awayuki-roundtrip',
+      idempotencyKey: 'retrieval-awayuki-roundtrip-v1',
+      inputHash: 'retrieval-awayuki-roundtrip-input',
+      snapshotVersionPreference: 'LATEST',
+      ruleVersion: 'closing-date-minus-two-v1',
+      items: [makeItem('awayuki-roundtrip', titles.awayuki)],
+    });
+    await gateway.waitForJob(awayukiCreated.jobId);
+    const storedAwayuki = await repository.listResolutionResults(awayukiCreated.jobId);
     const nextAfter = await environment.readPhysicalIndexedDbSnapshot('daigou-erp-db-next-v1');
     const productionAfter = await environment.readPhysicalIndexedDbSnapshot('daigou-erp-db');
     repository.close();
@@ -329,7 +421,7 @@ try {
     return {
       plans,
       lowInformationQueries: Object.fromEntries(
-        ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分', '約', '限定']
+        ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分', '約', '限定', '插畫', '原畫', '3059']
           .map(query => [query, planner.isLowInformationCatalogQuery(query)]),
       ),
       louise,
@@ -356,11 +448,16 @@ try {
       unreliableProgressive,
       reliableProgressive,
       repeatedEvidence,
+      elaina,
+      awayuki,
+      fireDragon,
+      mixedScriptMx,
       capturedUrl,
       zeroConfidenceRanked,
       roundtrip: {
         completed: completed.results,
         stored,
+        storedAwayuki,
       },
       nextUnchanged: JSON.stringify(nextBefore) === JSON.stringify(nextAfter),
       productionUnchanged: JSON.stringify(productionBefore) === JSON.stringify(productionAfter),
@@ -368,20 +465,33 @@ try {
   });
 
   const allQueries = Object.values(report.plans).flat().map(query => query.text);
-  assert.equal(Object.values(report.plans).every(queries => queries.length <= 4), true);
+  assert.equal(Object.values(report.plans).every(queries => queries.length <= 6), true);
   assert.equal(allQueries.includes('PLA'), false);
   assert.equal(allQueries.includes('無比例'), false);
   assert.equal(allQueries.includes('魂商店 &'), false);
   assert.equal(allQueries.includes('&'), false);
-  for (const generic of ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分', '約', '限定']) {
+  for (const generic of ['一般版', '再販', 'figma', 'POP UP PARADE', 'SMP', '1/7', '約23公分', '約', '限定', '插畫', '原畫']) {
     assert.equal(report.lowInformationQueries[generic], true, `${generic} must remain a blocked bare query`);
   }
   assert.ok(report.plans.louise.some(query => query.text === '露易絲'));
   assert.ok(report.plans.sophia.some(query => query.text.includes('索菲亞 F 希琳')));
   assert.ok(report.plans.sophia.some(query => query.text === '希琳'));
-  assert.deepEqual(report.plans.redHood.map(query => query.text), ['妮姬 小紅帽', '小紅帽']);
+  assert.deepEqual(
+    report.plans.redHood.map(query => query.text),
+    ['妮姬 小紅帽', '小紅帽', '妮姬', '勝利女神'],
+  );
   assert.equal(report.plans.omaneko.some(query => query.text === 'PLA'), false);
   assert.deepEqual(report.plans.unresolved, [], 'low-information subject fallback must fail closed');
+  assert.deepEqual(report.plans.elaina.map(query => query.text), ['魔女之旅 伊蕾娜', '伊蕾娜', '魔女之旅']);
+  assert.deepEqual(report.plans.awayuki.map(query => query.text), ['淡雪']);
+  assert.equal(report.plans.elaina.some(query => query.text === '插畫'), false);
+  assert.deepEqual(report.plans.nendoroid3059.map(query => query.text), ['3059', '魔物獵人 火龍 雄火龍', '雄火龍']);
+  assert.equal(report.plans.nendoroid3059[0].kind, 'MODEL_CODE');
+  assert.deepEqual(report.plans.mixedScriptMx.map(query => query.text), ['PLAMATEA MX醬', 'MX醬']);
+  assert.deepEqual(report.plans.shortMixedForm, []);
+  assert.deepEqual(report.plans.versionMixedForm, []);
+  assert.deepEqual(report.plans.loneCjkSuffix, []);
+  assert.equal(report.lowInformationQueries['3059'], true, 'bare numbers remain low-information outside a validated Model Code plan');
 
   assert.deepEqual(report.louise.result.candidates.map(candidate => candidate.catalogTitle), [
     '露易絲 20th Anniversary non scale model',
@@ -389,11 +499,10 @@ try {
   assert.equal(report.louise.result.candidates[0].retrieval.queryHits[0].nativeRank, 1);
   assert.deepEqual(report.sophia.result.candidates.map(candidate => candidate.catalogTitle), [
     '1/9 索菲亞·F·希琳 碧藍兔子Ver. 包膠可動公仔',
-    '1/9 可動 索菲亞·F·希琳 碧藍兔子Ver.',
   ]);
   assert.deepEqual(
     report.sophia.result.candidates.map(candidate => candidate.retrieval.queryHits[0].nativeRank),
-    [2, 3],
+    [2],
   );
   assert.equal(report.omaneko.queries.includes('PLA'), false);
   assert.equal(report.smp.queries.includes('魂商店 &'), false);
@@ -423,6 +532,11 @@ try {
   assert.equal(report.familyFallback.result.classification, 'YELLOW');
   assert.equal(report.retrievedButRejected.result.classification, 'RED');
   assert.equal(report.retrievedButRejected.result.classificationReason, 'RETRIEVED_BUT_REJECTED');
+  assert.ok((report.retrievedButRejected.result.rejectedCandidates?.length ?? 0) > 0);
+  assert.ok(report.retrievedButRejected.result.rejectedCandidates.every(candidate => (
+    candidate.applyEligible === false && candidate.rejectReasons.length > 0
+  )));
+  assert.ok(report.retrievedButRejected.result.rejectedCandidates.length <= 5);
   assert.equal(report.retrievedButRejected.queries.includes('牙吠'), false);
   assert.equal(report.omaneko.result.classificationReason, 'NO_CANDIDATE');
   assert.deepEqual(report.redHood.queries, ['妮姬 小紅帽']);
@@ -456,11 +570,53 @@ try {
     report.repeatedEvidence.result.candidates[0].retrieval.queryHits.length,
     report.plans.louise.length,
   );
+  assert.deepEqual(report.elaina.queryCalls, [
+    { query: '魔女之旅 伊蕾娜', limit: 5 },
+  ]);
+  assert.equal(report.elaina.queryCalls.some(call => call.limit === 12), false);
+  assert.equal(report.elaina.result.candidates[0].catalogTitle, '1/7 魔女之旅 伊蕾娜');
+  assert.equal(report.elaina.result.candidates[0].retrieval.queryHits[0].nativeRank, 1);
+  assert.equal(report.elaina.result.classification, 'YELLOW');
+  assert.deepEqual(report.awayuki.queryCalls, [
+    { query: '淡雪', limit: 5 },
+    { query: '淡雪', limit: 12 },
+  ]);
+  assert.equal(report.awayuki.result.candidates[0].catalogTitle, '1/7 PVC「Tactical Bride」淡雪 by SWAV');
+  assert.equal(report.awayuki.result.candidates[0].retrieval.queryHits[0].nativeRank, 11);
+  assert.equal(report.awayuki.result.classification, 'YELLOW');
+  assert.ok(report.awayuki.result.rejectedCandidates.every(candidate => candidate.applyEligible === false));
+  assert.ok(report.awayuki.result.rejectedCandidates.some(candidate => (
+    candidate.rejectReasons.includes('INSUFFICIENT_STRUCTURAL_COMPATIBILITY')
+  )));
+  assert.deepEqual(report.fireDragon.queryCalls, [{ query: '3059', limit: 5 }]);
+  assert.equal(report.fireDragon.result.classification, 'YELLOW');
+  assert.equal(report.fireDragon.result.candidates[0].catalogTitle, '黏土人3059《魔物獵人》火龍');
+  assert.equal(report.fireDragon.result.candidates[0].retrieval.queryHits[0].nativeRank, 4);
+  assert.equal(report.fireDragon.result.rejectedCandidates.some(candidate => (
+    candidate.catalogTitle.includes('PF-SP05')
+    && candidate.rejectReasons.includes('MODEL_CODE_CONFLICT')
+  )), true);
+  assert.equal(report.fireDragon.result.rejectedCandidates.some(candidate => (
+    candidate.catalogTitle.includes('PF-05')
+    && candidate.rejectReasons.includes('MODEL_CODE_CONFLICT')
+  )), true);
+  assert.deepEqual(report.mixedScriptMx.queryCalls, [
+    { query: 'PLAMATEA MX醬', limit: 5 },
+  ], 'a reliable Product Line + Subject result must stop before the subject fallback');
+  assert.deepEqual(
+    report.mixedScriptMx.result.candidates.map(candidate => candidate.catalogTitle),
+    ['PLAMATEA MX醬', 'PLAMATEA MX醬'],
+  );
+  assert.equal(report.mixedScriptMx.result.candidates[0].source.sourceSupplier, 'wanrong');
+  assert.equal(report.mixedScriptMx.result.classification, 'YELLOW');
   assert.match(report.capturedUrl, /[?&]limit=5(?:&|$)/u);
   assert.doesNotMatch(report.capturedUrl, /[?&]pageSize=/u);
   assert.deepEqual(report.zeroConfidenceRanked, ['native-1', 'native-2', 'native-3']);
   assert.deepEqual(report.roundtrip.stored, report.roundtrip.completed);
   assert.ok(report.roundtrip.stored[0].candidates.every(candidate => candidate.retrieval?.queryHits.length > 0));
+  assert.equal(report.roundtrip.storedAwayuki[0].candidates[0].retrieval.queryHits[0].nativeRank, 11);
+  assert.ok(report.roundtrip.storedAwayuki[0].rejectedCandidates.length <= 5);
+  assert.ok(report.roundtrip.storedAwayuki[0].rejectedCandidates.every(candidate => candidate.applyEligible === false));
   assert.equal(report.nextUnchanged, true);
   assert.equal(report.productionUnchanged, true);
   assert.deepEqual(supabaseRequests, []);
@@ -514,6 +670,33 @@ try {
       executedQueries: report.repeatedEvidence.queries,
       queryHits: report.repeatedEvidence.result.candidates[0].retrieval.queryHits,
     },
+    elaina: {
+      executedQueries: report.elaina.queryCalls,
+      top3: report.elaina.result.candidates.map(candidate => candidate.catalogTitle),
+    },
+    awayuki: {
+      executedQueries: report.awayuki.queryCalls,
+      top3: report.awayuki.result.candidates.map(candidate => ({
+        title: candidate.catalogTitle,
+        nativeRank: candidate.retrieval.queryHits[0].nativeRank,
+      })),
+      rejectedDiagnostics: report.awayuki.result.rejectedCandidates,
+    },
+    fireDragon: {
+      executedQueries: report.fireDragon.queryCalls,
+      top3: report.fireDragon.result.candidates.map(candidate => ({
+        title: candidate.catalogTitle,
+        nativeRank: candidate.retrieval.queryHits[0].nativeRank,
+      })),
+      rejectedDiagnostics: report.fireDragon.result.rejectedCandidates,
+    },
+    mixedScriptMx: {
+      executedQueries: report.mixedScriptMx.queryCalls,
+      top3: report.mixedScriptMx.result.candidates.map(candidate => ({
+        title: candidate.catalogTitle,
+        supplier: candidate.source.sourceSupplier,
+      })),
+    },
   }, null, 2));
   console.log('PASS Catalog API uses limit=5, never pageSize');
   console.log('PASS high-information query planner blocks generic PLA / 無比例 / 魂商店 & / & fallbacks');
@@ -524,6 +707,10 @@ try {
   console.log('PASS unresolved context query retrieves the compatible Red Hood model kit and preserves raw Catalog brand');
   console.log('PASS native rank and multi-query evidence survive dedupe, Top 3, and Sidecar round-trip');
   console.log('PASS zero-confidence candidates are never reordered by source UUID');
+  console.log('PASS 伊蕾娜 uses 魔女之旅 伊蕾娜 / 伊蕾娜 and never a bare 插畫 query');
+  console.log('PASS 淡雪 performs at most one limit=12 expansion; native #11 remains YELLOW and wrong candidates remain non-applicable');
+  console.log('PASS validated Model Code 3059 retrieves native #4 while PF-SP05 / PF-05 remain safety-rejected');
+  console.log('PASS MX醬 is queried as a distinctive mixed-script Subject and creator metadata is not queried');
   console.log('PASS Production Supabase requests = 0; Next/Production ERP DB unchanged');
 } finally {
   await browser?.close();

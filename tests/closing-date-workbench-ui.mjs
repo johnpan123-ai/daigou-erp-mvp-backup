@@ -98,6 +98,12 @@ try {
         sku: 'NENDOROID-3121',
         catalog: { supplier: { code: 'wanrong' }, deadlineAt: '2026-09-07T08:00:00.000Z' },
       }];
+    } else if (query.includes('商品紅色')) {
+      products = [{
+        id: 'candidate-red-conflict',
+        name: '1/7 Scale Figure 商品紅色',
+        catalog: { supplier: { code: 'dreamlink' }, deadlineAt: '2026-09-30T08:00:00.000Z' },
+      }];
     }
     await route.fulfill({
       status: 200,
@@ -496,7 +502,7 @@ try {
     const groups = [
       { id: 'ui-green', title: '代理版 figma 地獄征服者 Helltaker 路西法', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', source_type: 'proxy', created_at: now, updated_at: now },
       { id: 'ui-yellow', title: '代理版 GSC 黏土人 3121 BanG Dream! 夢限大MewType 峰月律', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', source_type: 'proxy', created_at: now, updated_at: now },
-      { id: 'ui-red', title: '代理版 不存在 商品紅色', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', source_type: 'proxy', created_at: now, updated_at: now },
+      { id: 'ui-red', title: '代理版 GSC 黏土人 商品紅色', purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false, product_url: '', source_type: 'proxy', created_at: now, updated_at: now },
     ];
     const database = await new Promise((resolve, reject) => {
       const request = indexedDB.open(environment.NEXT_SANDBOX_INDEXED_DB_NAME, 1);
@@ -558,6 +564,14 @@ try {
     1,
     JSON.stringify(classificationHeadings),
   );
+  const redResultUi = page.locator('[data-testid="closing-date-result-ui-red"]');
+  await redResultUi.getByText('查看被安全排除的候選', { exact: true }).click();
+  const rejectedText = await redResultUi.locator('[data-testid^="closing-date-rejected-"]').textContent();
+  assert.match(rejectedText, /1\/7 Scale Figure 商品紅色/u);
+  assert.match(rejectedText, /供應商：DreamLink/u);
+  assert.match(rejectedText, /Native Rank：#1/u);
+  assert.match(rejectedText, /Query：商品紅色/u);
+  assert.match(rejectedText, /PRODUCT_TYPE_CONFLICT/u);
   const greenResult = page.locator('[data-testid="closing-date-result-ui-green"]');
   assert.equal(await greenResult.getByText('✓ 已驗證', { exact: true }).count(), 1);
 

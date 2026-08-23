@@ -964,6 +964,7 @@ implements ClosingDateResolutionSidecarRepository {
             productUpdatedAtAtAnalysis: currentResult.productUpdatedAtAtAnalysis ?? null,
             closingDateAtAnalysis: currentResult.closingDateAtAnalysis ?? null,
             candidates: currentResult.candidates,
+            rejectedCandidates: currentResult.rejectedCandidates,
             recommendedCandidateId: candidate.id,
             selectedCandidateId: candidate.id,
             activeVerifiedMapping: persistedMapping,

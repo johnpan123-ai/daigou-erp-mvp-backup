@@ -102,6 +102,10 @@ try {
         source: '魂商店 萬代 SMP 牙吠孔雀王 & 牙吠眼鏡蛇王',
         candidates: [candidate('萬代 SMP 牙吠眼鏡蛇王 ＆ 牙吠孔雀王', 'smp-reverse', 'wanrong', 'BANDAI')],
       },
+      compoundChain: {
+        source: '預購 27年03月 再版 代理 萬代 盒玩 SMP 百獸戰隊 牙吠連者 牙吠力士 牙吠犀牛&犰狳',
+        candidates: [candidate('SMP 百獸戰隊牙吠連者 牙吠力士/牙吠犀牛&amp;牙吠犰狳（再販）', 'smp-compound-chain', 'wanrong', 'BANDAI')],
+      },
     };
     const matched = Object.fromEntries(Object.entries(shouldMatch).map(([key, testCase]) => {
       const v1Selection = v1.selectProxyCatalogCandidate(testCase.source, testCase.candidates);
@@ -153,6 +157,14 @@ try {
         '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 DX Ver.',
         candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿 一般版 組裝模型', 'wrong-version'),
       ),
+      thirdVsVer2: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 超像可動 JOJO 白金之星 3rd',
+        candidate('超像可動 JOJO 白金之星 Ver.2', 'third-vs-ver2'),
+      ),
+      dxVsRegular: pilot.scoreProxyCatalogCandidateV2Pilot(
+        '代理版 角川 PLASTIC MODEL 狼與辛香料 赫蘿 DX Ver.',
+        candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿 一般版', 'dx-vs-regular'),
+      ),
       regularVsDx: pilot.scoreProxyCatalogCandidateV2Pilot(
         '代理版 角川 組裝模型 PLASTIC MODEL 狼與辛香料 赫蘿 一般版',
         candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿 DX Ver.', 'regular-vs-dx'),
@@ -177,6 +189,10 @@ try {
         candidate('KADOKAWA PLASTIC MODEL SERIES 狼與辛香料 赫蘿', `default-${version}`),
       )
     ));
+    const releaseStatusEquivalent = pilot.scoreProxyCatalogCandidateV2Pilot(
+      '預購 27年07月 再版 代理 萬代 盒玩 SMP 百獸戰隊 牙吠連者 牙吠神',
+      candidate('SMP 百獸戰隊牙吠連者 牙吠神（再販）', 'smp-release-status', 'wanrong', 'BANDAI'),
+    );
 
     const supplierSource = '代理版 角川 KDcolle 狼與辛香料 原作版 赫蘿 無比例模型';
     const supplierSelection = pilot.selectProxyCatalogCandidateV2Pilot(supplierSource, [
@@ -273,6 +289,7 @@ try {
       matched,
       rejected,
       defaultVersionAliases,
+      releaseStatusEquivalent,
       supplierSelection,
       ambiguitySelection,
       v1PriorityResolution,
@@ -292,6 +309,12 @@ try {
 
   for (const [caseName, entry] of Object.entries(result.matched)) {
     assert.notEqual(entry.v1Status, 'match', `${caseName}: Pilot test must begin from a v1 false negative`);
+    if (caseName === 'kadokawaHoloRegularMissingVersion') {
+      assert.equal(entry.pilotSelection.status, 'no_match', `${caseName}: incomplete evidence must remain manual review`);
+      assert.equal(entry.score.reason, 'version_missing');
+      assert.equal(entry.resolution.match, null);
+      continue;
+    }
     assert.equal(entry.pilotSelection.status, 'match', `${caseName}: expected V2_PILOT MATCH`);
     assert.equal(entry.resolution.match?.decisionSource, 'V2_PILOT', `${caseName}: Runtime resolver must identify V2_PILOT`);
     assert.equal(entry.safe, true, `${caseName}: write-time Pilot verification must pass`);
@@ -312,16 +335,21 @@ try {
   assert.equal(result.rejected.smpDifferentSet.reason, 'compound_subject_conflict');
   assert.equal(result.rejected.productLineConflict.reason, 'product_line_conflict');
   assert.equal(result.rejected.versionConflict.reason, 'version_conflict');
+  assert.equal(result.rejected.thirdVsVer2.reason, 'version_conflict');
+  assert.equal(result.rejected.dxVsRegular.reason, 'version_conflict');
   assert.equal(result.rejected.regularVsDx.reason, 'version_conflict');
   assert.equal(result.rejected.regularWrongSubject.reason, 'subject_conflict');
   assert.equal(result.rejected.dxMissingVersion.reason, 'version_missing');
   assert.equal(result.rejected.dimensionConflict.reason, 'dimension_conflict');
   for (const entry of Object.values(result.rejected)) assert.equal(entry.rejected, true);
   for (const entry of result.defaultVersionAliases) {
-    assert.equal(entry.rejected, false, 'Default/Standard source version should be compatible with a missing candidate version');
-    assert.ok(entry.evidence.includes('VERSION_DEFAULT_COMPATIBLE'));
-    assert.ok(entry.confidence >= 0.9);
+    assert.equal(entry.rejected, true, 'One-sided default/standard Version must remain manual review');
+    assert.equal(entry.reason, 'version_missing');
   }
+  assert.equal(result.releaseStatusEquivalent.rejected, false, '再版 and 再販 must share one release-status semantic');
+  assert.deepEqual(result.releaseStatusEquivalent.sourceIdentity.versions, ['再版']);
+  assert.deepEqual(result.releaseStatusEquivalent.candidateIdentity.versions, ['再版']);
+  assert.ok(result.releaseStatusEquivalent.confidence >= 0.9);
 
   assert.equal(result.supplierSelection.status, 'match');
   assert.equal(result.supplierSelection.candidate.id, 'wanrong-holo', 'Wanrong priority must remain unchanged');
@@ -377,8 +405,9 @@ try {
   assert.deepEqual(forbiddenRequests, [], 'Pilot regression must issue 0 Catalog/Supabase requests');
 
   console.log('PASS V2_PILOT Phase 2 uses Parser v2.1 for source/candidate Subject metadata');
-  console.log('PASS V2_PILOT safely rescues KDcolle Holo/Shana, KADOKAWA Holo regular/DX, APEX Yixuan, and Jotaro Ver.2');
+  console.log('PASS V2_PILOT safely rescues accepted KDcolle/KADOKAWA DX/APEX/Jotaro cases; one-sided Version stays manual');
   console.log('PASS exact compound subject set supports A+B / B+A equivalence');
+  console.log('PASS A / B & C chains and 再版/再販 semantics match without relaxing other versions');
   console.log('PASS wrong subject/type/line/version/dimension and unverified aliases remain safe rejects');
   console.log('PASS Wanrong supplier priority, 90% threshold, and 5% ambiguity guard unchanged');
   console.log('PASS Next v2 safety veto blocks PLAMATEA standard -> Black Barrel Edition before closing-date write');

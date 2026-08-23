@@ -14,6 +14,7 @@ import type {
   CreateResolutionJobRequest,
   CreateResolutionJobResponse,
   ResolutionBatch,
+  ResolutionCandidateRejectReason,
   ResolutionCandidateRetrievalEvidence,
   ResolutionJobResponse,
   ResolutionResult,
@@ -39,7 +40,7 @@ import {
 import type { ProxyCatalogCandidate } from './proxyProductIdentity';
 import {
   resolveProxyCatalogDecision,
-  scoreProxyCatalogCandidateV2Pilot,
+  scoreProxyCatalogCandidateV21MetadataSafety,
 } from './proxyProductIdentityPilot';
 import type {
   ProxyIdentityPilotCandidateScore,
@@ -49,8 +50,12 @@ import {
   buildClosingDateCompoundMemberQueries,
   buildClosingDateFamilyStemFallbackQuery,
   CLOSING_DATE_CATALOG_NATIVE_LIMIT,
+  CLOSING_DATE_EXPANDED_NATIVE_LIMIT,
+  CLOSING_DATE_MAX_COMPOUND_REQUESTS,
+  CLOSING_DATE_MAX_NON_COMPOUND_REQUESTS,
   CLOSING_DATE_RELIABLE_NATIVE_TOP_N,
 } from './closingDateCandidateRetrievalV2';
+import type { ClosingDateCandidateRetrievalQuery } from './closingDateCandidateRetrievalV2';
 import { getBuildSandboxMode } from './testSandboxEnvironment';
 
 export const CLOSING_DATE_BATCH_GATEWAY_FEATURE_FLAG = 'VITE_ENABLE_CLOSING_DATE_BATCH_GATEWAY';
@@ -350,26 +355,39 @@ const hasDefiniteSubjectConflict = (left: readonly string[], right: readonly str
  * that both v2.1 parses can prove. Missing or partially parsed metadata stays
  * available as a YELLOW manual-review candidate and never gains confidence.
  */
-const hasExplicitIdentityConflict = (
+const explicitIdentityConflictReasons = (
   score: ProxyIdentityPilotCandidateScore,
-): boolean => {
+): ResolutionCandidateRejectReason[] => {
   const source = score.sourceIdentity;
   const candidate = score.candidateIdentity;
   const sourceCompound = source.compoundSubjects.flatMap(item => item.members);
   const candidateCompound = candidate.compoundSubjects.flatMap(item => item.members);
-  return hasDisjointSetConflict(source.productTypes, candidate.productTypes)
-    || hasDisjointSetConflict(source.productLines, candidate.productLines)
-    || hasDisjointSetConflict(source.versions, candidate.versions)
-    || hasDisjointSetConflict(source.forms, candidate.forms)
-    || hasDisjointSetConflict(source.scales, candidate.scales)
-    || hasDisjointSetConflict(source.modelCodes, candidate.modelCodes)
-    || (sourceCompound.length > 0
-      && candidateCompound.length > 0
-      && hasCompoundSetConflict(sourceCompound, candidateCompound))
-    || (sourceCompound.length === 0
-      && candidateCompound.length === 0
-      && hasDefiniteSubjectConflict(source.subjects, candidate.subjects));
+  const exactModelCode = hasExactSafetyOverlap(source.modelCodes, candidate.modelCodes);
+  const reasons: ResolutionCandidateRejectReason[] = [];
+  if (hasDisjointSetConflict(source.productTypes, candidate.productTypes)) reasons.push('PRODUCT_TYPE_CONFLICT');
+  if (hasDisjointSetConflict(source.productLines, candidate.productLines)) reasons.push('PRODUCT_LINE_CONFLICT');
+  if (hasDisjointSetConflict(source.editions, candidate.editions)) reasons.push('VERSION_CONFLICT');
+  if (hasDisjointSetConflict(source.releaseStatuses, candidate.releaseStatuses)) reasons.push('VERSION_CONFLICT');
+  if (hasDisjointSetConflict(source.forms, candidate.forms)) reasons.push('FORM_CONFLICT');
+  if (hasDisjointSetConflict(source.scales, candidate.scales)) reasons.push('SCALE_CONFLICT');
+  if (hasDisjointSetConflict(source.modelCodes, candidate.modelCodes)) reasons.push('MODEL_CODE_CONFLICT');
+  if (
+    sourceCompound.length > 0
+    && candidateCompound.length > 0
+    && hasCompoundSetConflict(sourceCompound, candidateCompound)
+  ) reasons.push('COMPOUND_SET_CONFLICT');
+  if (
+    sourceCompound.length === 0
+    && candidateCompound.length === 0
+    && !exactModelCode
+    && hasDefiniteSubjectConflict(source.subjects, candidate.subjects)
+  ) reasons.push('SUBJECT_CONFLICT');
+  return reasons;
 };
+
+const hasExplicitIdentityConflict = (score: ProxyIdentityPilotCandidateScore): boolean => (
+  explicitIdentityConflictReasons(score).length > 0
+);
 
 const hasExactSafetyOverlap = (left: readonly string[], right: readonly string[]): boolean => {
   const normalizedLeft = normalizedSafetySet(left);
@@ -415,15 +433,25 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
     let selectedCandidate: ProxyCatalogCandidate | null = null;
     let selectedConfidence = 0;
     let firstSeenOrder = 0;
+    let expandedNativeWindowUsed = false;
+    let executedRequestCount = 0;
+    const requestBudget = compoundMemberQueries.length > 0
+      ? CLOSING_DATE_MAX_COMPOUND_REQUESTS
+      : CLOSING_DATE_MAX_NON_COMPOUND_REQUESTS;
+    const executedPrimaryQueries: ClosingDateCandidateRetrievalQuery[] = [];
 
     const runQueryStage = async (
       stageQueries: readonly ReturnType<typeof buildClosingDateCandidateRetrievalQueries>[number][],
       allowProgressiveStop: boolean,
+      executedQueries?: ClosingDateCandidateRetrievalQuery[],
     ): Promise<boolean> => {
       for (const query of stageQueries) {
+      if (executedRequestCount >= requestBudget) return false;
       if (context.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
       try {
+        executedRequestCount += 1;
         const products = await context.search(query.text, { limit: query.limit });
+        executedQueries?.push(query);
         for (const [nativeIndex, product] of products.entries()) {
           const sourceProductId = candidateSourceProductId(product);
           if (!sourceProductId) continue;
@@ -434,14 +462,22 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
             retrieved = { candidate: product, firstSeenOrder, queryHits: [] };
             candidateMap.set(key, retrieved);
           }
-          retrieved.queryHits.push({
+          const queryHit = {
             queryText: query.text,
             queryPriority: query.priority,
             queryKind: query.kind,
             nativeRank: nativeIndex + 1,
             sourceSupplier: candidateSupplier(product),
             sourceProductId,
-          });
+          };
+          if (!retrieved.queryHits.some(hit => (
+            hit.queryText === queryHit.queryText
+            && hit.queryPriority === queryHit.queryPriority
+            && hit.queryKind === queryHit.queryKind
+            && hit.nativeRank === queryHit.nativeRank
+            && hit.sourceSupplier === queryHit.sourceSupplier
+            && hit.sourceProductId === queryHit.sourceProductId
+          ))) retrieved.queryHits.push(queryHit);
         }
       } catch (error) {
         if (isAbortError(error)) throw error;
@@ -454,7 +490,7 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       const scoredCandidates = [...candidateMap.entries()].map(([key, retrieved]) => ({
         key,
         retrieved,
-        v2: scoreProxyCatalogCandidateV2Pilot(title, retrieved.candidate),
+        v2: scoreProxyCatalogCandidateV21MetadataSafety(title, retrieved.candidate),
       }));
       const safetyFilteredCandidates = scoredCandidates
         .filter(entry => !hasExplicitIdentityConflict(entry.v2))
@@ -515,7 +551,29 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       return false;
     };
 
-    await runQueryStage(queries, true);
+    await runQueryStage(queries, true, executedPrimaryQueries);
+    const initialCandidatesLackStructuralCompatibility = candidateMap.size > 0
+      && [...candidateMap.values()].every(retrieved => (
+        progressiveMetadataEvidenceCount(
+          scoreProxyCatalogCandidateV21MetadataSafety(title, retrieved.candidate),
+          context.item,
+          retrieved.candidate,
+        ) === 0
+      ));
+    const expandableSubjectQuery = executedPrimaryQueries
+      .findLast(query => query.kind === 'SUBJECT')
+      ?? executedPrimaryQueries.at(-1);
+    if (
+      initialCandidatesLackStructuralCompatibility
+      && expandableSubjectQuery
+      && expandableSubjectQuery.limit < CLOSING_DATE_EXPANDED_NATIVE_LIMIT
+    ) {
+      expandedNativeWindowUsed = true;
+      await runQueryStage([{
+        ...expandableSubjectQuery,
+        limit: CLOSING_DATE_EXPANDED_NATIVE_LIMIT,
+      }], false);
+    }
     if (candidateMap.size === 0 && compoundMemberQueries.length > 0) {
       await runQueryStage(compoundMemberQueries, false);
     }
@@ -525,10 +583,32 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
     const finalSelectedCandidate = selectedCandidate as ProxyCatalogCandidate | null;
     const finalServiceError = lastServiceError as ClosingDateCatalogGatewayError | null;
 
+    const expandedWindowHasStructuralCandidate = expandedNativeWindowUsed
+      && [...candidateMap.values()].some(retrieved => (
+        progressiveMetadataEvidenceCount(
+          scoreProxyCatalogCandidateV21MetadataSafety(title, retrieved.candidate),
+          context.item,
+          retrieved.candidate,
+        ) > 0
+      ));
+
+    const rejectionReasonsFor = (
+      candidate: ProxyCatalogCandidate,
+      score: ProxyIdentityPilotCandidateScore,
+    ): ResolutionCandidateRejectReason[] => {
+      const reasons = explicitIdentityConflictReasons(score);
+      if (
+        reasons.length === 0
+        && expandedWindowHasStructuralCandidate
+        && progressiveMetadataEvidenceCount(score, context.item, candidate) === 0
+      ) reasons.push('INSUFFICIENT_STRUCTURAL_COMPATIBILITY');
+      return reasons;
+    };
+
     const domainCandidates = [...candidateMap.values()].flatMap(retrieved => {
       const candidate = retrieved.candidate;
-      const v2 = scoreProxyCatalogCandidateV2Pilot(title, candidate);
-      if (hasExplicitIdentityConflict(v2)) return [];
+      const v2 = scoreProxyCatalogCandidateV21MetadataSafety(title, candidate);
+      if (rejectionReasonsFor(candidate, v2).length > 0) return [];
       const source = sourceReferenceForCandidate(candidate, context.snapshot.version);
       if (!source) return [];
       const isSelected = candidate === finalSelectedCandidate;
@@ -572,6 +652,39 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
         },
       }];
     });
+    const rejectedCandidates = [...candidateMap.values()]
+      .flatMap(retrieved => {
+        const candidate = retrieved.candidate;
+        const v2 = scoreProxyCatalogCandidateV21MetadataSafety(title, candidate);
+        const rejectReasons = rejectionReasonsFor(candidate, v2);
+        const source = sourceReferenceForCandidate(candidate, context.snapshot.version);
+        if (rejectReasons.length === 0 || !source) return [];
+        return [{
+          id: `${context.batchId}:${context.item.clientItemId}:rejected:${source.sourceSupplier}:${source.sourceProductId}`,
+          source,
+          catalogTitle: candidate.name?.trim() || '(untitled catalog product)',
+          retrieval: {
+            strategy: 'CATALOG_NATIVE_SEARCH_V2' as const,
+            firstSeenOrder: retrieved.firstSeenOrder,
+            metadataCompatibilityCount: progressiveMetadataEvidenceCount(v2, context.item, candidate),
+            queryHits: retrieved.queryHits,
+          },
+          rejectReasons,
+          applyEligible: false as const,
+        }];
+      })
+      .sort((left, right) => {
+        const leftHit = [...left.retrieval.queryHits].sort((a, b) => (
+          a.queryPriority - b.queryPriority || a.nativeRank - b.nativeRank
+        ))[0];
+        const rightHit = [...right.retrieval.queryHits].sort((a, b) => (
+          a.queryPriority - b.queryPriority || a.nativeRank - b.nativeRank
+        ))[0];
+        return (leftHit?.queryPriority ?? 99) - (rightHit?.queryPriority ?? 99)
+          || (leftHit?.nativeRank ?? 99) - (rightHit?.nativeRank ?? 99)
+          || left.retrieval.firstSeenOrder - right.retrieval.firstSeenOrder;
+      })
+      .slice(0, 5);
     const rankedCandidates = rankTopThreeCandidates(domainCandidates);
     const selectedDomainCandidate = finalSelectedCandidate
       ? rankedCandidates.find(candidate => (
@@ -594,6 +707,7 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       productUpdatedAtAtAnalysis: context.item.updatedAt,
       closingDateAtAnalysis: context.item.currentClosingDate,
       candidates: domainCandidates,
+      rejectedCandidates,
       recommendedCandidateId: selectedDomainCandidate?.id ?? null,
       activeVerifiedMapping,
       serviceError: finalServiceError ? {

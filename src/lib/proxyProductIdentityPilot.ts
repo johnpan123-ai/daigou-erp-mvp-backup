@@ -9,7 +9,9 @@ import {
 } from './proxyProductIdentity';
 import {
   parseProxyProductIdentityV21,
+  parseProxyProductIdentityV21Metadata,
   type ProxyProductIdentityV21,
+  type ProxyProductIdentityV21Metadata,
 } from './proxyProductIdentityV2';
 
 export type ProxyIdentityPilotEvidence =
@@ -46,8 +48,8 @@ export interface ProxyIdentityPilotCandidateScore<T extends ProxyCatalogCandidat
   rejected: boolean;
   reason: ProxyIdentityPilotRejectReason;
   evidence: ProxyIdentityPilotEvidence[];
-  sourceIdentity: ProxyProductIdentityV21;
-  candidateIdentity: ProxyProductIdentityV21;
+  sourceIdentity: ProxyProductIdentityV21Metadata;
+  candidateIdentity: ProxyProductIdentityV21Metadata;
 }
 
 export type ProxyIdentityPilotSelection<T extends ProxyCatalogCandidate = ProxyCatalogCandidate> =
@@ -82,8 +84,8 @@ export type ProxyIdentitySafetyVetoReason = 'version_conflict';
 export interface ProxyIdentitySafetyVeto<T extends ProxyCatalogCandidate = ProxyCatalogCandidate> {
   candidate: T;
   reason: ProxyIdentitySafetyVetoReason;
-  sourceIdentity: ProxyProductIdentityV21;
-  candidateIdentity: ProxyProductIdentityV21;
+  sourceIdentity: ProxyProductIdentityV21Metadata;
+  candidateIdentity: ProxyProductIdentityV21Metadata;
   sourceVersions: string[];
   candidateVersions: string[];
 }
@@ -126,10 +128,37 @@ const DEFAULT_VERSION_TOKENS = new Set([
   'standardver',
 ]);
 
-const isDefaultVersion = (versions: string[]): boolean => versions.length > 0
-  && versions.every(version => DEFAULT_VERSION_TOKENS.has(compact(version)));
-
 const RELEASE_STATUS_VERSION_TOKENS = new Set(['再版', '再販']);
+
+const toPilotMetadataIdentity = (
+  identity: ProxyProductIdentityV21,
+): ProxyProductIdentityV21Metadata => ({
+  ...identity,
+  metadataVersion: 'generalized-retrieval-phase1',
+  subjectCandidates: identity.subjects.map((value, index) => ({
+    value,
+    evidence: [],
+    rank: index + 1,
+    queryEligible: true,
+  })),
+  editions: identity.versions.filter(version => (
+    !RELEASE_STATUS_VERSION_TOKENS.has(compact(version))
+  )),
+  releaseStatuses: identity.versions.filter(version => (
+    RELEASE_STATUS_VERSION_TOKENS.has(compact(version))
+  )),
+  productTypeEvidence: identity.productTypes.map(productType => ({
+    productType,
+    source: 'EXPLICIT_MARKER',
+  })),
+});
+
+const parsePilotIdentity = (
+  title: string,
+  manufacturerName = '',
+): ProxyProductIdentityV21Metadata => toPilotMetadataIdentity(
+  parseProxyProductIdentityV21(title, manufacturerName),
+);
 
 const identityBearingVersions = (versions: string[]): string[] => versions.filter((version) => {
   const normalized = compact(version);
@@ -138,7 +167,11 @@ const identityBearingVersions = (versions: string[]): string[] => versions.filte
     && !RELEASE_STATUS_VERSION_TOKENS.has(normalized);
 });
 
-const subjectFamilyTokens = (identity: ProxyProductIdentityV21): string[] => [
+const matchingSubjects = (identity: ProxyProductIdentityV21Metadata): string[] => (
+  identity.subjects
+);
+
+const subjectFamilyTokens = (identity: ProxyProductIdentityV21Metadata): string[] => [
   ...identity.subjects,
   ...identity.series,
   ...compoundMembers(identity),
@@ -157,8 +190,8 @@ export function evaluateProxyCatalogV2SafetyVeto<T extends ProxyCatalogCandidate
   sourceTitle: string,
   candidate: T,
 ): ProxyIdentitySafetyVeto<T> | null {
-  const sourceIdentity = parseProxyProductIdentityV21(sourceTitle);
-  const candidateIdentity = parseProxyProductIdentityV21(
+  const sourceIdentity = parsePilotIdentity(sourceTitle);
+  const candidateIdentity = parsePilotIdentity(
     candidate.name || '',
     candidate.manufacturer || candidate.brand?.name || '',
   );
@@ -187,8 +220,8 @@ export function evaluateProxyCatalogV2SafetyVeto<T extends ProxyCatalogCandidate
   );
   if (!hasSubjectFamilyEvidence) return null;
 
-  const sourceVersions = identityBearingVersions(sourceIdentity.versions);
-  const candidateVersions = identityBearingVersions(candidateIdentity.versions);
+  const sourceVersions = identityBearingVersions(sourceIdentity.editions);
+  const candidateVersions = identityBearingVersions(candidateIdentity.editions);
   const hasOneSidedExplicitVersion = (sourceVersions.length === 0) !== (candidateVersions.length === 0);
   if (!hasOneSidedExplicitVersion) return null;
 
@@ -202,14 +235,14 @@ export function evaluateProxyCatalogV2SafetyVeto<T extends ProxyCatalogCandidate
   };
 }
 
-const compoundMembers = (identity: ProxyProductIdentityV21): string[] => identity.compoundSubjects
+const compoundMembers = (identity: ProxyProductIdentityV21Metadata): string[] => identity.compoundSubjects
   .flatMap(compound => compound.members);
 
 const rejectedScore = <T extends ProxyCatalogCandidate>(
   candidate: T,
   reason: Exclude<ProxyIdentityPilotRejectReason, 'scored'>,
-  sourceIdentity: ProxyProductIdentityV21,
-  candidateIdentity: ProxyProductIdentityV21,
+  sourceIdentity: ProxyProductIdentityV21Metadata,
+  candidateIdentity: ProxyProductIdentityV21Metadata,
   evidence: ProxyIdentityPilotEvidence[] = [],
 ): ProxyIdentityPilotCandidateScore<T> => ({
   candidate,
@@ -223,12 +256,16 @@ const rejectedScore = <T extends ProxyCatalogCandidate>(
 
 export const canUseProxyIdentityPilot = (mode: ProviderMode): boolean => mode === 'next';
 
-export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidate>(
+const scoreProxyCatalogCandidateV2PilotWithParser = <T extends ProxyCatalogCandidate>(
   sourceTitle: string,
   candidate: T,
-): ProxyIdentityPilotCandidateScore<T> {
-  const sourceIdentity = parseProxyProductIdentityV21(sourceTitle);
-  const candidateIdentity = parseProxyProductIdentityV21(
+  generalizedMetadata: boolean,
+): ProxyIdentityPilotCandidateScore<T> => {
+  const parseIdentity = generalizedMetadata
+    ? parseProxyProductIdentityV21Metadata
+    : parsePilotIdentity;
+  const sourceIdentity = parseIdentity(sourceTitle);
+  const candidateIdentity = parseIdentity(
     candidate.name || '',
     candidate.manufacturer || candidate.brand?.name || '',
   );
@@ -248,7 +285,9 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
     evidence.push('PRODUCT_LINE_EXACT');
   }
 
-  if (sourceIdentity.subjects.length === 0 || candidateIdentity.subjects.length === 0) {
+  const sourceSubjects = matchingSubjects(sourceIdentity);
+  const candidateSubjects = matchingSubjects(candidateIdentity);
+  if (sourceSubjects.length === 0 || candidateSubjects.length === 0) {
     return rejectedScore(candidate, 'subject_missing', sourceIdentity, candidateIdentity, evidence);
   }
 
@@ -259,27 +298,30 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
       return rejectedScore(candidate, 'compound_subject_conflict', sourceIdentity, candidateIdentity);
     }
     evidence.push('SUBJECT_EXACT', 'COMPOUND_SUBJECT_EXACT');
-  } else if (!setsEqual(sourceIdentity.subjects, candidateIdentity.subjects)) {
+  } else if (!setsEqual(sourceSubjects, candidateSubjects)) {
     return rejectedScore(candidate, 'subject_conflict', sourceIdentity, candidateIdentity);
   } else {
     evidence.push('SUBJECT_EXACT');
   }
 
-  if (sourceIdentity.versions.length > 0 || candidateIdentity.versions.length > 0) {
-    if (sourceIdentity.versions.length > 0 && candidateIdentity.versions.length === 0) {
-      const hasStrongStructuralMatch = evidence.includes('PRODUCT_LINE_EXACT')
-        || evidence.includes('PRODUCT_TYPE_EXACT');
-      const hasReliableSeriesOverlap = hasOverlap(sourceIdentity.series, candidateIdentity.series);
-      if (!isDefaultVersion(sourceIdentity.versions) || !hasStrongStructuralMatch || !hasReliableSeriesOverlap) {
-        return rejectedScore(candidate, 'version_missing', sourceIdentity, candidateIdentity, evidence);
-      }
-      evidence.push('VERSION_DEFAULT_COMPATIBLE');
-    } else {
-      if (!setsEqual(sourceIdentity.versions, candidateIdentity.versions)) {
-        return rejectedScore(candidate, 'version_conflict', sourceIdentity, candidateIdentity, evidence);
-      }
-      evidence.push('VERSION_EXACT');
+  if (sourceIdentity.editions.length > 0 || candidateIdentity.editions.length > 0) {
+    if (sourceIdentity.editions.length === 0 || candidateIdentity.editions.length === 0) {
+      return rejectedScore(candidate, 'version_missing', sourceIdentity, candidateIdentity, evidence);
     }
+    if (!setsEqual(sourceIdentity.editions, candidateIdentity.editions)) {
+      return rejectedScore(candidate, 'version_conflict', sourceIdentity, candidateIdentity, evidence);
+    }
+    evidence.push('VERSION_EXACT');
+  }
+
+  if (sourceIdentity.releaseStatuses.length > 0 || candidateIdentity.releaseStatuses.length > 0) {
+    if (sourceIdentity.releaseStatuses.length === 0 || candidateIdentity.releaseStatuses.length === 0) {
+      return rejectedScore(candidate, 'version_missing', sourceIdentity, candidateIdentity, evidence);
+    }
+    if (!setsEqual(sourceIdentity.releaseStatuses, candidateIdentity.releaseStatuses)) {
+      return rejectedScore(candidate, 'version_conflict', sourceIdentity, candidateIdentity, evidence);
+    }
+    if (!evidence.includes('VERSION_EXACT')) evidence.push('VERSION_EXACT');
   }
 
   if (sourceIdentity.forms.length > 0 || candidateIdentity.forms.length > 0) {
@@ -348,6 +390,21 @@ export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidat
     sourceIdentity,
     candidateIdentity,
   };
+};
+
+export function scoreProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandidate>(
+  sourceTitle: string,
+  candidate: T,
+): ProxyIdentityPilotCandidateScore<T> {
+  return scoreProxyCatalogCandidateV2PilotWithParser(sourceTitle, candidate, false);
+}
+
+/** Workbench-only generalized metadata score used for retrieval safety. */
+export function scoreProxyCatalogCandidateV21MetadataSafety<T extends ProxyCatalogCandidate>(
+  sourceTitle: string,
+  candidate: T,
+): ProxyIdentityPilotCandidateScore<T> {
+  return scoreProxyCatalogCandidateV2PilotWithParser(sourceTitle, candidate, true);
 }
 
 const candidateKey = (candidate: ProxyCatalogCandidate): string => {
@@ -357,10 +414,10 @@ const candidateKey = (candidate: ProxyCatalogCandidate): string => {
 };
 
 const effectiveIdentityKey = (
-  source: ProxyProductIdentityV21,
-  candidate: ProxyProductIdentityV21,
+  source: ProxyProductIdentityV21Metadata,
+  candidate: ProxyProductIdentityV21Metadata,
 ): string => JSON.stringify({
-  subjects: compactSet(candidate.subjects),
+  subjects: compactSet(matchingSubjects(candidate)),
   productTypes: compactSet(candidate.productTypes.length > 0 ? candidate.productTypes : source.productTypes),
   productLines: compactSet(candidate.productLines.length > 0 ? candidate.productLines : source.productLines),
   versions: compactSet(candidate.versions.length > 0 ? candidate.versions : source.versions),
@@ -390,7 +447,7 @@ export function selectProxyCatalogCandidateV2Pilot<T extends ProxyCatalogCandida
   sourceTitle: string,
   candidates: T[],
 ): ProxyIdentityPilotSelection<T> {
-  const sourceIdentity = parseProxyProductIdentityV21(sourceTitle);
+  const sourceIdentity = parsePilotIdentity(sourceTitle);
   const deduped = Array.from(new Map(candidates.map(candidate => [candidateKey(candidate), candidate])).values());
   const scored = deduped
     .map(candidate => scoreProxyCatalogCandidateV2Pilot(sourceTitle, candidate))

@@ -80,6 +80,7 @@ export interface ResolutionCandidateIdentifiers {
 }
 
 export type ResolutionCandidateQueryKind =
+  | 'MODEL_CODE'
   | 'PRODUCT_LINE_SUBJECT'
   | 'SERIES_SUBJECT'
   | 'UNRESOLVED_CONTEXT_SUBJECT'
@@ -104,6 +105,28 @@ export interface ResolutionCandidateRetrievalMetadata {
   metadataCompatibilityCount?: number;
   queryHits: readonly ResolutionCandidateRetrievalEvidence[];
 }
+
+export type ResolutionCandidateRejectReason =
+  | 'PRODUCT_TYPE_CONFLICT'
+  | 'PRODUCT_LINE_CONFLICT'
+  | 'VERSION_CONFLICT'
+  | 'FORM_CONFLICT'
+  | 'SCALE_CONFLICT'
+  | 'MODEL_CODE_CONFLICT'
+  | 'COMPOUND_SET_CONFLICT'
+  | 'SUBJECT_CONFLICT'
+  | 'INSUFFICIENT_STRUCTURAL_COMPATIBILITY';
+
+export interface RejectedResolutionCandidateDiagnostic {
+  id: string;
+  source: SourceProductReference;
+  catalogTitle: string;
+  retrieval: ResolutionCandidateRetrievalMetadata;
+  rejectReasons: readonly ResolutionCandidateRejectReason[];
+  applyEligible: false;
+}
+
+export const MAX_REJECTED_RESOLUTION_DIAGNOSTICS = 5;
 
 export interface ResolutionCandidate {
   id: string;
@@ -145,6 +168,7 @@ export interface ResolutionResult {
   classificationReason: CandidateMatchMethod | ResolutionFailureCode;
   confidence: number;
   candidates: readonly RankedResolutionCandidate[];
+  rejectedCandidates?: readonly RejectedResolutionCandidateDiagnostic[];
   recommendedCandidateId?: string | null;
   selectedCandidateId?: string | null;
   selectedMappingId?: string | null;
@@ -207,6 +231,7 @@ export interface CreateResolutionResultInput {
   productUpdatedAtAtAnalysis?: string | null;
   closingDateAtAnalysis?: string | null;
   candidates?: readonly ResolutionCandidate[];
+  rejectedCandidates?: readonly RejectedResolutionCandidateDiagnostic[];
   recommendedCandidateId?: string | null;
   selectedCandidateId?: string | null;
   activeVerifiedMapping?: VerifiedMappingRegistryEntry | null;
@@ -635,6 +660,13 @@ export function classifyResolutionCandidate(input: {
 
 export function createResolutionResult(input: CreateResolutionResultInput): ResolutionResult {
   const candidates = rankTopThreeCandidates(input.candidates ?? []);
+  const rejectedCandidates = [...(input.rejectedCandidates ?? [])]
+    .slice(0, MAX_REJECTED_RESOLUTION_DIAGNOSTICS);
+  for (const candidate of rejectedCandidates) {
+    if (candidate.applyEligible !== false || candidate.rejectReasons.length === 0) {
+      throw new Error(`Rejected diagnostic must remain non-applicable: ${candidate.id}`);
+    }
+  }
   for (const candidate of candidates) {
     if (candidate.ruleVersion !== input.ruleVersion) {
       throw new Error(`Candidate rule version mismatch: ${candidate.id}`);
@@ -678,6 +710,7 @@ export function createResolutionResult(input: CreateResolutionResultInput): Reso
     classificationReason: decision.reason,
     confidence: recommended?.confidence ?? 0,
     candidates,
+    rejectedCandidates,
     recommendedCandidateId: recommended?.id ?? null,
     selectedCandidateId,
     selectedMappingId: recommended

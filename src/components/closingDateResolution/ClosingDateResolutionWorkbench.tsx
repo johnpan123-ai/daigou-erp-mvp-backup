@@ -144,9 +144,43 @@ const ResultCard = ({
 
       {result.candidates.length === 0 ? (
         <div style={{ marginTop: 10, color: '#64748b', fontSize: 13 }}>
+          <div>
+            {result.classificationReason === 'RETRIEVED_BUT_REJECTED'
+              ? 'Catalog 有回傳候選，但全部因安全衝突被排除，未套用任何結果。'
+              : '所有允許的 Catalog Query 均未取得候選。'}
+          </div>
           {result.classificationReason === 'RETRIEVED_BUT_REJECTED'
-            ? 'Catalog 有回傳候選，但全部因安全衝突被排除，未套用任何結果。'
-            : '所有允許的 Catalog Query 均未取得候選。'}
+            && (result.rejectedCandidates?.length ?? 0) > 0 && (
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer', width: 'fit-content' }}>查看被安全排除的候選</summary>
+              <div style={{ display: 'grid', gap: 6, marginTop: 7 }}>
+                {result.rejectedCandidates?.map(candidate => {
+                  const hit = [...candidate.retrieval.queryHits].sort((left, right) => (
+                    left.queryPriority - right.queryPriority || left.nativeRank - right.nativeRank
+                  ))[0];
+                  return (
+                    <div
+                      key={candidate.id}
+                      data-testid={`closing-date-rejected-${candidate.id}`}
+                      style={{ padding: '7px 9px', border: '1px solid #fecaca', borderRadius: 6, background: '#fff' }}
+                    >
+                      <strong style={{ display: 'block', color: '#7f1d1d' }}>{candidate.catalogTitle}</strong>
+                      <span style={{ display: 'block', marginTop: 2 }}>
+                        供應商：{supplierDisplayName(candidate.source.sourceSupplier)}
+                        {' ・ '}Native Rank：{hit ? `#${hit.nativeRank}` : '未提供'}
+                      </span>
+                      <span style={{ display: 'block', marginTop: 2 }}>
+                        Query：{hit?.queryText ?? '未提供'}
+                      </span>
+                      <span style={{ display: 'block', marginTop: 2 }}>
+                        排除原因：{candidate.rejectReasons.join('、')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          )}
         </div>
       ) : (
         <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
@@ -319,6 +353,7 @@ export default function ClosingDateResolutionWorkbench({
           productUpdatedAtAtAnalysis: result.productUpdatedAtAtAnalysis,
           closingDateAtAnalysis: result.closingDateAtAnalysis,
           candidates: result.candidates,
+          rejectedCandidates: result.rejectedCandidates,
           recommendedCandidateId: candidate.id,
           selectedCandidateId: candidate.id,
           activeVerifiedMapping: mapping,

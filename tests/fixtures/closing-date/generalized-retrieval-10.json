@@ -1,0 +1,82 @@
+[
+  {
+    "id": "elaina-azure",
+    "erpTitle": "預購 27年09月 代理版 GSC 魔女之旅 伊蕾娜 Azure 插畫 1/7",
+    "retrievalQuery": "魔女之旅 伊蕾娜",
+    "candidateTitle": "1/7 魔女之旅 伊蕾娜 Azure插畫Ver.",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "tactical-bride-awayuki",
+    "erpTitle": "預購 27年05月 代理版 QuesQ SWAV 原畫 Tactical Bride 淡雪 1/7",
+    "retrievalQuery": "淡雪",
+    "candidateTitle": "1/7 PVC Tactical Bride 淡雪 by SWAV",
+    "nativeRank": 11,
+    "compound": false
+  },
+  {
+    "id": "nendoroid-3059-fire-dragon",
+    "erpTitle": "預購 27年03月 代理版 GSC 黏土人 3059 Monster Hunter 魔物獵人 火龍 雄火龍",
+    "retrievalQuery": "3059",
+    "candidateTitle": "黏土人3059《魔物獵人》火龍",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "plamatea-mx",
+    "erpTitle": "預購 27年01月 代理版 GSC 組裝模型 PLAMATEA 繪師toridamono MX醬 約16公分",
+    "retrievalQuery": "PLAMATEA MX醬",
+    "candidateTitle": "PLAMATEA MX醬",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "smp-gao-peacock-cobra",
+    "erpTitle": "魂商店 萬代 SMP 牙吠孔雀王 & 牙吠眼鏡蛇王",
+    "retrievalQuery": "牙吠孔雀",
+    "candidateTitle": "SMP 百獸戰隊牙吠連者 威力獸 EXTRA 牙吠孔雀＆牙吠眼鏡蛇",
+    "nativeRank": 1,
+    "compound": true
+  },
+  {
+    "id": "chouzou-jotaro-ver2",
+    "erpTitle": "超像可動 TV動畫 JOJO的奇妙冒險 星塵遠征軍 空條承太郎 Ver.2",
+    "retrievalQuery": "空條承太郎 Ver.2",
+    "candidateTitle": "超像可動《JOJO的奇妙冒險 星塵遠征軍》空條承太郎 Ver.2",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "nendoroid-hina-basic",
+    "erpTitle": "GSC 黏土人 蔚藍檔案 空崎陽奈（禮服）Basic",
+    "retrievalQuery": "蔚藍檔案 空崎陽奈",
+    "candidateTitle": "黏土人 蔚藍檔案 空崎陽奈（禮服）Basic",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "takaratomy-lucky-box-27",
+    "erpTitle": "代理版 TAKARATOMY 商店限定 彈珠超人 彈珠人 大福箱27 戰鬥鳳凰號豪華套組",
+    "retrievalQuery": "大福箱27",
+    "candidateTitle": "T-SPARK LEGACYSOUL 彈珠超人 大福箱27[TAKARATOMY]",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "chouzou-star-platinum-reprint",
+    "erpTitle": "超像可動 JOJO的奇妙冒險第三部 星塵遠征軍 白金之星 再版",
+    "retrievalQuery": "超像可動 白金之星",
+    "candidateTitle": "超像可動 JOJO的奇妙冒險 第3部 白金之星 Third（再販）",
+    "nativeRank": 1,
+    "compound": false
+  },
+  {
+    "id": "mini-memory-tamamo-cross",
+    "erpTitle": "GSC Mini Memory 賽馬娘 灰髮灰姑娘 緊張小玉 玉藻十字",
+    "retrievalQuery": "緊張小玉",
+    "candidateTitle": "Mini Memory 賽馬娘 灰髮灰姑娘 緊張小玉 玉藻十字",
+    "nativeRank": 1,
+    "compound": false
+  }
+]
