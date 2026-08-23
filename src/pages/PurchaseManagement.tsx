@@ -968,6 +968,8 @@ export default function PurchaseManagement() {
   const [activeTab, setActiveTab] = useState<'worksheet' | 'purchase_batches' | 'private_orders'>('worksheet');
 
   const [showPrivateOrderModal, setShowPrivateOrderModal] = useState(false);
+  const [showOtherActionsMenu, setShowOtherActionsMenu] = useState(false);
+  const otherActionsMenuRef = useRef<HTMLDivElement>(null);
   const [editingPoId, setEditingPoId] = useState<string | null>(null);
   const [poForm, setPoForm] = useState({ customer_name: '', contact: '', note: '' });
   const [poLines, setPoLines] = useState<{ variant_id: string, quantity: number, amount: number | string, note: string }[]>([]);
@@ -979,6 +981,19 @@ export default function PurchaseManagement() {
   const [bulkMasterPrice, setBulkMasterPrice] = useState<string>('');
   const [bulkMasterCategory, setBulkMasterCategory] = useState<string>('');
   const [isApplyingMasterCost, setIsApplyingMasterCost] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!showOtherActionsMenu) return;
+
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!otherActionsMenuRef.current?.contains(event.target as Node)) {
+        setShowOtherActionsMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showOtherActionsMenu]);
 
   useEffect(() => {
     loadData();
@@ -2306,28 +2321,6 @@ export default function PurchaseManagement() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: '#fdf2f8', 
-                    color: '#db2777', 
-                    borderColor: '#fbcfe8',
-                    opacity: editMode ? 1 : 0.6,
-                    cursor: editMode ? 'pointer' : 'not-allowed',
-                    whiteSpace: 'nowrap'
-                  }}
-                  disabled={!editMode}
-                  onClick={openPrivateOrderModal}
-                >
-                  <Plus size={12} style={{ marginRight: '4px' }} /> 私下登記
-                </button>
-                <button 
-                  className="btn btn-outline" 
-                  style={{ 
-                    flex: 1,
-                    fontSize: '12px', 
-                    padding: '0', 
-                    height: '32px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
                     backgroundColor: '#eff6ff', 
                     color: '#2563eb', 
                     borderColor: '#bfdbfe',
@@ -2340,6 +2333,46 @@ export default function PurchaseManagement() {
                 >
                   <Plus size={12} style={{ marginRight: '4px' }} /> 新增採購批次
                 </button>
+                <div ref={otherActionsMenuRef} style={{ position: 'relative', flex: 1 }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    aria-haspopup="menu"
+                    aria-expanded={showOtherActionsMenu}
+                    disabled={!editMode}
+                    onClick={() => setShowOtherActionsMenu(current => !current)}
+                    style={{
+                      width: '100%',
+                      height: '32px',
+                      padding: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      fontSize: '12px',
+                      backgroundColor: '#f8fafc',
+                      color: '#475569',
+                      borderColor: '#cbd5e1',
+                      opacity: editMode ? 1 : 0.6,
+                      cursor: editMode ? 'pointer' : 'not-allowed',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    其他操作 <ChevronDown size={12} />
+                  </button>
+                  {showOtherActionsMenu && (
+                    <div role="menu" style={{ position: 'absolute', top: '38px', right: 0, minWidth: '150px', padding: '6px', backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 24px rgba(15, 23, 42, 0.14)', zIndex: 30 }}>
+                      <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); openPrivateOrderModal(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#be185d', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                        <Plus size={14} /> 私下登記
+                      </button>
+                      {canWrite && (
+                        <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); handleAddNewVariant(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                          <Plus size={14} /> 新增規格
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
@@ -2470,25 +2503,6 @@ export default function PurchaseManagement() {
                       fontSize: '13px', 
                       padding: '6px 12px', 
                       height: '36px',
-                      backgroundColor: '#fdf2f8', 
-                      color: '#db2777', 
-                      borderColor: '#fbcfe8',
-                      opacity: editMode ? 1 : 0.6,
-                      cursor: editMode ? 'pointer' : 'not-allowed',
-                      whiteSpace: 'nowrap'
-                    }}
-                    disabled={!editMode}
-                    onClick={openPrivateOrderModal}
-                  >
-                    <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 私下登記
-                  </button>
-                  <button 
-                    className="btn btn-outline" 
-                    style={{ 
-                      flex: isMobile ? 1 : 'none',
-                      fontSize: '13px', 
-                      padding: '6px 12px', 
-                      height: '36px',
                       backgroundColor: '#eff6ff', 
                       color: '#2563eb', 
                       borderColor: '#bfdbfe',
@@ -2501,27 +2515,46 @@ export default function PurchaseManagement() {
                   >
                     <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增採購批次
                   </button>
-                  {canWrite && (
-                    <button 
-                      className="btn btn-outline" 
-                      style={{ 
-                        flex: isMobile ? 1 : 'none',
-                        fontSize: '13px', 
-                        padding: '6px 12px', 
+                  <div ref={otherActionsMenuRef} style={{ position: 'relative', flex: isMobile ? 1 : 'none' }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      aria-haspopup="menu"
+                      aria-expanded={showOtherActionsMenu}
+                      disabled={!editMode}
+                      onClick={() => setShowOtherActionsMenu(current => !current)}
+                      style={{
+                        width: '100%',
                         height: '36px',
-                        backgroundColor: '#f8fafc', 
-                        color: '#475569', 
+                        padding: '6px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                        fontSize: '13px',
+                        backgroundColor: '#f8fafc',
+                        color: '#475569',
                         borderColor: '#cbd5e1',
                         opacity: editMode ? 1 : 0.6,
                         cursor: editMode ? 'pointer' : 'not-allowed',
                         whiteSpace: 'nowrap'
                       }}
-                      disabled={!editMode}
-                      onClick={handleAddNewVariant}
                     >
-                      <Plus size={14} style={{ display: 'inline-block', marginRight: '4px' }} /> 新增規格
+                      其他操作 <ChevronDown size={14} />
                     </button>
-                  )}
+                    {showOtherActionsMenu && (
+                      <div role="menu" style={{ position: 'absolute', top: '42px', right: 0, minWidth: '168px', padding: '6px', backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 24px rgba(15, 23, 42, 0.14)', zIndex: 30 }}>
+                        <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); openPrivateOrderModal(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#be185d', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                          <Plus size={14} /> 私下登記
+                        </button>
+                        {canWrite && (
+                          <button type="button" role="menuitem" onClick={() => { setShowOtherActionsMenu(false); handleAddNewVariant(); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 10px', border: 'none', borderRadius: '6px', backgroundColor: 'transparent', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer', textAlign: 'left' }}>
+                            <Plus size={14} /> 新增規格
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -3946,8 +3979,11 @@ export default function PurchaseManagement() {
       {showPrivateOrderModal && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div className="card" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#fff' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>{editingPoId ? '編輯私下登記' : '新增私下登記'}</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', padding: '16px', backgroundColor: '#fdf2f8', borderBottom: '2px solid #f9a8d4' }}>
+              <div>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#9d174d', margin: 0 }}>{editingPoId ? '編輯私下登記' : '新增私下登記'}</h2>
+                <p style={{ margin: '4px 0 0', color: '#9f1239', fontSize: '13px' }}>記錄個別買家的私人需求，不會建立採購批次。</p>
+              </div>
               <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowPrivateOrderModal(false)}><X size={20} /></button>
             </div>
             
