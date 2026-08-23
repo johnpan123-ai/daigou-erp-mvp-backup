@@ -191,11 +191,19 @@ try {
   await page.getByText('採購批次紀錄', { exact: true }).click();
   const copyBatchLedger = page.getByRole('button', { name: '複製本批次帳目', exact: true });
   assert.equal(await copyBatchLedger.count(), 1, 'Each purchase batch must retain its ledger copy action');
-  const copyDialog = page.waitForEvent('dialog');
+  const copyDialog = new Promise((resolve, reject) => {
+    page.once('dialog', async dialog => {
+      try {
+        assert.match(dialog.message(), /已複製本批次帳目/);
+        await dialog.accept();
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
   await copyBatchLedger.click();
-  const dialog = await copyDialog;
-  assert.match(dialog.message(), /已複製本批次帳目/);
-  await dialog.accept();
+  await copyDialog;
   const copiedBatchLedger = await page.evaluate(() => navigator.clipboard.readText());
   assert.equal(copiedBatchLedger, 'hololive active-General-A\t1', 'Per-batch clipboard output must remain byte-for-byte identical to the baseline formatter');
 
