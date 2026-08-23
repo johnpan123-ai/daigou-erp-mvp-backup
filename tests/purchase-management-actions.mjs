@@ -64,6 +64,48 @@ const page = await context.newPage();
 const supabaseRequests = [];
 const unexpectedErrors = [];
 
+const readStoredCollections = async () => page.evaluate(async keys => {
+  return await new Promise((resolve, reject) => {
+    const request = indexedDB.open('daigou-erp-db-test-v1', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction('kv', 'readonly');
+      const store = transaction.objectStore('kv');
+      const result = {};
+      let remaining = Object.entries(keys).length;
+
+      for (const [field, key] of Object.entries(keys)) {
+        const getRequest = store.get(key);
+        getRequest.onerror = () => reject(getRequest.error);
+        getRequest.onsuccess = () => {
+          result[field] = getRequest.result ?? [];
+          remaining -= 1;
+          if (remaining === 0) {
+            db.close();
+            resolve(result);
+          }
+        };
+      }
+    };
+  });
+}, storageKeys);
+
+const restoreStoredVariants = async variants => page.evaluate(async ({ key, variants }) => {
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.open('daigou-erp-db-test-v1', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction('kv', 'readwrite');
+      transaction.objectStore('kv').put(variants, key);
+      transaction.oncomplete = () => { db.close(); resolve(); };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
+    };
+  });
+}, { key: storageKeys.productVariants, variants });
+
 page.on('request', request => {
   if (request.url().includes('.supabase.co/')) supabaseRequests.push(request.url());
 });
@@ -101,29 +143,51 @@ try {
   await page.reload({ waitUntil: 'networkidle' });
   await page.goto(`${BASE_URL}/purchase-records/g-holo`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: '新增採購批次' }).waitFor();
+  const baselineCollections = await readStoredCollections();
 
   assert.equal(await page.getByRole('button', { name: '新增採購批次' }).count(), 1, 'Purchase batch must remain a direct primary action');
   assert.equal(await page.getByRole('button', { name: '私下登記' }).count(), 0, 'Private registration must not remain a direct toolbar action');
   assert.equal(await page.getByRole('button', { name: '新增規格' }).count(), 0, 'Add variant must not remain a direct toolbar action');
-  assert.equal(await page.getByText('複製已採購帳目', { exact: true }).count(), 0, 'Legacy clipboard action must be hidden from the UI');
 
   const otherActions = page.getByRole('button', { name: '其他操作' });
   await otherActions.click();
   assert.equal(await otherActions.getAttribute('aria-expanded'), 'true');
   assert.equal(await page.getByRole('menuitem', { name: '私下登記' }).count(), 1);
   assert.equal(await page.getByRole('menuitem', { name: '新增規格' }).count(), 1, 'Test Sandbox must allow writes to its isolated DB without granting Cloud write permission');
-  assert.ok(await page.locator('input[placeholder="-"]').count() > 0, 'Test Sandbox edit mode must render editable unit price inputs');
+
+  await otherActions.click();
+  assert.equal(await otherActions.getAttribute('aria-expanded'), 'false', 'Other actions menu must close when its trigger is pressed again');
+  await otherActions.click();
+  await page.getByRole('heading', { level: 1 }).click();
+  assert.equal(await otherActions.getAttribute('aria-expanded'), 'false', 'Other actions menu must close on an outside click');
+  await otherActions.click();
 
   await page.getByRole('menuitem', { name: '私下登記' }).click();
   await page.getByRole('heading', { name: '新增私下登記' }).waitFor();
-  assert.equal(await page.getByText('記錄個別買家的私人需求，不會建立採購批次。', { exact: true }).count(), 1);
+  assert.deepEqual(await readStoredCollections(), baselineCollections, 'Opening private registration must not write data');
 
   await page.reload({ waitUntil: 'networkidle' });
+  assert.deepEqual(await readStoredCollections(), baselineCollections, 'Reload after dismissing private registration must not write data');
   await page.getByRole('button', { name: '新增採購批次' }).click();
   await page.getByRole('heading', { name: '新增採購批次' }).waitFor();
-  assert.equal(await page.getByText('建立正式採購批次，記錄本次採購數量與成本。', { exact: true }).count(), 1);
 
   await page.getByRole('button', { name: '取消' }).click();
+  assert.deepEqual(await readStoredCollections(), baselineCollections, 'Cancelling a purchase batch must not write data');
+
+  await otherActions.click();
+  await page.getByRole('menuitem', { name: '新增規格' }).click();
+  await page.getByText('已成功手動新增規格', { exact: true }).waitFor();
+  const afterAddVariant = await readStoredCollections();
+  assert.equal(afterAddVariant.productVariants.length, baselineCollections.productVariants.length + 1, 'Add variant entry must invoke the existing isolated-DB save path');
+  assert.deepEqual(
+    { ...afterAddVariant, productVariants: baselineCollections.productVariants },
+    baselineCollections,
+    'Add variant entry must not modify unrelated collections'
+  );
+  await restoreStoredVariants(baselineCollections.productVariants);
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.deepEqual(await readStoredCollections(), baselineCollections, 'The isolated fixture must be restored after exercising add variant');
+
   await page.getByText('採購批次紀錄', { exact: true }).click();
   const copyBatchLedger = page.getByRole('button', { name: '複製本批次帳目', exact: true });
   assert.equal(await copyBatchLedger.count(), 1, 'Each purchase batch must retain its ledger copy action');
@@ -133,15 +197,31 @@ try {
   assert.match(dialog.message(), /已複製本批次帳目/);
   await dialog.accept();
   const copiedBatchLedger = await page.evaluate(() => navigator.clipboard.readText());
-  assert.notEqual(copiedBatchLedger, '', 'Batch ledger copy output must remain available');
-  assert.doesNotMatch(copiedBatchLedger, /【|批下單|採購日期|────|\n\n/, 'Per-batch ledger must not contain batch metadata, separators, or blank rows');
-  assert.ok(copiedBatchLedger.split('\n').every(row => row.split('\t').length === 2), 'Per-batch ledger rows must contain only product name and quantity');
+  assert.equal(copiedBatchLedger, 'hololive active-General-A\t1', 'Per-batch clipboard output must remain byte-for-byte identical to the baseline formatter');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${BASE_URL}/purchase-records/g-holo`, { waitUntil: 'networkidle' });
+  const mobileOtherActions = page.getByRole('button', { name: '其他操作' });
+  assert.equal(await page.getByRole('button', { name: '新增採購批次' }).count(), 1, 'Mobile must retain the primary purchase-batch action');
+  assert.equal(await mobileOtherActions.count(), 1, 'Mobile must retain the secondary actions menu');
+  await mobileOtherActions.click();
+  assert.equal(await page.getByRole('menuitem', { name: '私下登記' }).count(), 1);
+  assert.equal(await page.getByRole('menuitem', { name: '新增規格' }).count(), 1);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile action layout must not create horizontal scrolling');
+
+  await page.evaluate(() => localStorage.setItem('__hippo_test_sandbox__::purchase_management_edit_mode', 'false'));
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.equal(await page.getByRole('button', { name: '新增採購批次' }).isDisabled(), true, 'Locked mode must preserve the existing write permission boundary');
+  assert.equal(await page.getByRole('button', { name: '其他操作' }).isDisabled(), true, 'Locked mode must disable secondary write actions');
+  assert.deepEqual(await readStoredCollections(), baselineCollections, 'Responsive and permission checks must not modify data');
 
   assert.deepEqual(supabaseRequests, [], 'Test Mode must not call Production Supabase');
   assert.deepEqual(unexpectedErrors, [], 'Browser Console must not contain unexpected errors');
   console.log('PASS Purchase Management keeps purchase batch primary and moves secondary actions into a menu');
-  console.log('PASS private and purchase-batch modals have distinct titles and descriptions');
-  console.log('PASS legacy purchased-ledger copy UI is hidden while Sandbox Supabase requests remain 0');
+  console.log('PASS menu toggle/outside-close, desktop/mobile, and locked-mode behavior');
+  console.log('PASS private/batch cancel and reload produce 0 data changes');
+  console.log('PASS per-batch ledger action and clipboard bytes remain unchanged');
+  console.log('PASS Experimental/Test Supabase requests remain 0');
 } finally {
   await browser.close();
   vite.kill();
