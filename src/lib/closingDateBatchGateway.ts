@@ -783,10 +783,27 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
   }
 
   async pollJob(jobId: string): Promise<ClosingDateBatchPollResponse> {
+    const internal = this.jobs.get(jobId);
+    if (internal) {
+      const itemOrder = new Map(
+        internal.request.items.map((item, index) => [item.erpProductGroupId, index]),
+      );
+      const orderedResults = [...internal.results].sort((left, right) => (
+        (itemOrder.get(left.erpProductGroupId) ?? Number.MAX_SAFE_INTEGER)
+        - (itemOrder.get(right.erpProductGroupId) ?? Number.MAX_SAFE_INTEGER)
+      ));
+      return {
+        batch: internal.batch,
+        results: orderedResults,
+        nextCursor: null,
+        metrics: toMetrics(internal.metrics, this.monotonicNow(), orderedResults),
+        catalogSnapshot: internal.snapshot,
+        logicalBatchId: internal.logicalBatchId,
+      };
+    }
     const batch = await this.repository.getResolutionBatch(jobId);
     if (!batch) throw new Error(`Closing Date resolution job not found: ${jobId}`);
     const results = await this.repository.listResolutionResults(jobId);
-    const internal = this.jobs.get(jobId);
     const fallbackSnapshot: CatalogSnapshotDescriptor = {
       version: batch.snapshotVersion,
       capturedAt: batch.createdAt,
@@ -796,11 +813,9 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
       batch,
       results,
       nextCursor: null,
-      metrics: internal
-        ? toMetrics(internal.metrics, this.monotonicNow(), results)
-        : toMetrics(createMutableMetrics(this.monotonicNow()), this.monotonicNow(), results),
-      catalogSnapshot: internal?.snapshot ?? fallbackSnapshot,
-      logicalBatchId: internal?.logicalBatchId ?? batch.id,
+      metrics: toMetrics(createMutableMetrics(this.monotonicNow()), this.monotonicNow(), results),
+      catalogSnapshot: fallbackSnapshot,
+      logicalBatchId: batch.id,
     };
   }
 

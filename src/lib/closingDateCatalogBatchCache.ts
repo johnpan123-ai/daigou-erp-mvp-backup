@@ -80,7 +80,12 @@ const raceWithAbort = async <T>(promise: Promise<T>, signal?: AbortSignal): Prom
 class LimitedConcurrencyGate {
   private active = 0;
   private readonly maximum: number;
-  private readonly waiters: Array<() => void> = [];
+  private readonly waiters: Array<{
+    resolve: () => void;
+    reject: (error: DOMException) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  }> = [];
 
   peak = 0;
 
@@ -91,18 +96,58 @@ class LimitedConcurrencyGate {
     this.maximum = maximum;
   }
 
-  async run<T>(operation: () => Promise<T>): Promise<{ value: T; observedConcurrency: number }> {
-    if (this.active >= this.maximum) {
-      await new Promise<void>(resolve => this.waiters.push(resolve));
+  private async acquire(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw abortError();
+    if (this.active < this.maximum) {
+      this.active += 1;
+      this.peak = Math.max(this.peak, this.active);
+      return;
     }
-    this.active += 1;
+    await new Promise<void>((resolve, reject) => {
+      const waiter: (typeof this.waiters)[number] = {
+        resolve,
+        reject,
+        signal,
+      };
+      if (signal) {
+        waiter.onAbort = () => {
+          const index = this.waiters.indexOf(waiter);
+          if (index >= 0) this.waiters.splice(index, 1);
+          reject(abortError());
+        };
+        signal.addEventListener('abort', waiter.onAbort, { once: true });
+      }
+      this.waiters.push(waiter);
+    });
+  }
+
+  private release(): void {
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      if (!waiter) break;
+      if (waiter.onAbort) waiter.signal?.removeEventListener('abort', waiter.onAbort);
+      if (waiter.signal?.aborted) {
+        waiter.reject(abortError());
+        continue;
+      }
+      // Transfer the occupied slot directly to the next waiter.
+      waiter.resolve();
+      return;
+    }
+    this.active -= 1;
+  }
+
+  async run<T>(
+    operation: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<{ value: T; observedConcurrency: number }> {
+    await this.acquire(signal);
     this.peak = Math.max(this.peak, this.active);
     const observedConcurrency = this.active;
     try {
       return { value: await operation(), observedConcurrency };
     } finally {
-      this.active -= 1;
-      this.waiters.shift()?.();
+      this.release();
     }
   }
 }
@@ -119,10 +164,16 @@ export interface CatalogCacheLookupResult {
 interface CachedCatalogResponse {
   response: ReadonlyCatalogSearchResponse;
   expiresAtMs: number;
+  snapshotVersion: string;
+  normalizedQuery: string;
+  limit: number;
 }
 
 interface InflightCatalogResponse {
   promise: Promise<{ response: ReadonlyCatalogSearchResponse; observedConcurrency: number }>;
+  snapshotVersion: string;
+  normalizedQuery: string;
+  limit: number;
 }
 
 export interface CatalogSnapshotQueryCacheOptions {
@@ -173,31 +224,37 @@ export class CatalogSnapshotQueryCache {
     const limit = input.limit ?? 5;
     const cacheKey = JSON.stringify([input.snapshot.version, limit, normalizedQuery]);
     const now = this.nowMs();
-    const cached = this.cached.get(cacheKey);
-    if (cached && cached.expiresAtMs > now) {
+    let cached = this.cached.get(cacheKey) ?? null;
+    if (cached && cached.expiresAtMs <= now) {
       this.cached.delete(cacheKey);
-      this.cached.set(cacheKey, cached);
+      cached = null;
+    }
+    cached ??= this.findCachedSuperset(input.snapshot.version, normalizedQuery, limit, now);
+    if (cached && cached.expiresAtMs > now) {
+      const storedKey = JSON.stringify([cached.snapshotVersion, cached.limit, cached.normalizedQuery]);
+      this.cached.delete(storedKey);
+      this.cached.set(storedKey, cached);
       return {
-        response: cached.response,
+        response: this.limitResponse(cached.response, limit),
         source: 'CACHE',
         cacheKey,
         observedUpstreamConcurrency: 0,
       };
     }
-    if (cached) this.cached.delete(cacheKey);
 
-    const active = this.inflight.get(cacheKey);
+    const active = this.inflight.get(cacheKey)
+      ?? this.findInflightSuperset(input.snapshot.version, normalizedQuery, limit);
     if (active) {
       const shared = await raceWithAbort(active.promise, input.signal);
       return {
-        response: shared.response,
+        response: this.limitResponse(shared.response, limit),
         source: 'SINGLE_FLIGHT',
         cacheKey,
         observedUpstreamConcurrency: shared.observedConcurrency,
       };
     }
 
-    const request = this.concurrency.run(async () => {
+    const request: InflightCatalogResponse['promise'] = this.concurrency.run(async () => {
       const response = await this.client.search({
         query: normalizedQuery,
         limit,
@@ -211,7 +268,7 @@ export class CatalogSnapshotQueryCache {
         });
       }
       return response;
-    }).then(({ value, observedConcurrency }) => {
+    }, input.signal).then(({ value, observedConcurrency }) => {
       const completedAt = this.nowMs();
       const snapshotExpiry = Date.parse(input.snapshot.expiresAt);
       const expiresAtMs = Math.min(
@@ -219,11 +276,22 @@ export class CatalogSnapshotQueryCache {
         Number.isFinite(snapshotExpiry) ? snapshotExpiry : completedAt + this.ttlMs,
       );
       const shared = { response: value, observedConcurrency };
-      this.cached.set(cacheKey, { response: value, expiresAtMs });
+      this.cached.set(cacheKey, {
+        response: value,
+        expiresAtMs,
+        snapshotVersion: input.snapshot.version,
+        normalizedQuery,
+        limit,
+      });
       this.trim();
       return shared;
     });
-    this.inflight.set(cacheKey, { promise: request });
+    this.inflight.set(cacheKey, {
+      promise: request,
+      snapshotVersion: input.snapshot.version,
+      normalizedQuery,
+      limit,
+    });
     void request.then(() => {
       if (this.inflight.get(cacheKey)?.promise === request) this.inflight.delete(cacheKey);
     }, () => {
@@ -245,6 +313,53 @@ export class CatalogSnapshotQueryCache {
 
   get peakUpstreamConcurrency(): number {
     return this.concurrency.peak;
+  }
+
+  private limitResponse(
+    response: ReadonlyCatalogSearchResponse,
+    limit: number,
+  ): ReadonlyCatalogSearchResponse {
+    if (response.products.length <= limit) return response;
+    return { ...response, products: response.products.slice(0, limit) };
+  }
+
+  private findCachedSuperset(
+    snapshotVersion: string,
+    normalizedQuery: string,
+    limit: number,
+    now: number,
+  ): CachedCatalogResponse | null {
+    let best: CachedCatalogResponse | null = null;
+    for (const [key, candidate] of this.cached) {
+      if (candidate.expiresAtMs <= now) {
+        this.cached.delete(key);
+        continue;
+      }
+      if (
+        candidate.snapshotVersion === snapshotVersion
+        && candidate.normalizedQuery === normalizedQuery
+        && candidate.limit >= limit
+        && (!best || candidate.limit < best.limit)
+      ) best = candidate;
+    }
+    return best;
+  }
+
+  private findInflightSuperset(
+    snapshotVersion: string,
+    normalizedQuery: string,
+    limit: number,
+  ): InflightCatalogResponse | null {
+    let best: InflightCatalogResponse | null = null;
+    for (const candidate of this.inflight.values()) {
+      if (
+        candidate.snapshotVersion === snapshotVersion
+        && candidate.normalizedQuery === normalizedQuery
+        && candidate.limit >= limit
+        && (!best || candidate.limit < best.limit)
+      ) best = candidate;
+    }
+    return best;
   }
 
   private trim(): void {

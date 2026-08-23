@@ -375,6 +375,65 @@ try {
     const faultCompleted = await faultGateway.waitForJob(faultCreated.jobId);
     const faultCounts = await faultRepository.getStoreCounts();
 
+    const cacheSnapshot = {
+      version: 'cache-window-fixture',
+      capturedAt: '2026-08-21T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    };
+    const supersetState = { requests: 0 };
+    const supersetCache = new cacheModule.CatalogSnapshotQueryCache({
+      async openSnapshot() { return cacheSnapshot; },
+      async search(request) {
+        supersetState.requests += 1;
+        return {
+          products: Array.from({ length: request.limit }, (_, index) => ({
+            id: `superset-${index + 1}`,
+            name: `Superset ${index + 1}`,
+          })),
+          snapshotVersion: request.snapshotVersion,
+        };
+      },
+    }, { ttlMs: 60_000, maxConcurrency: 1 });
+    const largerWindow = await supersetCache.lookup({
+      snapshot: cacheSnapshot,
+      query: 'Shared Window',
+      limit: 12,
+    });
+    const reusedSmallerWindow = await supersetCache.lookup({
+      snapshot: cacheSnapshot,
+      query: 'shared   window',
+      limit: 5,
+    });
+
+    let releaseQueuedProbe;
+    const cancellationGateState = { requests: 0 };
+    const cancellationGateCache = new cacheModule.CatalogSnapshotQueryCache({
+      async openSnapshot() { return cacheSnapshot; },
+      async search(request) {
+        cancellationGateState.requests += 1;
+        await new Promise(resolve => { releaseQueuedProbe = resolve; });
+        return { products: [], snapshotVersion: request.snapshotVersion };
+      },
+    }, { ttlMs: 60_000, maxConcurrency: 1 });
+    const activeLookup = cancellationGateCache.lookup({
+      snapshot: cacheSnapshot,
+      query: 'active request',
+      limit: 5,
+    });
+    while (cancellationGateState.requests === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    const queuedController = new AbortController();
+    const queuedLookup = cancellationGateCache.lookup({
+      snapshot: cacheSnapshot,
+      query: 'cancel queued request',
+      limit: 5,
+      signal: queuedController.signal,
+    }).then(() => null, error => error?.name ?? 'UNKNOWN');
+    queuedController.abort();
+    releaseQueuedProbe();
+    await activeLookup;
+    const queuedAbortName = await queuedLookup;
+    await new Promise(resolve => setTimeout(resolve, 0));
+
     const nextAfter = await environment.readPhysicalIndexedDbSnapshot('daigou-erp-db-next-v1');
     const productionAfter = await environment.readPhysicalIndexedDbSnapshot('daigou-erp-db');
     repositories.forEach(repository => repository.close());
@@ -417,6 +476,16 @@ try {
       fault: {
         completed: faultCompleted,
         counts: faultCounts,
+      },
+      cacheWindowReuse: {
+        requests: supersetState.requests,
+        largerSource: largerWindow.source,
+        smallerSource: reusedSmallerWindow.source,
+        smallerCount: reusedSmallerWindow.response.products.length,
+      },
+      queuedCancellation: {
+        requests: cancellationGateState.requests,
+        abortName: queuedAbortName,
       },
       fakePeakConcurrency: fakeState.peak,
       nextUnchanged: stableStringify(nextBefore) === stableStringify(nextAfter),
@@ -482,6 +551,16 @@ try {
   assert.equal(testResult.fault.counts.closing_date_resolution_results, 0);
   assert.equal(testResult.fault.counts.closing_date_resolution_candidates, 0);
   assert.ok(testResult.fakePeakConcurrency <= 4);
+  assert.deepEqual(testResult.cacheWindowReuse, {
+    requests: 1,
+    largerSource: 'UPSTREAM',
+    smallerSource: 'CACHE',
+    smallerCount: 5,
+  });
+  assert.deepEqual(testResult.queuedCancellation, {
+    requests: 1,
+    abortName: 'AbortError',
+  });
   assert.equal(testResult.nextUnchanged, true);
   assert.equal(testResult.productionUnchanged, true);
   assert.deepEqual(supabaseRequests, []);
@@ -525,6 +604,8 @@ try {
   }, null, 2));
   console.log('PASS Next-only feature gate and polling job lifecycle');
   console.log('PASS query dedupe, single-flight, TTL cache, and limited concurrency');
+  console.log('PASS larger cached native window safely serves smaller limit without another upstream request');
+  console.log('PASS cancelled queued lookup never starts a new upstream request');
   console.log('PASS cancellation stops new work and retry re-runs only retryable service errors');
   console.log('PASS Result/Candidate progress writes persist only in Sidecar Storage');
   console.log('PASS injected result persistence fault leaves 0 partial Result/Candidate writes');
