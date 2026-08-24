@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import { formatMultiplePurchaseBatchLedgers } from '../lib/purchaseBatchLedger';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 type DateFilter = 'today' | 'yesterday' | '7d' | '30d';
 
@@ -110,6 +111,8 @@ export default function RecentPurchases() {
       setLoading(false);
     }
   };
+
+  useCloudResourceSync('recent-purchases', ['products', 'purchases'], false, loadData);
 
   useEffect(() => {
     void loadData();

@@ -12,6 +12,7 @@ import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 import { getProviderMode } from '../providers/providerMode';
@@ -118,6 +119,10 @@ const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: bool
 
 // Keep the legacy clipboard action available in code, but hide its UI until it is needed again.
 const COPY_PURCHASED_LEDGER_ACTION_VISIBLE = false;
+
+type PlatformDemand = 'myacg' | 'waca';
+
+const getPlatformDemandDraftKey = (variantId: string, platform: PlatformDemand) => `${variantId}:${platform}`;
 
 interface MobilePurchaseBatchTabProps {
   batches: PurchaseBatch[];
@@ -491,6 +496,8 @@ export default function PurchaseManagement() {
   const [group, setGroup] = useState<ProductGroup | null>(null);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
+  const [platformDemandDrafts, setPlatformDemandDrafts] = useState<Record<string, string>>({});
+  const platformDemandCommitInFlightRef = useRef<Set<string>>(new Set());
   const originalValuesRef = useRef<Record<string, string>>({});
 
   const [tempJpyCosts, setTempJpyCosts] = useState<Record<string, string>>({});
@@ -953,6 +960,13 @@ export default function PurchaseManagement() {
 
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
+
+  useCloudResourceSync(
+    `purchase-management:${id || 'unknown'}`,
+    ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
+    editMode || showBatchModal || showPrivateOrderModal || isBundleDialogOpen,
+    () => loadData(),
+  );
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   // Bulk master cost setting state
   const [bulkMasterPrice, setBulkMasterPrice] = useState<string>('');
@@ -1150,12 +1164,13 @@ export default function PurchaseManagement() {
   };
 
 
-  const handleUpdatePlatformDemand = async (vId: string, platform: 'myacg' | 'waca', totalValue: number) => {
+  const handleUpdatePlatformDemand = async (vId: string, platform: PlatformDemand, totalValue: number) => {
     if (isNaN(totalValue) || totalValue < 0) totalValue = 0;
     const allVars = await dataProvider.getProductVariants();
     const target = allVars.find(v => v.id === vId);
     if (target) {
       let patch: Partial<ProductVariant> = {};
+      let currentTotal = 0;
       if (platform === 'myacg') {
         const myacgQty = calculateFinalMyacgDemand(target.myacg_item_code, Array.from(inventoryMap.values()), salesOrderItems);
         const rawAuto = (target.effective_myacg_quantity !== null && target.effective_myacg_quantity !== undefined && target.effective_myacg_quantity >= 0)
@@ -1165,17 +1180,50 @@ export default function PurchaseManagement() {
             : (myacgQty >= 0 ? myacgQty : 0));
         const auto = rawAuto >= 0 ? rawAuto : 0;
         const manualAdj = totalValue - auto;
+        currentTotal = auto + (target.myacg_manual_adjustment ?? 0);
         patch = { myacg_manual_adjustment: manualAdj };
       } else {
         const auto = (target.waca_auto_quantity !== null && target.waca_auto_quantity !== undefined && target.waca_auto_quantity >= 0)
           ? target.waca_auto_quantity
           : 0;
         const manualAdj = totalValue - auto;
+        currentTotal = auto + (target.waca_manual_adjustment ?? 0);
         patch = { waca_manual_adjustment: manualAdj };
       }
+      if (currentTotal === totalValue) return;
       patch.updated_at = new Date().toISOString();
       await dataProvider.updateProductVariantPatch(vId, patch);
-      setVariants(variants.map(v => v.id === vId ? { ...v, ...patch } : v));
+      setVariants(prev => prev.map(v => v.id === vId ? { ...v, ...patch } : v));
+    }
+  };
+
+  const getPlatformDemandInputValue = (variantId: string, platform: PlatformDemand, persistedValue: number) => {
+    const draft = platformDemandDrafts[getPlatformDemandDraftKey(variantId, platform)];
+    return draft !== undefined ? draft : (persistedValue ? String(persistedValue) : '');
+  };
+
+  const handlePlatformDemandDraftChange = (variantId: string, platform: PlatformDemand, rawValue: string) => {
+    const value = rawValue.replace(/[^0-9]/g, '');
+    const key = getPlatformDemandDraftKey(variantId, platform);
+    setPlatformDemandDrafts(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleCommitPlatformDemand = async (variantId: string, platform: PlatformDemand, rawValue: string) => {
+    const key = getPlatformDemandDraftKey(variantId, platform);
+    if (platformDemandCommitInFlightRef.current.has(key)) return;
+
+    platformDemandCommitInFlightRef.current.add(key);
+    try {
+      const totalValue = rawValue === '' ? 0 : parseInt(rawValue, 10);
+      await handleUpdatePlatformDemand(variantId, platform, totalValue);
+      setPlatformDemandDrafts(prev => {
+        if (prev[key] === undefined) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    } finally {
+      platformDemandCommitInFlightRef.current.delete(key);
     }
   };
 
@@ -3105,11 +3153,16 @@ export default function PurchaseManagement() {
                                 margin: '0 auto', 
                                 display: 'block' 
                               }} 
-                              value={pMyacg || ''}
+                              aria-label={`買動漫需求 ${v.myacg_item_code || v.id}`}
+                              value={getPlatformDemandInputValue(v.id, 'myacg', pMyacg)}
                               placeholder="0"
-                              onChange={e => {
-                                const val = e.target.value.replace(/[^0-9]/g, '');
-                                handleUpdatePlatformDemand(v.id, 'myacg', val === '' ? 0 : parseInt(val));
+                              onChange={e => handlePlatformDemandDraftChange(v.id, 'myacg', e.target.value)}
+                              onBlur={e => void handleCommitPlatformDemand(v.id, 'myacg', e.currentTarget.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
                               }}
                               disabled={!editMode}
                             />
@@ -3133,11 +3186,16 @@ export default function PurchaseManagement() {
                                 margin: '0 auto', 
                                 display: 'block' 
                               }} 
-                              value={pWaca || ''}
+                              aria-label={`WACA 需求 ${v.myacg_item_code || v.id}`}
+                              value={getPlatformDemandInputValue(v.id, 'waca', pWaca)}
                               placeholder="0"
-                              onChange={e => {
-                                const val = e.target.value.replace(/[^0-9]/g, '');
-                                handleUpdatePlatformDemand(v.id, 'waca', val === '' ? 0 : parseInt(val));
+                              onChange={e => handlePlatformDemandDraftChange(v.id, 'waca', e.target.value)}
+                              onBlur={e => void handleCommitPlatformDemand(v.id, 'waca', e.currentTarget.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.currentTarget.blur();
+                                }
                               }}
                               disabled={!editMode}
                             />
@@ -3670,11 +3728,16 @@ export default function PurchaseManagement() {
                                         margin: '0 auto', 
                                         display: 'block' 
                                       }} 
-                                      value={myacgDemand || ''}
+                                      aria-label={`買動漫需求 ${v.myacg_item_code || v.id}`}
+                                      value={getPlatformDemandInputValue(v.id, 'myacg', myacgDemand)}
                                       placeholder="0"
-                                      onChange={e => {
-                                        const val = e.target.value.replace(/[^0-9]/g, '');
-                                        handleUpdatePlatformDemand(v.id, 'myacg', val === '' ? 0 : parseInt(val));
+                                      onChange={e => handlePlatformDemandDraftChange(v.id, 'myacg', e.target.value)}
+                                      onBlur={e => void handleCommitPlatformDemand(v.id, 'myacg', e.currentTarget.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          e.currentTarget.blur();
+                                        }
                                       }}
                                       disabled={!editMode}
                                     />
@@ -3698,11 +3761,16 @@ export default function PurchaseManagement() {
                                         margin: '0 auto', 
                                         display: 'block' 
                                       }} 
-                                      value={wacaDemand || ''}
+                                      aria-label={`WACA 需求 ${v.myacg_item_code || v.id}`}
+                                      value={getPlatformDemandInputValue(v.id, 'waca', wacaDemand)}
                                       placeholder="0"
-                                      onChange={e => {
-                                        const val = e.target.value.replace(/[^0-9]/g, '');
-                                        handleUpdatePlatformDemand(v.id, 'waca', val === '' ? 0 : parseInt(val));
+                                      onChange={e => handlePlatformDemandDraftChange(v.id, 'waca', e.target.value)}
+                                      onBlur={e => void handleCommitPlatformDemand(v.id, 'waca', e.currentTarget.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          e.currentTarget.blur();
+                                        }
                                       }}
                                       disabled={!editMode}
                                     />

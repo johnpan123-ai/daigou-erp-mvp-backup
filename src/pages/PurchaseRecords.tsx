@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -1474,6 +1475,13 @@ export default function PurchaseRecords() {
     setSalesOrderItems(fetchedOrderItems);
     dataProvider.registerFreshLoad();
   };
+
+  useCloudResourceSync(
+    'purchase-records',
+    ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
+    editMode,
+    loadFreshData,
+  );
 
   const handleUpdateWacaMeta = async (updatedBy: string) => {
     if (guardAgainstStaleWrite()) return;

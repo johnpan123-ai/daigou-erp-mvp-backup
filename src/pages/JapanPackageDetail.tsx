@@ -5,6 +5,7 @@ import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 const cleanDisplayProductTitle = (title: string): string => {
   if (!title) return '';
@@ -494,6 +495,20 @@ export default function JapanPackageDetail() {
       setIsLoading(false);
     }
   };
+
+  const packageHeaderDirty = Boolean(pkg && (
+    pkgForm.title !== (pkg.title || '')
+    || pkgForm.vendor_name !== (pkg.vendor_name || '')
+    || pkgForm.carrier !== (pkg.carrier || '')
+    || pkgForm.tracking_number !== (pkg.tracking_number || '')
+    || pkgForm.note !== (pkg.note || '')
+  ));
+  useCloudResourceSync(
+    `japan-package-detail:${id || 'unknown'}`,
+    ['japanPackages', 'products', 'purchases', 'bundles'],
+    packageHeaderDirty || isSaving || isAddingManualItem || Boolean(editingManualItemId),
+    () => id ? loadData(id) : undefined,
+  );
 
   // Close dropdowns when clicking outside
   useEffect(() => {

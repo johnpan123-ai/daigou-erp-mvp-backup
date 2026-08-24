@@ -145,6 +145,50 @@ try {
   await page.getByRole('button', { name: '新增採購批次' }).waitFor();
   const baselineCollections = await readStoredCollections();
 
+  await page.evaluate(() => {
+    const originalUpdate = window.dataProvider.updateProductVariantPatch.bind(window.dataProvider);
+    window.__platformDemandWrites = [];
+    window.dataProvider.updateProductVariantPatch = async (id, patch) => {
+      if ('myacg_manual_adjustment' in patch || 'waca_manual_adjustment' in patch) {
+        window.__platformDemandWrites.push({ id, patch: { ...patch } });
+      }
+      return originalUpdate(id, patch);
+    };
+  });
+
+  const myacgDemandInput = page.getByLabel('買動漫需求 SKU-HOLO');
+  await myacgDemandInput.fill('');
+  await myacgDemandInput.pressSequentially('200');
+  assert.equal(await page.evaluate(() => window.__platformDemandWrites.length), 0, '買動漫 typing must stay in a local draft');
+  await page.getByRole('heading', { level: 1 }).click();
+  await page.waitForFunction(() => window.__platformDemandWrites.length === 1);
+  assert.equal(await myacgDemandInput.inputValue(), '200', '買動漫 blur must persist the final multi-digit value');
+  assert.deepEqual(
+    await page.evaluate(() => window.__platformDemandWrites.map(write => Object.keys(write.patch).filter(key => key.endsWith('_manual_adjustment')))),
+    [['myacg_manual_adjustment']],
+    '買動漫 blur must produce exactly one final write'
+  );
+
+  const wacaDemandInput = page.getByLabel('WACA 需求 SKU-HOLO');
+  await wacaDemandInput.fill('');
+  await wacaDemandInput.pressSequentially('200');
+  assert.equal(await page.evaluate(() => window.__platformDemandWrites.length), 1, 'WACA typing must stay in a local draft');
+  await wacaDemandInput.press('Enter');
+  await page.waitForFunction(() => window.__platformDemandWrites.length === 2);
+  assert.equal(await wacaDemandInput.inputValue(), '200', 'WACA Enter must persist the final multi-digit value');
+  await page.getByRole('heading', { level: 1 }).click();
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => window.__platformDemandWrites.length), 2, 'Enter followed by blur must not duplicate the WACA write');
+  assert.deepEqual(
+    await page.evaluate(() => window.__platformDemandWrites.map(write => Object.keys(write.patch).filter(key => key.endsWith('_manual_adjustment')))),
+    [['myacg_manual_adjustment'], ['waca_manual_adjustment']],
+    'WACA Enter must produce exactly one final write'
+  );
+
+  await restoreStoredVariants(baselineCollections.productVariants);
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.deepEqual(await readStoredCollections(), baselineCollections, 'Demand draft regression must restore the isolated fixture');
+
   assert.equal(await page.getByRole('button', { name: '新增採購批次' }).count(), 1, 'Purchase batch must remain a direct primary action');
   assert.equal(await page.getByRole('button', { name: '私下登記' }).count(), 0, 'Private registration must not remain a direct toolbar action');
   assert.equal(await page.getByRole('button', { name: '新增規格' }).count(), 0, 'Add variant must not remain a direct toolbar action');
@@ -226,6 +270,8 @@ try {
   assert.deepEqual(supabaseRequests, [], 'Test Mode must not call Production Supabase');
   assert.deepEqual(unexpectedErrors, [], 'Browser Console must not contain unexpected errors');
   console.log('PASS Purchase Management keeps purchase batch primary and moves secondary actions into a menu');
+  console.log('PASS 買動漫/WACA multi-digit edits stay local until blur or Enter and commit exactly once');
+  console.log('PASS Enter-triggered blur does not duplicate the demand write');
   console.log('PASS menu toggle/outside-close, desktop/mobile, and locked-mode behavior');
   console.log('PASS private/batch cancel and reload produce 0 data changes');
   console.log('PASS per-batch ledger action and clipboard bytes remain unchanged');
