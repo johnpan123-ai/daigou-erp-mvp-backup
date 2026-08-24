@@ -4,7 +4,6 @@ import { PackageOpen, Plus, Search, ChevronRight } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
 import type { OutboundShipment, OutboundShipmentItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
-import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '全部' },
@@ -55,8 +54,6 @@ export default function OutboundShipmentsList() {
       setIsLoading(false);
     }
   };
-
-  useCloudResourceSync('outbound-shipments-list', ['outboundShipments'], showCreateForm, loadData);
 
   const filteredShipments = useMemo(() => {
     let list = shipments;

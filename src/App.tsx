@@ -20,7 +20,6 @@ import DuplicateVariants from './pages/DuplicateVariants';
 import OutboundShipmentsList from './pages/OutboundShipmentsList';
 import OutboundShipmentDetail from './pages/OutboundShipmentDetail';
 import NextRawDbIntegrityProbe from './pages/NextRawDbIntegrityProbe';
-import { CloudRealtimeSyncBoundary } from './contexts/CloudRealtimeSyncContext';
 
 function App() {
   return (
@@ -28,7 +27,6 @@ function App() {
     <ViewportProvider>
       <AuthProvider>
         <BrowserRouter>
-          <CloudRealtimeSyncBoundary>
           <StorageWarningBanner />
           <AppLayout>
             <div style={{ position: 'fixed', bottom: 10, right: 10, fontSize: '12px', color: '#64748b', zIndex: 9999, pointerEvents: 'none' }}>
@@ -55,7 +53,6 @@ function App() {
               <Route path="/diagnostics/next-raw-db" element={<NextRawDbIntegrityProbe />} />
             </Routes>
           </AppLayout>
-          </CloudRealtimeSyncBoundary>
         </BrowserRouter>
       </AuthProvider>
     </ViewportProvider>

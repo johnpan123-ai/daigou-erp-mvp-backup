@@ -4,7 +4,6 @@ import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, Chec
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
-import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 const CARRIERS_LIST = [
   { name: 'ヤマト運輸 (Yamato)', keyword: 'yamato' },
@@ -226,13 +225,6 @@ export default function JapanPackagesList() {
       setIsLoading(false);
     }
   };
-
-  useCloudResourceSync(
-    'japan-packages-list',
-    ['japanPackages'],
-    showAddModal || Boolean(editingPackageId),
-    loadData,
-  );
 
   const getTrackingUrl = (carrier: string, trackingNumber: string) => {
     if (!trackingNumber) return null;

@@ -20,7 +20,6 @@ import type {
 import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import * as XLSX from 'xlsx';
-import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 const cleanProductTitle = (title: string) =>
   title
@@ -208,19 +207,6 @@ export default function OutboundShipmentDetail() {
       setIsLoading(false);
     }
   }, [id]);
-
-  const headerDirty = Boolean(shipment && (
-    formTitle !== shipment.title
-    || formCarrier !== (shipment.carrier || '')
-    || formTracking !== (shipment.tracking_number || '')
-    || formNote !== (shipment.note || '')
-  ));
-  useCloudResourceSync(
-    `outbound-shipment-detail:${id || 'unknown'}`,
-    ['outboundShipments', 'japanPackages', 'products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
-    headerDirty || showHeaderEdit || showManualAdd || editingShipped || Boolean(editingManualItemId) || pendingItemSaveCount > 0,
-    loadData,
-  );
 
   useEffect(() => {
     void loadData();

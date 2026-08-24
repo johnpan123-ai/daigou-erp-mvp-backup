@@ -22,8 +22,6 @@ import type {
   OutboundShipment,
   OutboundShipmentItem
 } from '../lib/db';
-import type { CloudResource } from './cloud/cloudSyncDomain';
-import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -41,7 +39,6 @@ class DynamicDataProvider implements IDataProvider {
   private lastLoadedTime = Date.now();
   private isStale = false;
   private staleCallbacks: ((isStale: boolean) => void)[] = [];
-  private cloudStaleResources = new Set<CloudResource>();
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -78,23 +75,8 @@ class DynamicDataProvider implements IDataProvider {
 
   registerFreshLoad(): void {
     this.lastLoadedTime = Date.now();
-    this.cloudStaleResources.clear();
     this.isStale = false;
     this.notifySubscribers(false);
-  }
-
-  markCloudStale(resources: CloudResource[]): void {
-    resources.forEach(resource => this.cloudStaleResources.add(resource));
-    this.isStale = true;
-    this.notifySubscribers(true);
-  }
-
-  clearCloudStale(resources: CloudResource[]): void {
-    resources.forEach(resource => this.cloudStaleResources.delete(resource));
-    if (this.cloudStaleResources.size === 0) {
-      this.isStale = false;
-      this.notifySubscribers(false);
-    }
   }
 
   checkIsStaleLive(): boolean {
@@ -110,28 +92,12 @@ class DynamicDataProvider implements IDataProvider {
         }
       } catch (err) {}
     }
-    return this.isStale || this.cloudStaleResources.size > 0;
+    return this.isStale;
   }
 
   private guardStale() {
     if (this.checkIsStaleLive()) {
       throw new StaleDataError();
-    }
-  }
-
-  private async guardedWrite<T>(write: () => Promise<T>): Promise<T> {
-    this.guardStale();
-    try {
-      const result = await write();
-      this.registerWrite();
-      return result;
-    } catch (error) {
-      if (error instanceof CloudStaleWriteError) {
-        this.isStale = true;
-        this.notifySubscribers(true);
-        throw new StaleDataError(error.message);
-      }
-      throw error;
     }
   }
 
@@ -168,7 +134,9 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getProductGroups();
   }
   async saveProductGroups(groups: ProductGroup[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().saveProductGroups(groups));
+    this.guardStale();
+    await this.getActiveProvider().saveProductGroups(groups);
+    this.registerWrite();
   }
   async getProductCategories(): Promise<ProductCategory[]> {
     return this.getActiveProvider().getProductCategories();
@@ -180,43 +148,49 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getProductVariants(options);
   }
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().saveProductVariants(variants));
+    this.guardStale();
+    await this.getActiveProvider().saveProductVariants(variants);
+    this.registerWrite();
   }
   async deleteProductVariant(id: string): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().deleteProductVariant(id));
+    return this.getActiveProvider().deleteProductVariant(id);
   }
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().updateProductVariantPatch(id, patch));
+    return this.getActiveProvider().updateProductVariantPatch(id, patch);
   }
   async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().updateProductVariantPatchBulk(patches));
+    return this.getActiveProvider().updateProductVariantPatchBulk(patches);
   }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return this.getActiveProvider().getPurchaseBatches();
   }
   async savePurchaseBatches(batches: PurchaseBatch[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().savePurchaseBatches(batches));
+    this.guardStale();
+    await this.getActiveProvider().savePurchaseBatches(batches);
+    this.registerWrite();
   }
   async getPurchaseBatchItems(): Promise<PurchaseBatchItem[]> {
     return this.getActiveProvider().getPurchaseBatchItems();
   }
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().savePurchaseBatchItems(items));
+    this.guardStale();
+    await this.getActiveProvider().savePurchaseBatchItems(items);
+    this.registerWrite();
   }
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return this.getActiveProvider().getPrivateOrders();
   }
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().savePrivateOrders(orders));
+    return this.getActiveProvider().savePrivateOrders(orders);
   }
   async getPrivateOrderItems(): Promise<PrivateOrderItem[]> {
     return this.getActiveProvider().getPrivateOrderItems();
   }
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().savePrivateOrderItems(items));
+    return this.getActiveProvider().savePrivateOrderItems(items);
   }
   async deletePrivateOrderItems(ids: string[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().deletePrivateOrderItems(ids));
+    return this.getActiveProvider().deletePrivateOrderItems(ids);
   }
   async getJapanPackages(): Promise<JapanPackage[]> {
     return this.getActiveProvider().getJapanPackages();
