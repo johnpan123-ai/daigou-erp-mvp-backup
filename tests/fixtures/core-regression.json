@@ -40,7 +40,7 @@
     {"id":"v-proxy","product_group_id":"g-proxy","product_category_id":"c-proxy","myacg_item_code":"SKU-PROXY","product_title":"GSC Proxy Active","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_twd_cost":700},
     {"id":"v-other-a","product_group_id":"g-other","product_category_id":"c-other","myacg_item_code":"SKU-OTHER-A","product_title":"Other Active","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":600},
     {"id":"v-other-b","product_group_id":"g-other","product_category_id":"c-other","myacg_item_code":"SKU-OTHER-B","product_title":"Other Active","variant_name":"B","waca_auto_quantity":0,"note":"","sort_order":1,"default_jpy_cost":600},
-    {"id":"v-closed","product_group_id":"g-closed","product_category_id":"c-closed","myacg_item_code":"SKU-CLOSED","product_title":"Other Closed","variant_name":"A","waca_auto_quantity":3,"private_manual_adjustment":2,"note":"","sort_order":0,"default_jpy_cost":500},
+    {"id":"v-closed","product_group_id":"g-closed","product_category_id":"c-closed","myacg_item_code":"SKU-CLOSED","product_title":"Other Closed","variant_name":"A","waca_auto_quantity":3,"private_manual_adjustment":0,"note":"","sort_order":0,"default_jpy_cost":500},
     {"id":"v-invalid","product_group_id":"g-invalid","product_category_id":"c-invalid","myacg_item_code":"SKU-INVALID","product_title":"Invalid Date","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":null},
     {"id":"v-today","product_group_id":"g-today","product_category_id":"c-today","myacg_item_code":"SKU-TODAY","product_title":"Today Closing","variant_name":"A","waca_auto_quantity":0,"note":"","sort_order":0,"default_jpy_cost":300}
   ],
@@ -59,8 +59,12 @@
     {"id":"bi-other-b","purchase_batch_id":"b-other","product_variant_id":"v-other-b","quantity":1,"cost":600,"note":""},
     {"id":"bi-closed","purchase_batch_id":"b-closed","product_variant_id":"v-closed","quantity":6,"cost":500,"note":""}
   ],
-  "privateOrders": [],
-  "privateOrderItems": [],
+  "privateOrders": [
+    {"id":"po-closed","product_group_id":"g-closed","customer_name":"Core Fixture","contact":"","note":"","created_at":"2026-08-12"}
+  ],
+  "privateOrderItems": [
+    {"id":"poi-closed","private_order_id":"po-closed","product_variant_id":"v-closed","quantity":2,"amount":0,"note":""}
+  ],
   "japanPackages": [],
   "japanPackageItems": [],
   "outboundShipments": [],

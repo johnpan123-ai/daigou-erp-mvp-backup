@@ -51,6 +51,8 @@ export interface PurchaseBatch {
   date: string;
   note: string;
   created_at: string;
+  updated_at?: string;
+  version?: number;
 }
 
 export interface PurchaseBatchItem {
@@ -60,6 +62,8 @@ export interface PurchaseBatchItem {
   quantity: number;
   cost: number;
   note: string;
+  updated_at?: string;
+  version?: number;
 }
 
 export interface JapanPackage {
@@ -75,6 +79,7 @@ export interface JapanPackage {
   note?: string;
   created_at?: string;
   updated_at?: string;
+  version?: number;
 }
 
 export interface JapanPackageItem {
@@ -94,6 +99,7 @@ export interface JapanPackageItem {
   checked_at?: string;
   created_at?: string;
   updated_at?: string;
+  version?: number;
 }
 
 export interface OutboundShipment {
@@ -109,6 +115,7 @@ export interface OutboundShipment {
   note?: string;
   created_at?: string;
   updated_at?: string;
+  version?: number;
 }
 
 export interface OutboundShipmentItem {
@@ -126,6 +133,7 @@ export interface OutboundShipmentItem {
   note?: string;
   created_at?: string;
   updated_at?: string;
+  version?: number;
 }
 
 export interface PrivateOrder {
@@ -135,6 +143,8 @@ export interface PrivateOrder {
   contact: string;
   note: string;
   created_at: string;
+  updated_at?: string;
+  version?: number;
 }
 
 export interface PrivateOrderItem {
@@ -144,6 +154,8 @@ export interface PrivateOrderItem {
   quantity: number;
   amount: number;
   note: string;
+  updated_at?: string;
+  version?: number;
 }
 
 export interface BundleComponent {
@@ -151,6 +163,8 @@ export interface BundleComponent {
   bundle_variant_id: string; // FK to product_variants.id
   component_variant_id: string; // FK to product_variants.id
   created_at?: string;
+  updated_at?: string;
+  version?: number;
 }
 
 export interface ProductGroup {
@@ -169,6 +183,7 @@ export interface ProductGroup {
   show_in_purchase_list?: boolean;
   created_at: string;
   updated_at: string;
+  version?: number;
 }
 
 export interface ProductCategory {
@@ -176,6 +191,8 @@ export interface ProductCategory {
   product_group_id: string; // FK
   title: string;
   sort_order: number;
+  updated_at?: string;
+  version?: number;
 }
 
 export interface ProductVariant {
@@ -747,8 +764,8 @@ export const calculateVariantDemandAndPurchased = (
 
   // 私下數量
   const localPrivate = privateOrderItems.filter(poi => poi && poi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
-  const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-  const vPrivate = rawPrivate >= 0 ? rawPrivate : 0;
+  // Accepted worksheet contract (624c9a8): private-order items are authoritative.
+  const vPrivate = localPrivate >= 0 ? localPrivate : 0;
 
   // 已採購 / 已下單數量
   const localPurchased = batchItems.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);

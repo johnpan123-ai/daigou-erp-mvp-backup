@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -495,8 +496,7 @@ export default function PurchaseRecords() {
 
         const groupPrivateOrderItems = privateOrderItemsByGroupId.get(groupId) ?? [];
         const localPrivate = groupPrivateOrderItems.filter(poi => poi && poi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
-        const rawPrivate = v.private_manual_adjustment ?? (v as any).private_quantity ?? localPrivate;
-        const v0Private = rawPrivate >= 0 ? rawPrivate : 0;
+        const v0Private = localPrivate >= 0 ? localPrivate : 0;
 
         const groupBatchItems = batchItemsByGroupId.get(groupId) ?? [];
         const localPurchased = groupBatchItems.filter(pbi => pbi && pbi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
@@ -1474,6 +1474,13 @@ export default function PurchaseRecords() {
     setSalesOrderItems(fetchedOrderItems);
     dataProvider.registerFreshLoad();
   };
+
+  useCloudResourceSync(
+    'purchase-records',
+    ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
+    editMode,
+    loadFreshData,
+  );
 
   const handleUpdateWacaMeta = async (updatedBy: string) => {
     if (guardAgainstStaleWrite()) return;
