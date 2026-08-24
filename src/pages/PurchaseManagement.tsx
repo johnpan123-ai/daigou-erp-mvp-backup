@@ -12,6 +12,7 @@ import PurchaseBatchTab from '../components/PurchaseBatchTab';
 import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 import { getProviderMode } from '../providers/providerMode';
@@ -953,6 +954,13 @@ export default function PurchaseManagement() {
 
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
+
+  useCloudResourceSync(
+    `purchase-management:${id || 'unknown'}`,
+    ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
+    editMode || showBatchModal || showPrivateOrderModal || isBundleDialogOpen,
+    () => loadData(),
+  );
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   // Bulk master cost setting state
   const [bulkMasterPrice, setBulkMasterPrice] = useState<string>('');

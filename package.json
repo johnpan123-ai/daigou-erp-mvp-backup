@@ -32,6 +32,7 @@
     "test:next-nightly-performance": "node tests/next-nightly-performance-soak.mjs",
     "test:atomic-import-data": "node tests/atomic-import-data.mjs",
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
+    "test:cloud-multi-user-sync": "node tests/cloud-multi-user-sync.mjs",
     "test:bootstrap-error": "node tests/bootstrap-error-boundary.mjs",
     "test:inventory-backup-gate": "node tests/inventory-backup-gate.mjs",
     "test:outbound-purchase-cost-export": "node tests/outbound-purchase-cost-export.mjs",
