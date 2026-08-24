@@ -40,6 +40,7 @@
     "test:inventory-backup-gate": "node tests/inventory-backup-gate.mjs",
     "test:outbound-purchase-cost-export": "node tests/outbound-purchase-cost-export.mjs",
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
+    "test:japan-package-receiving-display": "node tests/japan-package-receiving-display.mjs",
     "test:proxy-product-identity": "node tests/proxy-product-identity-matching.mjs",
     "test:proxy-product-identity-v2": "node tests/proxy-product-identity-v2.mjs",
     "test:proxy-product-identity-v21": "node tests/proxy-product-identity-v21.mjs",
