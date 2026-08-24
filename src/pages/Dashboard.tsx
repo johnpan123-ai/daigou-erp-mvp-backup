@@ -1,16 +1,152 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, Archive, ChevronRight, Clock3, RefreshCw, ShoppingCart } from 'lucide-react';
 import { calculateGroupDemandAndPurchased } from '../lib/db';
+import type {
+  InventoryItem,
+  PrivateOrder,
+  PrivateOrderItem,
+  ProductCategory,
+  ProductGroup,
+  ProductVariant,
+  PurchaseBatch,
+  PurchaseBatchItem,
+  SalesOrderItem,
+} from '../lib/db';
+import {
+  buildProductDisplayCategoryMap,
+  getPendingUnlistedGroupIds,
+  normalizeDashboardWorkTitle,
+  type ProductDisplayCategory,
+  type UnlistedProcessedSnapshot,
+} from '../lib/dashboardDailyWork';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import { dataProvider } from '../providers/dataProvider';
-import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
-import { ClipboardList, AlertTriangle, Clock, CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react';
-import { supabase } from '../providers/cloud/supabaseClient';
-import { supabaseProvider } from '../providers/cloud/supabaseProvider';
-import { getProviderMode } from '../providers/providerMode';
-import { getAllDashboardCategoryImages, migrateLegacyDashboardImages, saveDashboardCategoryImage } from '../lib/dashboardImageStore';
+
+const UPCOMING_WINDOW_DAYS = 7;
+const UNLISTED_PROCESSED_STORAGE_KEY = 'erp_unlisted_processed_local';
+
+interface WorkQueueItem {
+  group: ProductGroup;
+  targetDate: string;
+  diffDays: number | null;
+  demand: number;
+  purchased: number;
+  gap: number;
+}
+
+type WorkQueueKey = 'unlisted' | 'upcoming' | 'overdue' | 'unordered';
+type UnorderedCategoryFilter = 'all' | ProductDisplayCategory;
+
+const normalizeDate = (value?: string | null): string => {
+  if (!value) return '';
+  const match = value.trim().replace(/\//g, '-').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!match) return '';
+  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+};
+
+const localToday = (): string => {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
+
+const daysFromToday = (date: string, today: string): number => {
+  const toLocalDate = (value: string) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+  return Math.round((toLocalDate(date).getTime() - toLocalDate(today).getTime()) / 86_400_000);
+};
+
+const readUnlistedProcessedSnapshot = (): UnlistedProcessedSnapshot | null => {
+  try {
+    const raw = localStorage.getItem(UNLISTED_PROCESSED_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as UnlistedProcessedSnapshot;
+    return Array.isArray(parsed.processed_group_ids) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+function WorkQueueSection({
+  id,
+  title,
+  description,
+  tone,
+  items,
+  emptyText,
+  onOpenItem,
+  onViewAll,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  tone: 'indigo' | 'amber' | 'red' | 'blue';
+  items: WorkQueueItem[];
+  emptyText: string;
+  onOpenItem: (groupId: string) => void;
+  onViewAll?: () => void;
+}) {
+  const visibleItems = onViewAll ? items.slice(0, 10) : items;
+
+  return (
+    <section id={id} className={`work-queue work-queue-${tone}`} data-dashboard-queue={id}>
+      <div className="work-queue-header">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        {onViewAll && (
+          <button type="button" className="view-all-button" onClick={onViewAll}>
+            前往處理 <ChevronRight size={17} />
+          </button>
+        )}
+      </div>
+
+      {visibleItems.length === 0 ? (
+        <div className="work-queue-empty">{emptyText}</div>
+      ) : (
+        <div className="work-queue-list">
+          {visibleItems.map(item => (
+            <button
+              type="button"
+              className="work-queue-row"
+              key={item.group.id}
+              onClick={() => onOpenItem(item.group.id)}
+            >
+              <div className="work-item-main">
+                <strong>{normalizeDashboardWorkTitle(item.group.title || '') || '未命名商品'}</strong>
+                <span>{item.targetDate ? `結單 ${item.targetDate}` : '未設定結單日'}</span>
+              </div>
+              <div className="work-item-metrics">
+                {item.diffDays !== null && (
+                  <span className="work-date-status">
+                    {item.diffDays < 0 ? `已過期 ${Math.abs(item.diffDays)} 天` : item.diffDays === 0 ? '今天結單' : `剩 ${item.diffDays} 天`}
+                  </span>
+                )}
+                <span>需求 {item.demand}</span>
+                <span>已採購 {item.purchased}</span>
+                <span className="work-gap">尚缺 {item.gap}</span>
+                <ChevronRight size={18} aria-hidden="true" />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {onViewAll && items.length > visibleItems.length && (
+        <button type="button" className="work-queue-more" onClick={onViewAll}>
+          還有 {items.length - visibleItems.length} 項，前往工作頁查看
+        </button>
+      )}
+    </section>
+  );
+}
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -20,175 +156,36 @@ export default function Dashboard() {
   const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
-  const [refreshTime, setRefreshTime] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [refreshTime, setRefreshTime] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasCompletedLoad, setHasCompletedLoad] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [urgentView, setUrgentView] = useState<'overdue' | 'upcoming'>('overdue');
-  const [upcomingDays, setUpcomingDays] = useState<3 | 5 | 7>(7);
+  const [activeQueue, setActiveQueue] = useState<WorkQueueKey>('unlisted');
+  const [unorderedCategory, setUnorderedCategory] = useState<UnorderedCategoryFilter>('all');
+
   const batchItemsByGroupId = useMemo(
     () => mapPurchaseBatchItemsByGroup(batches, batchItems),
-    [batches, batchItems]
+    [batches, batchItems],
   );
   const privateOrderItemsByGroupId = useMemo(
     () => mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems),
-    [privateOrders, privateOrderItems]
+    [privateOrders, privateOrderItems],
   );
-
-  // Distinguishes "load failed and we have nothing to show" from "load failed but
-  // the previous numbers are still on screen", which need different wording.
-  const hasLoadedData = groups.length > 0;
-
-  const navigate = useNavigate();
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [activeCategoryForUpload, setActiveCategoryForUpload] = useState<string | null>(null);
-  const [categoryImages, setCategoryImages] = useState<Record<string, string>>({
-    all: '',
-    hololive: '',
-    vspo: '',
-    agency: '',
-    other: ''
-  });
-
-  const DEFAULT_IMAGES: Record<string, string> = {
-    all: '/images/all_products.png',
-    hololive: '/images/hololive.png',
-    vspo: '/images/vspo.png',
-    agency: '/images/proxy.png',
-    other: '/images/other.png'
-  };
-
-  // Fallback mode still routes every read/write through SupabaseProvider, so it must
-  // use the cloud image URLs too -- treating it as local made it write megabyte Base64
-  // blobs into localStorage exactly when cloud sync was already struggling.
-  const usesCloudImages = (mode: ReturnType<typeof getProviderMode>) => mode === 'cloud' || mode === 'fallback';
-
-  const refreshCategoryImages = async () => {
-    const mode = getProviderMode();
-    if (usesCloudImages(mode)) {
-      setCategoryImages({
-        all: localStorage.getItem('dashboard_cloud_img_all') || '',
-        hololive: localStorage.getItem('dashboard_cloud_img_hololive') || '',
-        vspo: localStorage.getItem('dashboard_cloud_img_vspo') || '',
-        agency: localStorage.getItem('dashboard_cloud_img_agency') || '',
-        other: localStorage.getItem('dashboard_cloud_img_other') || ''
-      });
-    } else {
-      // IndexedDB-first; the store falls back to any legacy localStorage copy
-      // that has not been migrated yet.
-      setCategoryImages(await getAllDashboardCategoryImages());
-    }
-  };
-
-  const triggerImageUpload = (categoryKey: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setActiveCategoryForUpload(categoryKey);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-      fileInputRef.current.click();
-    }
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeCategoryForUpload) return;
-
-    const mode = getProviderMode();
-
-    if (usesCloudImages(mode)) {
-      try {
-        setIsLoading(true);
-        // 1. 刪除舊圖片 (若有)
-        const oldPath = localStorage.getItem(`dashboard_cloud_path_${activeCategoryForUpload}`);
-        if (oldPath) {
-          try {
-            const { error: removeError } = await supabase.storage
-              .from('dashboard-category-images')
-              .remove([oldPath]);
-            if (removeError) {
-              console.warn('[Storage] 刪除舊分類圖片失敗:', removeError.message);
-            }
-          } catch (err: any) {
-            console.warn('[Storage] 刪除舊分類圖片發生錯誤:', err.message || err);
-          }
-        }
-
-        // 2. 上傳新圖片
-        const fileExt = file.name.split('.').pop();
-        const newPath = `${activeCategoryForUpload}_${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage
-          .from('dashboard-category-images')
-          .upload(newPath, file, { cacheControl: '3600', upsert: true });
-
-        if (uploadError) {
-          throw uploadError;
-        }
-
-        // 3. 取得 Public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('dashboard-category-images')
-          .getPublicUrl(newPath);
-
-        // 4. 更新雲端資料庫與本地 localStorage 快取
-        await supabaseProvider.saveDashboardCategoryImage(activeCategoryForUpload, publicUrl, newPath);
-        await refreshCategoryImages();
-        alert('雲端圖片上傳成功！');
-      } catch (err: any) {
-        console.error('上傳圖片至雲端失敗:', err);
-        alert(`上傳圖片失敗: ${err.message || err}`);
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      // Local Mode: Data URL 存入 IndexedDB（不再寫入 localStorage，避免擠壓登入狀態）
-      const categoryKey = activeCategoryForUpload;
-      const reader = new FileReader();
-
-      reader.onerror = () => {
-        console.error('[DashboardImage] 讀取圖片檔案失敗', reader.error);
-        alert('讀取圖片檔案失敗，原本的圖片維持不變。');
-      };
-
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        if (!dataUrl) {
-          alert('讀取圖片檔案失敗，原本的圖片維持不變。');
-          return;
-        }
-
-        void saveDashboardCategoryImage(categoryKey, dataUrl)
-          .then(() => {
-            setCategoryImages(prev => ({ ...prev, [categoryKey]: dataUrl }));
-          })
-          .catch(err => {
-            // Storage failed -- keep the previously displayed image and say so
-            // rather than reporting a save that did not happen.
-            console.error('[DashboardImage] 儲存圖片失敗', err);
-            alert('儲存圖片失敗：瀏覽器儲存空間不足或無法使用，原本的圖片維持不變。');
-          });
-      };
-
-      reader.readAsDataURL(file);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-    // Legacy Base64 images can be sitting in localStorage in any provider mode, so
-    // reclaim that space first, then read. Migration never deletes on failure, and
-    // the read path falls back to localStorage for anything left behind.
-    void migrateLegacyDashboardImages()
-      .catch(err => console.error('[DashboardImage] Migration pass failed', err))
-      .then(() => refreshCategoryImages());
-  }, []);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      // No per-call .catch fallbacks here: swallowing a failed fetch into [] made a
-      // total sync failure render as "0 項" plus "太棒了！目前沒有需要處理的商品",
-      // which is indistinguishable from a genuinely clear day.
-      const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedPrivateOrders, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
+      const [
+        fetchedGroups,
+        fetchedVariants,
+        fetchedCategories,
+        fetchedBatches,
+        fetchedBatchItems,
+        fetchedPrivateOrders,
+        fetchedPrivateOrderItems,
+        fetchedInventory,
+        fetchedSalesOrderItems,
+      ] = await Promise.all([
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
         dataProvider.getProductCategories(),
@@ -197,1474 +194,398 @@ export default function Dashboard() {
         dataProvider.getPrivateOrders(),
         dataProvider.getPrivateOrderItems(),
         dataProvider.getInventory(),
-        dataProvider.getSalesOrderItems()
+        dataProvider.getSalesOrderItems(),
       ]);
 
-      // Commit only after every fetch resolved, so a partial failure can never
-      // blank out numbers that are already on screen.
       setGroups(fetchedGroups || []);
-      setVariants(fetchedVars || []);
-      setCategories(fetchedCats || []);
+      setVariants(fetchedVariants || []);
+      setCategories(fetchedCategories || []);
       setBatches(fetchedBatches || []);
       setBatchItems(fetchedBatchItems || []);
       setPrivateOrders(fetchedPrivateOrders || []);
-      setPrivateOrderItems(fetchedPrivateItems || []);
+      setPrivateOrderItems(fetchedPrivateOrderItems || []);
       setInventory(fetchedInventory || []);
-      setSalesOrderItems(fetchedOrderItems || []);
+      setSalesOrderItems(fetchedSalesOrderItems || []);
       setLoadError(null);
+      setHasCompletedLoad(true);
 
-      // Only stamp a fresh "更新時間" when the data behind it is actually fresh.
       const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, '0');
+      const pad = (value: number) => String(value).padStart(2, '0');
       setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
-    } catch (e) {
-      // Existing data state is left untouched on purpose -- stale numbers with a
-      // visible warning beat wrong numbers presented as current.
-      console.error('Failed to load data on Dashboard', e);
-      setLoadError(e instanceof Error ? e.message : String(e));
+    } catch (error) {
+      console.error('Failed to load data on Dashboard', error);
+      setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
-      void refreshCategoryImages().catch(err =>
-        console.error('[DashboardImage] Failed to refresh category images', err)
-      );
       setIsLoading(false);
     }
   };
 
-  // --- Classification logic (Strictly matched with PurchaseRecords.tsx, with safety guards) ---
-  const checkIsProxyProduct = (g: ProductGroup) => {
-    if (!g) return false;
-    if (g.listing_type === '代理版') return true;
-    if (g.source_type === '代理版') return true;
-
-    const variantsList = variants || [];
-    const inventoryList = inventory || [];
-
-    const groupVars = variantsList.filter(v => v && v.product_group_id === g.id);
-    const hasProxySku = groupVars.some(v => {
-      if (!v.myacg_item_code) return false;
-      const invItem = inventoryList.find(i => i && i.myacg_item_code === v.myacg_item_code);
-      return invItem?.listing_type === '代理版';
-    });
-    if (hasProxySku) return true;
-
-    const keywords = [
-      '代理版', '代理', 'gsc', 'good smile', 'max factory', 'furyu', '景品', 'sega', 'bandai', 'kotobukiya'
-    ];
-
-    const matchText = (text: any) => {
-      if (!text || typeof text !== 'string') return false;
-      const lower = text.toLowerCase();
-      return keywords.some(kw => lower.includes(kw));
-    };
-
-    if (matchText(g.title) || matchText(g.normalized_title)) return true;
-
-    const matchVar = groupVars.some(v => 
-      v && (
-        matchText(v.variant_name) || 
-        matchText(v.raw_variant_name) || 
-        matchText(v.product_title)
-      )
-    );
-    if (matchVar) return true;
-
-    const matchInv = groupVars.some(v => {
-      if (!v || !v.myacg_item_code) return false;
-      const invItem = inventoryList.find(i => i && i.myacg_item_code === v.myacg_item_code);
-      return matchText(invItem?.product_title) || matchText(invItem?.raw_variant_name);
-    });
-    if (matchInv) return true;
-
-    return false;
-  };
-
-  const normalizeForMatch = (text: any): string => {
-    if (!text || typeof text !== 'string') return '';
-    return text.toLowerCase().replace(/[\s!\uff01\?\uff1f\-_\(\)\uff08\uff09\.\*,]/g, '');
-  };
-
-  const isProxyProduct = (g: ProductGroup) => {
-    return checkIsProxyProduct(g);
-  };
-
-  const isHololiveProduct = (g: ProductGroup) => {
-    if (!g) return false;
-    if (isProxyProduct(g)) return false;
-    const titleNorm = normalizeForMatch(g.title);
-    const normTitleNorm = normalizeForMatch(g.normalized_title);
-    return titleNorm.includes('hololive') || normTitleNorm.includes('hololive');
-  };
-
-  const isVspoProduct = (g: ProductGroup) => {
-    if (!g) return false;
-    if (isProxyProduct(g)) return false;
-    const titleNorm = normalizeForMatch(g.title);
-    const normTitleNorm = normalizeForMatch(g.normalized_title);
-    return titleNorm.includes('vspo') || titleNorm.includes('ぶいすぽ') || 
-           normTitleNorm.includes('vspo') || normTitleNorm.includes('ぶいすぽ');
-  };
-
-  const isOtherProduct = (g: ProductGroup) => {
-    if (!g) return false;
-    return !isProxyProduct(g) && !isHololiveProduct(g) && !isVspoProduct(g);
-  };
-
-  const getGroupDemandAndPurchased = (groupId: string) => {
-    return calculateGroupDemandAndPurchased(
-      groupId,
-      categories || [],
-      variants || [],
-      privateOrderItemsByGroupId.get(groupId) || [],
-      batchItemsByGroupId.get(groupId) || [],
-      inventory || [],
-      salesOrderItems || []
-    );
-  };
-
-  // --- Date helpers ---
-  const normalizeDateStr = (dateStr: string | null | undefined): string => {
-    if (!dateStr) return '';
-    const clean = dateStr.trim().replace(/\//g, '-');
-    const match = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (!match) return clean;
-    const year = match[1];
-    const month = match[2].padStart(2, '0');
-    const day = match[3].padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const parseDateStr = (dateStr: string) => {
-    const normalized = normalizeDateStr(dateStr);
-    const [year, month, day] = normalized.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
-
-  const getTargetClosingDate = (g: ProductGroup) => {
-    if (g.closing_date && g.closing_date.trim() !== '') {
-      return { date: normalizeDateStr(g.closing_date), type: 'closing' as const };
-    }
-    return null;
-  };
-
-  const today = useMemo(() => {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  useEffect(() => {
+    // Defer the async state transition out of the effect body. Initial render is
+    // already in the loading state, and this avoids a synchronous effect cascade.
+    void Promise.resolve().then(loadData);
   }, []);
 
-  const getRemainingDays = (dateStr: string | undefined | null) => {
-    if (!dateStr) return { text: '-', days: 999 };
-    const diffTime = parseDateStr(dateStr).getTime() - parseDateStr(today).getTime();
-    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-    return {
-      text: diffDays < 0 ? '已過期' : `剩 ${diffDays} 天`,
-      days: diffDays
+  const today = localToday();
+  const queues = useMemo(() => {
+    const upcoming: WorkQueueItem[] = [];
+    const overdue: WorkQueueItem[] = [];
+    const unordered: WorkQueueItem[] = [];
+    const byGroupId = new Map<string, WorkQueueItem>();
+
+    groups.forEach(group => {
+      const totals = calculateGroupDemandAndPurchased(
+        group.id,
+        categories,
+        variants,
+        privateOrderItemsByGroupId.get(group.id) || [],
+        batchItemsByGroupId.get(group.id) || [],
+        inventory,
+        salesOrderItems,
+      );
+      const targetDate = normalizeDate(group.closing_date);
+      const hasClosingDateValue = Boolean(group.closing_date?.trim());
+      const diffDays = targetDate ? daysFromToday(targetDate, today) : null;
+      const item: WorkQueueItem = {
+        group,
+        targetDate,
+        diffDays,
+        demand: totals.demand,
+        purchased: totals.purchased,
+        gap: totals.gap,
+      };
+      byGroupId.set(group.id, item);
+
+      if (totals.gap > 0 && diffDays !== null) {
+        if (diffDays < 0) overdue.push(item);
+        if (diffDays >= 0 && diffDays <= UPCOMING_WINDOW_DAYS) upcoming.push(item);
+      }
+
+      // Preserve the accepted Dashboard rule: an empty closing date is active,
+      // while a non-empty malformed date must not be silently reclassified as active.
+      const isActive = !hasClosingDateValue || (diffDays !== null && diffDays >= 0);
+      if (isActive && totals.demand > 0 && totals.purchased === 0) unordered.push(item);
+    });
+
+    upcoming.sort((a, b) => (a.diffDays ?? 0) - (b.diffDays ?? 0) || b.gap - a.gap);
+    overdue.sort((a, b) => (a.targetDate || '').localeCompare(b.targetDate || '') || b.gap - a.gap);
+    unordered.sort((a, b) => {
+      if (a.targetDate && !b.targetDate) return -1;
+      if (!a.targetDate && b.targetDate) return 1;
+      return (a.targetDate || '').localeCompare(b.targetDate || '') || b.gap - a.gap || a.group.title.localeCompare(b.group.title);
+    });
+
+    return { upcoming, overdue, unordered, byGroupId };
+  }, [batchItemsByGroupId, categories, groups, inventory, privateOrderItemsByGroupId, salesOrderItems, today, variants]);
+
+  const pendingUnlistedGroupIds = useMemo(
+    () => getPendingUnlistedGroupIds({
+      groups,
+      variants,
+      inventoryItems: inventory,
+      today,
+      processedSnapshot: readUnlistedProcessedSnapshot(),
+    }),
+    [groups, inventory, today, variants],
+  );
+  const pendingUnlistedItems = useMemo(
+    () => pendingUnlistedGroupIds
+      .map(groupId => queues.byGroupId.get(groupId))
+      .filter((item): item is WorkQueueItem => Boolean(item)),
+    [pendingUnlistedGroupIds, queues.byGroupId],
+  );
+  const productDisplayCategoryMap = useMemo(
+    () => buildProductDisplayCategoryMap(groups, variants, inventory),
+    [groups, inventory, variants],
+  );
+  const unorderedCategoryCounts = useMemo(() => {
+    const counts: Record<UnorderedCategoryFilter, number> = {
+      all: queues.unordered.length,
+      c108: 0,
+      hololive: 0,
+      vspo: 0,
+      proxy: 0,
+      other: 0,
     };
+    queues.unordered.forEach(item => {
+      const category = productDisplayCategoryMap.get(item.group.id) ?? 'other';
+      counts[category] += 1;
+    });
+    return counts;
+  }, [productDisplayCategoryMap, queues.unordered]);
+  const filteredUnorderedItems = useMemo(
+    () => unorderedCategory === 'all'
+      ? queues.unordered
+      : queues.unordered.filter(item => productDisplayCategoryMap.get(item.group.id) === unorderedCategory),
+    [productDisplayCategoryMap, queues.unordered, unorderedCategory],
+  );
+
+  const displayCount = (count: number) => (isLoading && !hasCompletedLoad ? '…' : String(count));
+  const activeQueueConfig = {
+    unlisted: {
+      title: '待下架',
+      description: '已過結單日、但仍存在最新商品目錄中的商品',
+      tone: 'indigo' as const,
+      items: pendingUnlistedItems,
+      emptyText: '目前沒有待下架商品。',
+      route: '/unlisted-items',
+      itemRoute: '/unlisted-items',
+    },
+    upcoming: {
+      title: '快結單',
+      description: `未來 ${UPCOMING_WINDOW_DAYS} 天內需要優先完成採購的商品`,
+      tone: 'amber' as const,
+      items: queues.upcoming,
+      emptyText: `未來 ${UPCOMING_WINDOW_DAYS} 天內沒有尚缺的商品。`,
+      route: null,
+      itemRoute: null,
+    },
+    overdue: {
+      title: '已過期',
+      description: '已過結單日但仍有缺口，請優先確認處理狀態',
+      tone: 'red' as const,
+      items: queues.overdue,
+      emptyText: '目前沒有已過期且尚缺的商品。',
+      route: null,
+      itemRoute: null,
+    },
+    unordered: {
+      title: '尚未下單',
+      description: '已有需求但採購數量仍為 0 的商品',
+      tone: 'blue' as const,
+      items: filteredUnorderedItems,
+      emptyText: '目前沒有尚未下單的商品。',
+      route: null,
+      itemRoute: null,
+    },
+  }[activeQueue];
+
+  const showQueue = (queue: WorkQueueKey) => {
+    setActiveQueue(queue);
+    document.getElementById('dashboard-work-switcher')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // --- Dynamic Stats Computations ---
-  const stats = useMemo(() => {
-    const groupsList = groups || [];
-    let activeCount = 0;
-    let unorderedCount = 0;
-    let urgent7Count = 0;
-    let urgent3Count = 0;
-    let closedCount = 0;
-
-    groupsList.forEach(g => {
-      if (!g) return;
-      const target = getTargetClosingDate(g);
-      const details = getGroupDemandAndPurchased(g.id);
-      
-      const isActive = !target || target.date >= today;
-
-      if (isActive) {
-        activeCount++;
-        // 尚未下單商品數 (已開單且需求 > 0，但採購數量 = 0)
-        if (details.demand > 0 && details.purchased === 0) {
-          unorderedCount++;
-        }
-
-        // 即將結單 (7天內且有缺口)
-        if (target && details.gap > 0) {
-          const { days } = getRemainingDays(target.date);
-          if (days >= 0 && days <= 7) {
-            urgent7Count++;
-            if (days <= 3) {
-              urgent3Count++;
-            }
-          }
-        }
-      } else {
-        closedCount++;
-      }
-    });
-
-    return {
-      activeCount,
-      unorderedCount,
-      urgent7Count,
-      urgent3Count,
-      closedCount
-    };
-  }, [groups, variants, inventory, salesOrderItems, batchItemsByGroupId, privateOrderItemsByGroupId, today]);
-
-  // Categories count
-  const categoryCounts = useMemo(() => {
-    const groupsList = groups || [];
-    return {
-      all: groupsList.length,
-      hololive: groupsList.filter(isHololiveProduct).length,
-      vspo: groupsList.filter(isVspoProduct).length,
-      proxy: groupsList.filter(isProxyProduct).length,
-      other: groupsList.filter(isOtherProduct).length,
-    };
-  }, [groups, variants, inventory]);
-
-  // Release Month stats aggregation
-  const releaseMonthStats = useMemo(() => {
-    const counts: Record<string, number> = {};
-    const groupsList = groups || [];
-    const currentMonth = today.substring(0, 7); // "YYYY-MM"
-
-    groupsList.forEach(g => {
-      if (!g || !g.release_month) return;
-      const match = g.release_month.match(/^(\d{4})-(\d{2})$/);
-      if (!match) return;
-
-      if (g.release_month >= currentMonth) {
-        counts[g.release_month] = (counts[g.release_month] || 0) + 1;
-      }
-    });
-
-    return Object.entries(counts)
-      .map(([month, count]) => ({ month, count }))
-      .sort((a, b) => a.month.localeCompare(b.month));
-  }, [groups, today]);
-
-  // Urgent Groups (closing in <= 7 days, or overdue with gap)
-  const urgentGroups = useMemo(() => {
-    const groupsList = groups || [];
-    const eligibleList: {
-      group: ProductGroup;
-      targetDate: string;
-      targetType: 'purchase' | 'closing';
-      gap: number;
-      diffDays: number;
-    }[] = [];
-
-    groupsList.forEach(g => {
-      if (!g) return;
-      const target = getTargetClosingDate(g);
-      if (!target) return;
-
-      const { gap } = getGroupDemandAndPurchased(g.id);
-      const { days } = getRemainingDays(target.date);
-
-      const isEligible = gap > 0 && ((days >= 0 && days <= 7) || days < 0);
-      if (isEligible) {
-        eligibleList.push({
-          group: g,
-          targetDate: target.date,
-          targetType: target.type,
-          gap,
-          diffDays: days
-        });
-      }
-    });
-
-    // Sort according to rules:
-    // 1. 缺口 > 0 優先
-    // 2. 結單日期越近越前面
-    // 3. 缺口數越大越前面
-    eligibleList.sort((a, b) => {
-      const hasGapA = a.gap > 0;
-      const hasGapB = b.gap > 0;
-
-      if (hasGapA !== hasGapB) {
-        return hasGapA ? -1 : 1;
-      }
-
-      const dateCompare = a.targetDate.localeCompare(b.targetDate);
-      if (dateCompare !== 0) {
-        return dateCompare;
-      }
-
-      return b.gap - a.gap;
-    });
-
-    return eligibleList;
-  }, [groups, today, variants, inventory, salesOrderItems, batchItemsByGroupId, privateOrderItemsByGroupId]);
-
-  const overdueGroups = useMemo(
-    () => urgentGroups.filter(item => item.diffDays < 0),
-    [urgentGroups]
-  );
-  const upcomingGroups = useMemo(
-    () => urgentGroups.filter(item => item.diffDays >= 0 && item.diffDays <= upcomingDays),
-    [urgentGroups, upcomingDays]
-  );
-  const visibleUrgentGroups = (urgentView === 'overdue' ? overdueGroups : upcomingGroups).slice(0, 10);
-
   return (
-    <div className="dashboard-container">
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept="image/*" 
-        style={{ display: 'none' }} 
-      />
-      <style>{`
-        .dashboard-container {
-          width: 100%;
-          max-width: none;
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-          font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          color: #1e293b;
-          display: flex;
-          flex-direction: column;
-          gap: 24px;
-        }
-
-        .dashboard-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          border-bottom: 1px solid #f1f5f9;
-          padding-bottom: 16px;
-          flex-wrap: wrap;
-          gap: 16px;
-        }
-
-        .dashboard-title-area h1 {
-          font-size: 26px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0 0 6px 0;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .dashboard-title-area p {
-          font-size: 14px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .header-actions {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .update-time {
-          font-size: 12px;
-          color: #64748b;
-          background-color: #f8fafc;
-          padding: 6px 12px;
-          border-radius: 9999px;
-          border: 1px solid #e2e8f0;
-        }
-
-        .btn-refresh {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 12px;
-          font-size: 12px;
-          font-weight: 600;
-          color: #475569;
-          background: #ffffff;
-          border: 1px solid #cbd5e1;
-          border-radius: 9999px;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        }
-
-        .btn-refresh:hover {
-          background-color: #f8fafc;
-          border-color: #94a3b8;
-          color: #1e293b;
-        }
-
-        .btn-refresh:active {
-          transform: scale(0.98);
-        }
-
-        /* KPI Cards Grid */
-        .kpi-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 20px;
-        }
-
-        .kpi-card {
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          padding: 16px 20px;
-          height: 110px;
-          box-sizing: border-box;
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-          position: relative;
-        }
-
-        .kpi-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 10px 20px rgba(0,0,0,0.04);
-          border-color: #cbd5e1;
-        }
-
-        .kpi-icon-wrapper {
-          width: 48px;
-          height: 48px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-
-        .kpi-info {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .kpi-value {
-          font-size: 26px;
-          font-weight: 700;
-          color: #0f172a;
-          line-height: 1.2;
-        }
-
-        .kpi-value span {
-          font-size: 14px;
-          font-weight: 600;
-          color: #64748b;
-          margin-left: 2px;
-        }
-
-        .kpi-label {
-          font-size: 14px;
-          font-weight: 600;
-          color: #475569;
-          margin-bottom: 2px;
-        }
-
-        .kpi-sub {
-          font-size: 12px;
-          color: #64748b;
-        }
-
-        /* Category Section */
-        .category-section {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .category-section-header {
-          margin-bottom: 4px;
-        }
-
-        .category-section h3 {
-          font-size: 16px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0 0 4px 0;
-        }
-
-        .category-section p {
-          font-size: 13px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .category-grid {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 20px;
-        }
-
-        .category-card {
-          display: flex;
-          align-items: center;
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          overflow: hidden;
-          cursor: pointer;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          height: 160px;
-          position: relative;
-          padding: 10px;
-          box-sizing: border-box;
-          gap: 10px;
-        }
-
-        .category-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 12px 20px -8px rgba(37, 99, 235, 0.15), 0 4px 12px -2px rgba(0, 0, 0, 0.04);
-          border-color: #2563eb;
-        }
-
-        .category-img-container {
-          width: 35%;
-          height: 100%;
-          border-radius: 12px;
-          overflow: hidden;
-          position: relative;
-          flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
-          background-color: #f8fafc;
-        }
-
-        .category-img-overlay {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          z-index: 1;
-        }
-
-        .category-img {
-          max-width: 90%;
-          max-height: 90%;
-          object-fit: contain;
-          transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .category-card:hover .category-img {
-          transform: scale(1.08);
-        }
-
-        .category-info {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          height: 100%;
-          min-width: 0;
-          padding: 4px 0;
-          box-sizing: border-box;
-        }
-
-        .category-info-top {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .category-name {
-          font-size: 13.5px;
-          font-weight: 700;
-          color: #334155;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          transition: color 0.2s ease;
-        }
-
-        .category-card:hover .category-name {
-          color: #2563eb;
-        }
-
-        .category-count {
-          font-size: 24px;
-          font-weight: 800;
-          color: #0f172a;
-          margin-top: 2px;
-          line-height: 1;
-        }
-
-        .category-count span {
-          font-size: 13px;
-          font-weight: 600;
-          color: #64748b;
-          margin-left: 2px;
-        }
-
-        .category-link {
-          font-size: 11px;
-          font-weight: 700;
-          color: #2563eb;
-          display: inline-flex;
-          align-items: center;
-          gap: 2px;
-          transition: all 0.2s ease;
-          opacity: 0.85;
-          white-space: nowrap;
-        }
-
-        .category-card:hover .category-link {
-          opacity: 1;
-          transform: translateX(3px);
-          color: #1d4ed8;
-        }
-
-        .category-footer-row {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 6px;
-          margin-top: auto;
-          width: 100%;
-        }
-
-        .btn-change-image {
-          font-size: 10px;
-          padding: 2px 6px;
-          border-radius: 4px;
-          background: #f8fafc;
-          border: 1px solid #cbd5e1;
-          color: #64748b;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          font-weight: 600;
-          display: inline-flex;
-          align-items: center;
-          white-space: nowrap;
-          margin-top: 2px;
-        }
-
-        .btn-change-image:hover {
-          background: #f1f5f9;
-          color: #1e293b;
-          border-color: #94a3b8;
-        }
-
-        .btn-change-image:active {
-          transform: scale(0.95);
-        }
-
-
-        /* Urgent section */
-        .urgent-section {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-
-        .urgent-section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-          border-bottom: 1px solid #f1f5f9;
-          padding-bottom: 8px;
-        }
-
-        .urgent-section-header h3 {
-          font-size: 16px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0 0 4px 0;
-        }
-
-        .urgent-section-header p {
-          font-size: 13px;
-          color: #64748b;
-          margin: 0;
-        }
-
-        .link-view-all {
-          font-size: 13px;
-          font-weight: 600;
-          color: #2563eb;
-          text-decoration: none;
-          display: inline-flex;
-          align-items: center;
-          gap: 2px;
-          transition: color 0.15s ease;
-        }
-
-        .link-view-all:hover {
-          color: #1d4ed8;
-          text-decoration: underline;
-        }
-
-        .urgent-table-container {
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          overflow: hidden;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-        }
-
-        .urgent-table {
-          width: 100%;
-          border-collapse: collapse;
-          text-align: left;
-          font-size: 13px;
-        }
-
-        .urgent-table th {
-          padding: 14px 20px;
-          font-weight: 600;
-          color: #475569;
-          font-size: 12px;
-          background-color: #f8fafc;
-          border-bottom: 1px solid #e2e8f0;
-        }
-
-        .urgent-table tr {
-          border-bottom: 1px solid #f1f5f9;
-          transition: background-color 0.2s ease;
-          height: 68px;
-        }
-
-        .urgent-table tbody tr:hover {
-          background-color: #f8fafc;
-        }
-
-        .urgent-table tbody tr:last-child {
-          border-bottom: none;
-        }
-
-        .urgent-table td {
-          padding: 12px 20px;
-          vertical-align: middle;
-          color: #1e293b;
-        }
-
-        .urgent-table-title {
-          font-size: 13.5px;
-          font-weight: 700;
-          color: #0f172a;
-          margin: 0;
-          line-height: 1.4;
-          white-space: normal;
-          word-break: break-all;
-        }
-
-        /* Urgent cards for mobile */
-        .urgent-cards-container {
-          display: none;
-        }
-
-        .urgent-card {
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 16px;
-          box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          cursor: pointer;
-          transition: background-color 0.2s ease, transform 0.2s ease;
-          box-sizing: border-box;
-        }
-
-        .urgent-card:hover {
-          background-color: #f8fafc;
-        }
-
-        .urgent-card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 8px;
-        }
-
-        .urgent-card-title {
-          font-size: 14.2px;
-          font-weight: 700;
-          color: #0f172a;
-          line-height: 1.4;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          word-break: break-word;
-          flex: 1;
-          margin: 0;
-        }
-
-        .urgent-card-tags {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-
-        .urgent-card-tag {
-          background-color: #f1f5f9;
-          color: #475569;
-          font-size: 10px;
-          padding: 2px 8px;
-          border-radius: 4px;
-          font-weight: 500;
-        }
-
-        .urgent-card-info {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          border-top: 1px solid #f1f5f9;
-          padding-top: 10px;
-          font-size: 13.5px;
-          color: #64748b;
-        }
-
-        .urgent-card-info-row {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-
-        .urgent-card-info-row .text-red {
-          color: #ef4444;
-          font-weight: 700;
-        }
-
-        @media (max-width: 1024px) {
-          .kpi-grid {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
-          }
-          .category-grid {
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-          }
-        }
-
-        @media (max-width: 768px) {
-          .category-grid {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-          }
-          .urgent-table-container {
-            display: none;
-          }
-          .urgent-cards-container {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-          }
-        }
-
-        @media (max-width: 600px) {
-          .kpi-grid {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-          }
-          .kpi-card {
-            padding: 12px 14px;
-            height: 96px;
-            gap: 8px;
-            border-radius: 12px;
-          }
-          .kpi-icon-wrapper {
-            width: 36px;
-            height: 36px;
-          }
-          .kpi-icon-wrapper svg {
-            width: 18px;
-            height: 18px;
-          }
-          .kpi-value {
-            font-size: 18px;
-          }
-          .kpi-value span {
-            font-size: 11px;
-          }
-          .kpi-label {
-            font-size: 11px;
-            margin-bottom: 0px;
-          }
-          .kpi-sub {
-            font-size: 9px;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .category-grid {
-            grid-template-columns: 1fr;
-            gap: 12px;
-          }
-        }
-        @media (min-width: 1400px) {
-          .kpi-card {
-            padding: 24px !important;
-          }
-          .kpi-value {
-            font-size: 32px !important;
-          }
-          .kpi-label {
-            font-size: 15px !important;
-          }
-          .kpi-sub {
-            font-size: 13.5px !important;
-          }
-          .category-card {
-            padding: 24px !important;
-          }
-          .category-title {
-            font-size: 18px !important;
-          }
-          .category-desc {
-            font-size: 14.5px !important;
-          }
-        }
-        @media (min-width: 2500px) {
-          .kpi-card {
-            padding: 30px !important;
-            border-radius: 12px !important;
-          }
-          .kpi-value {
-            font-size: 38px !important;
-          }
-          .kpi-label {
-            font-size: 17px !important;
-          }
-          .kpi-sub {
-            font-size: 15.5px !important;
-          }
-          .category-card {
-            padding: 30px !important;
-            border-radius: 12px !important;
-          }
-          .category-title {
-            font-size: 21px !important;
-          }
-          .category-desc {
-            font-size: 16.5px !important;
-          }
-        }
-      `}</style>
-
-      {/* Header section */}
-      <div className="dashboard-header">
-        <div className="dashboard-title-area">
-          <h1>訂購紀錄表</h1>
-          <p>追蹤商品採購進度，協助您入貨與結單行程規劃與進度管理。</p>
+    <div className="daily-dashboard">
+      <header className="dashboard-header">
+        <div>
+          <p className="dashboard-eyebrow">DAILY WORK</p>
+          <h1>每日工作待辦</h1>
+          <p className="dashboard-subtitle">先處理待下架，再掌握快結單、已過期與尚未下單。</p>
         </div>
-        <div className="header-actions">
-          {refreshTime && (
-            <span className="update-time">更新時間：{refreshTime}</span>
-          )}
-          <button className="btn-refresh" onClick={loadData} disabled={isLoading}>
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
-            <span>重新整理</span>
+        <div className="dashboard-refresh-area">
+          {refreshTime && <span>更新時間 {refreshTime}</span>}
+          <button type="button" className="refresh-button" onClick={() => void loadData()} disabled={isLoading}>
+            <RefreshCw size={17} className={isLoading ? 'spin' : ''} />
+            {isLoading ? '更新中' : '重新整理'}
           </button>
         </div>
-      </div>
+      </header>
 
       {loadError && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          flexWrap: 'wrap',
-          padding: '12px 16px',
-          marginBottom: '16px',
-          backgroundColor: '#fef2f2',
-          border: '1px solid #fca5a5',
-          borderRadius: '12px',
-          color: '#991b1b',
-          fontSize: '14px',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <AlertTriangle size={18} style={{ flexShrink: 0 }} />
-            <span>
-              資料載入失敗，請重新整理或重試。
-              {hasLoadedData && '（以下顯示的是上次成功載入的資料，可能不是最新狀態）'}
-            </span>
-          </div>
-          <button
-            onClick={loadData}
-            disabled={isLoading}
-            style={{
-              padding: '6px 16px',
-              fontSize: '13px',
-              fontWeight: 600,
-              border: '1px solid #dc2626',
-              borderRadius: '8px',
-              backgroundColor: '#fff',
-              color: '#991b1b',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              opacity: isLoading ? 0.6 : 1,
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-            }}
-          >
-            {isLoading ? '重新載入中…' : '重新載入'}
-          </button>
-        </div>
-      )}
-
-      {/* 第一區：營運摘要 */}
-      <div className="kpi-grid">
-        {/* 開單中商品數 */}
-        <div className="kpi-card">
-          <div className="kpi-icon-wrapper" style={{ backgroundColor: '#eff6ff', color: '#2563eb' }}>
-            <ClipboardList size={22} />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-label">開單中商品數</span>
-            <span className="kpi-value">{stats.activeCount}<span>項</span></span>
-            <span className="kpi-sub">目前進行中</span>
-          </div>
-        </div>
-
-        {/* 尚未下單商品數 */}
-        <div className="kpi-card">
-          <div className="kpi-icon-wrapper" style={{ backgroundColor: '#fff7ed', color: '#ea580c' }}>
-            <AlertTriangle size={22} />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-label">尚未下單商品數</span>
-            <span className="kpi-value">{stats.unorderedCount}<span>項</span></span>
-            <span className="kpi-sub">已開單但尚未下單</span>
-          </div>
-        </div>
-
-        {/* 即將結單商品數 */}
-        <div className="kpi-card">
-          <div className="kpi-icon-wrapper" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-            <Clock size={22} />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-label">即將結單商品數 (7天內)</span>
-            <span className="kpi-value">{stats.urgent7Count}<span>項</span></span>
-            <span className="kpi-sub">3天內結單：{stats.urgent3Count} 項</span>
-          </div>
-        </div>
-
-        {/* 已結單商品數 */}
-        <div className="kpi-card">
-          <div className="kpi-icon-wrapper" style={{ backgroundColor: '#f0fdf4', color: '#16a34a' }}>
-            <CheckCircle2 size={22} />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-label">已結單商品數</span>
-            <span className="kpi-value">{stats.closedCount}<span>項</span></span>
-            <span className="kpi-sub">已完成結單</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 第二區：商品分類入口 */}
-      <div className="category-section">
-        <div className="category-section-header">
-          <h3>商品分類</h3>
-          <p>點擊分類卡片可直接進入訂購紀錄表篩選特定分類</p>
-        </div>
-        <div className="category-grid">
-          {/* 全部商品 */}
-          <div className="category-card" onClick={() => navigate('/purchase-records?tab=all')}>
-            <div className="category-img-container" style={{ backgroundColor: '#eff6ff' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.all || DEFAULT_IMAGES.all} alt="全部商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
-                <span className="category-name">全部商品</span>
-                <span className="category-count">{categoryCounts.all}<span>項</span></span>
-              </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('all', e)}
-                >
-                  更換圖片
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Hololive商品 */}
-          <div className="category-card" onClick={() => navigate('/purchase-records?tab=hololive')}>
-            <div className="category-img-container" style={{ backgroundColor: '#f5f3ff' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(139, 92, 246, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.hololive || DEFAULT_IMAGES.hololive} alt="Hololive商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
-                <span className="category-name">Hololive商品</span>
-                <span className="category-count">{categoryCounts.hololive}<span>項</span></span>
-              </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('hololive', e)}
-                >
-                  更換圖片
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* VSPO商品 */}
-          <div className="category-card" onClick={() => navigate('/purchase-records?tab=vspo')}>
-            <div className="category-img-container" style={{ backgroundColor: '#fff1f2' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(244, 63, 94, 0.12) 0%, rgba(244, 63, 94, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.vspo || DEFAULT_IMAGES.vspo} alt="VSPO商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
-                <span className="category-name">VSPO商品</span>
-                <span className="category-count">{categoryCounts.vspo}<span>項</span></span>
-              </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('vspo', e)}
-                >
-                  更換圖片
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* 代理版商品 */}
-          <div className="category-card" onClick={() => navigate('/purchase-records?tab=agency')}>
-            <div className="category-img-container" style={{ backgroundColor: '#fff7ed' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(249, 115, 22, 0.12) 0%, rgba(249, 115, 22, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.agency || DEFAULT_IMAGES.agency} alt="代理版商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
-                <span className="category-name">代理版商品</span>
-                <span className="category-count">{categoryCounts.proxy}<span>項</span></span>
-              </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('agency', e)}
-                >
-                  更換圖片
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* 其他商品 */}
-          <div className="category-card" onClick={() => navigate('/purchase-records?tab=other')}>
-            <div className="category-img-container" style={{ backgroundColor: '#f8fafc' }}>
-              <div className="category-img-overlay" style={{ background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.12) 0%, rgba(100, 116, 139, 0.02) 100%)' }} />
-              <img className="category-img" src={categoryImages.other || DEFAULT_IMAGES.other} alt="其他商品" />
-            </div>
-            <div className="category-info">
-              <div className="category-info-top">
-                <span className="category-name">其他商品</span>
-                <span className="category-count">{categoryCounts.other}<span>項</span></span>
-              </div>
-              <div className="category-footer-row">
-                <span className="category-link">
-                  查看訂購紀錄 <ChevronRight size={12} />
-                </span>
-                <button 
-                  className="btn-change-image"
-                  onClick={(e) => triggerImageUpload('other', e)}
-                >
-                  更換圖片
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 第三區：即將發售商品 */}
-      {releaseMonthStats.length > 0 && (
-        <div className="category-section" style={{ marginTop: '8px' }}>
-          <div className="category-section-header">
-            <h3>即將發售商品</h3>
-            <p>本月及未來月份即將發售之商品群組統計，點擊可查詢該月份商品</p>
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-            gap: '20px'
-          }}>
-            {releaseMonthStats.map(({ month, count }) => {
-              const match = month.match(/^(\d{4})-(\d{2})$/);
-              const displayName = match ? `${match[1]}年${match[2]}月` : month;
-              return (
-                <div 
-                  key={month}
-                  onClick={() => navigate(`/purchase-records?tab=all&search=${month}`)}
-                  style={{
-                    background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '16px',
-                    padding: '20px',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px',
-                    position: 'relative',
-                    overflow: 'hidden'
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.transform = 'translateY(-4px)';
-                    e.currentTarget.style.borderColor = '#2563eb';
-                    e.currentTarget.style.boxShadow = '0 12px 20px -8px rgba(37, 99, 235, 0.15), 0 4px 12px -2px rgba(0, 0, 0, 0.04)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.borderColor = '#e2e8f0';
-                    e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)';
-                  }}
-                >
-                  <div style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '4px',
-                    height: '100%',
-                    backgroundColor: '#2563eb'
-                  }} />
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#475569' }}>{displayName}</span>
-                  <span style={{ fontSize: '24px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                    {count}
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>個商品群組</span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* 第四區：即將結單 / 需要處理 */}
-      <div className="urgent-section">
-        <div className="urgent-section-header">
+        <div className="dashboard-error" role="alert">
+          <AlertTriangle size={19} />
           <div>
-            <h3>{urgentView === 'overdue' ? '已過期' : '即將到期'}</h3>
-            <p>{urgentView === 'overdue' ? '已超過官方結單日且仍有缺口的商品' : `未來 ${upcomingDays} 天內即將結單且仍有缺口的商品`}</p>
+            <strong>{hasCompletedLoad ? '更新失敗，畫面保留上次資料' : '無法載入首頁資料'}</strong>
+            <span>{loadError}</span>
           </div>
-          <a href="/purchase-records?tab=all" onClick={(e) => { e.preventDefault(); navigate('/purchase-records?tab=all'); }} className="link-view-all">
-            查看全部提醒 &gt;
-          </a>
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+      )}
+
+      <section className="daily-task-grid" aria-label="每日工作優先順序">
+        <button type="button" className="daily-task-card task-unlisted" data-dashboard-task="unlisted" onClick={() => showQueue('unlisted')}>
+          <span className="task-icon"><Archive size={23} /></span>
+          <span className="task-copy"><strong>待下架</strong><small>仍在賣場、需要處理</small></span>
+          <span className="daily-task-count" data-task-count>{displayCount(pendingUnlistedItems.length)}</span>
+          <ChevronRight size={20} className="task-chevron" />
+        </button>
+
+        <button type="button" className="daily-task-card task-upcoming" data-dashboard-task="upcoming" onClick={() => showQueue('upcoming')}>
+          <span className="task-icon"><Clock3 size={23} /></span>
+          <span className="task-copy"><strong>快結單</strong><small>未來 {UPCOMING_WINDOW_DAYS} 天內且尚缺</small></span>
+          <span className="daily-task-count" data-task-count>{displayCount(queues.upcoming.length)}</span>
+          <ChevronRight size={20} className="task-chevron" />
+        </button>
+
+        <button type="button" className="daily-task-card task-overdue" data-dashboard-task="overdue" onClick={() => showQueue('overdue')}>
+          <span className="task-icon"><AlertTriangle size={23} /></span>
+          <span className="task-copy"><strong>已過期</strong><small>已過結單日、工作未完成</small></span>
+          <span className="daily-task-count" data-task-count>{displayCount(queues.overdue.length)}</span>
+          <ChevronRight size={20} className="task-chevron" />
+        </button>
+
+        <button type="button" className="daily-task-card task-unordered" data-dashboard-task="unordered" onClick={() => showQueue('unordered')}>
+          <span className="task-icon"><ShoppingCart size={23} /></span>
+          <span className="task-copy"><strong>尚未下單</strong><small>有需求、尚未建立採購</small></span>
+          <span className="daily-task-count" data-task-count>{displayCount(queues.unordered.length)}</span>
+          <ChevronRight size={20} className="task-chevron" />
+        </button>
+      </section>
+
+      <section id="dashboard-work-switcher" className="dashboard-work-switcher" aria-label="工作清單切換">
+        <div className="work-queue-tabs" role="tablist" aria-label="選擇工作清單">
           <button
-            onClick={() => setUrgentView('overdue')}
-            style={{ padding: '6px 14px', borderRadius: '9999px', border: `1px solid ${urgentView === 'overdue' ? '#ef4444' : '#cbd5e1'}`, backgroundColor: urgentView === 'overdue' ? '#fef2f2' : '#fff', color: urgentView === 'overdue' ? '#dc2626' : '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+            type="button"
+            role="tab"
+            aria-selected={activeQueue === 'unlisted'}
+            className={activeQueue === 'unlisted' ? 'active tab-unlisted' : ''}
+            data-work-queue-tab="unlisted"
+            onClick={() => setActiveQueue('unlisted')}
           >
-            已過期 ({overdueGroups.length})
+            待下架 <span>{pendingUnlistedItems.length}</span>
           </button>
           <button
-            onClick={() => setUrgentView('upcoming')}
-            style={{ padding: '6px 14px', borderRadius: '9999px', border: `1px solid ${urgentView === 'upcoming' ? '#f59e0b' : '#cbd5e1'}`, backgroundColor: urgentView === 'upcoming' ? '#fffbeb' : '#fff', color: urgentView === 'upcoming' ? '#b45309' : '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+            type="button"
+            role="tab"
+            aria-selected={activeQueue === 'upcoming'}
+            className={activeQueue === 'upcoming' ? 'active tab-upcoming' : ''}
+            data-work-queue-tab="upcoming"
+            onClick={() => setActiveQueue('upcoming')}
           >
-            即將到期 ({upcomingGroups.length})
+            快結單 <span>{queues.upcoming.length}</span>
           </button>
-          {urgentView === 'upcoming' && ([3, 5, 7] as const).map(days => (
-            <button
-              key={days}
-              onClick={() => setUpcomingDays(days)}
-              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${upcomingDays === days ? '#2563eb' : '#cbd5e1'}`, backgroundColor: upcomingDays === days ? '#eff6ff' : '#fff', color: upcomingDays === days ? '#2563eb' : '#64748b', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-            >
-              {days} 天
-            </button>
-          ))}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeQueue === 'overdue'}
+            className={activeQueue === 'overdue' ? 'active tab-overdue' : ''}
+            data-work-queue-tab="overdue"
+            onClick={() => setActiveQueue('overdue')}
+          >
+            已過期 <span>{queues.overdue.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeQueue === 'unordered'}
+            className={activeQueue === 'unordered' ? 'active tab-unordered' : ''}
+            data-work-queue-tab="unordered"
+            onClick={() => setActiveQueue('unordered')}
+          >
+            尚未下單 <span>{queues.unordered.length}</span>
+          </button>
         </div>
-        {visibleUrgentGroups.length === 0 && loadError ? (
-          // An empty list after a failed load means "we don't know", not "nothing to do".
-          <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fef2f2', borderRadius: '16px', border: '1px dashed #fca5a5', color: '#991b1b', fontSize: '14px', boxSizing: 'border-box', textAlign: 'center', padding: '0 16px' }}>
-            資料載入失敗，無法確認是否有即將結單的商品，請重新載入。
+
+        {activeQueue === 'unordered' && (
+          <div className="unordered-category-tabs" role="tablist" aria-label="尚未下單商品分類">
+            {([
+              ['all', '全部'],
+              ['c108', 'C108專區'],
+              ['hololive', 'Hololive商品'],
+              ['vspo', 'VSPO商品'],
+              ['proxy', '代理版商品'],
+              ['other', '其他商品'],
+            ] as Array<[UnorderedCategoryFilter, string]>).map(([key, label]) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={unorderedCategory === key}
+                className={unorderedCategory === key ? 'active' : ''}
+                data-unordered-category={key}
+                key={key}
+                onClick={() => setUnorderedCategory(key)}
+              >
+                {label} <span>{unorderedCategoryCounts[key]}</span>
+              </button>
+            ))}
           </div>
-        ) : visibleUrgentGroups.length === 0 ? (
-          <div style={{ height: '90px', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', borderRadius: '16px', border: '1px dashed #e2e8f0', color: '#64748b', fontSize: '14px', boxSizing: 'border-box' }}>
-            {urgentView === 'overdue' ? '目前沒有已過期且仍有缺口的商品。' : `目前沒有未來 ${upcomingDays} 天內即將到期且仍有缺口的商品。`}
-          </div>
-        ) : (
-          <>
-            <div className="urgent-table-container">
-              <table className="urgent-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '15%', paddingLeft: '24px' }}>結單類型</th>
-                    <th style={{ width: '45%' }}>商品名稱</th>
-                    <th style={{ width: '13%', textAlign: 'center' }}>結單日期</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>剩餘天數</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>缺口數量</th>
-                    <th style={{ width: '10%', textAlign: 'center' }}>狀態</th>
-                    <th style={{ width: '2%', paddingRight: '24px' }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleUrgentGroups.map(item => {
-                    const g = item.group;
-                    if (!g) return null;
-                    const gap = item.gap;
-                    const targetDate = item.targetDate;
-                    const targetType = item.targetType;
-                    const diffDays = item.diffDays;
-                    const remainingText = diffDays < 0 ? '已過期' : `${diffDays} 天`;
-
-                    // Determine tags
-                    const tags = [];
-                    if (g.listing_type) {
-                      tags.push(g.listing_type);
-                    } else {
-                      if (isProxyProduct(g)) {
-                        tags.push('代理版');
-                      } else {
-                        tags.push('一般預購');
-                      }
-                    }
-                    if (isHololiveProduct(g)) {
-                      tags.push('Hololive');
-                    } else if (isVspoProduct(g)) {
-                      tags.push('VSPO');
-                    }
-
-                    return (
-                      <tr key={g.id} onClick={() => navigate(`/purchase-records/${g.id}`)} style={{ cursor: 'pointer' }}>
-                        <td style={{ paddingLeft: '24px' }}>
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '4px 12px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            borderRadius: '9999px',
-                            backgroundColor: targetType === 'purchase' ? '#eff6ff' : '#f0fdf4',
-                            color: targetType === 'purchase' ? '#2563eb' : '#16a34a',
-                            border: targetType === 'purchase' ? '1px solid #bfdbfe' : '1px solid #bbf7d0'
-                          }}>
-                            {targetType === 'purchase' ? '購買結單' : '官方結單'}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span className="urgent-table-title">{g.normalized_title || g.title}</span>
-                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                              {tags.map((tag, i) => (
-                                <span key={i} style={{ backgroundColor: '#f1f5f9', color: '#475569', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', fontWeight: 500 }}>
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
-                          {targetDate}
-                        </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
-                          {remainingText}
-                        </td>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: '#ef4444' }}>
-                          缺口 {gap}
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '4px 10px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            borderRadius: '9999px',
-                            backgroundColor: '#fffbeb',
-                            color: '#d97706',
-                            border: '1px solid #fef3c7'
-                          }}>
-                            進行中
-                          </span>
-                        </td>
-                        <td style={{ paddingRight: '24px', textAlign: 'right' }}>
-                          <ChevronRight size={16} style={{ color: '#94a3b8' }} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="urgent-cards-container">
-              {visibleUrgentGroups.map(item => {
-                const g = item.group;
-                if (!g) return null;
-                const gap = item.gap;
-                const targetDate = item.targetDate;
-                const diffDays = item.diffDays;
-                const remainingText = diffDays < 0 ? '已過期' : `剩 ${diffDays} 天`;
-
-                // Determine tags
-                const tags = [];
-                if (g.listing_type) {
-                  tags.push(g.listing_type);
-                } else {
-                  if (isProxyProduct(g)) {
-                    tags.push('代理版');
-                  } else {
-                    tags.push('一般預購');
-                  }
-                }
-                if (isHololiveProduct(g)) {
-                  tags.push('Hololive');
-                } else if (isVspoProduct(g)) {
-                  tags.push('VSPO');
-                }
-
-                return (
-                  <div
-                    key={g.id}
-                    className="urgent-card"
-                    onClick={() => navigate(`/purchase-records/${g.id}`)}
-                  >
-                    <div className="urgent-card-header">
-                      <span className="urgent-card-title">{g.normalized_title || g.title}</span>
-                    </div>
-
-                    <div className="urgent-card-tags">
-                      {tags.map((tag, i) => (
-                        <span key={i} className="urgent-card-tag">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="urgent-card-info">
-                      <div className="urgent-card-info-row">
-                        <span>結單日：{targetDate}</span>
-                      </div>
-                      <div className="urgent-card-info-row">
-                        <span>狀態：</span>
-                        <span className={diffDays < 0 ? 'text-red' : ''}>{remainingText}</span>
-                      </div>
-                      <div className="urgent-card-info-row">
-                        <span>缺口：</span>
-                        <span className="text-red">{gap}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
         )}
-      </div>
+
+        <WorkQueueSection
+          id={activeQueue}
+          title={activeQueueConfig.title}
+          description={activeQueueConfig.description}
+          tone={activeQueueConfig.tone}
+          items={activeQueueConfig.items}
+          emptyText={activeQueueConfig.emptyText}
+          onOpenItem={groupId => navigate(activeQueueConfig.itemRoute || `/purchase-records/${groupId}`)}
+          onViewAll={activeQueueConfig.route ? () => navigate(activeQueueConfig.route) : undefined}
+        />
+      </section>
+
+      <style>{`
+        .daily-dashboard { max-width: 1420px; margin: 0 auto; padding: 26px 28px 56px; color: #172033; }
+        .dashboard-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+        .dashboard-eyebrow { margin: 0 0 5px; color: #64748b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.16em; }
+        .dashboard-header h1 { margin: 0; font-size: clamp(1.65rem, 2.4vw, 2.25rem); line-height: 1.15; letter-spacing: -0.03em; }
+        .dashboard-subtitle { margin: 8px 0 0; color: #64748b; font-size: 0.95rem; }
+        .dashboard-refresh-area { display: flex; align-items: center; gap: 12px; color: #94a3b8; font-size: 0.78rem; white-space: nowrap; }
+        .refresh-button, .view-all-button, .work-queue-more { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+        .refresh-button { display: inline-flex; align-items: center; gap: 7px; padding: 9px 13px; border: 1px solid #dbe3ee; border-radius: 10px; background: #fff; color: #475569; font-weight: 700; }
+        .refresh-button:disabled { cursor: wait; opacity: 0.65; }
+        .spin { animation: dashboard-spin 0.8s linear infinite; }
+        @keyframes dashboard-spin { to { transform: rotate(360deg); } }
+        .dashboard-error { display: flex; gap: 10px; margin-bottom: 18px; padding: 13px 15px; border: 1px solid #fecaca; border-radius: 12px; background: #fff7f7; color: #b42318; }
+        .dashboard-error div { display: flex; flex-direction: column; gap: 2px; }
+        .dashboard-error span { font-size: 0.82rem; }
+        .daily-task-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 26px; }
+        .daily-task-card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 112px; padding: 18px 38px 18px 18px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 17px; background: #fff; color: #172033; text-align: left; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.045); cursor: pointer; transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease; }
+        .daily-task-card:hover { transform: translateY(-2px); border-color: #cbd5e1; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09); }
+        .task-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; }
+        .task-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+        .task-copy strong { font-size: 1rem; }
+        .task-copy small { overflow: hidden; color: #64748b; font-size: 0.75rem; line-height: 1.35; text-overflow: ellipsis; }
+        .daily-task-count { font-size: 2rem; font-weight: 850; letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
+        .task-chevron { position: absolute; right: 12px; color: #94a3b8; }
+        .task-unlisted .task-icon { background: #eef2ff; color: #4f46e5; }
+        .task-upcoming .task-icon { background: #fff7e6; color: #d97706; }
+        .task-overdue { border-color: #fecaca; background: linear-gradient(135deg, #fff 25%, #fff7f7); }
+        .task-overdue .task-icon { background: #fee2e2; color: #dc2626; }
+        .task-overdue .daily-task-count { color: #c81e1e; }
+        .task-unordered .task-icon { background: #e8f2ff; color: #2563eb; }
+        .dashboard-work-switcher { display: grid; gap: 12px; }
+        .work-queue-tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .work-queue-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border: 1px solid #dbe3ee; border-radius: 999px; background: #fff; color: #64748b; font-size: 0.82rem; font-weight: 760; cursor: pointer; transition: border-color 140ms ease, background 140ms ease, color 140ms ease; }
+        .work-queue-tabs button:hover { border-color: #aebccc; color: #334155; }
+        .work-queue-tabs button span { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 0.72rem; text-align: center; }
+        .work-queue-tabs button.active { color: #172033; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.07); }
+        .work-queue-tabs button.active.tab-unlisted { border-color: #a5b4fc; background: #eef2ff; color: #4338ca; }
+        .work-queue-tabs button.active.tab-upcoming { border-color: #f2b94b; background: #fff8e8; color: #a65f00; }
+        .work-queue-tabs button.active.tab-overdue { border-color: #fca5a5; background: #fff1f1; color: #c81e1e; }
+        .work-queue-tabs button.active.tab-unordered { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+        .unordered-category-tabs { display: flex; align-items: center; gap: 4px; padding: 0 2px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; scrollbar-width: thin; }
+        .unordered-category-tabs button { flex: 0 0 auto; padding: 9px 13px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #64748b; font-size: 0.8rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
+        .unordered-category-tabs button:hover { color: #334155; }
+        .unordered-category-tabs button.active { border-bottom-color: #2563eb; color: #2563eb; }
+        .unordered-category-tabs button span { font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+        .work-queue { overflow: hidden; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; box-shadow: 0 5px 18px rgba(15, 23, 42, 0.035); }
+        .work-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 20px; border-bottom: 1px solid #edf1f5; }
+        .work-queue-header h2 { margin: 0; font-size: 1.07rem; }
+        .work-queue-header p { margin: 4px 0 0; color: #718096; font-size: 0.8rem; }
+        .work-queue-indigo .work-queue-header { border-left: 4px solid #6366f1; }
+        .work-queue-amber .work-queue-header { border-left: 4px solid #f59e0b; }
+        .work-queue-red .work-queue-header { border-left: 4px solid #ef4444; background: #fffafa; }
+        .work-queue-blue .work-queue-header { border-left: 4px solid #3b82f6; }
+        .view-all-button { display: inline-flex; align-items: center; gap: 3px; flex: none; color: #475569; font-size: 0.8rem; font-weight: 750; }
+        .view-all-button:hover, .work-queue-more:hover { color: #1d4ed8; }
+        .work-queue-list { display: grid; }
+        .work-queue-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: 100%; padding: 13px 20px; border: 0; border-bottom: 1px solid #f0f3f7; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+        .work-queue-row:last-child { border-bottom: 0; }
+        .work-queue-row:hover { background: #f8fafc; }
+        .work-item-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+        .work-item-main strong { overflow: hidden; font-size: 0.9rem; text-overflow: ellipsis; white-space: nowrap; }
+        .work-item-main span { color: #718096; font-size: 0.75rem; }
+        .work-item-metrics { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; color: #64748b; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+        .work-item-metrics > span { padding: 5px 8px; border-radius: 7px; background: #f4f6f8; }
+        .work-item-metrics .work-date-status { font-weight: 750; }
+        .work-queue-amber .work-date-status { background: #fff6dd; color: #a65f00; }
+        .work-queue-red .work-date-status { background: #fee8e8; color: #c81e1e; }
+        .work-item-metrics .work-gap { color: #b42318; font-weight: 750; }
+        .work-queue-empty { padding: 24px 20px; color: #718096; font-size: 0.86rem; text-align: center; }
+        .work-queue-more { width: 100%; padding: 11px 20px; border-top: 1px solid #edf1f5; color: #64748b; font-size: 0.78rem; font-weight: 700; }
+        @media (max-width: 1100px) { .daily-task-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 720px) {
+          .daily-dashboard { padding: 20px 14px 44px; }
+          .dashboard-header { align-items: flex-start; flex-direction: column; }
+          .dashboard-refresh-area { width: 100%; justify-content: space-between; }
+          .daily-task-grid { grid-template-columns: 1fr; gap: 10px; }
+          .daily-task-card { min-height: 90px; }
+          .work-queue-header { align-items: flex-start; }
+          .work-queue-row { align-items: flex-start; flex-direction: column; gap: 9px; }
+          .work-item-main { width: 100%; }
+          .work-item-metrics { width: 100%; justify-content: flex-start; }
+        }
+      `}</style>
     </div>
   );
 }

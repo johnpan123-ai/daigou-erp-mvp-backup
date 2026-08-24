@@ -1,17 +1,10 @@
 {
   "dashboard": {
-    "kpi": {
-      "active": 6,
-      "unordered": 1,
-      "urgent7": 1,
-      "closed": 3
-    },
-    "categories": {
-      "all": 9,
-      "hololive": 1,
-      "vspo": 1,
-      "proxy": 1,
-      "other": 6
+    "tasks": {
+      "unlisted": 2,
+      "upcoming": 1,
+      "overdue": 1,
+      "unordered": 1
     }
   },
   "purchaseRecords": {

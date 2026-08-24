@@ -64,7 +64,7 @@ async function waitForServer() {
   throw new Error(`Vite 啟動逾時：\n${viteOutput}`);
 }
 
-async function putFixture(page) {
+async function putFixture(page, fixtureData = fixture) {
   await page.evaluate(async ({ data, keys }) => {
     localStorage.clear();
     localStorage.setItem('erp_provider_mode', 'test');
@@ -93,7 +93,7 @@ async function putFixture(page) {
         tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
       };
     });
-  }, { data: fixture, keys: storageKeys });
+  }, { data: fixtureData, keys: storageKeys });
 }
 
 async function readFixture(page) {
@@ -123,27 +123,166 @@ const parseCount = text => {
 
 async function captureDashboard(page) {
   await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle' });
-  await page.locator('.kpi-card').first().waitFor();
-  await page.waitForFunction(() => [...document.querySelectorAll('.category-count')]
-    .some(node => Number.parseInt(node.textContent ?? '0', 10) > 0));
+  await page.locator('[data-dashboard-task="unlisted"]').waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-task-count]')]
+    .every(node => /^\d+$/.test((node.textContent ?? '').trim())));
 
-  const kpi = await page.locator('.kpi-card .kpi-value').allTextContents();
-  const categories = await page.locator('.category-count').allTextContents();
+  const taskLabels = await page.locator('[data-dashboard-task] .task-copy strong').allTextContents();
+  assert.deepEqual(taskLabels, ['待下架', '快結單', '已過期', '尚未下單'], '首頁工作卡順序或名稱退化');
+  const bodyText = await page.locator('body').innerText();
+  assert.equal(bodyText.includes('商品分類'), false, '每日工作首頁不應再顯示商品分類');
+  assert.equal(bodyText.includes('即將發售商品'), false, '每日工作首頁不應再顯示即將發售商品');
+  assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '首頁一次只能展開一個工作清單');
+  assert.match(await page.locator('[data-dashboard-queue="unlisted"]').innerText(), /C108 Closed/, '首頁待下架清單漏掉仍在目錄中的過期商品');
+  assert.match(await page.locator('[data-dashboard-queue="unlisted"]').innerText(), /Other Closed/, '首頁待下架清單未沿用待下架頁的完整商品集合');
+  await page.locator('[data-work-queue-tab="upcoming"]').click();
+  assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '快結單切換後不得同時展開多個工作清單');
+  assert.match(await page.locator('[data-dashboard-queue="upcoming"]').innerText(), /Today Closing/, '快結單清單漏掉今天結單商品');
+  await page.locator('[data-work-queue-tab="overdue"]').click();
+  assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '切換後不得同時展開多個工作清單');
+  assert.match(await page.locator('[data-dashboard-queue="overdue"]').innerText(), /C108 Closed/, '已過期清單漏掉未完成商品');
+  await page.locator('[data-work-queue-tab="unordered"]').click();
+  assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '尚未下單切換後不得同時展開多個工作清單');
+  assert.match(await page.locator('[data-dashboard-queue="unordered"]').innerText(), /Today Closing/, '尚未下單清單漏掉有需求且採購為 0 的商品');
+  const unorderedCategoryTabs = await page.locator('[data-unordered-category]').allTextContents();
+  assert.deepEqual(
+    unorderedCategoryTabs.map(text => text.replace(/\s+/g, ' ').trim()),
+    ['全部 1', 'C108專區 0', 'Hololive商品 0', 'VSPO商品 0', '代理版商品 0', '其他商品 1'],
+    '尚未下單分類按鈕或分類數量不正確',
+  );
+  await page.locator('[data-unordered-category="other"]').click();
+  assert.match(await page.locator('[data-dashboard-queue="unordered"]').innerText(), /Today Closing/, '其他商品分類漏掉對應尚未下單商品');
+  await page.locator('[data-unordered-category="c108"]').click();
+  assert.match(await page.locator('[data-dashboard-queue="unordered"]').innerText(), /沒有尚未下單的商品/, '空分類應顯示清楚的空狀態');
+
+  const taskCounts = await page.locator('[data-dashboard-task] [data-task-count]').allTextContents();
   return {
-    kpi: {
-      active: parseCount(kpi[0]),
-      unordered: parseCount(kpi[1]),
-      urgent7: parseCount(kpi[2]),
-      closed: parseCount(kpi[3]),
-    },
-    categories: {
-      all: parseCount(categories[0]),
-      hololive: parseCount(categories[1]),
-      vspo: parseCount(categories[2]),
-      proxy: parseCount(categories[3]),
-      other: parseCount(categories[4]),
+    tasks: {
+      unlisted: parseCount(taskCounts[0]),
+      upcoming: parseCount(taskCounts[1]),
+      overdue: parseCount(taskCounts[2]),
+      unordered: parseCount(taskCounts[3]),
     },
   };
+}
+
+async function verifyDashboardTaskNavigation(page) {
+  const cases = ['unlisted', 'upcoming', 'overdue', 'unordered'];
+
+  for (const task of cases) {
+    await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle' });
+    await page.locator(`[data-dashboard-task="${task}"]`).click();
+    assert.equal(new URL(page.url()).pathname, '/dashboard', `首頁 ${task} 卡片不應錯誤跳到全部商品`);
+    assert.equal(
+      await page.locator(`[data-work-queue-tab="${task}"]`).getAttribute('aria-selected'),
+      'true',
+      `首頁 ${task} 卡片未切換到對應工作清單`,
+    );
+    assert.equal(
+      await page.locator('[data-dashboard-queue]').getAttribute('data-dashboard-queue'),
+      task,
+      `首頁 ${task} 卡片顯示了錯誤工作清單`,
+    );
+  }
+
+  await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle' });
+  await page.locator('[data-work-queue-tab="upcoming"]').click();
+  await page.locator('[data-dashboard-queue="upcoming"] .work-queue-row').first().click();
+  await page.waitForURL(url => url.pathname === '/purchase-records/g-today');
+}
+
+async function verifyUnlistedQueueRule(page) {
+  const snapshot = JSON.stringify({ catalog_import_id: 'import-current', processed_group_ids: ['g-one'] });
+  const result = await page.evaluate(async storedSnapshot => {
+    localStorage.setItem('erp_unlisted_processed_local', storedSnapshot);
+    const { getPendingUnlistedGroupIds } = await import('/src/lib/dashboardDailyWork.ts');
+    const groups = [
+      { id: 'g-one', closing_date: '2026/08/01' },
+      { id: 'g-two', closing_date: '2026-08-02' },
+      { id: 'g-future', closing_date: '2026-08-30' },
+    ];
+    const variants = [
+      { id: 'v-one', product_group_id: 'g-one', myacg_item_code: 'sku-one' },
+      { id: 'v-two', product_group_id: 'g-two', myacg_item_code: 'sku-two' },
+      { id: 'v-future', product_group_id: 'g-future', myacg_item_code: 'sku-future' },
+    ];
+    const inventoryItems = [
+      { myacg_item_code: 'SKU-ONE', latest_catalog_import_id: 'import-current', catalog_last_seen_at: '2026-08-12T01:00:00Z' },
+      { myacg_item_code: 'SKU-TWO', latest_catalog_import_id: 'import-current', catalog_last_seen_at: '2026-08-12T01:00:00Z' },
+      { myacg_item_code: 'SKU-FUTURE', latest_catalog_import_id: 'import-current', catalog_last_seen_at: '2026-08-12T01:00:00Z' },
+    ];
+    const currentProcessed = JSON.parse(storedSnapshot);
+    const pending = getPendingUnlistedGroupIds({ groups, variants, inventoryItems, today: '2026-08-12', processedSnapshot: currentProcessed });
+    const staleMarkPending = getPendingUnlistedGroupIds({
+      groups,
+      variants,
+      inventoryItems,
+      today: '2026-08-12',
+      processedSnapshot: { catalog_import_id: 'import-old', processed_group_ids: ['g-one'] },
+    });
+    return {
+      pending,
+      staleMarkPending,
+      storageAfter: localStorage.getItem('erp_unlisted_processed_local'),
+    };
+  }, snapshot);
+
+  assert.deepEqual(result.pending, ['g-two'], '目前 Catalog 的已處理標記未正確排除待下架商品');
+  assert.deepEqual(result.staleMarkPending, ['g-one', 'g-two'], '舊 Catalog 的已處理標記不應隱藏目前待下架商品');
+  assert.equal(result.storageAfter, snapshot, '首頁待下架計數不得寫入或改動已處理狀態');
+}
+
+async function verifyDashboardDisplayNameNormalization(page) {
+  const rawTitle = '【小河馬日本代購】預購 27年01月 代理版 GSC 測試商品';
+  const reorderedRawTitle = '【小河馬日本代購】預購 代理版 27年05月 figma 測試商品';
+  const displayFixture = structuredClone(fixture);
+  displayFixture.productGroups.find(group => group.id === 'g-today').title = rawTitle;
+  await putFixture(page, displayFixture);
+
+  await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'networkidle' });
+  await page.locator('[data-work-queue-tab="upcoming"]').click();
+  const upcomingText = await page.locator('[data-dashboard-queue="upcoming"]').innerText();
+  assert.match(upcomingText, /代理版 GSC 測試商品/, '首頁工作清單未保留真正商品名稱');
+  assert.equal(upcomingText.includes('小河馬日本代購'), false, '首頁工作清單仍顯示固定賣場前綴');
+  assert.equal(upcomingText.includes('預購'), false, '首頁工作清單仍顯示開頭預購標記');
+  assert.equal(upcomingText.includes('27年01月'), false, '首頁工作清單仍顯示開頭賣場年月');
+
+  const helperResult = await page.evaluate(async title => {
+    const { normalizeDashboardWorkTitle } = await import('/src/lib/dashboardDailyWork.ts');
+    return {
+      reordered: normalizeDashboardWorkTitle(title),
+      middleMonthPreserved: normalizeDashboardWorkTitle('【小河馬日本代購】商品A 27年05月紀念版'),
+    };
+  }, reorderedRawTitle);
+  assert.equal(helperResult.reordered, '代理版 figma 測試商品', '首頁未清除固定前綴區段中的賣場年月');
+  assert.equal(helperResult.middleMonthPreserved, '商品A 27年05月紀念版', '商品名稱中間的正常年月不得被錯刪');
+
+  const stored = await readFixture(page);
+  assert.equal(
+    stored.productGroups.find(group => group.id === 'g-today')?.title,
+    rawTitle,
+    '首頁顯示清理不得修改原始商品名稱',
+  );
+  await putFixture(page);
+}
+
+async function verifyDashboardCategoryParity(page) {
+  const result = await page.evaluate(async ({ data, metaId }) => {
+    const { buildProductDisplayCategoryMap } = await import('/src/lib/dashboardDailyWork.ts');
+    const regularGroups = data.productGroups.filter(group => group.id !== metaId);
+    const categoryMap = buildProductDisplayCategoryMap(regularGroups, data.productVariants, data.inventory);
+    const counts = { c108: 0, hololive: 0, vspo: 0, proxy: 0, other: 0 };
+    regularGroups.forEach(group => { counts[categoryMap.get(group.id) ?? 'other'] += 1; });
+    return counts;
+  }, { data: fixture, metaId: META_GROUP_ID });
+
+  assert.deepEqual(result, {
+    c108: expected.purchaseRecords.categories.c108,
+    hololive: expected.purchaseRecords.categories.hololive,
+    vspo: expected.purchaseRecords.categories.vspo,
+    proxy: expected.purchaseRecords.categories.proxy,
+    other: expected.purchaseRecords.categories.other,
+  }, '首頁尚未下單分類必須與訂購紀錄表 Accepted 分類完全一致');
 }
 
 async function capturePurchaseRecords(page) {
@@ -269,6 +408,12 @@ try {
   assert.deepEqual(before, after, '回歸測試前後 Local 資料被改變');
   assert.deepEqual(first, expected, '核心數據與固定基準不同');
   assert.equal(cloudRequests.length, 0, `測試期間不應連線 Supabase：${cloudRequests.join(', ')}`);
+
+  await verifyDashboardTaskNavigation(page);
+  await verifyUnlistedQueueRule(page);
+  await verifyDashboardDisplayNameNormalization(page);
+  await verifyDashboardCategoryParity(page);
+  assert.deepEqual(await readFixture(page), before, '首頁導頁與待下架計數 regression 不得修改正式資料');
 
   await verifyProxyMigration(page);
   assert.equal(cloudRequests.length, 0, 'migration 重現測試不得連線 Supabase');
