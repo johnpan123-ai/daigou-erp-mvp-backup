@@ -135,8 +135,21 @@ async function captureDashboard(page) {
   assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '首頁一次只能展開一個工作清單');
   assert.match(await page.locator('[data-dashboard-queue="unlisted"]').innerText(), /C108 Closed/, '首頁待下架清單漏掉仍在目錄中的過期商品');
   assert.match(await page.locator('[data-dashboard-queue="unlisted"]').innerText(), /Other Closed/, '首頁待下架清單未沿用待下架頁的完整商品集合');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async value => { window.__dashboardCopiedName = value; } },
+    });
+  });
+  const firstUnlistedRow = page.locator('[data-dashboard-queue="unlisted"] .work-queue-row').first();
+  const firstUnlistedName = (await firstUnlistedRow.locator('.work-item-main strong').textContent())?.trim();
+  await firstUnlistedRow.locator('[data-copy-unlisted-name]').click();
+  assert.equal(await page.evaluate(() => window.__dashboardCopiedName), firstUnlistedName, '待下架複製按鈕未複製畫面使用的同一份商品名稱');
+  assert.equal(new URL(page.url()).pathname, '/dashboard', '複製待下架商品名稱不應觸發商品導頁');
+  assert.match(await firstUnlistedRow.locator('[data-copy-unlisted-name]').innerText(), /已複製/, '複製後缺少清楚但低調的完成回饋');
   await page.locator('[data-work-queue-tab="upcoming"]').click();
   assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '快結單切換後不得同時展開多個工作清單');
+  assert.equal(await page.locator('[data-dashboard-queue="upcoming"] [data-copy-unlisted-name]').count(), 0, '複製按鈕只應出現在待下架清單');
   assert.match(await page.locator('[data-dashboard-queue="upcoming"]').innerText(), /Today Closing/, '快結單清單漏掉今天結單商品');
   await page.locator('[data-work-queue-tab="overdue"]').click();
   assert.equal(await page.locator('[data-dashboard-queue]').count(), 1, '切換後不得同時展開多個工作清單');

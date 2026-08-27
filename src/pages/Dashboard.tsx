@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Archive, ChevronRight, Clock3, RefreshCw, ShoppingCart } from 'lucide-react';
+import { AlertTriangle, Archive, Check, ChevronRight, Clock3, Copy, RefreshCw, ShoppingCart } from 'lucide-react';
 import { calculateGroupDemandAndPurchased } from '../lib/db';
 import type {
   InventoryItem,
@@ -79,6 +79,7 @@ function WorkQueueSection({
   emptyText,
   onOpenItem,
   onViewAll,
+  showCopyAction = false,
 }: {
   id: string;
   title: string;
@@ -88,8 +89,23 @@ function WorkQueueSection({
   emptyText: string;
   onOpenItem: (groupId: string) => void;
   onViewAll?: () => void;
+  showCopyAction?: boolean;
 }) {
   const visibleItems = onViewAll ? items.slice(0, 10) : items;
+  const [copiedGroupId, setCopiedGroupId] = useState<string | null>(null);
+
+  const copyItemName = async (item: WorkQueueItem) => {
+    const displayName = normalizeDashboardWorkTitle(item.group.title || '') || '未命名商品';
+    try {
+      await navigator.clipboard.writeText(displayName);
+      setCopiedGroupId(item.group.id);
+      window.setTimeout(() => {
+        setCopiedGroupId(current => current === item.group.id ? null : current);
+      }, 1600);
+    } catch (error) {
+      console.error('複製待下架商品名稱失敗:', error);
+    }
+  };
 
   return (
     <section id={id} className={`work-queue work-queue-${tone}`} data-dashboard-queue={id}>
@@ -109,18 +125,34 @@ function WorkQueueSection({
         <div className="work-queue-empty">{emptyText}</div>
       ) : (
         <div className="work-queue-list">
-          {visibleItems.map(item => (
-            <button
-              type="button"
-              className="work-queue-row"
-              key={item.group.id}
-              onClick={() => onOpenItem(item.group.id)}
-            >
-              <div className="work-item-main">
-                <strong>{normalizeDashboardWorkTitle(item.group.title || '') || '未命名商品'}</strong>
-                <span>{item.targetDate ? `結單 ${item.targetDate}` : '未設定結單日'}</span>
+          {visibleItems.map(item => {
+            const displayName = normalizeDashboardWorkTitle(item.group.title || '') || '未命名商品';
+            const isCopied = copiedGroupId === item.group.id;
+            return (
+            <div className="work-queue-row" key={item.group.id} onClick={() => onOpenItem(item.group.id)}>
+              <div className="work-item-title-area">
+                <button type="button" className="work-item-main">
+                  <strong title={displayName}>{displayName}</strong>
+                  <span>{item.targetDate ? `結單 ${item.targetDate}` : '未設定結單日'}</span>
+                </button>
+                {showCopyAction && (
+                  <button
+                    type="button"
+                    className={`work-item-copy${isCopied ? ' copied' : ''}`}
+                    title="複製商品名稱"
+                    aria-label={`複製商品名稱：${displayName}`}
+                    data-copy-unlisted-name={item.group.id}
+                    onClick={event => {
+                      event.stopPropagation();
+                      void copyItemName(item);
+                    }}
+                  >
+                    {isCopied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+                    <span>{isCopied ? '已複製' : '複製'}</span>
+                  </button>
+                )}
               </div>
-              <div className="work-item-metrics">
+              <button type="button" className="work-item-metrics">
                 {item.diffDays !== null && (
                   <span className="work-date-status">
                     {item.diffDays < 0 ? `已過期 ${Math.abs(item.diffDays)} 天` : item.diffDays === 0 ? '今天結單' : `剩 ${item.diffDays} 天`}
@@ -130,9 +162,10 @@ function WorkQueueSection({
                 <span>已採購 {item.purchased}</span>
                 <span className="work-gap">尚缺 {item.gap}</span>
                 <ChevronRight size={18} aria-hidden="true" />
-              </div>
-            </button>
-          ))}
+              </button>
+            </div>
+            );
+          })}
         </div>
       )}
 
@@ -500,6 +533,7 @@ export default function Dashboard() {
           emptyText={activeQueueConfig.emptyText}
           onOpenItem={groupId => navigate(activeQueueConfig.itemRoute || `/purchase-records/${groupId}`)}
           onViewAll={activeQueueConfig.route ? () => navigate(activeQueueConfig.route) : undefined}
+          showCopyAction={activeQueue === 'unlisted'}
         />
       </section>
 
@@ -559,13 +593,17 @@ export default function Dashboard() {
         .view-all-button { display: inline-flex; align-items: center; gap: 3px; flex: none; color: #475569; font-size: 0.8rem; font-weight: 750; }
         .view-all-button:hover, .work-queue-more:hover { color: #1d4ed8; }
         .work-queue-list { display: grid; }
-        .work-queue-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: 100%; padding: 13px 20px; border: 0; border-bottom: 1px solid #f0f3f7; background: #fff; color: inherit; text-align: left; cursor: pointer; }
+        .work-queue-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; width: 100%; padding: 13px 20px; border-bottom: 1px solid #f0f3f7; background: #fff; color: inherit; text-align: left; cursor: pointer; }
         .work-queue-row:last-child { border-bottom: 0; }
         .work-queue-row:hover { background: #f8fafc; }
-        .work-item-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+        .work-item-title-area { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
+        .work-item-main { display: flex; min-width: 0; flex: 0 1 auto; flex-direction: column; gap: 4px; padding: 0; overflow: hidden; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
         .work-item-main strong { overflow: hidden; font-size: 0.9rem; text-overflow: ellipsis; white-space: nowrap; }
         .work-item-main span { color: #718096; font-size: 0.75rem; }
-        .work-item-metrics { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; color: #64748b; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+        .work-item-copy { display: inline-flex; flex: none; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid #dbe3ee; border-radius: 8px; background: #fff; color: #64748b; font-size: 0.72rem; font-weight: 700; cursor: pointer; transition: border-color 140ms ease, background 140ms ease, color 140ms ease; }
+        .work-item-copy:hover { border-color: #a5b4fc; background: #f5f7ff; color: #4f46e5; }
+        .work-item-copy.copied { border-color: #bbf7d0; background: #f0fdf4; color: #15803d; }
+        .work-item-metrics { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding: 0; border: 0; background: transparent; color: #64748b; font-size: 0.75rem; font-variant-numeric: tabular-nums; cursor: pointer; }
         .work-item-metrics > span { padding: 5px 8px; border-radius: 7px; background: #f4f6f8; }
         .work-item-metrics .work-date-status { font-weight: 750; }
         .work-queue-amber .work-date-status { background: #fff6dd; color: #a65f00; }
@@ -582,7 +620,8 @@ export default function Dashboard() {
           .daily-task-card { min-height: 90px; }
           .work-queue-header { align-items: flex-start; }
           .work-queue-row { align-items: flex-start; flex-direction: column; gap: 9px; }
-          .work-item-main { width: 100%; }
+          .work-item-title-area { width: 100%; }
+          .work-item-main { flex: 1; }
           .work-item-metrics { width: 100%; justify-content: flex-start; }
         }
       `}</style>
