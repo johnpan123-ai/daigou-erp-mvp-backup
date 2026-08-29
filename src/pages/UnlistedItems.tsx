@@ -21,6 +21,9 @@ interface UnlistedItem {
   status: '已結單' | '進行中';
   hitSkus: UnlistedItemSku[];
   totalDemand: number;
+  myacgDemand: number;
+  wacaDemand: number;
+  privateOrderDemand: number;
   purchased: number;
   gap: number;
 }
@@ -82,6 +85,28 @@ function UnlistedBadge({ icon, children, color, bg, border }: { icon: string; ch
       <span aria-hidden="true">{icon}</span>
       <span>{children}</span>
     </span>
+  );
+}
+
+function UnlistedChannelDemand({ item, compact = false }: { item: UnlistedItem; compact?: boolean }) {
+  return (
+    <div
+      aria-label={`通路需求：買動漫 ${item.myacgDemand}，WACA ${item.wacaDemand}，私下登記 ${item.privateOrderDemand}`}
+      data-unlisted-channel-demand={item.id}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: compact ? '6px 12px' : '8px 16px',
+        color: '#475569',
+        fontSize: compact ? '12px' : '16px',
+        fontWeight: 600
+      }}
+    >
+      <span data-channel-demand="myacg">買動漫 <strong style={{ color: '#2563eb' }}>{item.myacgDemand}</strong></span>
+      <span data-channel-demand="waca">WACA <strong style={{ color: '#7c3aed' }}>{item.wacaDemand}</strong></span>
+      <span data-channel-demand="private-order">私下登記 <strong style={{ color: '#0f766e' }}>{item.privateOrderDemand}</strong></span>
+    </div>
   );
 }
 
@@ -233,6 +258,9 @@ export default function UnlistedItems() {
             status,
             hitSkus,
             totalDemand: demandResult.demand,
+            myacgDemand: demandResult.myacg,
+            wacaDemand: demandResult.waca,
+            privateOrderDemand: demandResult.privateOrder,
             purchased: demandResult.purchased,
             gap: demandResult.gap
           });
@@ -904,6 +932,9 @@ export default function UnlistedItems() {
                       需求{item.totalDemand} │ 已採購{item.purchased} │ 缺<strong style={{ color: item.gap > 0 ? '#ef4444' : '#166534' }}>{item.gap}</strong>
                     </span>
                   </div>
+                  <div style={{ marginTop: '6px' }}>
+                    <UnlistedChannelDemand item={item} compact />
+                  </div>
                   {viewMode === 'processed' && processedData.processed_at_map[item.id] && (
                     <div style={{ fontSize: '11px', color: '#16a34a', marginTop: '4px' }}>
                       ✓ 已處理於 {new Date(processedData.processed_at_map[item.id]).toLocaleString('zh-TW', { hour12: false })}
@@ -994,6 +1025,7 @@ export default function UnlistedItems() {
                           <UnlistedBadge icon="📦" color="#2563eb" bg="#eff6ff" border="#bfdbfe">
                             需求 {item.totalDemand}
                           </UnlistedBadge>
+                          <UnlistedChannelDemand item={item} />
                           <UnlistedBadge
                             icon="✅"
                             color={item.gap === 0 ? '#15803d' : '#475569'}

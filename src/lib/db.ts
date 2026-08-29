@@ -731,6 +731,9 @@ export interface VariantDemandResult {
 
 export interface GroupDemandResult {
   demand: number;
+  myacg: number;
+  waca: number;
+  privateOrder: number;
   purchased: number;
   gap: number;
   hasCatalogMissing: boolean;
@@ -814,19 +817,33 @@ export const calculateGroupDemandAndPurchased = (
   const groupVars = variants.filter(v => v && (v.product_group_id === groupId || (v.product_category_id && catIds.has(v.product_category_id))));
   
   let totalDemand = 0;
+  let totalMyacg = 0;
+  let totalWaca = 0;
+  let totalPrivateOrder = 0;
   let totalPurchased = 0;
   let gap = 0;
   
   groupVars.forEach(v => {
     if (!v) return;
     const res = calculateVariantDemandAndPurchased(v, privateOrderItems, batchItems, inventory, salesOrderItems);
+    totalMyacg += res.myacg;
+    totalWaca += res.waca;
+    totalPrivateOrder += res.privateOrder;
     totalDemand += (res.myacg + res.waca + res.privateOrder);
     totalPurchased += res.purchased;
     gap += res.gap;
   });
   
   const hasCatalogMissing = groupVars.some(v => v && v.catalog_missing === true);
-  return { demand: totalDemand, purchased: totalPurchased, gap, hasCatalogMissing };
+  return {
+    demand: totalDemand,
+    myacg: totalMyacg,
+    waca: totalWaca,
+    privateOrder: totalPrivateOrder,
+    purchased: totalPurchased,
+    gap,
+    hasCatalogMissing
+  };
 };
 
 export const normalizeDateInput = (value: string | null | undefined): string | null => {
