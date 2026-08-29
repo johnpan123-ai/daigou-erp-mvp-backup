@@ -1,32 +1,18 @@
 import type { RankedResolutionCandidate } from './closingDateResolutionDomain';
 
 /**
- * Supplier priority is intentionally scoped to candidates that already share
- * an explicit resolution identity. It must never move an unrelated Wanrong
- * listing ahead of a different DreamLink product.
+ * Candidates have already passed retrieval and qualification before reaching
+ * this display-only ordering step. Keep native order stable within each group,
+ * while presenting the exact Wanrong supplier identity first for review.
  */
 export const orderClosingDateReviewCandidates = (
   candidates: readonly RankedResolutionCandidate[],
 ): readonly RankedResolutionCandidate[] => {
-  const ordered = [...candidates];
-  const positionsByIdentity = new Map<string, number[]>();
-  ordered.forEach((candidate, index) => {
-    if (!candidate.resolutionIdentityId) return;
-    const positions = positionsByIdentity.get(candidate.resolutionIdentityId) ?? [];
-    positions.push(index);
-    positionsByIdentity.set(candidate.resolutionIdentityId, positions);
+  const wanrong: RankedResolutionCandidate[] = [];
+  const otherSuppliers: RankedResolutionCandidate[] = [];
+  candidates.forEach(candidate => {
+    if (candidate.source.sourceSupplier === 'wanrong') wanrong.push(candidate);
+    else otherSuppliers.push(candidate);
   });
-  positionsByIdentity.forEach(positions => {
-    if (positions.length < 2) return;
-    const sameIdentity = positions.map(index => ordered[index]).sort((left, right) => {
-      const supplierPriority = (candidate: RankedResolutionCandidate): number => (
-        candidate.source.sourceSupplier.toLowerCase() === 'wanrong' ? 0 : 1
-      );
-      return supplierPriority(left) - supplierPriority(right) || left.rank - right.rank;
-    });
-    positions.forEach((position, index) => {
-      ordered[position] = sameIdentity[index];
-    });
-  });
-  return ordered;
+  return [...wanrong, ...otherSuppliers];
 };

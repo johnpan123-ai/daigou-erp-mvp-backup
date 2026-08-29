@@ -257,6 +257,7 @@ try {
   }, { batchKey: storageKeys.purchaseBatches, itemKey: storageKeys.purchaseBatchItems });
   assert.deepEqual(persistedPurchaseDataAfterCopy.batches, purchaseBatches, 'Daily copy must not modify purchase_batches');
   assert.deepEqual(persistedPurchaseDataAfterCopy.items, purchaseBatchItems, 'Daily copy must not modify purchase_batch_items');
+  await page.getByTestId('recent-purchases-copy-notice').waitFor({ state: 'detached' });
 
   await dateToggles.first().click();
   assert.equal(await rows.count(), 2, 'Opening today must reveal only today rows');
@@ -269,6 +270,46 @@ try {
   assert.match(await firstRow.innerText(), /2 批/);
   assert.match(await firstRow.innerText(), /14:20/);
   assert.equal(await firstRow.getByTestId('recent-purchase-agent').innerText(), '萬榮', 'Non-empty proxy_agent must appear as a read-only badge');
+
+  const rowCopyButtons = page.getByTestId('recent-purchase-copy-row-ledger');
+  assert.equal(await rowCopyButtons.count(), 2, 'Each grouped product row must expose a compact ledger copy action');
+  await rowCopyButtons.first().click();
+  const firstRowLedger = await page.evaluate(() => navigator.clipboard.readText());
+  assert.equal(
+    firstRowLedger,
+    dailyLedgerRows.filter(row => row.startsWith('商品 A-')).join('\n'),
+    'A grouped row must copy every original same-day batch ledger for that product in daily ledger order',
+  );
+  assert.equal(firstRowLedger.split('\n').length, 2, 'Two source batches behind one grouped row must remain two ledger rows');
+  assert.doesNotMatch(firstRowLedger, /商品 B-/, 'Per-row copy must exclude other products from the same day');
+
+  await rowCopyButtons.nth(1).click();
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    dailyLedgerRows.find(row => row.startsWith('商品 B-'))?.replace(/\r$/, ''),
+    'A single-batch grouped row must copy only its original ledger row',
+  );
+  assert.equal(await page.getByTestId('recent-purchases-copy-notice').count(), 0, 'Per-row copy must not add a success toast');
+
+  const persistedPurchaseDataAfterRowCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('daigou-erp-db', 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const transaction = db.transaction('kv', 'readonly');
+    const store = transaction.objectStore('kv');
+    const read = key => new Promise((resolve, reject) => {
+      const request = store.get(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result ?? []);
+    });
+    const [batches, items] = await Promise.all([read(batchKey), read(itemKey)]);
+    db.close();
+    return { batches, items };
+  }, { batchKey: storageKeys.purchaseBatches, itemKey: storageKeys.purchaseBatchItems });
+  assert.deepEqual(persistedPurchaseDataAfterRowCopy.batches, purchaseBatches, 'Per-row copy must not modify purchase_batches');
+  assert.deepEqual(persistedPurchaseDataAfterRowCopy.items, purchaseBatchItems, 'Per-row copy must not modify purchase_batch_items');
 
   const officialLink = firstRow.getByTestId('recent-purchase-official-link');
   assert.equal(await officialLink.getAttribute('href'), 'https://example.com/product-a');
@@ -323,6 +364,7 @@ try {
   console.log('PASS date sections are independent, collapsed by default, and reset on date-filter changes');
   console.log('PASS collapsed date sections copy every original batch with shared ledger formatting');
   console.log('PASS daily ledger copy preserves purchase_batches and purchase_batch_items');
+  console.log('PASS grouped product rows copy all and only their original ledgers without data writes');
   console.log('PASS date/search/official-site filters are correct');
   console.log('PASS proxy_agent is shown read-only and blank agents stay hidden');
   console.log('PASS product detail and official URL actions are correct');

@@ -36,10 +36,13 @@
     "test:cloud-canonical-identity": "node tests/cloud-canonical-identity-integration.mjs",
     "test:cloud-private-order-hydration": "node tests/cloud-private-order-hydration.mjs",
     "test:purchase-management-actions": "node tests/purchase-management-actions.mjs",
+    "test:recent-purchases": "node tests/recent-purchases.mjs",
     "test:bootstrap-error": "node tests/bootstrap-error-boundary.mjs",
     "test:inventory-backup-gate": "node tests/inventory-backup-gate.mjs",
     "test:outbound-purchase-cost-export": "node tests/outbound-purchase-cost-export.mjs",
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
+    "test:outbound-shipment-search": "node tests/outbound-shipment-search.mjs",
+    "test:outbound-group-quick-actions": "node tests/outbound-group-quick-actions.mjs",
     "test:japan-package-receiving-display": "node tests/japan-package-receiving-display.mjs",
     "test:unlisted-channel-demand": "node tests/unlisted-channel-demand.mjs",
     "test:proxy-product-identity": "node tests/proxy-product-identity-matching.mjs",
@@ -63,8 +66,10 @@
     "benchmark:closing-date-batch-gateway": "node tests/closing-date-batch-gateway-performance.mjs",
     "benchmark:closing-date-workbench-load": "node tests/closing-date-workbench-load-performance.mjs",
     "test:closing-date-workbench-ui": "node tests/closing-date-workbench-ui.mjs",
+    "test:closing-date-wanrong-priority": "node tests/closing-date-wanrong-priority.mjs",
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
-    "diagnose:core": "node tests/core-diagnostics.mjs"
+    "diagnose:core": "node tests/core-diagnostics.mjs",
+    "test:purchase-records-edit-view": "node tests/purchase-records-edit-view.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

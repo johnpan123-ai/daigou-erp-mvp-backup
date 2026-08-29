@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
@@ -46,6 +46,7 @@ import {
   createNextFieldTestClosingDateClearPlan,
 } from '../lib/nextFieldTestClosingDate';
 import { canUseClosingDateWorkbenchUi } from '../lib/closingDateWorkbenchAccess';
+import { capturePurchaseRecordsEditView, resolvePurchaseRecordsEditView } from '../lib/purchaseRecordsEditView';
 
 const ClosingDateResolutionWorkbench = lazy(
   () => import('../components/closingDateResolution/ClosingDateResolutionWorkbench'),
@@ -384,6 +385,7 @@ export default function PurchaseRecords() {
   const [draftDemands, setDraftDemands] = useState<Record<string, string>>({});
 
   const [draftClosingDates, setDraftClosingDates] = useState<Record<string, string>>({});
+  const [closingDateSaveErrors, setClosingDateSaveErrors] = useState<Record<string, string>>({});
 
   const getClosingDateInputVal = (g: ProductGroup): string => {
     if (draftClosingDates[g.id] !== undefined) {
@@ -398,6 +400,11 @@ export default function PurchaseRecords() {
 
     const currentVal = group.closing_date || '';
     if (rawVal.trim() === currentVal.trim()) {
+      setClosingDateSaveErrors(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
       setDraftClosingDates(prev => {
         const next = { ...prev };
         delete next[groupId];
@@ -406,17 +413,26 @@ export default function PurchaseRecords() {
       return;
     }
 
-    if (rawVal.trim() === '') {
-      await handleUpdateGroupField(groupId, 'closing_date', '');
+    const normalized = rawVal.trim() === '' ? '' : normalizeDateInput(rawVal);
+    if (normalized === null) {
+      // Keep in draft for incomplete inputs, do not sync, do not alert
+      console.log(`[Date Input] incomplete/invalid input ignored: ${rawVal}`);
       return;
     }
 
-    const normalized = normalizeDateInput(rawVal);
-    if (normalized) {
-      await handleUpdateGroupField(groupId, 'closing_date', normalized);
-    } else {
-      // Keep in draft for incomplete inputs, do not sync, do not alert
-      console.log(`[Date Input] incomplete/invalid input ignored: ${rawVal}`);
+    setClosingDateSaveErrors(prev => {
+      const next = { ...prev };
+      delete next[groupId];
+      return next;
+    });
+    try {
+      const saved = await handleUpdateGroupField(groupId, 'closing_date', normalized);
+      if (!saved) {
+        setClosingDateSaveErrors(prev => ({ ...prev, [groupId]: '儲存未完成，請重新載入後再試' }));
+      }
+    } catch (error) {
+      console.error('[PurchaseRecords] Failed to save closing date:', error);
+      setClosingDateSaveErrors(prev => ({ ...prev, [groupId]: '儲存失敗，請重試' }));
     }
   };
 
@@ -1338,39 +1354,43 @@ export default function PurchaseRecords() {
   const [stableEditOrder, setStableEditOrder] = useState<string[] | null>(null);
   const [stableCompletedOrder, setStableCompletedOrder] = useState<string[] | null>(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
+  const captureCurrentEditView = () => {
+    const snapshot = capturePurchaseRecordsEditView(filteredAndSortedGroups, completedGroups);
+    setStableEditOrder(snapshot.mainGroupIds);
+    setStableCompletedOrder(snapshot.completedGroupIds);
+  };
+
+  const toggleEditMode = () => {
     if (editMode) {
-      setStableEditOrder(filteredAndSortedGroups.map(g => g.id));
-      setStableCompletedOrder(completedGroups.map(g => g.id));
-    } else {
+      setEditMode(false);
       setStableEditOrder(null);
       setStableCompletedOrder(null);
+      setDraftClosingDates({});
+      setClosingDateSaveErrors({});
+      return;
     }
-  }, [editMode, searchTerm, filterSource, filterType, activeTab, secondaryTab, sortMode, needsPurchaseOnly]);
+
+    captureCurrentEditView();
+    setEditMode(true);
+  };
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    if (editMode) captureCurrentEditView();
+  }, [searchTerm, filterSource, filterType, activeTab, secondaryTab, sortMode, needsPurchaseOnly]);
 
 
 
   const displayedMainGroups = useMemo(() => {
     if (editMode && stableEditOrder) {
-      const mapped = stableEditOrder
-        .map(id => groups.find(g => g.id === id))
-        .filter((g): g is ProductGroup => !!g);
-      const existingIds = new Set(stableEditOrder);
-      const newGroups = filteredAndSortedGroups.filter(g => !existingIds.has(g.id));
-      return [...mapped, ...newGroups];
+      return resolvePurchaseRecordsEditView(stableEditOrder, groups);
     }
     return filteredAndSortedGroups;
   }, [editMode, stableEditOrder, filteredAndSortedGroups, groups]);
 
   const displayedCompletedGroups = useMemo(() => {
     if (editMode && stableCompletedOrder) {
-      const mapped = stableCompletedOrder
-        .map(id => groups.find(g => g.id === id))
-        .filter((g): g is ProductGroup => !!g);
-      const existingIds = new Set(stableCompletedOrder);
-      const newGroups = completedGroups.filter(g => !existingIds.has(g.id));
-      return [...mapped, ...newGroups];
+      return resolvePurchaseRecordsEditView(stableCompletedOrder, groups);
     }
     return completedGroups;
   }, [editMode, stableCompletedOrder, completedGroups, groups]);
@@ -1563,9 +1583,9 @@ export default function PurchaseRecords() {
   }, [showWacaDialog]);
 
   const handleUpdateGroupField = async (groupId: string, field: string, value: any) => {
-    if (guardAgainstStaleWrite()) return;
+    if (guardAgainstStaleWrite()) return false;
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
-      return;
+      return false;
     }
     if (field === 'closing_date') {
       setDraftClosingDates(prev => {
@@ -1592,10 +1612,11 @@ export default function PurchaseRecords() {
         alert(err.message);
         setIsStale(true);
         await loadData();
-        return;
+        return false;
       }
       throw err;
     }
+    return true;
   };
 
   const handleBatchApply = async () => {
@@ -4076,7 +4097,14 @@ export default function PurchaseRecords() {
                                 data-table={tableId}
                                 data-row={idx}
                                 data-field="closing_date"
+                                aria-invalid={closingDateSaveErrors[g.id] ? 'true' : undefined}
+                                title={closingDateSaveErrors[g.id] || undefined}
                               />
+                              {closingDateSaveErrors[g.id] && (
+                                <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                  {closingDateSaveErrors[g.id]}
+                                </span>
+                              )}
                               <Calendar
                                 size={14}
                                 style={{ flexShrink: 0, color: '#64748b', cursor: 'pointer' }}
@@ -4517,7 +4545,14 @@ export default function PurchaseRecords() {
                                 data-table={tableId}
                                 data-row={idx}
                                 data-field="closing_date"
+                                aria-invalid={closingDateSaveErrors[g.id] ? 'true' : undefined}
+                                title={closingDateSaveErrors[g.id] || undefined}
                               />
+                              {closingDateSaveErrors[g.id] && (
+                                <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                  {closingDateSaveErrors[g.id]}
+                                </span>
+                              )}
                               <Calendar
                                 size={14}
                                 style={{ flexShrink: 0, color: '#64748b', cursor: 'pointer' }}
@@ -4623,7 +4658,7 @@ export default function PurchaseRecords() {
     
       return (
         <div className="flex-col gap-md">
-          {(filteredAndSortedGroups.length === 0 && completedGroups.length === 0) ? (
+          {(displayedMainGroups.length === 0 && displayedCompletedGroups.length === 0) ? (
             <EmptyState
               icon={Receipt}
               title={groups.length === 0 ? "尚未有訂購紀錄" : "找不到符合的紀錄"}
@@ -4639,7 +4674,7 @@ export default function PurchaseRecords() {
                 </div>
               )}
     
-              {secondaryTab === 'progress' && completedGroups.length > 0 && (
+              {secondaryTab === 'progress' && displayedCompletedGroups.length > 0 && (
                 <div style={{ marginTop: '8px' }}>
                   <button
                     onClick={() => setCompletedExpanded(!completedExpanded)}
@@ -4663,7 +4698,7 @@ export default function PurchaseRecords() {
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>{completedExpanded ? '▼' : '▶'}</span>
-                      <span>已過結單日商品 ({completedGroups.length})</span>
+                      <span>已過結單日商品 ({displayedCompletedGroups.length})</span>
                     </span>
                     <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>
                       {completedExpanded ? '點擊收合' : '點擊展開'}
@@ -4808,7 +4843,8 @@ export default function PurchaseRecords() {
       
       {/* Floating Action Button (FAB) */}
       <button
-        onClick={() => setEditMode(!editMode)}
+        data-testid="purchase-records-edit-mode-toggle"
+        onClick={toggleEditMode}
         style={{
           position: 'fixed',
           bottom: isMobile ? 'calc(env(safe-area-inset-bottom) + 72px)' : '24px',

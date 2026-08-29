@@ -449,7 +449,7 @@ try {
       changedSelectionSavedLastOnly: firstGroupMapping?.source.sourceProductId === 'three-yellow-0-last'
         && !mappingsAfterMultiYellow.some(item => item.source.sourceProductId === 'three-yellow-0-first'),
       sameIdentityWanrongFirst: sameIdentityOrder.join(',') === 'same-wanrong,same-dreamlink',
-      differentIdentityNativeOrderPreserved: differentIdentityOrder.join(',') === 'different-dreamlink,different-wanrong',
+      differentIdentityWanrongFirst: differentIdentityOrder.join(',') === 'different-wanrong,different-dreamlink',
       conflictStatus: conflict.status,
       conflictZeroWrite: JSON.stringify(beforeConflict) === JSON.stringify(afterConflict)
         && JSON.stringify(mappingsBeforeConflict) === JSON.stringify(mappingsAfterConflict)
@@ -484,7 +484,7 @@ try {
   assert.deepEqual(contractResult.threeYellowAppliedDates, ['2026/11/01', '2026/10/02', '2026/10/03']);
   assert.equal(contractResult.changedSelectionSavedLastOnly, true);
   assert.equal(contractResult.sameIdentityWanrongFirst, true);
-  assert.equal(contractResult.differentIdentityNativeOrderPreserved, true);
+  assert.equal(contractResult.differentIdentityWanrongFirst, true);
   assert.equal(contractResult.conflictStatus, 'CONFLICT');
   assert.equal(contractResult.conflictZeroWrite, true);
   assert.equal(contractResult.rollbackStatus, 'ROLLED_BACK');

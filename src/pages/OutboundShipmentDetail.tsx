@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, ExternalLink, Check } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
 import type {
@@ -21,6 +21,10 @@ import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import * as XLSX from 'xlsx';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import {
+  copyOutboundGroupNameToClipboard,
+  copyOutboundGroupNameAndOpenMyacg,
+} from '../lib/outboundGroupQuickActions';
 
 const cleanProductTitle = (title: string) =>
   title
@@ -572,12 +576,23 @@ export default function OutboundShipmentDetail() {
 
   const copyGroupName = useCallback(async (groupName: string) => {
     try {
-      await navigator.clipboard.writeText(groupName);
+      await copyOutboundGroupNameToClipboard(groupName);
       setCopiedGroupName(groupName);
       window.setTimeout(() => setCopiedGroupName(current => current === groupName ? null : current), 1200);
     } catch (error) {
       console.error('複製商品名稱失敗:', error);
     }
+  }, []);
+
+  const openMyacgForGroup = useCallback((groupName: string) => {
+    // Opening happens synchronously inside the click event before the Clipboard promise settles.
+    const copyAttempt = copyOutboundGroupNameAndOpenMyacg(groupName);
+    void copyAttempt.then(() => {
+      setCopiedGroupName(groupName);
+      window.setTimeout(() => setCopiedGroupName(current => current === groupName ? null : current), 1200);
+    }).catch(error => {
+      console.error('複製商品名稱失敗（買動漫頁面已開啟）:', error);
+    });
   }, []);
 
   const toggleGroup = (groupKey: string) => {
@@ -1533,55 +1548,84 @@ export default function OutboundShipmentDetail() {
                         minHeight: 44,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div data-testid="outbound-group-header" style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                         {isCollapsed ? <ChevronDown size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <ChevronUp size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
-                        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                          <span title={groupName} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 14, fontWeight: 700 }}>
-                            {groupName}
-                          </span>
-                          <span style={{ flexShrink: 0, color: '#475569', fontSize: 12, fontWeight: 700 }}>
-                            ｜買動漫{sourceSummary.myacg}・WACA{sourceSummary.waca}・私人{sourceSummary.privateOrder}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void copyGroupName(groupName);
-                          }}
-                          title="複製商品名稱"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
-                            padding: '4px 8px', borderRadius: 6,
-                            border: '1px solid #cbd5e1', background: '#fff',
-                            color: copiedGroupName === groupName ? '#15803d' : '#475569',
-                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                            whiteSpace: 'nowrap', flexShrink: 0,
-                          }}
-                        >
-                          {copiedGroupName === groupName ? <Check size={13} /> : <Copy size={13} />}
-                          {copiedGroupName === groupName ? '已複製' : '複製名稱'}
-                        </button>
-                        {canEditGroup && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeGroupItems(groupName, items);
-                            }}
-                            title="刪除此群組的全部商品"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 4,
-                              padding: '4px 8px', borderRadius: 6,
-                              border: '1px solid #fecaca', background: '#fff7f7',
-                              color: '#dc2626', fontSize: 12, fontWeight: 700,
-                              cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
-                            }}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            data-testid="outbound-group-title"
+                            title={groupName}
+                            style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 14, fontWeight: 700 }}
                           >
-                            <Trash2 size={13} />
-                            全部刪除
-                          </button>
-                        )}
+                            {groupName}
+                          </div>
+                          <div
+                            data-testid="outbound-group-meta"
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? 8 : 4, marginTop: 5, minWidth: 0 }}
+                          >
+                            <span style={{ minWidth: 0, color: '#64748b', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              買動漫 {sourceSummary.myacg} ・ WACA {sourceSummary.waca} ・ 私人 {sourceSummary.privateOrder}
+                            </span>
+                            <div data-testid="outbound-group-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: isMobile ? 8 : 4, flexShrink: 0, marginLeft: 'auto' }}>
+                              <button
+                                data-testid="outbound-copy-button"
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void copyGroupName(groupName);
+                                }}
+                                title="複製商品名稱"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  padding: isMobile ? '10px 12px' : '3px 6px', minWidth: isMobile ? 44 : undefined, minHeight: isMobile ? 44 : 26, borderRadius: 6,
+                                  border: '1px solid #cbd5e1', background: '#fff',
+                                  color: copiedGroupName === groupName ? '#15803d' : '#475569',
+                                  fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                                  whiteSpace: 'nowrap', flexShrink: 0,
+                                }}
+                              >
+                                {copiedGroupName === groupName ? '已複製' : '複製'}
+                              </button>
+                              <button
+                                data-testid="outbound-myacg-button"
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openMyacgForGroup(groupName);
+                                }}
+                                title="複製名稱並開啟買動漫"
+                                aria-label="複製名稱並開啟買動漫"
+                                style={{
+                                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  width: isMobile ? 44 : 28, height: isMobile ? 44 : 26, padding: 0, borderRadius: 6,
+                                  border: '1px solid #bfdbfe', background: '#eff6ff',
+                                  color: '#2563eb', cursor: 'pointer', flexShrink: 0,
+                                }}
+                              >
+                                <ExternalLink size={14} />
+                              </button>
+                              {canEditGroup && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeGroupItems(groupName, items);
+                                  }}
+                                  title="刪除此群組的全部商品"
+                                  style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '4px 8px', borderRadius: 6,
+                                    border: '1px solid #fecaca', background: '#fff7f7',
+                                    color: '#dc2626', fontSize: 12, fontWeight: 700,
+                                    cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+                                  }}
+                                >
+                                  <Trash2 size={13} />
+                                  全部刪除
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                       <div style={{ paddingLeft: 22, marginTop: 4 }}>
                         <span style={{ fontSize: 12, color: '#64748b' }}>

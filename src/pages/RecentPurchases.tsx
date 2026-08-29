@@ -13,6 +13,7 @@ interface RecentPurchaseRow {
   group: ProductGroup;
   totalQuantity: number;
   batchCount: number;
+  batchIds: string[];
   lastPurchaseAt: number;
 }
 
@@ -173,22 +174,31 @@ export default function RecentPurchases() {
     }, 2200);
   };
 
-  const copyDailyLedger = async (dateKey: string) => {
+  const getOrderedDailyBatches = (dateKey: string, includedBatchIds?: Set<string>) => {
     const itemBatchIds = new Set(batchItems.map(item => item.purchase_batch_id));
-    const dailyBatches = batches
-      .filter(batch => itemBatchIds.has(batch.id) && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === dateKey)
+    return batches
+      .filter(batch => (
+        itemBatchIds.has(batch.id)
+        && (!includedBatchIds || includedBatchIds.has(batch.id))
+        && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === dateKey
+      ))
       .sort((a, b) => {
         const timeDiff = getPurchaseBatchTimestamp(a) - getPurchaseBatchTimestamp(b);
         return timeDiff || a.id.localeCompare(b.id);
       });
-    const ledgerText = formatMultiplePurchaseBatchLedgers({
-      batches: dailyBatches,
+  };
+
+  const formatLedgerForBatches = (ledgerBatches: PurchaseBatch[]) => formatMultiplePurchaseBatchLedgers({
+      batches: ledgerBatches,
       batchItems,
       variants,
       categoryById,
       groupById,
       getDisplayProductName: getLedgerDisplayProductName,
     });
+
+  const copyDailyLedger = async (dateKey: string) => {
+    const ledgerText = formatLedgerForBatches(getOrderedDailyBatches(dateKey));
 
     if (!ledgerText) {
       showCopyNotice('當日沒有可複製的採購帳目', true);
@@ -204,6 +214,19 @@ export default function RecentPurchases() {
     }
   };
 
+  const copyRowLedger = async (row: RecentPurchaseRow) => {
+    const ledgerText = formatLedgerForBatches(
+      getOrderedDailyBatches(row.dateKey, new Set(row.batchIds)),
+    );
+    if (!ledgerText) return;
+
+    try {
+      await navigator.clipboard.writeText(ledgerText);
+    } catch (error) {
+      console.error('[RecentPurchases] Failed to copy row ledger:', error);
+    }
+  };
+
   const allRows = useMemo(() => {
     const groupById = new Map(groups.map(group => [group.id, group]));
     const itemsByBatchId = new Map<string, PurchaseBatchItem[]>();
@@ -214,7 +237,7 @@ export default function RecentPurchases() {
       else itemsByBatchId.set(item.purchase_batch_id, [item]);
     }
 
-    const rowsByDateAndGroup = new Map<string, RecentPurchaseRow & { batchIds: Set<string> }>();
+    const rowsByDateAndGroup = new Map<string, Omit<RecentPurchaseRow, 'batchIds'> & { batchIds: Set<string> }>();
 
     for (const batch of batches) {
       const group = groupById.get(batch.product_group_id);
@@ -244,7 +267,10 @@ export default function RecentPurchases() {
       }
     }
 
-    return Array.from(rowsByDateAndGroup.values()).map(({ batchIds: _batchIds, ...row }) => row);
+    return Array.from(rowsByDateAndGroup.values()).map(({ batchIds, ...row }) => ({
+      ...row,
+      batchIds: Array.from(batchIds),
+    }));
   }, [groups, batches, batchItems]);
 
   const sections = useMemo<RecentPurchaseSection[]>(() => {
@@ -535,6 +561,16 @@ export default function RecentPurchases() {
                                 onClick={() => openProductDetail(row.group.id)}
                               >
                                 {row.group.normalized_title || row.group.title}
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="recent-purchase-copy-row-ledger"
+                                aria-label={`複製 ${row.group.normalized_title || row.group.title} 當日採購帳目`}
+                                title="複製這列商品的當日採購帳目"
+                                onClick={() => void copyRowLedger(row)}
+                                style={{ width: '26px', height: '26px', flex: '0 0 26px', padding: 0, border: '1px solid #bfdbfe', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#2563eb', cursor: 'pointer' }}
+                              >
+                                <Copy size={14} />
                               </button>
                               {row.group.proxy_agent?.trim() && (
                                 <span data-testid="recent-purchase-agent" className="recent-purchase-agent-badge">
