@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
@@ -7,6 +7,7 @@ import { formatMultiplePurchaseBatchLedgers } from '../lib/purchaseBatchLedger';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 type DateFilter = 'today' | 'yesterday' | '7d' | '30d';
+type CopyFeedback = 'success' | 'error';
 
 interface RecentPurchaseRow {
   dateKey: string;
@@ -86,8 +87,12 @@ export default function RecentPurchases() {
   const [onlyWithOfficialSite, setOnlyWithOfficialSite] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [copyNotice, setCopyNotice] = useState<{ text: string; isError: boolean } | null>(null);
-  const copyNoticeTimerRef = useRef<number | null>(null);
+  const [dailyCopyFeedback, setDailyCopyFeedback] = useState<Record<string, CopyFeedback>>({});
+  const [rowCopyFeedback, setRowCopyFeedback] = useState<Record<string, CopyFeedback>>({});
+  const dailyCopyTimersRef = useRef<Map<string, number>>(new Map());
+  const rowCopyTimersRef = useRef<Map<string, number>>(new Map());
+  const copyRequestIdsRef = useRef<Map<string, number>>(new Map());
+  const isMountedRef = useRef(true);
 
   const loadData = async () => {
     setLoading(true);
@@ -123,8 +128,19 @@ export default function RecentPurchases() {
     setExpandedDateKeys(new Set());
   }, [dateFilter]);
 
-  useEffect(() => () => {
-    if (copyNoticeTimerRef.current !== null) window.clearTimeout(copyNoticeTimerRef.current);
+  useEffect(() => {
+    isMountedRef.current = true;
+    const dailyTimers = dailyCopyTimersRef.current;
+    const rowTimers = rowCopyTimersRef.current;
+    const copyRequestIds = copyRequestIdsRef.current;
+    return () => {
+      isMountedRef.current = false;
+      dailyTimers.forEach(timerId => window.clearTimeout(timerId));
+      rowTimers.forEach(timerId => window.clearTimeout(timerId));
+      dailyTimers.clear();
+      rowTimers.clear();
+      copyRequestIds.clear();
+    };
   }, []);
 
   const toggleDateSection = (dateKey: string) => {
@@ -165,14 +181,37 @@ export default function RecentPurchases() {
     return variantName || productTitle || variant.myacg_item_code || '未命名規格';
   };
 
-  const showCopyNotice = (text: string, isError = false) => {
-    setCopyNotice({ text, isError });
-    if (copyNoticeTimerRef.current !== null) window.clearTimeout(copyNoticeTimerRef.current);
-    copyNoticeTimerRef.current = window.setTimeout(() => {
-      setCopyNotice(null);
-      copyNoticeTimerRef.current = null;
-    }, 2200);
+  const showCopyFeedback = (
+    key: string,
+    feedback: CopyFeedback,
+    setFeedback: React.Dispatch<React.SetStateAction<Record<string, CopyFeedback>>>,
+    timers: Map<string, number>,
+  ) => {
+    if (!isMountedRef.current) return;
+    setFeedback(current => ({ ...current, [key]: feedback }));
+    const existingTimer = timers.get(key);
+    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+    const timerId = window.setTimeout(() => {
+      setFeedback(current => {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      timers.delete(key);
+    }, 1600);
+    timers.set(key, timerId);
   };
+
+  const beginCopyRequest = (key: string) => {
+    const requestId = (copyRequestIdsRef.current.get(key) ?? 0) + 1;
+    copyRequestIdsRef.current.set(key, requestId);
+    return requestId;
+  };
+
+  const isLatestCopyRequest = (key: string, requestId: number) => (
+    isMountedRef.current && copyRequestIdsRef.current.get(key) === requestId
+  );
 
   const getOrderedDailyBatches = (dateKey: string, includedBatchIds?: Set<string>) => {
     const itemBatchIds = new Set(batchItems.map(item => item.purchase_batch_id));
@@ -198,32 +237,50 @@ export default function RecentPurchases() {
     });
 
   const copyDailyLedger = async (dateKey: string) => {
+    const requestKey = `daily:${dateKey}`;
+    const requestId = beginCopyRequest(requestKey);
     const ledgerText = formatLedgerForBatches(getOrderedDailyBatches(dateKey));
 
     if (!ledgerText) {
-      showCopyNotice('當日沒有可複製的採購帳目', true);
+      showCopyFeedback(dateKey, 'error', setDailyCopyFeedback, dailyCopyTimersRef.current);
       return;
     }
 
     try {
       await navigator.clipboard.writeText(ledgerText);
-      showCopyNotice('已複製當日帳目');
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(dateKey, 'success', setDailyCopyFeedback, dailyCopyTimersRef.current);
+      }
     } catch (error) {
       console.error('[RecentPurchases] Failed to copy daily ledger:', error);
-      showCopyNotice('複製失敗，請確認瀏覽器剪貼簿權限', true);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(dateKey, 'error', setDailyCopyFeedback, dailyCopyTimersRef.current);
+      }
     }
   };
 
   const copyRowLedger = async (row: RecentPurchaseRow) => {
+    const rowKey = `${row.dateKey}::${row.group.id}`;
+    const requestKey = `row:${rowKey}`;
+    const requestId = beginCopyRequest(requestKey);
     const ledgerText = formatLedgerForBatches(
       getOrderedDailyBatches(row.dateKey, new Set(row.batchIds)),
     );
-    if (!ledgerText) return;
+    if (!ledgerText) {
+      showCopyFeedback(rowKey, 'error', setRowCopyFeedback, rowCopyTimersRef.current);
+      return;
+    }
 
     try {
       await navigator.clipboard.writeText(ledgerText);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(rowKey, 'success', setRowCopyFeedback, rowCopyTimersRef.current);
+      }
     } catch (error) {
       console.error('[RecentPurchases] Failed to copy row ledger:', error);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(rowKey, 'error', setRowCopyFeedback, rowCopyTimersRef.current);
+      }
     }
   };
 
@@ -417,16 +474,6 @@ export default function RecentPurchases() {
         </div>
       </header>
 
-      {copyNotice && (
-        <div
-          role="status"
-          data-testid="recent-purchases-copy-notice"
-          style={{ position: 'fixed', top: '76px', right: '24px', zIndex: 1000, padding: '9px 14px', borderRadius: '8px', background: copyNotice.isError ? '#b91c1c' : '#047857', color: '#fff', fontSize: '13px', fontWeight: 700, boxShadow: '0 8px 24px rgba(15, 23, 42, 0.18)' }}
-        >
-          {copyNotice.text}
-        </div>
-      )}
-
       <div className="recent-purchases-toolbar" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', padding: '14px', marginBottom: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
           {dateFilterOptions.map(option => (
@@ -486,6 +533,7 @@ export default function RecentPurchases() {
             const sectionQuantity = section.rows.reduce((sum, row) => sum + row.totalQuantity, 0);
             const isExpanded = expandedDateKeys.has(section.dateKey);
             const contentId = `recent-purchases-date-content-${section.dateKey}`;
+            const dailyFeedback = dailyCopyFeedback[section.dateKey];
             const hasDailyLedger = batches.some(batch => (
               batchItems.some(item => item.purchase_batch_id === batch.id)
               && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === section.dateKey
@@ -513,11 +561,12 @@ export default function RecentPurchases() {
                     <button
                       type="button"
                       data-testid="recent-purchases-copy-daily-ledger"
+                      data-copy-status={dailyFeedback ?? 'idle'}
                       onClick={() => void copyDailyLedger(section.dateKey)}
                       title="複製該日期所有原始採購批次帳目"
-                      style={{ flexShrink: 0, minHeight: '32px', padding: '0 10px', border: '1px solid #93c5fd', borderRadius: '7px', display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#fff', color: '#1d4ed8', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      style={{ flexShrink: 0, minWidth: '116px', minHeight: '32px', padding: '0 10px', border: `1px solid ${dailyFeedback === 'error' ? '#fecaca' : dailyFeedback === 'success' ? '#86efac' : '#93c5fd'}`, borderRadius: '7px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: dailyFeedback === 'error' ? '#fff7f7' : dailyFeedback === 'success' ? '#f0fdf4' : '#fff', color: dailyFeedback === 'error' ? '#b91c1c' : dailyFeedback === 'success' ? '#047857' : '#1d4ed8', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
                     >
-                      <Copy size={14} /> 複製當日帳目
+                      {dailyFeedback === 'success' ? <><Check size={14} /> 已複製</> : dailyFeedback === 'error' ? <><X size={14} /> 複製失敗</> : <><Copy size={14} /> 複製當日帳目</>}
                     </button>
                   )}
                 </div>
@@ -542,7 +591,10 @@ export default function RecentPurchases() {
                       </tr>
                     </thead>
                     <tbody>
-                      {section.rows.map(row => (
+                      {section.rows.map(row => {
+                        const rowKey = `${row.dateKey}::${row.group.id}`;
+                        const rowFeedback = rowCopyFeedback[rowKey];
+                        return (
                         <tr
                           key={`${section.dateKey}::${row.group.id}`}
                           data-testid="recent-purchase-row"
@@ -565,12 +617,13 @@ export default function RecentPurchases() {
                               <button
                                 type="button"
                                 data-testid="recent-purchase-copy-row-ledger"
+                                data-copy-status={rowFeedback ?? 'idle'}
                                 aria-label={`複製 ${row.group.normalized_title || row.group.title} 當日採購帳目`}
-                                title="複製這列商品的當日採購帳目"
+                                title={rowFeedback === 'error' ? '複製失敗' : rowFeedback === 'success' ? '已複製' : '複製這列商品的當日採購帳目'}
                                 onClick={() => void copyRowLedger(row)}
-                                style={{ width: '26px', height: '26px', flex: '0 0 26px', padding: 0, border: '1px solid #bfdbfe', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#2563eb', cursor: 'pointer' }}
+                                style={{ width: '26px', height: '26px', flex: '0 0 26px', padding: 0, border: `1px solid ${rowFeedback === 'error' ? '#fecaca' : rowFeedback === 'success' ? '#86efac' : '#bfdbfe'}`, borderRadius: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: rowFeedback === 'error' ? '#fff7f7' : rowFeedback === 'success' ? '#f0fdf4' : '#fff', color: rowFeedback === 'error' ? '#b91c1c' : rowFeedback === 'success' ? '#047857' : '#2563eb', cursor: 'pointer' }}
                               >
-                                <Copy size={14} />
+                                {rowFeedback === 'success' ? <Check size={14} /> : rowFeedback === 'error' ? <X size={14} /> : <Copy size={14} />}
                               </button>
                               {row.group.proxy_agent?.trim() && (
                                 <span data-testid="recent-purchase-agent" className="recent-purchase-agent-badge">
@@ -607,7 +660,8 @@ export default function RecentPurchases() {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>}

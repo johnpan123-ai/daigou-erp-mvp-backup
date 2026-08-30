@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT_PATH = fileURLToPath(new URL('../', import.meta.url));
-const BASE_URL = 'http://127.0.0.1:4193';
+const TEST_PORT = Number(process.env.RECENT_PURCHASES_TEST_PORT || 4293);
+const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const CHROME_PATH = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const TAIPEI_TIME_ZONE = 'Asia/Taipei';
 
@@ -13,7 +14,7 @@ if (!existsSync(CHROME_PATH)) throw new Error(`Chrome not found: ${CHROME_PATH}`
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--host', '127.0.0.1', '--port', '4193', '--strictPort',
+  '--host', '127.0.0.1', '--port', String(TEST_PORT), '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 
 let viteOutput = '';
@@ -225,10 +226,12 @@ try {
 
   const dailyCopyButtons = page.getByTestId('recent-purchases-copy-daily-ledger');
   assert.equal(await dailyCopyButtons.count(), 2, 'Every populated date section must expose daily ledger copy while collapsed');
+  const dailyButtonBoxBeforeCopy = await dailyCopyButtons.first().boundingBox();
   await dailyCopyButtons.first().click();
   assert.equal(await dateToggles.first().getAttribute('aria-expanded'), 'false', 'Copying a collapsed date must not expand it');
-  await page.getByTestId('recent-purchases-copy-notice').waitFor();
-  assert.equal(await page.getByTestId('recent-purchases-copy-notice').innerText(), '已複製當日帳目');
+  await page.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'success');
+  assert.equal(await dailyCopyButtons.first().innerText(), '已複製', 'Daily copy success must be shown on the button');
+  assert.deepEqual(await dailyCopyButtons.first().boundingBox(), dailyButtonBoxBeforeCopy, 'Daily feedback must not resize its button');
 
   const dailyLedger = await page.evaluate(() => navigator.clipboard.readText());
   assert.doesNotMatch(dailyLedger, /【|批下單|採購日期|────|\n\n/, 'Daily ledger must not contain batch headings, dates, separators, or blank rows');
@@ -237,6 +240,10 @@ try {
   assert.equal(dailyLedgerRows.length, 3, 'Three original one-item batches must produce three continuous rows');
   assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 2), 'Every ledger row must contain only product name and quantity');
   assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[1])), [3, 12, 2], 'Original batch quantities must remain intact in chronological order');
+  await page.waitForTimeout(900);
+  await dailyCopyButtons.first().click();
+  await page.waitForTimeout(900);
+  assert.equal(await dailyCopyButtons.first().getAttribute('data-copy-status'), 'success', 'A repeated click must replace the old restore timer');
 
   const persistedPurchaseDataAfterCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
     const db = await new Promise((resolve, reject) => {
@@ -257,7 +264,8 @@ try {
   }, { batchKey: storageKeys.purchaseBatches, itemKey: storageKeys.purchaseBatchItems });
   assert.deepEqual(persistedPurchaseDataAfterCopy.batches, purchaseBatches, 'Daily copy must not modify purchase_batches');
   assert.deepEqual(persistedPurchaseDataAfterCopy.items, purchaseBatchItems, 'Daily copy must not modify purchase_batch_items');
-  await page.getByTestId('recent-purchases-copy-notice').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'idle');
+  assert.equal(await dailyCopyButtons.first().innerText(), '複製當日帳目', 'Daily copy feedback must automatically restore');
 
   await dateToggles.first().click();
   assert.equal(await rows.count(), 2, 'Opening today must reveal only today rows');
@@ -273,7 +281,10 @@ try {
 
   const rowCopyButtons = page.getByTestId('recent-purchase-copy-row-ledger');
   assert.equal(await rowCopyButtons.count(), 2, 'Each grouped product row must expose a compact ledger copy action');
+  const firstRowCopyBox = await rowCopyButtons.first().boundingBox();
   await rowCopyButtons.first().click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="recent-purchase-copy-row-ledger"]')[0]?.getAttribute('data-copy-status') === 'success');
+  assert.deepEqual(await rowCopyButtons.first().boundingBox(), firstRowCopyBox, 'Row feedback must keep the compact action size stable');
   const firstRowLedger = await page.evaluate(() => navigator.clipboard.readText());
   assert.equal(
     firstRowLedger,
@@ -284,12 +295,18 @@ try {
   assert.doesNotMatch(firstRowLedger, /商品 B-/, 'Per-row copy must exclude other products from the same day');
 
   await rowCopyButtons.nth(1).click();
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-testid="recent-purchase-copy-row-ledger"]')).slice(0, 2).every(button => button.getAttribute('data-copy-status') === 'success'));
   assert.equal(
     await page.evaluate(() => navigator.clipboard.readText()),
     dailyLedgerRows.find(row => row.startsWith('商品 B-'))?.replace(/\r$/, ''),
     'A single-batch grouped row must copy only its original ledger row',
   );
-  assert.equal(await page.getByTestId('recent-purchases-copy-notice').count(), 0, 'Per-row copy must not add a success toast');
+  assert.deepEqual(
+    await rowCopyButtons.evaluateAll(buttons => buttons.map(button => button.getAttribute('data-copy-status'))),
+    ['success', 'success'],
+    'Rapid A/B row copies must retain independent success state',
+  );
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-testid="recent-purchase-copy-row-ledger"]')).slice(0, 2).every(button => button.getAttribute('data-copy-status') === 'idle'));
 
   const persistedPurchaseDataAfterRowCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
     const db = await new Promise((resolve, reject) => {
@@ -316,6 +333,27 @@ try {
   assert.equal(await officialLink.getAttribute('target'), '_blank');
   assert.equal(await rows.nth(1).getByTestId('recent-purchase-official-link').count(), 0, 'URL-less products must not show an official link');
   assert.equal(await rows.nth(1).getByTestId('recent-purchase-agent').count(), 0, 'Blank proxy_agent must not render a badge');
+
+  const failurePage = await context.newPage();
+  await failurePage.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => { throw new Error('Simulated clipboard denial'); } },
+    });
+  });
+  await failurePage.goto(`${BASE_URL}/recent-purchases`, { waitUntil: 'networkidle' });
+  const failureDailyButton = failurePage.getByTestId('recent-purchases-copy-daily-ledger').first();
+  await failureDailyButton.click();
+  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'error');
+  assert.equal(await failureDailyButton.innerText(), '複製失敗', 'Clipboard failure must not show daily-copy success');
+  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'idle');
+  await failurePage.getByTestId('recent-purchases-date-toggle').first().click();
+  const failureRowButton = failurePage.getByTestId('recent-purchase-copy-row-ledger').first();
+  await failureRowButton.click();
+  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchase-copy-row-ledger"]')?.getAttribute('data-copy-status') === 'error');
+  assert.equal(await failureRowButton.getAttribute('title'), '複製失敗', 'Clipboard failure must remain local to the row action');
+  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchase-copy-row-ledger"]')?.getAttribute('data-copy-status') === 'idle');
+  await failurePage.close();
 
   await dateToggles.first().click();
   assert.equal(await rows.count(), 0, 'Clicking an open date must collapse it again');
@@ -354,6 +392,25 @@ try {
   await page.getByTestId('recent-purchase-row').first().getByTestId('recent-purchase-view').click();
   await page.waitForURL(`${BASE_URL}/purchase-records/group-url`);
 
+  const persistedFixtureAfterAllCopyActions = await page.evaluate(async keys => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('daigou-erp-db', 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const transaction = db.transaction('kv', 'readonly');
+    const store = transaction.objectStore('kv');
+    const result = {};
+    await Promise.all(Object.entries(keys).map(([field, key]) => new Promise((resolve, reject) => {
+      const request = store.get(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { result[field] = request.result ?? []; resolve(); };
+    })));
+    db.close();
+    return result;
+  }, storageKeys);
+  assert.deepEqual(persistedFixtureAfterAllCopyActions, fixture, 'Copy feedback actions must not write any ERP fixture data');
+
   assert.equal(supabaseRequests.length, 0, `Local fixture test made Supabase requests: ${JSON.stringify(supabaseRequests)}`);
   assert.deepEqual(unexpectedErrors, [], `Unexpected browser errors: ${JSON.stringify(unexpectedErrors)}`);
 
@@ -365,6 +422,9 @@ try {
   console.log('PASS collapsed date sections copy every original batch with shared ledger formatting');
   console.log('PASS daily ledger copy preserves purchase_batches and purchase_batch_items');
   console.log('PASS grouped product rows copy all and only their original ledgers without data writes');
+  console.log('PASS daily and per-row copy feedback is independent, stable-sized, and auto-restores');
+  console.log('PASS clipboard failure never displays success and does not crash');
+  console.log('PASS all ERP fixture data writes = 0');
   console.log('PASS date/search/official-site filters are correct');
   console.log('PASS proxy_agent is shown read-only and blank agents stay hidden');
   console.log('PASS product detail and official URL actions are correct');
