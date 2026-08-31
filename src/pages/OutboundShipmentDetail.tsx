@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, Copy, Check, ExternalLink } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
+import { copyOutboundGroupNameAndOpenMyacg } from '../lib/outboundGroupMyacgShortcut';
 import type {
   OutboundShipment,
   OutboundShipmentItem,
@@ -487,6 +488,12 @@ export default function OutboundShipmentDetail() {
     } catch (error) {
       console.error('複製商品名稱失敗:', error);
     }
+  }, []);
+
+  const openMyacgForGroup = useCallback((groupName: string) => {
+    void copyOutboundGroupNameAndOpenMyacg(groupName).catch(error => {
+      console.error('複製商品名稱失敗:', error);
+    });
   }, []);
 
   const toggleGroup = (groupKey: string) => {
@@ -1468,6 +1475,24 @@ export default function OutboundShipmentDetail() {
                             >
                               {copiedGroupName === groupName ? <Check size={13} /> : <Copy size={13} />}
                               {copiedGroupName === groupName ? '已複製' : '複製名稱'}
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="outbound-myacg-button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openMyacgForGroup(groupName);
+                              }}
+                              title="複製名稱並開啟買動漫"
+                              aria-label="複製名稱並開啟買動漫"
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 28, height: 26, padding: 0, borderRadius: 6,
+                                border: '1px solid #bfdbfe', background: '#eff6ff',
+                                color: '#2563eb', cursor: 'pointer', flexShrink: 0,
+                              }}
+                            >
+                              <ExternalLink size={14} />
                             </button>
                             {canEditGroup && (
                               <button
