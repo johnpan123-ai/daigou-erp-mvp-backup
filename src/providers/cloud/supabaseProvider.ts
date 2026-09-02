@@ -84,6 +84,7 @@
 
 import { supabase } from './supabaseClient';
 import { db, calculateFinalMyacgDemand, normalizeProductTitle, getBaseSku } from '../../lib/db';
+import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { getProviderMode } from '../providerMode';
 import type { IDataProvider } from '../types';
 import type { 
@@ -179,31 +180,6 @@ async function retrySupabase(
     }
   }
   throw lastError;
-}
-
-const DATA_SIZE_THRESHOLDS: Record<string, number> = {
-  product_variants: 3000,
-  purchase_batch_items: 5000,
-  private_order_items: 3000,
-  sales_order_items: 5000,
-};
-
-let dataSizeWarningShown = false;
-
-function checkDataSizeWarnings(counts: Record<string, number>) {
-  if (dataSizeWarningShown) return;
-  const warnings: string[] = [];
-  for (const [table, count] of Object.entries(counts)) {
-    const threshold = DATA_SIZE_THRESHOLDS[table];
-    if (threshold && count >= threshold) {
-      warnings.push(`${table}: ${count} 筆 (閾值 ${threshold})`);
-    }
-  }
-  if (warnings.length > 0) {
-    dataSizeWarningShown = true;
-    console.warn(`[Data Size Warning] 以下表格資料量接近效能瓶頸:\n${warnings.join('\n')}`);
-    alert(`⚠️ 資料量警告\n\n以下表格的資料筆數已超過建議上限，可能影響頁面載入速度：\n\n${warnings.join('\n')}\n\n建議聯絡管理員評估是否需要優化。`);
-  }
 }
 
 const fetchAll = async <T>(
@@ -556,7 +532,7 @@ export class SupabaseProvider implements IDataProvider {
             product_variants: vLen,
             purchase_batch_items: biLen,
             private_order_items: poiLen,
-          });
+          }, role);
         } catch (err: any) {
           console.error('[Sync] 商品核心主檔同步失敗:', err);
           if (isSchemaMissingError(err)) {

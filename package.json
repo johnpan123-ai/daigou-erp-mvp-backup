@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:outbound-myacg-shortcut": "node tests/outbound-myacg-shortcut.mjs"
+    "test:outbound-myacg-shortcut": "node tests/outbound-myacg-shortcut.mjs",
+    "test:data-size-advisory": "node tests/data-size-advisory.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
