@@ -1,4 +1,4 @@
-import type { ProductVariant } from './db';
+import type { JapanPackageItem, ProductVariant } from './db';
 
 const FIXED_STOREFRONT_PREFIX = '【小河馬日本代購】';
 const GENERIC_COMPONENT_NAMES = new Set(['單品', '單一品項']);
@@ -56,3 +56,59 @@ export const sortJapanPackageReceivingBundleComponentsBySku = <T extends Pick<Pr
     return skuOrder || left.originalIndex - right.originalIndex;
   })
   .map(({ component }) => component);
+
+export const sortJapanPackageReceivingItemsByBatchThenSku = <T extends Pick<
+  JapanPackageItem,
+  'purchase_batch_id' | 'product_variant_id' | 'sku'
+>>(
+  items: readonly T[],
+  purchaseBatchIds: readonly string[],
+  variantSkuById: ReadonlyMap<string, string>
+): T[] => {
+  const batchOrder = new Map<string, number>();
+  purchaseBatchIds.forEach((batchId, index) => {
+    if (!batchOrder.has(batchId)) batchOrder.set(batchId, index);
+  });
+  let nextBatchIndex = batchOrder.size;
+  items.forEach(item => {
+    const batchId = item.purchase_batch_id;
+    if (batchId && !batchOrder.has(batchId)) {
+      batchOrder.set(batchId, nextBatchIndex);
+      nextBatchIndex += 1;
+    }
+  });
+
+  return items
+    .map((item, originalIndex) => ({
+      item,
+      originalIndex,
+      batchIndex: item.purchase_batch_id
+        ? (batchOrder.get(item.purchase_batch_id) ?? Number.MAX_SAFE_INTEGER)
+        : Number.MAX_SAFE_INTEGER,
+      sku: (
+        item.sku
+        || (item.product_variant_id ? variantSkuById.get(item.product_variant_id) : '')
+        || ''
+      ).trim()
+    }))
+    .sort((left, right) => {
+      const batchOrderResult = left.batchIndex - right.batchIndex;
+      if (batchOrderResult !== 0) return batchOrderResult;
+      if (left.sku && !right.sku) return -1;
+      if (!left.sku && right.sku) return 1;
+      if (!left.sku && !right.sku) return left.originalIndex - right.originalIndex;
+      const skuOrder = left.sku.localeCompare(right.sku, 'en', {
+        numeric: true,
+        sensitivity: 'base'
+      });
+      return skuOrder || left.originalIndex - right.originalIndex;
+    })
+    .map(({ item }) => item);
+};
+
+type ClipboardWriter = (value: string) => Promise<void>;
+
+export const copyJapanPackageReceivingGroupTitle = (
+  title: string,
+  writeClipboard: ClipboardWriter = value => navigator.clipboard.writeText(value)
+): Promise<void> => writeClipboard(title);

@@ -1,14 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3, Copy } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import {
+  copyJapanPackageReceivingGroupTitle,
   getJapanPackageReceivingBundleComponentName,
   normalizeJapanPackageReceivingName,
-  sortJapanPackageReceivingBundleComponentsBySku
+  sortJapanPackageReceivingBundleComponentsBySku,
+  sortJapanPackageReceivingItemsByBatchThenSku
 } from '../lib/japanPackageReceivingDisplay';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
@@ -227,6 +229,16 @@ export default function JapanPackageDetail() {
       }
       return next;
     });
+  };
+
+  const handleCopyGroupTitle = async (title: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    try {
+      await copyJapanPackageReceivingGroupTitle(title);
+    } catch (error) {
+      console.error('Failed to copy Japan package group title:', error);
+      window.alert('複製失敗，請再試一次。');
+    }
   };
 
   const checkAndAutoUpdateStatus = async (updatedItems: JapanPackageItem[]) => {
@@ -450,8 +462,20 @@ export default function JapanPackageDetail() {
       groups[groupId].items.push(item);
     });
 
+    const variantSkuById = new Map(
+      variants.map(variant => [variant.id, variant.myacg_item_code || ''])
+    );
+    const purchaseBatchIds = batches.map(batch => batch.id);
+    Object.values(groups).forEach(group => {
+      group.items = sortJapanPackageReceivingItemsByBatchThenSku(
+        group.items,
+        purchaseBatchIds,
+        variantSkuById
+      );
+    });
+
     return Object.values(groups).sort((a, b) => a.title.localeCompare(b.title));
-  }, [packageItems, productGroups]);
+  }, [packageItems, productGroups, variants, batches]);
 
   useEffect(() => {
     if (id) {
@@ -1578,13 +1602,13 @@ export default function JapanPackageDetail() {
                 return (
                   <div key={g.id} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
                     {/* Group Header */}
-                    <div 
+                    <div
                       style={{ padding: '12px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '6px' }}
                       onClick={() => toggleMobileGroupExpand(g.id)}
                     >
                       {/* First Line: Title + Arrow right-aligned */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                        <span style={{ 
+                        <span title={g.title} style={{
                           fontSize: '14px', 
                           fontWeight: 700, 
                           color: '#1e293b', 
@@ -1599,27 +1623,53 @@ export default function JapanPackageDetail() {
                         }}>
                           📦 {g.title}
                         </span>
-                        <span style={{
-                          fontSize: '12px',
-                          color: '#64748b',
-                          transition: 'transform 0.2s',
-                          transform: isExpanded ? 'rotate(90deg)' : 'none',
-                          display: 'inline-block',
-                          flexShrink: 0,
-                          marginTop: '4px'
-                        }}>
-                          ▶
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            data-testid={`copy-japan-package-group-${g.id}`}
+                            aria-label={`複製商品群組名稱 ${g.title}`}
+                            title="複製商品群組名稱"
+                            onClick={event => void handleCopyGroupTitle(g.title, event)}
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              background: '#fff',
+                              color: '#475569',
+                              cursor: 'pointer',
+                              padding: 0
+                            }}
+                          >
+                            <Copy size={14} />
+                          </button>
+                          <span style={{
+                            fontSize: '12px',
+                            color: '#64748b',
+                            transition: 'transform 0.2s',
+                            transform: isExpanded ? 'rotate(90deg)' : 'none',
+                            display: 'inline-block',
+                            marginTop: '4px'
+                          }}>
+                            ▶
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                          共 {g.items.length} 項・完成 {g.items.filter(item => item.checked).length} / {g.items.length}（{percent}%）
                         </span>
-                      </div>
-
-                      {/* Second Line: Stats */}
-                      <div style={{ fontSize: '12.5px', color: '#475569', fontWeight: 600 }}>
-                        已完成 {checkedGroupQty} / {totalGroupQty}・共 {totalGroupQty} 件・{percent}%
-                      </div>
-
-                      {/* Third Line: Full-width Progress Bar */}
-                      <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden', marginTop: '2px' }}>
-                        <div style={{ width: `${percent}%`, height: '100%', background: '#10b981', borderRadius: '3px' }} />
+                        <div style={{ flex: '1 1 80px', minWidth: '64px', height: '5px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+                          <div style={{ width: `${percent}%`, height: '100%', background: '#10b981', borderRadius: '999px' }} />
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', width: '100%' }} onClick={event => event.stopPropagation()}>
+                          <button type="button" className="btn btn-outline" style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, true)}>全選已點收</button>
+                          <button type="button" className="btn btn-outline" style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, false)}>全取消點收</button>
+                        </div>
                       </div>
                     </div>
 
@@ -1871,8 +1921,8 @@ export default function JapanPackageDetail() {
         }
         .checklist-group-header {
           display: flex;
-          align-items: center;
-          justify-content: space-between;
+          flex-direction: column;
+          align-items: stretch;
           padding: 18px 26px;
           background: #f8fafc;
           border-bottom: 2px solid #e2e8f0;
@@ -1882,7 +1932,6 @@ export default function JapanPackageDetail() {
           color: #1e293b;
           font-size: 18px;
           transition: background-color 0.15s;
-          flex-wrap: wrap;
           gap: 12px;
         }
         .checklist-group-header:hover {
@@ -1893,19 +1942,41 @@ export default function JapanPackageDetail() {
           align-items: center;
           gap: 10px;
           flex: 1;
-          min-width: 200px;
+          min-width: 0;
         }
-        .group-header-right {
+        .checklist-group-header-main {
           display: flex;
           align-items: center;
-          gap: 16px;
-          flex-shrink: 0;
+          justify-content: space-between;
+          gap: 10px;
+          min-width: 0;
+        }
+        .compact-group-title {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 15px;
+          font-weight: 700;
+        }
+        .checklist-group-header-secondary {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
           flex-wrap: wrap;
         }
         .group-progress-wrapper {
           display: flex;
           align-items: center;
           gap: 8px;
+          min-width: 0;
+          flex-wrap: wrap;
+        }
+        .group-item-count {
+          font-size: 13px;
+          color: #64748b;
+          font-weight: 600;
         }
         .group-progress-text {
           font-size: 14px;
@@ -1913,7 +1984,7 @@ export default function JapanPackageDetail() {
           font-weight: 600;
         }
         .group-progress-bar-bg {
-          width: 150px;
+          width: 100px;
           height: 9px;
           background-color: #cbd5e1;
           border-radius: 9999px;
@@ -3257,19 +3328,42 @@ export default function JapanPackageDetail() {
                       className="checklist-group-header" 
                       onClick={() => toggleGroupCollapse(g.id)}
                     >
-                      <div className="checklist-group-title-area">
-                        <span style={{ fontSize: '13px', color: '#64748b' }}>
-                          {isCollapsed ? '▶' : '▼'}
-                        </span>
-                        <span style={{ fontSize: '15px', fontWeight: 700 }}>📦 {g.title}</span>
-                        <span style={{ fontSize: '12.5px', color: '#64748b', fontWeight: 'normal' }}>
-                          （共 {totalGroupItems} 項）
-                        </span>
+                      <div className="checklist-group-header-main">
+                        <div className="checklist-group-title-area">
+                          <span style={{ fontSize: '13px', color: '#64748b', flexShrink: 0 }}>
+                            {isCollapsed ? '▶' : '▼'}
+                          </span>
+                          <span title={g.title} className="compact-group-title">📦 {g.title}</span>
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`copy-japan-package-group-${g.id}`}
+                          aria-label={`複製商品群組名稱 ${g.title}`}
+                          title="複製商品群組名稱"
+                          onClick={event => void handleCopyGroupTitle(g.title, event)}
+                          style={{
+                            width: '28px',
+                            height: '28px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            background: '#fff',
+                            color: '#475569',
+                            cursor: 'pointer',
+                            padding: 0,
+                            flexShrink: 0
+                          }}
+                        >
+                          <Copy size={14} />
+                        </button>
                       </div>
-                      
-                      <div className="group-header-right" onClick={e => e.stopPropagation()}>
+
+                      <div className="checklist-group-header-secondary" onClick={e => e.stopPropagation()}>
                         <div className="group-progress-wrapper" title={`點收進度: ${checkedGroupItems} / ${totalGroupItems}`}>
-                          <span className="group-progress-text">完成 {checkedGroupItems} / {totalGroupItems} ({percent}%)</span>
+                          <span className="group-item-count">共 {totalGroupItems} 項</span>
+                          <span className="group-progress-text">完成 {checkedGroupItems} / {totalGroupItems}</span>
                           <div className="group-progress-bar-bg">
                             <div className="group-progress-bar-fill" style={{ width: `${percent}%` }} />
                           </div>

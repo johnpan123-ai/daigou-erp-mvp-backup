@@ -6,14 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT_PATH = fileURLToPath(new URL('../', import.meta.url));
-const BASE_URL = 'http://127.0.0.1:4194';
+const BASE_URL = 'http://127.0.0.1:4294';
 const CHROME_PATH = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 
 if (!existsSync(CHROME_PATH)) throw new Error(`Chrome not found: ${CHROME_PATH}`);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--mode', 'experimental', '--host', '127.0.0.1', '--port', '4194', '--strictPort',
+  '--mode', 'experimental', '--host', '127.0.0.1', '--port', '4294', '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });
@@ -65,6 +65,26 @@ try {
     const originalVariants = JSON.stringify(variants);
     const originalRelations = JSON.stringify(relations);
     const sorted = display.sortJapanPackageReceivingBundleComponentsBySku(variants);
+    const packageItems = Object.freeze([
+      Object.freeze({ id: 'batch-2-a2', purchase_batch_id: 'batch-2', product_variant_id: 'variant-a2-first', sku: 'A002' }),
+      Object.freeze({ id: 'batch-1-a3-first', purchase_batch_id: 'batch-1', product_variant_id: 'variant-a3', sku: 'A003' }),
+      Object.freeze({ id: 'batch-2-no-sku', purchase_batch_id: 'batch-2', product_variant_id: 'variant-no-sku-1', sku: '' }),
+      Object.freeze({ id: 'batch-1-a1', purchase_batch_id: 'batch-1', product_variant_id: 'variant-a1', sku: 'A001' }),
+      Object.freeze({ id: 'batch-2-a4', purchase_batch_id: 'batch-2', product_variant_id: 'variant-a4', sku: 'A004' }),
+      Object.freeze({ id: 'batch-1-a3-second', purchase_batch_id: 'batch-1', product_variant_id: 'variant-a3-second', sku: 'A003' }),
+      Object.freeze({ id: 'unknown-batch-a0', purchase_batch_id: 'batch-legacy', product_variant_id: 'variant-legacy', sku: 'A000' }),
+      Object.freeze({ id: 'manual-a0', purchase_batch_id: null, product_variant_id: 'variant-manual', sku: 'A000' }),
+    ]);
+    const originalPackageItems = JSON.stringify(packageItems);
+    const sortedPackageItems = display.sortJapanPackageReceivingItemsByBatchThenSku(
+      packageItems,
+      ['batch-1', 'batch-2'],
+      new Map()
+    );
+    let copiedGroupTitle = '';
+    await display.copyJapanPackageReceivingGroupTitle('Hololive 商品群組', async value => {
+      copiedGroupTitle = value;
+    });
     const variantIds = new Set(variants.map(variant => variant.id));
     const bundleIds = new Set(['bundle-parent']);
 
@@ -90,6 +110,12 @@ try {
         variantTitle: '單品',
       }),
       sortedIds: sorted.map(variant => variant.id),
+      sortedPackageItemIds: sortedPackageItems.map(item => item.id),
+      packageItemInputCount: packageItems.length,
+      packageItemOutputCount: sortedPackageItems.length,
+      samePackageItemIdentities: sortedPackageItems.every(item => packageItems.includes(item)),
+      packageItemsUnchanged: JSON.stringify(packageItems) === originalPackageItems,
+      copiedGroupTitle,
       inputCount: variants.length,
       outputCount: sorted.length,
       sameObjectIdentities: sorted.every(variant => variants.includes(variant)),
@@ -123,6 +149,19 @@ try {
   assert.equal(result.sameObjectIdentities, true);
   console.log('PASS SKU order is stable, same-SKU rows remain separate, and no-SKU rows remain last');
 
+  assert.deepEqual(result.sortedPackageItemIds, [
+    'batch-1-a1', 'batch-1-a3-first', 'batch-1-a3-second',
+    'batch-2-a2', 'batch-2-a4', 'batch-2-no-sku',
+    'unknown-batch-a0', 'manual-a0',
+  ]);
+  assert.equal(result.packageItemOutputCount, result.packageItemInputCount);
+  assert.equal(result.samePackageItemIdentities, true);
+  assert.equal(result.packageItemsUnchanged, true);
+  console.log('PASS package items remain grouped by purchase batch, sort by SKU within each batch, and are not merged or mutated');
+
+  assert.equal(result.copiedGroupTitle, 'Hololive 商品群組');
+  console.log('PASS group-title copy uses the exact displayed group name and performs Clipboard-only work');
+
   assert.equal(result.variantsUnchanged, true);
   assert.equal(result.relationsUnchanged, true);
   assert.equal(result.missingBundleRelations, 0);
@@ -135,6 +174,9 @@ try {
   assert.equal((pageSource.match(/bundleComps\.map\(renderBundleComponent\)/g) || []).length, 3, 'A receiving layout lost its component rows');
   assert.ok((pageSource.match(/套組內容/g) || []).length >= 6, 'Expand/collapse structure labels were removed');
   assert.ok(pageSource.includes('handleToggleCheck'), 'Receiving check behavior is no longer wired');
+  assert.equal((pageSource.match(/data-testid={`copy-japan-package-group-\${g\.id}`}/g) || []).length, 2, 'Desktop/mobile group-title copy controls are incomplete');
+  assert.ok(pageSource.includes('checklist-group-header-main'), 'Two-row desktop group header main row is missing');
+  assert.ok(pageSource.includes('checklist-group-header-secondary'), 'Two-row desktop group header status row is missing');
   console.log('PASS all three receiving layouts keep expand/collapse structure without redundant inner headings');
 
   assert.deepEqual(supabaseRequests, []);

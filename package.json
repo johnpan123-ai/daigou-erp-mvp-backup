@@ -69,7 +69,8 @@
     "test:closing-date-wanrong-priority": "node tests/closing-date-wanrong-priority.mjs",
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs",
-    "test:purchase-records-edit-view": "node tests/purchase-records-edit-view.mjs"
+    "test:purchase-records-edit-view": "node tests/purchase-records-edit-view.mjs",
+    "test:data-size-advisory": "node tests/data-size-advisory.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
