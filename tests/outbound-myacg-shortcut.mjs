@@ -92,7 +92,7 @@ try {
     return { url: actions.MYACG_MEMBER_CENTER_URL, cases, failureCases };
   });
 
-  assert.equal(result.url, 'https://www.myacg.com.tw/member_center_v2.php');
+  assert.equal(result.url, 'https://www.myacg.com.tw/member_center_v2.php?e_id=1&list_type=3');
   for (const testCase of result.cases) {
     assert.deepEqual(testCase.beforeClipboardSettles, [
       ['clipboard', testCase.name],

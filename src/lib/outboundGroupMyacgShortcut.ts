@@ -1,4 +1,4 @@
-export const MYACG_MEMBER_CENTER_URL = 'https://www.myacg.com.tw/member_center_v2.php';
+export const MYACG_MEMBER_CENTER_URL = 'https://www.myacg.com.tw/member_center_v2.php?e_id=1&list_type=3';
 
 type ClipboardWriter = (text: string) => Promise<void>;
 type ExternalPageOpener = (url: string, target: string, features: string) => unknown;
