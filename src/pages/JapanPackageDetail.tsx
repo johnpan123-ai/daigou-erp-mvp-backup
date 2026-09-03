@@ -4,6 +4,12 @@ import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Pack
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
+import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
+import {
+  getJapanPackageReceivingBundleComponentName,
+  normalizeJapanPackageReceivingName,
+  sortJapanPackageReceivingBundleComponentsBySku,
+} from '../lib/japanPackageReceivingDisplay';
 
 const cleanDisplayProductTitle = (title: string): string => {
   if (!title) return '';
@@ -163,6 +169,15 @@ export default function JapanPackageDetail() {
   const [expandedBundleItems, setExpandedBundleItems] = useState<Set<string>>(new Set());
   const [showDetailedInfo, setShowDetailedInfo] = useState<boolean>(false);
 
+  const bundleCategoryById = useMemo(
+    () => new Map(categories.map(category => [category.id, category])),
+    [categories],
+  );
+  const bundleProductGroupById = useMemo(
+    () => new Map(productGroups.map(productGroup => [productGroup.id, productGroup])),
+    [productGroups],
+  );
+
   const getBundleComponents = (parentVar: ProductVariant): ProductVariant[] => {
     const compIds = new Set(
       bundleComponents
@@ -170,7 +185,34 @@ export default function JapanPackageDetail() {
         .map(bc => bc.component_variant_id)
     );
     if (compIds.size === 0) return [];
-    return variants.filter(v => compIds.has(v.id));
+    return sortJapanPackageReceivingBundleComponentsBySku(
+      variants.filter(v => compIds.has(v.id)),
+    );
+  };
+
+  const renderBundleComponent = (component: ProductVariant) => {
+    const display = getBundleComponentDisplay(component, {
+      categoryById: bundleCategoryById,
+      productGroupById: bundleProductGroupById,
+    });
+    const categoryTitle = component.product_category_id
+      ? bundleCategoryById.get(component.product_category_id)?.title
+      : undefined;
+    const componentName = getJapanPackageReceivingBundleComponentName({
+      productTitle: display.productTitle,
+      variantTitle: display.variantTitle,
+      categoryTitle,
+    });
+
+    return (
+      <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
+        <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '1px' }}>
+          <span style={{ fontWeight: 500, color: '#334155', wordBreak: 'break-word' }}>{componentName}</span>
+          <span style={{ fontSize: '11px', color: '#94a3b8' }}>SKU: {display.sku || '(無)'}</span>
+        </div>
+      </div>
+    );
   };
 
   const toggleBundleExpand = (itemId: string, e: React.MouseEvent) => {
@@ -372,7 +414,7 @@ export default function JapanPackageDetail() {
     const v = variants.find(x => x.id === vId);
     if (!v) return '';
     const group = productGroups.find(g => g.id === v.product_group_id);
-    return group ? cleanDisplayProductTitle(group.title) : '';
+    return group ? normalizeJapanPackageReceivingName(group.title) : '';
   }
 
   // Group items by product_group_id, fallback to product_title
@@ -395,7 +437,7 @@ export default function JapanPackageDetail() {
         groupId = `title-${groupTitle}`;
       }
 
-      const cleanTitle = cleanDisplayProductTitle(groupTitle);
+      const cleanTitle = normalizeJapanPackageReceivingName(groupTitle);
 
       if (!groups[groupId]) {
         groups[groupId] = {
@@ -1570,9 +1612,11 @@ export default function JapanPackageDetail() {
                     {isExpanded && (
                       <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '10px', background: '#fafafa' }}>
                         {g.items.map(item => {
-                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ')
-                            || item.product_title
-                            || getBatchItemLabel(item.product_variant_id || '');
+                          const catAndVariant = normalizeJapanPackageReceivingName(
+                            [item.category_name, item.variant_name].filter(Boolean).join(' - ')
+                              || item.product_title
+                              || getBatchItemLabel(item.product_variant_id || ''),
+                          );
                           const manualTwdPrice = getManualTwdPrice(item.note);
                           const manualNote = getManualItemNote(item.note);
                           const v = variants.find(x => x.id === item.product_variant_id);
@@ -1678,18 +1722,7 @@ export default function JapanPackageDetail() {
                                     }}
                                     onClick={e => e.stopPropagation()}
                                   >
-                                    <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
-                                      📦 套組內容 ({bundleComps.length})
-                                    </div>
-                                    {bundleComps.map((comp) => {
-                                      const compLabel = comp.variant_name || '單品';
-                                      return (
-                                        <div key={comp.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
-                                          <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
-                                          <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{compLabel}</span>
-                                        </div>
-                                      );
-                                    })}
+                                    {bundleComps.map(renderBundleComponent)}
                                   </div>
                                 )}
 
@@ -3064,9 +3097,11 @@ export default function JapanPackageDetail() {
                 const v = variants.find(x => x.id === item.product_variant_id);
                 const bundleComps = v ? getBundleComponents(v) : [];
                 const isBundleExpanded = expandedBundleItems.has(item.id);
-                const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join(' - ')
-                  || item.product_title
-                  || getBatchItemLabel(item.product_variant_id || '');
+                const catAndVariant = normalizeJapanPackageReceivingName(
+                  [item.category_name, item.variant_name].filter(Boolean).join(' - ')
+                    || item.product_title
+                    || getBatchItemLabel(item.product_variant_id || ''),
+                );
                 const manualTwdPrice = getManualTwdPrice(item.note);
                 const manualNote = getManualItemNote(item.note);
                 return (
@@ -3083,7 +3118,7 @@ export default function JapanPackageDetail() {
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', padding: '2px 0' }}>
                       {/* Product Group title (e.g. VTuber project name) */}
                       <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', lineHeight: 1.2 }}>
-                        {cleanDisplayProductTitle(item.product_title || getProductGroupTitle(item.product_variant_id))}
+                        {normalizeJapanPackageReceivingName(item.product_title || getProductGroupTitle(item.product_variant_id))}
                       </div>
 
                       {/* Main Item spec title + quantity */}
@@ -3145,18 +3180,7 @@ export default function JapanPackageDetail() {
                           }}
                           onClick={e => e.stopPropagation()}
                         >
-                          <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
-                            📦 套組內容 ({bundleComps.length})
-                          </div>
-                          {bundleComps.map((comp) => {
-                            const compLabel = comp.variant_name || '單品';
-                            return (
-                              <div key={comp.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', paddingLeft: '2px' }}>
-                                <span style={{ color: '#94a3b8', marginTop: '2px', flexShrink: 0 }}>•</span>
-                                <span style={{ fontWeight: 500, wordBreak: 'break-word' }}>{compLabel}</span>
-                              </div>
-                            );
-                          })}
+                          {bundleComps.map(renderBundleComponent)}
                         </div>
                       )}
 
@@ -3260,9 +3284,11 @@ export default function JapanPackageDetail() {
                     {!isCollapsed && (
                       <div className="checklist-group-body">
                         {g.items.map(item => {
-                          const catAndVariant = [item.category_name, item.variant_name].filter(Boolean).join('－')
-                            || item.product_title
-                            || getBatchItemLabel(item.product_variant_id || '');
+                          const catAndVariant = normalizeJapanPackageReceivingName(
+                            [item.category_name, item.variant_name].filter(Boolean).join('－')
+                              || item.product_title
+                              || getBatchItemLabel(item.product_variant_id || ''),
+                          );
                           const manualTwdPrice = getManualTwdPrice(item.note);
                           const manualNote = getManualItemNote(item.note);
                           const v = variants.find(x => x.id === item.product_variant_id);
@@ -3351,18 +3377,7 @@ export default function JapanPackageDetail() {
                                       }}
                                       onClick={e => e.stopPropagation()}
                                     >
-                                      <div style={{ fontWeight: 700, color: '#334155', marginBottom: '2px' }}>
-                                        📦 套組內容 ({bundleComps.length})
-                                      </div>
-                                      {bundleComps.map((comp) => {
-                                        const compLabel = comp.variant_name || '單品';
-                                        return (
-                                          <div key={comp.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '2px' }}>
-                                            <span style={{ color: '#94a3b8' }}>•</span>
-                                            <span style={{ fontWeight: 500 }}>{compLabel}</span>
-                                          </div>
-                                        );
-                                      })}
+                                      {bundleComps.map(renderBundleComponent)}
                                     </div>
                                   )}
 
