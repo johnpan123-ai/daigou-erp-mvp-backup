@@ -1,16 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, ExternalLink, History, RefreshCcw, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import type { ProductGroup, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
+import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
+import { formatMultiplePurchaseBatchLedgers } from '../lib/purchaseBatchLedger';
 
 type DateFilter = 'today' | 'yesterday' | '7d' | '30d';
+type CopyFeedback = 'success' | 'error';
 
 interface RecentPurchaseRow {
   dateKey: string;
   group: ProductGroup;
   totalQuantity: number;
   batchCount: number;
+  batchIds: string[];
   lastPurchaseAt: number;
 }
 
@@ -73,6 +76,8 @@ const dateFilterOptions: Array<{ value: DateFilter; label: string }> = [
 export default function RecentPurchases() {
   const navigate = useNavigate();
   const [groups, setGroups] = useState<ProductGroup[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [batches, setBatches] = useState<PurchaseBatch[]>([]);
   const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [dateFilter, setDateFilter] = useState<DateFilter>('7d');
@@ -81,17 +86,27 @@ export default function RecentPurchases() {
   const [onlyWithOfficialSite, setOnlyWithOfficialSite] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [dailyCopyFeedback, setDailyCopyFeedback] = useState<Record<string, CopyFeedback>>({});
+  const [rowCopyFeedback, setRowCopyFeedback] = useState<Record<string, CopyFeedback>>({});
+  const dailyCopyTimersRef = useRef<Map<string, number>>(new Map());
+  const rowCopyTimersRef = useRef<Map<string, number>>(new Map());
+  const copyRequestIdsRef = useRef<Map<string, number>>(new Map());
+  const isMountedRef = useRef(true);
 
   const loadData = async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const [nextGroups, nextBatches, nextBatchItems] = await Promise.all([
+      const [nextGroups, nextCategories, nextVariants, nextBatches, nextBatchItems] = await Promise.all([
         dataProvider.getProductGroups(),
+        dataProvider.getProductCategories(),
+        dataProvider.getProductVariants(),
         dataProvider.getPurchaseBatches(),
         dataProvider.getPurchaseBatchItems(),
       ]);
       setGroups(nextGroups);
+      setCategories(nextCategories);
+      setVariants(nextVariants);
       setBatches(nextBatches);
       setBatchItems(nextBatchItems);
     } catch (error) {
@@ -110,6 +125,21 @@ export default function RecentPurchases() {
     setExpandedDateKeys(new Set());
   }, [dateFilter]);
 
+  useEffect(() => {
+    isMountedRef.current = true;
+    const dailyTimers = dailyCopyTimersRef.current;
+    const rowTimers = rowCopyTimersRef.current;
+    const copyRequestIds = copyRequestIdsRef.current;
+    return () => {
+      isMountedRef.current = false;
+      dailyTimers.forEach(timerId => window.clearTimeout(timerId));
+      rowTimers.forEach(timerId => window.clearTimeout(timerId));
+      dailyTimers.clear();
+      rowTimers.clear();
+      copyRequestIds.clear();
+    };
+  }, []);
+
   const toggleDateSection = (dateKey: string) => {
     setExpandedDateKeys(current => {
       const next = new Set(current);
@@ -124,6 +154,133 @@ export default function RecentPurchases() {
 
   const todayKey = getTaipeiDateKey(Date.now());
 
+  const categoryById = useMemo(
+    () => new Map(categories.map(category => [category.id, category])),
+    [categories],
+  );
+  const groupById = useMemo(
+    () => new Map(groups.map(group => [group.id, group])),
+    [groups],
+  );
+
+  const getLedgerDisplayProductName = (variant: ProductVariant): string => {
+    const variantName = (variant.variant_name || '').trim();
+    const ownerGroup = variant.product_group_id ? groupById.get(variant.product_group_id) : undefined;
+    const productTitle = ownerGroup?.normalized_title || ownerGroup?.title || variant.product_title || '';
+
+    if (ownerGroup?.listing_type === '代理版') {
+      if (variantName && variantName !== '單品' && variantName !== '一箱') return variantName;
+      return variant.product_title || productTitle || variant.myacg_item_code || '未命名規格';
+    }
+
+    const category = variant.product_category_id ? categoryById.get(variant.product_category_id) : undefined;
+    if (category?.title && category.title !== '單品') return `${category.title} - ${variantName || '單品'}`;
+    return variantName || productTitle || variant.myacg_item_code || '未命名規格';
+  };
+
+  const showCopyFeedback = (
+    key: string,
+    feedback: CopyFeedback,
+    setFeedback: React.Dispatch<React.SetStateAction<Record<string, CopyFeedback>>>,
+    timers: Map<string, number>,
+  ) => {
+    if (!isMountedRef.current) return;
+    setFeedback(current => ({ ...current, [key]: feedback }));
+    const existingTimer = timers.get(key);
+    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+    const timerId = window.setTimeout(() => {
+      setFeedback(current => {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      timers.delete(key);
+    }, 1600);
+    timers.set(key, timerId);
+  };
+
+  const beginCopyRequest = (key: string) => {
+    const requestId = (copyRequestIdsRef.current.get(key) ?? 0) + 1;
+    copyRequestIdsRef.current.set(key, requestId);
+    return requestId;
+  };
+
+  const isLatestCopyRequest = (key: string, requestId: number) => (
+    isMountedRef.current && copyRequestIdsRef.current.get(key) === requestId
+  );
+
+  const getOrderedDailyBatches = (dateKey: string, includedBatchIds?: Set<string>) => {
+    const itemBatchIds = new Set(batchItems.map(item => item.purchase_batch_id));
+    return batches
+      .filter(batch => (
+        itemBatchIds.has(batch.id)
+        && (!includedBatchIds || includedBatchIds.has(batch.id))
+        && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === dateKey
+      ))
+      .sort((a, b) => {
+        const timeDiff = getPurchaseBatchTimestamp(a) - getPurchaseBatchTimestamp(b);
+        return timeDiff || a.id.localeCompare(b.id);
+      });
+  };
+
+  const formatLedgerForBatches = (ledgerBatches: PurchaseBatch[]) => formatMultiplePurchaseBatchLedgers({
+    batches: ledgerBatches,
+    batchItems,
+    variants,
+    categoryById,
+    groupById,
+    getDisplayProductName: getLedgerDisplayProductName,
+  });
+
+  const copyDailyLedger = async (dateKey: string) => {
+    const requestKey = `daily:${dateKey}`;
+    const requestId = beginCopyRequest(requestKey);
+    const ledgerText = formatLedgerForBatches(getOrderedDailyBatches(dateKey));
+
+    if (!ledgerText) {
+      showCopyFeedback(dateKey, 'error', setDailyCopyFeedback, dailyCopyTimersRef.current);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(ledgerText);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(dateKey, 'success', setDailyCopyFeedback, dailyCopyTimersRef.current);
+      }
+    } catch (error) {
+      console.error('[RecentPurchases] Failed to copy daily ledger:', error);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(dateKey, 'error', setDailyCopyFeedback, dailyCopyTimersRef.current);
+      }
+    }
+  };
+
+  const copyRowLedger = async (row: RecentPurchaseRow) => {
+    const rowKey = `${row.dateKey}::${row.group.id}`;
+    const requestKey = `row:${rowKey}`;
+    const requestId = beginCopyRequest(requestKey);
+    const ledgerText = formatLedgerForBatches(
+      getOrderedDailyBatches(row.dateKey, new Set(row.batchIds)),
+    );
+    if (!ledgerText) {
+      showCopyFeedback(rowKey, 'error', setRowCopyFeedback, rowCopyTimersRef.current);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(ledgerText);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(rowKey, 'success', setRowCopyFeedback, rowCopyTimersRef.current);
+      }
+    } catch (error) {
+      console.error('[RecentPurchases] Failed to copy row ledger:', error);
+      if (isLatestCopyRequest(requestKey, requestId)) {
+        showCopyFeedback(rowKey, 'error', setRowCopyFeedback, rowCopyTimersRef.current);
+      }
+    }
+  };
+
   const allRows = useMemo(() => {
     const groupById = new Map(groups.map(group => [group.id, group]));
     const itemsByBatchId = new Map<string, PurchaseBatchItem[]>();
@@ -134,7 +291,7 @@ export default function RecentPurchases() {
       else itemsByBatchId.set(item.purchase_batch_id, [item]);
     }
 
-    const rowsByDateAndGroup = new Map<string, RecentPurchaseRow & { batchIds: Set<string> }>();
+    const rowsByDateAndGroup = new Map<string, Omit<RecentPurchaseRow, 'batchIds'> & { batchIds: Set<string> }>();
 
     for (const batch of batches) {
       const group = groupById.get(batch.product_group_id);
@@ -164,7 +321,10 @@ export default function RecentPurchases() {
       }
     }
 
-    return Array.from(rowsByDateAndGroup.values()).map(({ batchIds: _batchIds, ...row }) => row);
+    return Array.from(rowsByDateAndGroup.values()).map(({ batchIds, ...row }) => ({
+      ...row,
+      batchIds: Array.from(batchIds),
+    }));
   }, [groups, batches, batchItems]);
 
   const sections = useMemo<RecentPurchaseSection[]>(() => {
@@ -370,22 +530,43 @@ export default function RecentPurchases() {
             const sectionQuantity = section.rows.reduce((sum, row) => sum + row.totalQuantity, 0);
             const isExpanded = expandedDateKeys.has(section.dateKey);
             const contentId = `recent-purchases-date-content-${section.dateKey}`;
+            const dailyFeedback = dailyCopyFeedback[section.dateKey];
+            const hasDailyLedger = batches.some(batch => (
+              batchItems.some(item => item.purchase_batch_id === batch.id)
+              && getTaipeiDateKey(getPurchaseBatchTimestamp(batch)) === section.dateKey
+            ));
             return (
               <section key={section.dateKey} data-testid="recent-purchases-date-section" data-date={section.dateKey} style={{ border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff', overflow: 'hidden' }}>
-                <button
-                  type="button"
-                  data-testid="recent-purchases-date-toggle"
-                  aria-expanded={isExpanded}
-                  aria-controls={contentId}
-                  onClick={() => toggleDateSection(section.dateKey)}
-                  style={{ width: '100%', minHeight: '44px', padding: '9px 14px', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', background: '#eff6ff', cursor: 'pointer', textAlign: 'left' }}
+                <div
+                  style={{ width: '100%', minHeight: '44px', padding: '6px 10px 6px 4px', display: 'flex', alignItems: 'center', gap: '8px', background: '#eff6ff' }}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
-                    {isExpanded ? <ChevronDown size={16} color="#1e3a8a" /> : <ChevronRight size={16} color="#1e3a8a" />}
-                    <strong style={{ color: '#1e3a8a', fontSize: '15px' }}>{formatDateHeading(section.dateKey, todayKey)}</strong>
-                  </span>
-                  <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>{section.rows.length} 項・{sectionQuantity} 件</span>
-                </button>
+                  <button
+                    type="button"
+                    data-testid="recent-purchases-date-toggle"
+                    aria-expanded={isExpanded}
+                    aria-controls={contentId}
+                    onClick={() => toggleDateSection(section.dateKey)}
+                    style={{ minWidth: 0, flex: 1, alignSelf: 'stretch', padding: '3px 10px', border: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+                      {isExpanded ? <ChevronDown size={16} color="#1e3a8a" /> : <ChevronRight size={16} color="#1e3a8a" />}
+                      <strong style={{ color: '#1e3a8a', fontSize: '15px' }}>{formatDateHeading(section.dateKey, todayKey)}</strong>
+                    </span>
+                    <span style={{ color: '#64748b', fontSize: '12px', fontWeight: 600 }}>{section.rows.length} 項・{sectionQuantity} 件</span>
+                  </button>
+                  {hasDailyLedger && (
+                    <button
+                      type="button"
+                      data-testid="recent-purchases-copy-daily-ledger"
+                      data-copy-status={dailyFeedback ?? 'idle'}
+                      onClick={() => void copyDailyLedger(section.dateKey)}
+                      title="複製該日期所有原始採購批次帳目"
+                      style={{ flexShrink: 0, minWidth: '116px', minHeight: '32px', padding: '0 10px', border: `1px solid ${dailyFeedback === 'error' ? '#fecaca' : dailyFeedback === 'success' ? '#86efac' : '#93c5fd'}`, borderRadius: '7px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '5px', background: dailyFeedback === 'error' ? '#fff7f7' : dailyFeedback === 'success' ? '#f0fdf4' : '#fff', color: dailyFeedback === 'error' ? '#b91c1c' : dailyFeedback === 'success' ? '#047857' : '#1d4ed8', fontSize: '12px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      {dailyFeedback === 'success' ? <><Check size={14} /> 已複製</> : dailyFeedback === 'error' ? <><X size={14} /> 複製失敗</> : <><Copy size={14} /> 複製當日帳目</>}
+                    </button>
+                  )}
+                </div>
                 {isExpanded && <div id={contentId} data-testid="recent-purchases-date-content" style={{ width: '100%', overflowX: 'auto', borderTop: '1px solid #dbeafe' }}>
                   <table className="recent-purchases-table">
                     <colgroup>
@@ -407,7 +588,10 @@ export default function RecentPurchases() {
                       </tr>
                     </thead>
                     <tbody>
-                      {section.rows.map(row => (
+                      {section.rows.map(row => {
+                        const rowKey = `${row.dateKey}::${row.group.id}`;
+                        const rowFeedback = rowCopyFeedback[rowKey];
+                        return (
                         <tr
                           key={`${section.dateKey}::${row.group.id}`}
                           data-testid="recent-purchase-row"
@@ -426,6 +610,17 @@ export default function RecentPurchases() {
                                 onClick={() => openProductDetail(row.group.id)}
                               >
                                 {row.group.normalized_title || row.group.title}
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="recent-purchase-copy-row-ledger"
+                                data-copy-status={rowFeedback ?? 'idle'}
+                                aria-label={`複製 ${row.group.normalized_title || row.group.title} 當日採購帳目`}
+                                title={rowFeedback === 'error' ? '複製失敗' : rowFeedback === 'success' ? '已複製' : '複製這列商品的當日採購帳目'}
+                                onClick={() => void copyRowLedger(row)}
+                                style={{ width: '26px', height: '26px', flex: '0 0 26px', padding: 0, border: `1px solid ${rowFeedback === 'error' ? '#fecaca' : rowFeedback === 'success' ? '#86efac' : '#bfdbfe'}`, borderRadius: '6px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: rowFeedback === 'error' ? '#fff7f7' : rowFeedback === 'success' ? '#f0fdf4' : '#fff', color: rowFeedback === 'error' ? '#b91c1c' : rowFeedback === 'success' ? '#047857' : '#2563eb', cursor: 'pointer' }}
+                              >
+                                {rowFeedback === 'success' ? <Check size={14} /> : rowFeedback === 'error' ? <X size={14} /> : <Copy size={14} />}
                               </button>
                               {row.group.proxy_agent?.trim() && (
                                 <span data-testid="recent-purchase-agent" className="recent-purchase-agent-badge">
@@ -462,7 +657,8 @@ export default function RecentPurchases() {
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>}
