@@ -1,3 +1,5 @@
+import { PRODUCTION_SUPABASE_PROJECT_REF, parseSupabaseProjectRef } from './supabaseEnvironmentBoundary';
+
 export const PRODUCTION_INDEXED_DB_NAME = 'daigou-erp-db';
 export const TEST_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-test-v1';
 export const NEXT_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-next-v1';
@@ -18,7 +20,6 @@ export interface SandboxConfig {
   title: string;
 }
 
-const PRODUCTION_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 const SANDBOX_DATABASE_NAMES = new Set([
   TEST_SANDBOX_INDEXED_DB_NAME,
   NEXT_SANDBOX_INDEXED_DB_NAME,
@@ -113,11 +114,18 @@ export const isSandboxEnvironmentActive = (): boolean => getActiveSandboxConfig(
 export const isTestSandboxRequested = (): boolean => rawProviderMode() === 'test';
 
 export const isProductionSupabaseRequest = (input: RequestInfo | URL | string): boolean => {
-  if (!PRODUCTION_SUPABASE_URL) return false;
   try {
     const request = new URL(requestUrl(input), window.location.origin);
-    const production = new URL(PRODUCTION_SUPABASE_URL);
-    return request.hostname === production.hostname && request.port === production.port;
+    return parseSupabaseProjectRef(request.origin) === PRODUCTION_SUPABASE_PROJECT_REF;
+  } catch {
+    return false;
+  }
+};
+
+const isAnySupabaseRequest = (input: RequestInfo | URL | string): boolean => {
+  try {
+    const request = new URL(requestUrl(input), window.location.origin);
+    return request.hostname.toLowerCase().endsWith('.supabase.co');
   } catch {
     return false;
   }
@@ -126,7 +134,7 @@ export const isProductionSupabaseRequest = (input: RequestInfo | URL | string): 
 const installProductionNetworkBlock = (): void => {
   nativeFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    if (isProductionSupabaseRequest(input)) {
+    if (isAnySupabaseRequest(input)) {
       throw new TestSandboxProductionNetworkBlockedError(
         `fetch ${init?.method || (input instanceof Request ? input.method : 'GET')}`,
         requestUrl(input),
@@ -144,7 +152,7 @@ const installProductionNetworkBlock = (): void => {
     username?: string | null,
     password?: string | null,
   ): void {
-    if (isProductionSupabaseRequest(url)) {
+    if (isAnySupabaseRequest(url)) {
       throw new TestSandboxProductionNetworkBlockedError(`XMLHttpRequest ${method}`, String(url));
     }
     const open = nativeXhrOpen as unknown as (
@@ -160,7 +168,7 @@ const installProductionNetworkBlock = (): void => {
 
   nativeSendBeacon = navigator.sendBeacon.bind(navigator);
   navigator.sendBeacon = ((url: string | URL, data?: BodyInit | null) => {
-    if (isProductionSupabaseRequest(url)) {
+    if (isAnySupabaseRequest(url)) {
       throw new TestSandboxProductionNetworkBlockedError('sendBeacon', String(url));
     }
     return nativeSendBeacon!(url, data);
@@ -169,7 +177,7 @@ const installProductionNetworkBlock = (): void => {
   nativeWebSocket = window.WebSocket;
   window.WebSocket = class SandboxWebSocket extends nativeWebSocket {
     constructor(url: string | URL, protocols?: string | string[]) {
-      if (isProductionSupabaseRequest(url)) {
+      if (isAnySupabaseRequest(url)) {
         throw new TestSandboxProductionNetworkBlockedError('WebSocket', String(url));
       }
       super(url, protocols);
