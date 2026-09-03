@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT_PATH = fileURLToPath(new URL('../', import.meta.url));
-const BASE_URL = 'http://127.0.0.1:4195';
+const TEST_PORT = process.env.CLOUD_RESTORE_TEST_PORT || '4195';
+const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const CHROME_PATH = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const VALID_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/p0-a-atomic-import-valid.json', import.meta.url));
 const INVALID_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/p0-a-atomic-import-invalid-collection-8.json', import.meta.url));
@@ -64,7 +65,7 @@ assert.match(inventorySource, /Cloud Mode 暫停還原/);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--host', '127.0.0.1', '--port', '4195', '--strictPort',
+  '--host', '127.0.0.1', '--port', TEST_PORT, '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 
 let viteOutput = '';

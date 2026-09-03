@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "build:next": "tsc -b && vite build --mode next",
     "build:experimental": "tsc -b && vite build --mode experimental",
+    "build:staging": "tsc -b && vite build --mode staging",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
@@ -70,7 +71,10 @@
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs",
     "test:purchase-records-edit-view": "node tests/purchase-records-edit-view.mjs",
-    "test:data-size-advisory": "node tests/data-size-advisory.mjs"
+    "test:data-size-advisory": "node tests/data-size-advisory.mjs",
+    "test:supabase-environment-boundary": "node tests/supabase-environment-boundary.mjs",
+    "test:staging-refresh-tooling": "node tests/staging-refresh-tooling.mjs",
+    "test:staging-sidecar-refresh": "node tests/staging-sidecar-refresh.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
@@ -90,6 +94,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "pg": "^8.23.0",
     "playwright": "^1.60.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",

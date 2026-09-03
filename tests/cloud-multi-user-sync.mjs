@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const BASE_URL = 'http://127.0.0.1:4195';
+const TEST_PORT = process.env.CLOUD_MULTI_USER_TEST_PORT || '4195';
+const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const CHROME_PATH = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 if (!existsSync(CHROME_PATH)) throw new Error(`Chrome not found: ${CHROME_PATH}`);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--mode', 'next', '--host', '127.0.0.1', '--port', '4195', '--strictPort',
+  '--mode', 'next', '--host', '127.0.0.1', '--port', TEST_PORT, '--strictPort',
 ], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';
 vite.stdout.on('data', chunk => { output += String(chunk); });
