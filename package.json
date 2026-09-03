@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:outbound-myacg-shortcut": "node tests/outbound-myacg-shortcut.mjs",
     "test:data-size-advisory": "node tests/data-size-advisory.mjs",
-    "test:outbound-group-layout": "node tests/outbound-group-layout.mjs"
+    "test:outbound-group-layout": "node tests/outbound-group-layout.mjs",
+    "test:outbound-shipment-search": "node tests/outbound-shipment-search.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

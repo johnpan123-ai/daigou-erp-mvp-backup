@@ -2,8 +2,19 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PackageOpen, Plus, Search, ChevronRight } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
-import type { OutboundShipment, OutboundShipmentItem } from '../lib/db';
+import type {
+  BundleComponent,
+  JapanPackageItem,
+  OutboundShipment,
+  OutboundShipmentItem,
+  ProductGroup,
+  ProductVariant,
+} from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
+import {
+  buildOutboundShipmentProductSearchIndex,
+  outboundShipmentMatchesSearch,
+} from '../lib/outboundShipmentSearch';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '全部' },
@@ -29,6 +40,10 @@ export default function OutboundShipmentsList() {
 
   const [shipments, setShipments] = useState<OutboundShipment[]>([]);
   const [shipmentItems, setShipmentItems] = useState<OutboundShipmentItem[]>([]);
+  const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>([]);
+  const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -42,12 +57,20 @@ export default function OutboundShipmentsList() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [s, si] = await Promise.all([
+      const [s, si, jpi, groups, variants, bundles] = await Promise.all([
         dataProvider.getOutboundShipments(),
         dataProvider.getOutboundShipmentItems(),
+        dataProvider.getJapanPackageItems(),
+        dataProvider.getProductGroups(),
+        dataProvider.getProductVariants(),
+        dataProvider.getBundleComponents(),
       ]);
       setShipments(s);
       setShipmentItems(si);
+      setJapanPackageItems(jpi);
+      setProductGroups(groups);
+      setProductVariants(variants);
+      setBundleComponents(bundles);
     } catch (e) {
       console.error('[OutboundShipmentsList] load failed:', e);
     } finally {
@@ -55,21 +78,31 @@ export default function OutboundShipmentsList() {
     }
   };
 
+  const productSearchIndex = useMemo(
+    () => buildOutboundShipmentProductSearchIndex({
+      shipmentItems,
+      japanPackageItems,
+      productGroups,
+      productVariants,
+      bundleComponents,
+    }),
+    [bundleComponents, japanPackageItems, productGroups, productVariants, shipmentItems],
+  );
+
   const filteredShipments = useMemo(() => {
     let list = shipments;
     if (statusFilter !== 'all') {
       list = list.filter(s => s.status === statusFilter);
     }
     if (searchTerm.trim()) {
-      const q = searchTerm.toLowerCase();
-      list = list.filter(s =>
-        (s.title || '').toLowerCase().includes(q) ||
-        (s.tracking_number || '').toLowerCase().includes(q) ||
-        (s.carrier || '').toLowerCase().includes(q)
-      );
+      list = list.filter(shipment => outboundShipmentMatchesSearch(
+        shipment,
+        searchTerm,
+        productSearchIndex,
+      ));
     }
-    return list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-  }, [shipments, statusFilter, searchTerm]);
+    return [...list].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }, [productSearchIndex, shipments, statusFilter, searchTerm]);
 
   const getItemCount = (shipmentId: string) =>
     shipmentItems.filter(i => i.outbound_shipment_id === shipmentId).length;
@@ -256,7 +289,7 @@ export default function OutboundShipmentsList() {
       <div style={{ position: 'relative', marginBottom: 16 }}>
         <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: '#94a3b8' }} />
         <input
-          placeholder="搜尋出庫單名稱、追蹤號碼..."
+          placeholder="搜尋出庫單名稱、追蹤號碼、商品名稱..."
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
           style={{
