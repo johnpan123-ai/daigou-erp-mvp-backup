@@ -1444,20 +1444,26 @@ export default function OutboundShipmentDetail() {
                         minHeight: 44,
                       }}
                     >
-                      <div className="outbound-group-header-row">
-                        <div className="outbound-group-title-row">
-                          {isCollapsed ? <ChevronDown size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <ChevronUp size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
-                          <span className="outbound-group-title" title={groupName}>
+                      <div data-testid="outbound-group-header" style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                        {isCollapsed ? <ChevronDown size={16} style={{ flexShrink: 0, marginTop: 2 }} /> : <ChevronUp size={16} style={{ flexShrink: 0, marginTop: 2 }} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            data-testid="outbound-group-title"
+                            title={groupName}
+                            style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 14, fontWeight: 700 }}
+                          >
                             {groupName}
-                          </span>
-                        </div>
-                        <div className="outbound-group-meta-row">
-                          <span className="outbound-group-source-summary">
-                            <span className="outbound-group-source-separator">｜</span>
-                            買動漫 {sourceSummary.myacg}・WACA {sourceSummary.waca}・私人 {sourceSummary.privateOrder}
-                          </span>
-                          <div className="outbound-group-actions">
+                          </div>
+                          <div
+                            data-testid="outbound-group-meta"
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? 8 : 4, marginTop: 5, minWidth: 0 }}
+                          >
+                            <span style={{ minWidth: 0, color: '#64748b', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              買動漫 {sourceSummary.myacg} ・ WACA {sourceSummary.waca} ・ 私人 {sourceSummary.privateOrder}
+                            </span>
+                            <div data-testid="outbound-group-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: isMobile ? 8 : 4, flexShrink: 0, marginLeft: 'auto' }}>
                             <button
+                              data-testid="outbound-copy-button"
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -1465,8 +1471,8 @@ export default function OutboundShipmentDetail() {
                               }}
                               title="複製商品名稱"
                               style={{
-                                display: 'inline-flex', alignItems: 'center', gap: 4,
-                                padding: '4px 8px', borderRadius: 6,
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                                padding: isMobile ? '10px 12px' : '4px 8px', minWidth: isMobile ? 44 : undefined, minHeight: isMobile ? 44 : undefined, borderRadius: 6,
                                 border: '1px solid #cbd5e1', background: '#fff',
                                 color: copiedGroupName === groupName ? '#15803d' : '#475569',
                                 fontSize: 12, fontWeight: 700, cursor: 'pointer',
@@ -1487,7 +1493,7 @@ export default function OutboundShipmentDetail() {
                               aria-label="複製名稱並開啟買動漫"
                               style={{
                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                width: 28, height: 26, padding: 0, borderRadius: 6,
+                                width: isMobile ? 44 : 28, height: isMobile ? 44 : 26, padding: 0, borderRadius: 6,
                                 border: '1px solid #bfdbfe', background: '#eff6ff',
                                 color: '#2563eb', cursor: 'pointer', flexShrink: 0,
                               }}
@@ -1514,6 +1520,7 @@ export default function OutboundShipmentDetail() {
                                 全部刪除
                               </button>
                             )}
+                            </div>
                           </div>
                         </div>
                       </div>
