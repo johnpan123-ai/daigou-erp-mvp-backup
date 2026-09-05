@@ -95,6 +95,36 @@ const identityProjection = data => ({
   })),
 });
 
+const FOREIGN_KEY_ACTIONS = Object.freeze({
+  a: 'NO ACTION',
+  r: 'RESTRICT',
+  c: 'CASCADE',
+  n: 'SET NULL',
+  d: 'SET DEFAULT',
+});
+
+const normalizeForeignKeyAction = value => {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim().replace(/\s+/g, ' ').toUpperCase();
+  return FOREIGN_KEY_ACTIONS[normalized.toLowerCase()] || normalized;
+};
+
+const foreignKeyContractProjection = schema => (schema.foreignKeys || [])
+  .map(reference => ({
+    constraintName: reference.constraintName ?? null,
+    childSchema: reference.childSchema ?? null,
+    childTable: reference.childTable,
+    childColumn: reference.childColumn,
+    parentSchema: reference.parentSchema,
+    parentTable: reference.parentTable,
+    parentColumn: reference.parentColumn,
+    ordinalPosition: reference.ordinalPosition ?? null,
+    onDelete: normalizeForeignKeyAction(reference.onDelete),
+    onUpdate: normalizeForeignKeyAction(reference.onUpdate),
+    validated: typeof reference.validated === 'boolean' ? reference.validated : null,
+  }))
+  .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+
 // PostgreSQL ALTER TABLE appends new columns and has no safe in-place column
 // reorder. The restore contract addresses JSON fields by name, and
 // assertSchemaCompatible already compares the complete column definition by
@@ -103,8 +133,7 @@ const identityProjection = data => ({
 const schemaFingerprintProjection = schema => ({
   columns: [...(schema.columns || [])]
     .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
-  foreignKeys: [...(schema.foreignKeys || [])]
-    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+  foreignKeys: foreignKeyContractProjection(schema),
   constraints: [...(schema.constraints || [])]
     .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
 });
@@ -209,15 +238,8 @@ export function assertSchemaCompatible(sourceSchema, targetSchema, tables) {
       identityGeneration: column.identityGeneration ?? null,
     }))
     .sort((left, right) => left.columnName.localeCompare(right.columnName));
-  const relationsFor = schema => (schema.foreignKeys || [])
+  const relationsFor = schema => foreignKeyContractProjection(schema)
     .filter(reference => tables.includes(reference.childTable))
-    .map(reference => ({
-      childTable: reference.childTable,
-      childColumn: reference.childColumn,
-      parentSchema: reference.parentSchema,
-      parentTable: reference.parentTable,
-      parentColumn: reference.parentColumn,
-    }))
     .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
   const constraintsFor = schema => (schema.constraints || [])
     .filter(constraint => tables.includes(constraint.tableName))

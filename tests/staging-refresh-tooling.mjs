@@ -23,6 +23,7 @@ import {
 } from '../tools/staging-refresh/manifest.mjs';
 import {
   assertRestoreWriterInspection,
+  buildSchemaInspectionSql,
   buildRestoreWriterInspectionSql,
   buildSnapshotSql,
   buildTransactionalRestoreSql,
@@ -85,10 +86,19 @@ const schema = {
   foreignKeys: [
     ...LOGICAL_RELATIONSHIPS.map(([childTable, childColumn, parentTable, parentColumn], index) => ({
       constraintName: `fixture_fk_${index}`,
-      childTable, childColumn, parentSchema: 'public', parentTable, parentColumn,
+      childSchema: 'public', childTable, childColumn, parentSchema: 'public', parentTable, parentColumn,
+      ordinalPosition: 1, onDelete: 'NO ACTION', onUpdate: 'NO ACTION', validated: true,
     })),
-    { constraintName: 'fixture_updated_by', childTable: 'product_groups', childColumn: 'updated_by', parentSchema: 'auth', parentTable: 'users', parentColumn: 'id' },
-    { constraintName: 'fixture_inventory_updated_by', childTable: 'inventory_items', childColumn: 'updated_by', parentSchema: 'auth', parentTable: 'users', parentColumn: 'id' },
+    {
+      constraintName: 'fixture_updated_by', childSchema: 'public', childTable: 'product_groups',
+      childColumn: 'updated_by', parentSchema: 'auth', parentTable: 'users', parentColumn: 'id',
+      ordinalPosition: 1, onDelete: 'NO ACTION', onUpdate: 'NO ACTION', validated: true,
+    },
+    {
+      constraintName: 'fixture_inventory_updated_by', childSchema: 'public', childTable: 'inventory_items',
+      childColumn: 'updated_by', parentSchema: 'auth', parentTable: 'users', parentColumn: 'id',
+      ordinalPosition: 1, onDelete: 'NO ACTION', onUpdate: 'NO ACTION', validated: true,
+    },
   ],
 };
 
@@ -191,6 +201,18 @@ assert.match(writerInspectionSql, /current_user/);
 assert.match(writerInspectionSql, /pg_catalog\.pg_roles/);
 assert.doesNotMatch(writerInspectionSql, /INSERT|UPDATE|DELETE|TRUNCATE/i);
 
+const schemaInspectionSql = buildSchemaInspectionSql();
+assert.match(schemaInspectionSql, /REPEATABLE READ READ ONLY/);
+assert.match(schemaInspectionSql, /pg_catalog\.pg_constraint/);
+assert.match(schemaInspectionSql, /unnest\(constraint_record\.conkey\) WITH ORDINALITY/);
+assert.match(schemaInspectionSql, /unnest\(constraint_record\.confkey\) WITH ORDINALITY/);
+assert.match(schemaInspectionSql, /constraint_record\.confdeltype AS delete_action/);
+assert.match(schemaInspectionSql, /constraint_record\.confupdtype AS update_action/);
+assert.match(schemaInspectionSql, /constraint_record\.convalidated AS validated/);
+for (const action of ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']) {
+  assert.match(schemaInspectionSql, new RegExp(`THEN '${action}'`));
+}
+
 const snapshot = createSnapshotEnvelope({
   sourceProjectRef: PRODUCTION_PROJECT_REF,
   schema,
@@ -246,6 +268,92 @@ const changedForeignKeySchema = structuredClone(schema);
 changedForeignKeySchema.foreignKeys = changedForeignKeySchema.foreignKeys.filter(reference => reference.constraintName !== 'fixture_fk_1');
 assert.throws(() => assertSchemaCompatible(schema, changedForeignKeySchema, REQUIRED_TABLES), /SCHEMA_MISMATCH:foreign_keys/);
 
+const cascadeForeignKeySchema = structuredClone(schema);
+cascadeForeignKeySchema.foreignKeys[0].onDelete = 'CASCADE';
+assert.doesNotThrow(() => assertSchemaCompatible(
+  cascadeForeignKeySchema,
+  structuredClone(cascadeForeignKeySchema),
+  REQUIRED_TABLES,
+));
+for (const differentAction of ['RESTRICT', 'NO ACTION', 'SET NULL']) {
+  const changedActionSchema = structuredClone(cascadeForeignKeySchema);
+  changedActionSchema.foreignKeys[0].onDelete = differentAction;
+  assert.throws(
+    () => assertSchemaCompatible(cascadeForeignKeySchema, changedActionSchema, REQUIRED_TABLES),
+    /SCHEMA_MISMATCH:foreign_keys/,
+  );
+}
+const changedUpdateActionSchema = structuredClone(cascadeForeignKeySchema);
+changedUpdateActionSchema.foreignKeys[0].onUpdate = 'CASCADE';
+assert.throws(
+  () => assertSchemaCompatible(cascadeForeignKeySchema, changedUpdateActionSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:foreign_keys/,
+);
+const changedValidatedSchema = structuredClone(cascadeForeignKeySchema);
+changedValidatedSchema.foreignKeys[0].validated = false;
+assert.throws(
+  () => assertSchemaCompatible(cascadeForeignKeySchema, changedValidatedSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:foreign_keys/,
+);
+const changedRelationSchema = structuredClone(cascadeForeignKeySchema);
+changedRelationSchema.foreignKeys[0].parentColumn = 'different_id';
+assert.throws(
+  () => assertSchemaCompatible(cascadeForeignKeySchema, changedRelationSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:foreign_keys/,
+);
+const changedConstraintNameSchema = structuredClone(cascadeForeignKeySchema);
+changedConstraintNameSchema.foreignKeys[0].constraintName = 'different_fk_name';
+assert.throws(
+  () => assertSchemaCompatible(cascadeForeignKeySchema, changedConstraintNameSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:foreign_keys/,
+);
+
+for (const [code, action] of [
+  ['a', 'NO ACTION'],
+  ['r', 'RESTRICT'],
+  ['c', 'CASCADE'],
+  ['n', 'SET NULL'],
+  ['d', 'SET DEFAULT'],
+]) {
+  const namedActionSchema = structuredClone(schema);
+  const codedActionSchema = structuredClone(schema);
+  namedActionSchema.foreignKeys[0].onDelete = action;
+  codedActionSchema.foreignKeys[0].onDelete = code;
+  assert.doesNotThrow(() => assertSchemaCompatible(namedActionSchema, codedActionSchema, REQUIRED_TABLES));
+}
+
+const compositeForeignKeySchema = structuredClone(schema);
+compositeForeignKeySchema.foreignKeys.push(
+  {
+    constraintName: 'fixture_composite_fk', childSchema: 'public', childTable: 'purchase_batch_items',
+    childColumn: 'purchase_batch_id', parentSchema: 'public', parentTable: 'purchase_batches',
+    parentColumn: 'id', ordinalPosition: 1, onDelete: 'CASCADE', onUpdate: 'NO ACTION', validated: true,
+  },
+  {
+    constraintName: 'fixture_composite_fk', childSchema: 'public', childTable: 'purchase_batch_items',
+    childColumn: 'product_variant_id', parentSchema: 'public', parentTable: 'purchase_batches',
+    parentColumn: 'product_group_id', ordinalPosition: 2, onDelete: 'CASCADE', onUpdate: 'NO ACTION', validated: true,
+  },
+);
+const reorderedCompositeForeignKeySchema = structuredClone(compositeForeignKeySchema);
+reorderedCompositeForeignKeySchema.foreignKeys.reverse();
+assert.doesNotThrow(() => assertSchemaCompatible(
+  compositeForeignKeySchema,
+  reorderedCompositeForeignKeySchema,
+  REQUIRED_TABLES,
+));
+const changedCompositeOrdinalSchema = structuredClone(compositeForeignKeySchema);
+const compositeReferences = changedCompositeOrdinalSchema.foreignKeys
+  .filter(reference => reference.constraintName === 'fixture_composite_fk');
+[compositeReferences[0].ordinalPosition, compositeReferences[1].ordinalPosition] = [
+  compositeReferences[1].ordinalPosition,
+  compositeReferences[0].ordinalPosition,
+];
+assert.throws(
+  () => assertSchemaCompatible(compositeForeignKeySchema, changedCompositeOrdinalSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:foreign_keys/,
+);
+
 assert.doesNotThrow(() => assertNoSecrets(data));
 assert.throws(() => assertNoSecrets({ access_token: 'forbidden' }), /敏感欄位/);
 const restoreSql = buildTransactionalRestoreSql(snapshot);
@@ -257,7 +365,7 @@ assert.doesNotMatch(restoreSql, new RegExp(PRODUCTION_PROJECT_REF));
 assert.doesNotMatch(restoreSql, /\bUPDATE\b|\bTRUNCATE\b|\bALTER\b|\bDROP\b|BYPASSRLS/i);
 const snapshotSql = buildSnapshotSql(REQUIRED_TABLES);
 assert.match(snapshotSql, /REPEATABLE READ READ ONLY DEFERRABLE/);
-assert.doesNotMatch(snapshotSql, /INSERT|UPDATE|DELETE|TRUNCATE/i);
+assert.doesNotMatch(snapshotSql, /^\s*(INSERT|UPDATE|DELETE|TRUNCATE)\b/im);
 
 const target = { product_groups: [{ id: 'old-target' }], product_variants: [] };
 await assert.rejects(
@@ -279,4 +387,5 @@ console.log('PASS snapshot is read-only, deterministic, secret-free and preserve
 console.log('PASS manifest compares counts, ID/row/relationship/identity hashes and anomaly ID sets');
 console.log('PASS historical orphan baseline is preserved while new anomaly delta is rejected');
 console.log('PASS schema mismatch and unresolved Auth attribution are rejected');
+console.log('PASS FK names, schemas, composite ordinals, actions and validation state are deterministic and fail closed');
 console.log('PASS transactional restore contract rolls back injected failure and retry creates no duplicate');

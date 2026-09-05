@@ -66,20 +66,62 @@ const schemaJsonExpression = `jsonb_build_object(
       ON tc.constraint_name = kcu.constraint_name AND tc.constraint_schema = kcu.constraint_schema
     WHERE tc.table_schema = 'public' AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')),
   'foreignKeys', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
-      'constraintName', constraint_name, 'childTable', table_name, 'childColumn', column_name,
+      'constraintName', constraint_name, 'childSchema', child_schema,
+      'childTable', child_table, 'childColumn', child_column,
       'parentSchema', foreign_table_schema, 'parentTable', foreign_table_name,
-      'parentColumn', foreign_column_name
-    ) ORDER BY table_name, constraint_name, ordinal_position), '[]'::jsonb)
+      'parentColumn', foreign_column_name, 'ordinalPosition', ordinal_position,
+      'onDelete', CASE delete_action
+        WHEN 'a' THEN 'NO ACTION'
+        WHEN 'r' THEN 'RESTRICT'
+        WHEN 'c' THEN 'CASCADE'
+        WHEN 'n' THEN 'SET NULL'
+        WHEN 'd' THEN 'SET DEFAULT'
+        ELSE 'UNKNOWN:' || delete_action
+      END,
+      'onUpdate', CASE update_action
+        WHEN 'a' THEN 'NO ACTION'
+        WHEN 'r' THEN 'RESTRICT'
+        WHEN 'c' THEN 'CASCADE'
+        WHEN 'n' THEN 'SET NULL'
+        WHEN 'd' THEN 'SET DEFAULT'
+        ELSE 'UNKNOWN:' || update_action
+      END,
+      'validated', validated
+    ) ORDER BY child_schema, child_table, constraint_name, ordinal_position), '[]'::jsonb)
     FROM (
-      SELECT tc.constraint_name, tc.table_name, kcu.column_name, kcu.ordinal_position,
-        ccu.table_schema AS foreign_table_schema, ccu.table_name AS foreign_table_name,
-        ccu.column_name AS foreign_column_name
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name AND tc.constraint_schema = kcu.constraint_schema
-      JOIN information_schema.constraint_column_usage ccu
-        ON tc.constraint_name = ccu.constraint_name AND tc.constraint_schema = ccu.constraint_schema
-      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+      SELECT constraint_record.conname AS constraint_name,
+        child_namespace.nspname AS child_schema,
+        child_table.relname AS child_table,
+        child_attribute.attname AS child_column,
+        parent_namespace.nspname AS foreign_table_schema,
+        parent_table.relname AS foreign_table_name,
+        parent_attribute.attname AS foreign_column_name,
+        child_key.ordinal_position,
+        constraint_record.confdeltype AS delete_action,
+        constraint_record.confupdtype AS update_action,
+        constraint_record.convalidated AS validated
+      FROM pg_catalog.pg_constraint constraint_record
+      JOIN pg_catalog.pg_class child_table
+        ON child_table.oid = constraint_record.conrelid
+      JOIN pg_catalog.pg_namespace child_namespace
+        ON child_namespace.oid = child_table.relnamespace
+      JOIN pg_catalog.pg_class parent_table
+        ON parent_table.oid = constraint_record.confrelid
+      JOIN pg_catalog.pg_namespace parent_namespace
+        ON parent_namespace.oid = parent_table.relnamespace
+      CROSS JOIN LATERAL unnest(constraint_record.conkey) WITH ORDINALITY
+        AS child_key(attribute_number, ordinal_position)
+      JOIN LATERAL unnest(constraint_record.confkey) WITH ORDINALITY
+        AS parent_key(attribute_number, ordinal_position)
+        ON parent_key.ordinal_position = child_key.ordinal_position
+      JOIN pg_catalog.pg_attribute child_attribute
+        ON child_attribute.attrelid = child_table.oid
+        AND child_attribute.attnum = child_key.attribute_number
+      JOIN pg_catalog.pg_attribute parent_attribute
+        ON parent_attribute.attrelid = parent_table.oid
+        AND parent_attribute.attnum = parent_key.attribute_number
+      WHERE constraint_record.contype = 'f'
+        AND child_namespace.nspname = 'public'
     ) fk)
 )`;
 

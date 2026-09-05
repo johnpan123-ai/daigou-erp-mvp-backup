@@ -61,7 +61,12 @@ triggers and dependencies. Refresh schema compatibility already compares every
 named column's type/null/default/generated/identity contract. The manifest now
 sorts catalog arrays before hashing so the post-restore fingerprint follows the
 same strict semantic contract: array order alone is ignored, while any column,
-FK or constraint definition change still fails.
+FK or constraint definition change still fails. The FK contract includes the
+constraint name, child/parent schemas and columns, composite-column ordinal,
+normalized `ON DELETE` / `ON UPDATE` actions, and validation state.
+Snapshots created before this FK contract was added do not contain enough
+evidence and must be recaptured; the tooling fails closed instead of inferring
+missing actions or rewriting an existing snapshot JSON.
 
 The migration:
 

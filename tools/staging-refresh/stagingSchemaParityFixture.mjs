@@ -169,10 +169,14 @@ export function createLegacyStagingParityFixture() {
       },
       foreignKeys: {
         purchase_batches_product_group_id_fkey: {
-          childTable: 'purchase_batches', childColumn: 'product_group_id', parentTable: 'product_groups', parentColumn: 'id', onDelete: 'RESTRICT',
+          childSchema: 'public', childTable: 'purchase_batches', childColumn: 'product_group_id',
+          parentTable: 'product_groups', parentColumn: 'id', ordinalPosition: 1,
+          onDelete: 'RESTRICT', onUpdate: 'NO ACTION', validated: true,
         },
         private_orders_product_group_id_fkey: {
-          childTable: 'private_orders', childColumn: 'product_group_id', parentTable: 'product_groups', parentColumn: 'id', onDelete: 'RESTRICT',
+          childSchema: 'public', childTable: 'private_orders', childColumn: 'product_group_id',
+          parentTable: 'product_groups', parentColumn: 'id', ordinalPosition: 1,
+          onDelete: 'RESTRICT', onUpdate: 'NO ACTION', validated: true,
         },
       },
     },

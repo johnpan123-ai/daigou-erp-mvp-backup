@@ -46,6 +46,19 @@ assert.doesNotThrow(() => assertSchemaCompatible(
 ));
 
 const paritySchema = toRefreshToolingSchema(productionContract);
+const preMigrationFkActionSchema = structuredClone(paritySchema);
+for (const constraintName of [
+  'purchase_batches_product_group_id_fkey',
+  'private_orders_product_group_id_fkey',
+]) {
+  preMigrationFkActionSchema.foreignKeys
+    .find(reference => reference.constraintName === constraintName)
+    .onDelete = 'RESTRICT';
+}
+assert.throws(
+  () => assertSchemaCompatible(paritySchema, preMigrationFkActionSchema, STAGING_SCHEMA_PARITY_TABLES),
+  /SCHEMA_MISMATCH:foreign_keys/,
+);
 const reorderedParitySchema = structuredClone(paritySchema);
 reorderedParitySchema.columns.reverse();
 reorderedParitySchema.constraints.reverse();
@@ -80,6 +93,10 @@ assert.throws(
 assert.notEqual(
   manifestFor(paritySchema).schemaFingerprint,
   manifestFor(changedParitySchema).schemaFingerprint,
+);
+assert.notEqual(
+  manifestFor(paritySchema).schemaFingerprint,
+  manifestFor(preMigrationFkActionSchema).schemaFingerprint,
 );
 
 assert.equal(productionContract.schema.tables.inventory_items.primaryKey.join(','), 'id');
