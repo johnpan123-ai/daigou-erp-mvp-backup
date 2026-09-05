@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import {
+  RESTORE_WRITER_ROLE,
   RESTORE_ORDER,
   assertConnectionTargetsProject,
   classifyPublicTables,
@@ -116,6 +117,36 @@ SELECT '${JSON_BEGIN}' || jsonb_build_object(
 COMMIT;`;
   const result = await runPostgresJson({ ...connection, sql });
   if (result.exists !== true) throw new Error('STAGING_ACTOR_NOT_FOUND');
+}
+
+export function buildRestoreWriterInspectionSql() {
+  return `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SELECT '${JSON_BEGIN}' || jsonb_build_object(
+  'currentUser', current_user,
+  'superuser', role.rolsuper,
+  'createdb', role.rolcreatedb,
+  'createrole', role.rolcreaterole,
+  'replication', role.rolreplication,
+  'bypassrls', role.rolbypassrls
+)::text || '${JSON_END}' AS hippo_payload
+FROM pg_catalog.pg_roles role
+WHERE role.rolname = current_user;
+COMMIT;`;
+}
+
+export function assertRestoreWriterInspection(result) {
+  if (result?.currentUser !== RESTORE_WRITER_ROLE) {
+    throw new Error(`RESTORE_WRITER_CURRENT_USER_MISMATCH:${result?.currentUser || 'missing'}`);
+  }
+  const forbiddenAttributes = ['superuser', 'createdb', 'createrole', 'replication', 'bypassrls'];
+  const enabled = forbiddenAttributes.filter(attribute => result?.[attribute] !== false);
+  if (enabled.length) throw new Error(`RESTORE_WRITER_FORBIDDEN_ATTRIBUTES:${enabled.join(',')}`);
+  return result;
+}
+
+export async function assertRestoreWriterRole(connection) {
+  const result = await runPostgresJson({ ...connection, sql: buildRestoreWriterInspectionSql() });
+  return assertRestoreWriterInspection(result);
 }
 
 export async function captureConsistentSnapshot(connection) {

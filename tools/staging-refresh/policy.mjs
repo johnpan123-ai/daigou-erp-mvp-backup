@@ -1,5 +1,6 @@
 export const PRODUCTION_PROJECT_REF = 'twzpqyesbtnfxdkorluf';
 export const STAGING_PROJECT_REF = 'rhfdjsklfrgpoqsaqpkn';
+export const RESTORE_WRITER_ROLE = 'staging_refresh_restore_writer';
 
 export const REQUIRED_TABLES = Object.freeze([
   'inventory_items',
@@ -155,6 +156,121 @@ export function assertConnectionTargetsProject(connectionUrl, expectedRef, label
     );
   }
   return parsed;
+}
+
+const requireConnectionUrl = (environment, variableName) => {
+  const connectionUrl = String(environment?.[variableName] || '').trim();
+  if (!connectionUrl) {
+    throw new StagingRefreshPolicyError(
+      'DATABASE_URL_REQUIRED',
+      `${variableName} is required`,
+    );
+  }
+  return connectionUrl;
+};
+
+export function assertRestoreWriterConnection(connectionUrl) {
+  const parsed = assertConnectionTargetsProject(
+    connectionUrl,
+    STAGING_PROJECT_REF,
+    'Staging restore writer',
+  );
+
+  let username;
+  try {
+    username = decodeURIComponent(parsed.username).toLowerCase();
+  } catch {
+    throw new StagingRefreshPolicyError(
+      'RESTORE_WRITER_USERNAME_INVALID',
+      'Staging restore writer username is not valid URL encoding',
+    );
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  const expectedDirectHost = `db.${STAGING_PROJECT_REF}.supabase.co`;
+  const expectedPoolerUsername = `${RESTORE_WRITER_ROLE}.${STAGING_PROJECT_REF}`;
+  const isSupabasePooler = /^aws-\d+-[a-z0-9-]+\.pooler\.supabase\.com$/u.test(hostname);
+
+  if (`${hostname} ${username}`.includes(PRODUCTION_PROJECT_REF)) {
+    throw new StagingRefreshPolicyError(
+      'PRODUCTION_TARGET_BLOCKED',
+      'Staging restore writer must never identify the Production project',
+    );
+  }
+
+  if (hostname === expectedDirectHost) {
+    if (username !== RESTORE_WRITER_ROLE) {
+      throw new StagingRefreshPolicyError(
+        'RESTORE_WRITER_ROLE_NOT_ALLOWED',
+        `Direct Staging restore connections must use ${RESTORE_WRITER_ROLE}`,
+      );
+    }
+    return parsed;
+  }
+
+  if (isSupabasePooler) {
+    if (username !== expectedPoolerUsername) {
+      throw new StagingRefreshPolicyError(
+        'RESTORE_WRITER_ROLE_NOT_ALLOWED',
+        `Staging pooler restore connections must use ${expectedPoolerUsername}`,
+      );
+    }
+    return parsed;
+  }
+
+  throw new StagingRefreshPolicyError(
+    'RESTORE_WRITER_HOST_NOT_ALLOWED',
+    'Staging restore writer must use the verified Supabase direct or pooler hostname',
+  );
+}
+
+export function resolveSnapshotConnection(role, environment = {}) {
+  if (!['production', 'staging-rollback'].includes(role)) {
+    throw new StagingRefreshPolicyError(
+      'SNAPSHOT_ROLE_INVALID',
+      'Snapshot role must be production or staging-rollback',
+    );
+  }
+
+  const isProduction = role === 'production';
+  const variableName = isProduction
+    ? 'STAGING_REFRESH_SOURCE_DATABASE_URL'
+    : 'STAGING_REFRESH_TARGET_DATABASE_URL';
+  const expectedRef = isProduction ? PRODUCTION_PROJECT_REF : STAGING_PROJECT_REF;
+  const label = isProduction ? 'Production snapshot source' : 'Staging rollback source';
+  const connectionUrl = requireConnectionUrl(environment, variableName);
+  assertConnectionTargetsProject(connectionUrl, expectedRef, label);
+  return { connectionUrl, expectedRef, label, variableName };
+}
+
+export function resolveDryRunConnection(environment = {}) {
+  const variableName = 'STAGING_REFRESH_TARGET_DATABASE_URL';
+  const connectionUrl = requireConnectionUrl(environment, variableName);
+  assertConnectionTargetsProject(connectionUrl, STAGING_PROJECT_REF, 'Staging dry-run target');
+  return {
+    connectionUrl,
+    expectedRef: STAGING_PROJECT_REF,
+    label: 'Staging dry-run target',
+    variableName,
+  };
+}
+
+export function resolveRestoreConnection(environment = {}) {
+  const variableName = 'STAGING_REFRESH_RESTORE_DATABASE_URL';
+  const connectionUrl = String(environment?.[variableName] || '').trim();
+  if (!connectionUrl) {
+    throw new StagingRefreshPolicyError(
+      'RESTORE_DATABASE_URL_REQUIRED',
+      `${variableName} is required for restore --execute; the read-only target credential is never used as a fallback`,
+    );
+  }
+  assertRestoreWriterConnection(connectionUrl);
+  return {
+    connectionUrl,
+    expectedRef: STAGING_PROJECT_REF,
+    label: 'Staging restore writer',
+    variableName,
+  };
 }
 
 export function classifyPublicTables(publicTables) {

@@ -13,13 +13,21 @@ uses IndexedDB as a Production source and never accepts Production as a target.
   and are never written to a snapshot or manifest.
 - PostgreSQL credentials are read only from the operator process environment.
   They are not command-line arguments and never enter snapshot manifests.
+- Production snapshots use only `STAGING_REFRESH_SOURCE_DATABASE_URL`.
+- Staging rollback snapshots and `dry-run` use only `STAGING_REFRESH_TARGET_DATABASE_URL`.
+- `restore --execute` uses only `STAGING_REFRESH_RESTORE_DATABASE_URL`; the
+  Staging reader is never used as a fallback.
+- The restore URL must identify the dedicated `staging_refresh_restore_writer`
+  role on `rhfdjsklfrgpoqsaqpkn`. Production refs, other project refs,
+  `postgres`, `service_role`, IP-address hosts and unrecognized hosts are
+  rejected before a database session is opened.
 - Browser Cloud Restore remains disabled.
 
 ## Before the first dry run
 
 1. Verify the live Cloudflare Production and Staging project settings.
-2. Provision separate read-only Production DB credentials and Staging operator
-   credentials. Never use a browser anon key or service-role key in the app.
+2. Provision separate read-only Production and Staging DB credentials. Never
+   use a browser anon key or service-role key in the app.
 3. Pause Staging users, importer jobs and Realtime writers.
 4. Classify every table listed as `SCHEMA_REVIEW_REQUIRED`. Migrations 018/019
    are not assumed to exist and are not applied automatically.
@@ -69,6 +77,8 @@ schema marks nullable. Otherwise use an existing Staging-only Auth actor UUID:
 Restore is not part of the current tooling acceptance. When separately
 authorized, it requires all of the following and still cannot target Production:
 
+- a separate `STAGING_REFRESH_RESTORE_DATABASE_URL` for the Staging-only
+  `staging_refresh_restore_writer` role;
 - a rollback snapshot created in the previous 60 minutes;
 - `--execute`;
 - `--maintenance-ack=STAGING_WRITES_PAUSED`;
@@ -80,6 +90,12 @@ transaction. A forced error, constraint failure, count mismatch or readback
 mismatch rolls the entire transaction back. After commit it creates a fresh
 read-only snapshot and compares counts, ID hashes, relationship hashes,
 Product/Variant identity and anomaly ID sets.
+
+The restore role contract is limited to `SELECT`, `DELETE` and `INSERT` on the
+included business tables plus `CREATE TEMP TABLE`. The current SQL does not use
+`UPDATE`, `TRUNCATE`, persistent schema `CREATE` / `ALTER` / `DROP`,
+`BYPASSRLS`, Production credentials or `service_role`. Snapshot and dry-run
+commands do not require the restore writer credential.
 
 ## Closing Date sidecar
 

@@ -3,10 +3,15 @@ import {
   LOGICAL_RELATIONSHIPS,
   PRODUCTION_PROJECT_REF,
   REQUIRED_TABLES,
+  RESTORE_WRITER_ROLE,
   STAGING_PROJECT_REF,
+  StagingRefreshPolicyError,
   assertConnectionTargetsProject,
   assertNoSecrets,
   assertRefreshDirection,
+  resolveDryRunConnection,
+  resolveRestoreConnection,
+  resolveSnapshotConnection,
 } from '../tools/staging-refresh/policy.mjs';
 import {
   applyAuthAttributionPolicy,
@@ -16,7 +21,12 @@ import {
   createSnapshotEnvelope,
   validateSnapshotEnvelope,
 } from '../tools/staging-refresh/manifest.mjs';
-import { buildSnapshotSql, buildTransactionalRestoreSql } from '../tools/staging-refresh/postgres.mjs';
+import {
+  assertRestoreWriterInspection,
+  buildRestoreWriterInspectionSql,
+  buildSnapshotSql,
+  buildTransactionalRestoreSql,
+} from '../tools/staging-refresh/postgres.mjs';
 import { replaceFixtureAtomically } from '../tools/staging-refresh/fixtureTransaction.mjs';
 
 const ids = {
@@ -91,6 +101,10 @@ assert.throws(
   () => assertRefreshDirection(STAGING_PROJECT_REF, PRODUCTION_PROJECT_REF),
   error => error?.code === 'SOURCE_NOT_PRODUCTION',
 );
+assert.throws(
+  () => assertRefreshDirection(STAGING_PROJECT_REF, STAGING_PROJECT_REF),
+  error => error?.code === 'SOURCE_TARGET_EQUAL',
+);
 assert.doesNotThrow(() => assertConnectionTargetsProject(
   `postgresql://postgres.${STAGING_PROJECT_REF}:fixture@pooler.example.test/postgres`,
   STAGING_PROJECT_REF,
@@ -101,6 +115,81 @@ assert.throws(() => assertConnectionTargetsProject(
   STAGING_PROJECT_REF,
   'fixture',
 ), /無法證明/);
+
+const sourceReaderUrl = `postgresql://staging_refresh_source_reader.${PRODUCTION_PROJECT_REF}:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`;
+const targetReaderUrl = `postgresql://staging_refresh_target_reader.${STAGING_PROJECT_REF}:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`;
+const restoreWriterUrl = `postgresql://${RESTORE_WRITER_ROLE}.${STAGING_PROJECT_REF}:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`;
+const separatedEnvironment = {
+  STAGING_REFRESH_SOURCE_DATABASE_URL: sourceReaderUrl,
+  STAGING_REFRESH_TARGET_DATABASE_URL: targetReaderUrl,
+  STAGING_REFRESH_RESTORE_DATABASE_URL: restoreWriterUrl,
+};
+assert.equal(resolveSnapshotConnection('production', separatedEnvironment).connectionUrl, sourceReaderUrl);
+assert.equal(resolveSnapshotConnection('staging-rollback', separatedEnvironment).connectionUrl, targetReaderUrl);
+assert.equal(resolveDryRunConnection(separatedEnvironment).connectionUrl, targetReaderUrl);
+assert.equal(resolveRestoreConnection(separatedEnvironment).connectionUrl, restoreWriterUrl);
+assert.equal(
+  resolveSnapshotConnection('production', { STAGING_REFRESH_SOURCE_DATABASE_URL: sourceReaderUrl }).connectionUrl,
+  sourceReaderUrl,
+);
+assert.equal(
+  resolveSnapshotConnection('staging-rollback', { STAGING_REFRESH_TARGET_DATABASE_URL: targetReaderUrl }).connectionUrl,
+  targetReaderUrl,
+);
+
+assert.equal(
+  resolveDryRunConnection({ STAGING_REFRESH_TARGET_DATABASE_URL: targetReaderUrl }).connectionUrl,
+  targetReaderUrl,
+);
+assert.throws(
+  () => resolveRestoreConnection({ STAGING_REFRESH_TARGET_DATABASE_URL: targetReaderUrl }),
+  error => error instanceof StagingRefreshPolicyError && error.code === 'RESTORE_DATABASE_URL_REQUIRED',
+);
+assert.throws(
+  () => resolveRestoreConnection({ STAGING_REFRESH_RESTORE_DATABASE_URL: targetReaderUrl }),
+  error => error instanceof StagingRefreshPolicyError && error.code === 'RESTORE_WRITER_ROLE_NOT_ALLOWED',
+);
+
+const directRestoreWriterUrl = `postgresql://${RESTORE_WRITER_ROLE}:fixture@db.${STAGING_PROJECT_REF}.supabase.co:5432/postgres?sslmode=require`;
+assert.equal(
+  resolveRestoreConnection({ STAGING_REFRESH_RESTORE_DATABASE_URL: directRestoreWriterUrl }).connectionUrl,
+  directRestoreWriterUrl,
+);
+const rejectedRestoreWriterUrls = [
+  `postgresql://${RESTORE_WRITER_ROLE}.${PRODUCTION_PROJECT_REF}:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`,
+  `postgresql://${RESTORE_WRITER_ROLE}.aaaaaaaaaaaaaaaaaaaa:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`,
+  `postgresql://postgres.${STAGING_PROJECT_REF}:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`,
+  `postgresql://service_role.${STAGING_PROJECT_REF}:fixture@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`,
+  `postgresql://${RESTORE_WRITER_ROLE}.${STAGING_PROJECT_REF}:fixture@127.0.0.1:5432/postgres?sslmode=require`,
+];
+for (const connectionUrl of rejectedRestoreWriterUrls) {
+  assert.throws(() => resolveRestoreConnection({ STAGING_REFRESH_RESTORE_DATABASE_URL: connectionUrl }));
+}
+
+const safeWriterInspection = {
+  currentUser: RESTORE_WRITER_ROLE,
+  superuser: false,
+  createdb: false,
+  createrole: false,
+  replication: false,
+  bypassrls: false,
+};
+assert.deepEqual(assertRestoreWriterInspection(safeWriterInspection), safeWriterInspection);
+assert.throws(
+  () => assertRestoreWriterInspection({ ...safeWriterInspection, currentUser: 'postgres' }),
+  /RESTORE_WRITER_CURRENT_USER_MISMATCH/,
+);
+for (const attribute of ['superuser', 'createdb', 'createrole', 'replication', 'bypassrls']) {
+  assert.throws(
+    () => assertRestoreWriterInspection({ ...safeWriterInspection, [attribute]: true }),
+    /RESTORE_WRITER_FORBIDDEN_ATTRIBUTES/,
+  );
+}
+const writerInspectionSql = buildRestoreWriterInspectionSql();
+assert.match(writerInspectionSql, /REPEATABLE READ READ ONLY/);
+assert.match(writerInspectionSql, /current_user/);
+assert.match(writerInspectionSql, /pg_catalog\.pg_roles/);
+assert.doesNotMatch(writerInspectionSql, /INSERT|UPDATE|DELETE|TRUNCATE/i);
 
 const snapshot = createSnapshotEnvelope({
   sourceProjectRef: PRODUCTION_PROJECT_REF,
@@ -165,6 +254,7 @@ assert.match(restoreSql, /CREATE TEMP TABLE/);
 assert.match(restoreSql, /STAGING_READBACK_MISMATCH/);
 assert.match(restoreSql, /COMMIT;$/);
 assert.doesNotMatch(restoreSql, new RegExp(PRODUCTION_PROJECT_REF));
+assert.doesNotMatch(restoreSql, /\bUPDATE\b|\bTRUNCATE\b|\bALTER\b|\bDROP\b|BYPASSRLS/i);
 const snapshotSql = buildSnapshotSql(REQUIRED_TABLES);
 assert.match(snapshotSql, /REPEATABLE READ READ ONLY DEFERRABLE/);
 assert.doesNotMatch(snapshotSql, /INSERT|UPDATE|DELETE|TRUNCATE/i);
@@ -182,6 +272,9 @@ assert.equal(cleanTarget.product_variants.length, 1);
 assert.equal(cleanTarget.product_variants[0].id, ids.variant);
 
 console.log('PASS source/target project-ref direction is fail closed; Production target has no override');
+console.log('PASS source reader, target reader and restore writer credentials are strictly separated');
+console.log('PASS restore execute has no reader fallback and accepts only the dedicated Staging writer');
+console.log('PASS actual restore DB role must be dedicated and have no high-privilege attributes');
 console.log('PASS snapshot is read-only, deterministic, secret-free and preserves UUID identity');
 console.log('PASS manifest compares counts, ID/row/relationship/identity hashes and anomaly ID sets');
 console.log('PASS historical orphan baseline is preserved while new anomaly delta is rejected');
