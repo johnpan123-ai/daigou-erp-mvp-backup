@@ -118,6 +118,7 @@ const schemaContractUnsupported = () => {
 export function assertSnapshotSchemaContract(schema) {
   const evidence = schema?.schemaContract;
   const foreignKeys = schema?.foreignKeys;
+  const primaryUniqueConstraints = schema?.constraints;
   if (evidence?.version !== SNAPSHOT_SCHEMA_CONTRACT_VERSION
       || evidence?.foreignKeysComplete !== true
       || !Number.isSafeInteger(evidence?.foreignKeyConstraintCount)
@@ -125,7 +126,14 @@ export function assertSnapshotSchemaContract(schema) {
       || !Number.isSafeInteger(evidence?.foreignKeyColumnCount)
       || evidence.foreignKeyColumnCount < 0
       || !Array.isArray(foreignKeys)
-      || evidence.foreignKeyColumnCount !== foreignKeys.length) {
+      || evidence.foreignKeyColumnCount !== foreignKeys.length
+      || evidence?.primaryUniqueConstraintsComplete !== true
+      || !Number.isSafeInteger(evidence?.primaryUniqueConstraintCount)
+      || evidence.primaryUniqueConstraintCount < 0
+      || !Number.isSafeInteger(evidence?.primaryUniqueConstraintColumnCount)
+      || evidence.primaryUniqueConstraintColumnCount < 0
+      || !Array.isArray(primaryUniqueConstraints)
+      || evidence.primaryUniqueConstraintColumnCount !== primaryUniqueConstraints.length) {
     schemaContractUnsupported();
   }
 
@@ -183,6 +191,38 @@ export function assertSnapshotSchemaContract(schema) {
 
   if (constraints.size !== evidence.foreignKeyConstraintCount) schemaContractUnsupported();
   for (const contract of constraints.values()) {
+    const ordinals = [...contract.ordinals].sort((left, right) => left - right);
+    if (ordinals.some((ordinal, index) => ordinal !== index + 1)) schemaContractUnsupported();
+  }
+
+  const primaryUniqueConstraintContracts = new Map();
+  for (const constraint of primaryUniqueConstraints) {
+    const requiredStrings = [
+      constraint.tableName,
+      constraint.constraintName,
+      constraint.columnName,
+    ];
+    if (requiredStrings.some(value => typeof value !== 'string' || value.length === 0)
+        || !['PRIMARY KEY', 'UNIQUE'].includes(constraint.constraintType)
+        || !Number.isSafeInteger(constraint.ordinalPosition)
+        || constraint.ordinalPosition < 1) {
+      schemaContractUnsupported();
+    }
+
+    const constraintKey = `${constraint.tableName}.${constraint.constraintName}`;
+    const contract = primaryUniqueConstraintContracts.get(constraintKey) || {
+      constraintType: constraint.constraintType,
+      ordinals: [],
+    };
+    if (contract.constraintType !== constraint.constraintType) schemaContractUnsupported();
+    contract.ordinals.push(constraint.ordinalPosition);
+    primaryUniqueConstraintContracts.set(constraintKey, contract);
+  }
+
+  if (primaryUniqueConstraintContracts.size !== evidence.primaryUniqueConstraintCount) {
+    schemaContractUnsupported();
+  }
+  for (const contract of primaryUniqueConstraintContracts.values()) {
     const ordinals = [...contract.ordinals].sort((left, right) => left - right);
     if (ordinals.some((ordinal, index) => ordinal !== index + 1)) schemaContractUnsupported();
   }

@@ -54,13 +54,20 @@ const schemaJsonExpression = `jsonb_build_object(
   'schemaContract', (SELECT jsonb_build_object(
       'version', ${SNAPSHOT_SCHEMA_CONTRACT_VERSION},
       'foreignKeysComplete', true,
-      'foreignKeyConstraintCount', count(*),
-      'foreignKeyColumnCount', COALESCE(sum(cardinality(constraint_record.conkey)), 0)
+      'foreignKeyConstraintCount', count(*) FILTER (WHERE constraint_record.contype::text = 'f'),
+      'foreignKeyColumnCount', COALESCE(sum(cardinality(constraint_record.conkey))
+        FILTER (WHERE constraint_record.contype::text = 'f'), 0),
+      'primaryUniqueConstraintsComplete', true,
+      'primaryUniqueConstraintCount', count(*)
+        FILTER (WHERE constraint_record.contype::text IN ('p', 'u')),
+      'primaryUniqueConstraintColumnCount', COALESCE(sum(cardinality(constraint_record.conkey))
+        FILTER (WHERE constraint_record.contype::text IN ('p', 'u')), 0)
     )
     FROM pg_catalog.pg_constraint constraint_record
     JOIN pg_catalog.pg_class child_table ON child_table.oid = constraint_record.conrelid
     JOIN pg_catalog.pg_namespace child_namespace ON child_namespace.oid = child_table.relnamespace
-    WHERE constraint_record.contype = 'f' AND child_namespace.nspname = 'public'),
+    WHERE child_namespace.nspname = 'public'
+      AND child_table.relkind::text IN ('r', 'p')),
   'columns', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
       'tableName', table_name, 'columnName', column_name, 'dataType', data_type,
       'udtName', udt_name, 'nullable', is_nullable = 'YES', 'defaultValue', column_default,
@@ -68,14 +75,33 @@ const schemaJsonExpression = `jsonb_build_object(
     ) ORDER BY table_name, ordinal_position), '[]'::jsonb)
     FROM information_schema.columns WHERE table_schema = 'public'),
   'constraints', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
-      'tableName', tc.table_name, 'constraintName', tc.constraint_name,
-      'constraintType', tc.constraint_type, 'columnName', kcu.column_name,
-      'ordinalPosition', kcu.ordinal_position
-    ) ORDER BY tc.table_name, tc.constraint_name, kcu.ordinal_position), '[]'::jsonb)
-    FROM information_schema.table_constraints tc
-    LEFT JOIN information_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name AND tc.constraint_schema = kcu.constraint_schema
-    WHERE tc.table_schema = 'public' AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')),
+      'tableName', table_name, 'constraintName', constraint_name,
+      'constraintType', constraint_type, 'columnName', column_name,
+      'ordinalPosition', ordinal_position
+    ) ORDER BY table_name, constraint_name, ordinal_position), '[]'::jsonb)
+    FROM (
+      SELECT child_table.relname AS table_name,
+        constraint_record.conname AS constraint_name,
+        CASE constraint_record.contype::text
+          WHEN 'p' THEN 'PRIMARY KEY'
+          WHEN 'u' THEN 'UNIQUE'
+        END AS constraint_type,
+        child_attribute.attname AS column_name,
+        child_key.ordinal_position
+      FROM pg_catalog.pg_constraint constraint_record
+      JOIN pg_catalog.pg_class child_table
+        ON child_table.oid = constraint_record.conrelid
+      JOIN pg_catalog.pg_namespace child_namespace
+        ON child_namespace.oid = child_table.relnamespace
+      CROSS JOIN LATERAL unnest(constraint_record.conkey) WITH ORDINALITY
+        AS child_key(attribute_number, ordinal_position)
+      JOIN pg_catalog.pg_attribute child_attribute
+        ON child_attribute.attrelid = child_table.oid
+        AND child_attribute.attnum = child_key.attribute_number
+      WHERE constraint_record.contype::text IN ('p', 'u')
+        AND child_namespace.nspname = 'public'
+        AND child_table.relkind::text IN ('r', 'p')
+    ) primary_unique_constraint),
   'foreignKeys', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
       'constraintName', constraint_name, 'childSchema', child_schema,
       'childTable', child_table, 'childColumn', child_column,
@@ -131,8 +157,9 @@ const schemaJsonExpression = `jsonb_build_object(
       JOIN pg_catalog.pg_attribute parent_attribute
         ON parent_attribute.attrelid = parent_table.oid
         AND parent_attribute.attnum = parent_key.attribute_number
-      WHERE constraint_record.contype = 'f'
+      WHERE constraint_record.contype::text = 'f'
         AND child_namespace.nspname = 'public'
+        AND child_table.relkind::text IN ('r', 'p')
     ) fk)
 )`;
 

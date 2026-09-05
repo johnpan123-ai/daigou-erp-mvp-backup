@@ -17,6 +17,7 @@ import {
 import {
   applyAuthAttributionPolicy,
   assertSchemaCompatible,
+  assertSnapshotSchemaContract,
   buildSnapshotManifest,
   compareManifests,
   createSnapshotEnvelope,
@@ -85,6 +86,36 @@ const schema = {
       defaultValue: null,
     }));
   }),
+  constraints: [
+    ...REQUIRED_TABLES.map(tableName => ({
+      tableName,
+      constraintName: `${tableName}_pkey`,
+      constraintType: 'PRIMARY KEY',
+      columnName: 'id',
+      ordinalPosition: 1,
+    })),
+    {
+      tableName: 'inventory_items',
+      constraintName: 'inventory_items_inventory_key_key',
+      constraintType: 'UNIQUE',
+      columnName: 'inventory_key',
+      ordinalPosition: 1,
+    },
+    {
+      tableName: 'purchase_batch_items',
+      constraintName: 'purchase_batch_items_identity_key',
+      constraintType: 'UNIQUE',
+      columnName: 'purchase_batch_id',
+      ordinalPosition: 1,
+    },
+    {
+      tableName: 'purchase_batch_items',
+      constraintName: 'purchase_batch_items_identity_key',
+      constraintType: 'UNIQUE',
+      columnName: 'product_variant_id',
+      ordinalPosition: 2,
+    },
+  ],
   foreignKeys: [
     ...LOGICAL_RELATIONSHIPS.map(([childTable, childColumn, parentTable, parentColumn], index) => ({
       constraintName: `fixture_fk_${index}`,
@@ -106,6 +137,7 @@ const schema = {
 
 const refreshSchemaContractEvidence = candidate => {
   const foreignKeys = candidate.foreignKeys || [];
+  const constraints = candidate.constraints || [];
   candidate.schemaContract = {
     version: SNAPSHOT_SCHEMA_CONTRACT_VERSION,
     foreignKeysComplete: true,
@@ -113,6 +145,11 @@ const refreshSchemaContractEvidence = candidate => {
       `${reference.childSchema}.${reference.constraintName}`
     ))).size,
     foreignKeyColumnCount: foreignKeys.length,
+    primaryUniqueConstraintsComplete: true,
+    primaryUniqueConstraintCount: new Set(constraints.map(constraint => (
+      `${constraint.tableName}.${constraint.constraintName}`
+    ))).size,
+    primaryUniqueConstraintColumnCount: constraints.length,
   };
   return candidate;
 };
@@ -222,11 +259,29 @@ assert.match(schemaInspectionSql, /REPEATABLE READ READ ONLY/);
 assert.match(schemaInspectionSql, /'schemaContract'/);
 assert.match(schemaInspectionSql, new RegExp(`'version', ${SNAPSHOT_SCHEMA_CONTRACT_VERSION}`));
 assert.match(schemaInspectionSql, /'foreignKeysComplete', true/);
-assert.match(schemaInspectionSql, /'foreignKeyConstraintCount', count\(\*\)/);
-assert.match(schemaInspectionSql, /'foreignKeyColumnCount', COALESCE\(sum\(cardinality\(constraint_record\.conkey\)\), 0\)/);
+assert.match(schemaInspectionSql, /'foreignKeyConstraintCount', count\(\*\) FILTER \(WHERE constraint_record\.contype::text = 'f'\)/);
+assert.match(schemaInspectionSql, /'foreignKeyColumnCount', COALESCE\(sum\(cardinality\(constraint_record\.conkey\)\)/);
+assert.match(schemaInspectionSql, /'primaryUniqueConstraintsComplete', true/);
+assert.match(schemaInspectionSql, /'primaryUniqueConstraintCount', count\(\*\)/);
+assert.match(schemaInspectionSql, /'primaryUniqueConstraintColumnCount', COALESCE\(sum\(cardinality\(constraint_record\.conkey\)\)/);
 assert.match(schemaInspectionSql, /pg_catalog\.pg_constraint/);
+assert.match(schemaInspectionSql, /pg_catalog\.pg_class/);
+assert.match(schemaInspectionSql, /pg_catalog\.pg_namespace/);
+assert.match(schemaInspectionSql, /pg_catalog\.pg_attribute/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.conkey\) WITH ORDINALITY/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.confkey\) WITH ORDINALITY/);
+assert.match(schemaInspectionSql, /CASE constraint_record\.contype::text/);
+assert.match(schemaInspectionSql, /WHEN 'p' THEN 'PRIMARY KEY'/);
+assert.match(schemaInspectionSql, /WHEN 'u' THEN 'UNIQUE'/);
+assert.match(schemaInspectionSql, /constraint_record\.contype::text IN \('p', 'u'\)/);
+assert.doesNotMatch(schemaInspectionSql, /constraint_record\.contype(?:\s|\)|=|IN)/);
+assert.match(schemaInspectionSql, /primary_unique_constraint/);
+for (const field of ['tableName', 'constraintName', 'constraintType', 'columnName', 'ordinalPosition']) {
+  assert.match(schemaInspectionSql, new RegExp(`'${field}'`));
+}
+assert.match(schemaInspectionSql, /ORDER BY table_name, constraint_name, ordinal_position/);
+assert.doesNotMatch(schemaInspectionSql, /information_schema\.table_constraints/);
+assert.doesNotMatch(schemaInspectionSql, /information_schema\.key_column_usage/);
 assert.match(schemaInspectionSql, /constraint_record\.confdeltype::text AS delete_action/);
 assert.match(schemaInspectionSql, /constraint_record\.confupdtype::text AS update_action/);
 assert.doesNotMatch(schemaInspectionSql, /constraint_record\.confdeltype AS delete_action/);
@@ -237,6 +292,33 @@ for (const action of ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAU
 }
 assert.match(schemaInspectionSql, /ELSE 'UNKNOWN:' \|\| delete_action/);
 assert.match(schemaInspectionSql, /ELSE 'UNKNOWN:' \|\| update_action/);
+
+const roleVisibilityFixture = {
+  reader: {
+    informationSchemaConstraints: [],
+    pgCatalogConstraints: structuredClone(schema.constraints),
+  },
+  writer: {
+    informationSchemaConstraints: structuredClone(schema.constraints),
+    pgCatalogConstraints: structuredClone(schema.constraints),
+  },
+};
+assert.notDeepEqual(
+  roleVisibilityFixture.reader.informationSchemaConstraints,
+  roleVisibilityFixture.writer.informationSchemaConstraints,
+);
+const readerCatalogSchema = structuredClone(schema);
+readerCatalogSchema.constraints = roleVisibilityFixture.reader.pgCatalogConstraints;
+refreshSchemaContractEvidence(readerCatalogSchema);
+const writerCatalogSchema = structuredClone(schema);
+writerCatalogSchema.constraints = roleVisibilityFixture.writer.pgCatalogConstraints;
+refreshSchemaContractEvidence(writerCatalogSchema);
+assert.deepEqual(readerCatalogSchema.constraints, writerCatalogSchema.constraints);
+assert.doesNotThrow(() => assertSchemaCompatible(
+  readerCatalogSchema,
+  writerCatalogSchema,
+  REQUIRED_TABLES,
+));
 
 const snapshot = createSnapshotEnvelope({
   sourceProjectRef: PRODUCTION_PROJECT_REF,
@@ -300,6 +382,100 @@ const changedForeignKeySchema = structuredClone(schema);
 changedForeignKeySchema.foreignKeys = changedForeignKeySchema.foreignKeys.filter(reference => reference.constraintName !== 'fixture_fk_1');
 refreshSchemaContractEvidence(changedForeignKeySchema);
 assert.throws(() => assertSchemaCompatible(schema, changedForeignKeySchema, REQUIRED_TABLES), /SCHEMA_MISMATCH:foreign_keys/);
+
+const inventoryPrimaryKey = schema.constraints.find(constraint => (
+  constraint.constraintName === 'inventory_items_pkey'
+));
+assert.deepEqual(inventoryPrimaryKey, {
+  tableName: 'inventory_items',
+  constraintName: 'inventory_items_pkey',
+  constraintType: 'PRIMARY KEY',
+  columnName: 'id',
+  ordinalPosition: 1,
+});
+assert.equal(
+  schema.constraints.find(constraint => (
+    constraint.constraintName === 'inventory_items_inventory_key_key'
+  )).constraintType,
+  'UNIQUE',
+);
+assert.deepEqual(
+  schema.constraints
+    .filter(constraint => constraint.constraintName === 'purchase_batch_items_identity_key')
+    .map(constraint => [constraint.columnName, constraint.ordinalPosition]),
+  [['purchase_batch_id', 1], ['product_variant_id', 2]],
+);
+
+const reorderedConstraintSchema = structuredClone(schema);
+reorderedConstraintSchema.constraints.reverse();
+assert.doesNotThrow(() => assertSchemaCompatible(schema, reorderedConstraintSchema, REQUIRED_TABLES));
+assert.equal(
+  buildSnapshotManifest(createSnapshotEnvelope({
+    sourceProjectRef: STAGING_PROJECT_REF,
+    schema,
+    data,
+    piiMode: 'internal-preserve',
+  })).schemaFingerprint,
+  buildSnapshotManifest(createSnapshotEnvelope({
+    sourceProjectRef: STAGING_PROJECT_REF,
+    schema: reorderedConstraintSchema,
+    data,
+    piiMode: 'internal-preserve',
+  })).schemaFingerprint,
+);
+
+const changedPrimaryKeySchema = structuredClone(schema);
+changedPrimaryKeySchema.constraints.find(constraint => (
+  constraint.constraintName === 'inventory_items_pkey'
+)).columnName = 'inventory_key';
+assert.throws(
+  () => assertSchemaCompatible(schema, changedPrimaryKeySchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:constraints/,
+);
+const changedUniqueSchema = structuredClone(schema);
+changedUniqueSchema.constraints.find(constraint => (
+  constraint.constraintName === 'inventory_items_inventory_key_key'
+)).constraintName = 'different_inventory_key';
+assert.throws(
+  () => assertSchemaCompatible(schema, changedUniqueSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:constraints/,
+);
+const changedCompositeConstraintSchema = structuredClone(schema);
+const compositeConstraints = changedCompositeConstraintSchema.constraints.filter(constraint => (
+  constraint.constraintName === 'purchase_batch_items_identity_key'
+));
+[compositeConstraints[0].ordinalPosition, compositeConstraints[1].ordinalPosition] = [
+  compositeConstraints[1].ordinalPosition,
+  compositeConstraints[0].ordinalPosition,
+];
+assert.throws(
+  () => assertSchemaCompatible(schema, changedCompositeConstraintSchema, REQUIRED_TABLES),
+  /SCHEMA_MISMATCH:constraints/,
+);
+const malformedCompositeConstraintSchema = structuredClone(schema);
+malformedCompositeConstraintSchema.constraints
+  .find(constraint => (
+    constraint.constraintName === 'purchase_batch_items_identity_key'
+    && constraint.ordinalPosition === 2
+  )).ordinalPosition = 1;
+refreshSchemaContractEvidence(malformedCompositeConstraintSchema);
+assert.throws(
+  () => assertSnapshotSchemaContract(malformedCompositeConstraintSchema),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+const checkConstraintSchema = structuredClone(schema);
+checkConstraintSchema.constraints.push({
+  tableName: 'inventory_items',
+  constraintName: 'inventory_items_check',
+  constraintType: 'CHECK',
+  columnName: 'inventory_key',
+  ordinalPosition: 1,
+});
+refreshSchemaContractEvidence(checkConstraintSchema);
+assert.throws(
+  () => assertSnapshotSchemaContract(checkConstraintSchema),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
 
 const cascadeForeignKeySchema = structuredClone(schema);
 cascadeForeignKeySchema.foreignKeys[0].onDelete = 'CASCADE';
@@ -386,6 +562,34 @@ assert.throws(
   () => validateSnapshotEnvelope(hashValidLegacySnapshot),
   /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
 );
+const incompletePrimaryUniqueSnapshot = structuredClone(snapshot);
+incompletePrimaryUniqueSnapshot.schema.constraints = [];
+delete incompletePrimaryUniqueSnapshot.schema.schemaContract.primaryUniqueConstraintsComplete;
+delete incompletePrimaryUniqueSnapshot.schema.schemaContract.primaryUniqueConstraintCount;
+delete incompletePrimaryUniqueSnapshot.schema.schemaContract.primaryUniqueConstraintColumnCount;
+const hashValidIncompletePrimaryUniqueSnapshot = rehashSnapshot(incompletePrimaryUniqueSnapshot);
+assert.throws(
+  () => validateSnapshotEnvelope(hashValidIncompletePrimaryUniqueSnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+assert.throws(
+  () => buildSnapshotManifest(hashValidIncompletePrimaryUniqueSnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+assert.throws(
+  () => assertSchemaCompatible(
+    hashValidIncompletePrimaryUniqueSnapshot.schema,
+    hashValidIncompletePrimaryUniqueSnapshot.schema,
+    REQUIRED_TABLES,
+  ),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+const blockedRestoreTarget = { marker: [{ id: 'preserved-before-refusal' }] };
+await assert.rejects(
+  replaceFixtureAtomically(blockedRestoreTarget, hashValidIncompletePrimaryUniqueSnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+assert.deepEqual(blockedRestoreTarget, { marker: [{ id: 'preserved-before-refusal' }] });
 const unsupportedVersionSnapshot = structuredClone(snapshot);
 unsupportedVersionSnapshot.schemaContractVersion = SNAPSHOT_SCHEMA_CONTRACT_VERSION - 1;
 unsupportedVersionSnapshot.schema.schemaContract.version = SNAPSHOT_SCHEMA_CONTRACT_VERSION - 1;
@@ -493,6 +697,7 @@ console.log('PASS manifest compares counts, ID/row/relationship/identity hashes 
 console.log('PASS historical orphan baseline is preserved while new anomaly delta is rejected');
 console.log('PASS schema mismatch and unresolved Auth attribution are rejected');
 console.log('PASS FK names, schemas, composite ordinals, actions and validation state are deterministic and fail closed');
-console.log('PASS legacy snapshots and incomplete FK evidence are rejected instead of being rebuilt or self-accepted');
+console.log('PASS PK/UNIQUE metadata is deterministic across reader/writer role visibility and remains fail closed');
+console.log('PASS legacy snapshots and incomplete FK or PK/UNIQUE evidence are rejected instead of being rebuilt or self-accepted');
 console.log('PASS versioned Production snapshot, Staging rollback and dry-run schema contracts remain compatible');
 console.log('PASS transactional restore contract rolls back injected failure and retry creates no duplicate');

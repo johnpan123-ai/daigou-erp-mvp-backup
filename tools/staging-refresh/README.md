@@ -69,13 +69,17 @@ evidence and must be recaptured; the tooling fails closed instead of inferring
 missing actions or rewriting an existing snapshot JSON.
 
 New snapshots carry `schemaContractVersion: 2`. Their catalog evidence also
-records that FK inspection completed plus the FK constraint and column counts.
-Envelope validation rejects a missing/older contract, missing FK fields,
+records that FK and PK/UNIQUE inspection completed plus each contract's
+constraint and column counts. PK/UNIQUE metadata comes from deterministic
+`pg_catalog` rows rather than the role-filtered `information_schema` constraint
+views. Envelope validation rejects a missing/older contract, missing FK fields,
 malformed actions, inconsistent composite ordinals or mismatched counts with
-`SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED`. An empty FK array is accepted only when
-the versioned catalog evidence explicitly records zero constraints and zero FK
-columns. Existing Production and Staging rollback snapshots are never upgraded
-in place; both must be recaptured before the next dry run.
+`SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED`. An empty FK or PK/UNIQUE array is
+accepted only when the versioned catalog evidence explicitly records complete
+inspection with zero constraints and zero columns. Existing Production and
+Staging rollback snapshots, including earlier v2 files without PK/UNIQUE
+completeness evidence, are never upgraded in place; both must be recaptured
+before the next dry run.
 
 The migration:
 

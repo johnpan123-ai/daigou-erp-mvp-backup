@@ -313,6 +313,11 @@ export function toRefreshToolingSchema(fixture) {
         `${reference.childSchema}.${reference.constraintName}`
       ))).size,
       foreignKeyColumnCount: foreignKeys.length,
+      primaryUniqueConstraintsComplete: true,
+      primaryUniqueConstraintCount: new Set(constraints.map(constraint => (
+        `${constraint.tableName}.${constraint.constraintName}`
+      ))).size,
+      primaryUniqueConstraintColumnCount: constraints.length,
     },
     columns,
     constraints,
