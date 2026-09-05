@@ -1,6 +1,7 @@
 export const PRODUCTION_PROJECT_REF = 'twzpqyesbtnfxdkorluf';
 export const STAGING_PROJECT_REF = 'rhfdjsklfrgpoqsaqpkn';
 export const RESTORE_WRITER_ROLE = 'staging_refresh_restore_writer';
+export const SNAPSHOT_SCHEMA_CONTRACT_VERSION = 2;
 
 export const REQUIRED_TABLES = Object.freeze([
   'inventory_items',

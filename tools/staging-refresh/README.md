@@ -68,6 +68,15 @@ Snapshots created before this FK contract was added do not contain enough
 evidence and must be recaptured; the tooling fails closed instead of inferring
 missing actions or rewriting an existing snapshot JSON.
 
+New snapshots carry `schemaContractVersion: 2`. Their catalog evidence also
+records that FK inspection completed plus the FK constraint and column counts.
+Envelope validation rejects a missing/older contract, missing FK fields,
+malformed actions, inconsistent composite ordinals or mismatched counts with
+`SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED`. An empty FK array is accepted only when
+the versioned catalog evidence explicitly records zero constraints and zero FK
+columns. Existing Production and Staging rollback snapshots are never upgraded
+in place; both must be recaptured before the next dry run.
+
 The migration:
 
 - makes `inventory_items.id` the UUID primary key while retaining a UNIQUE

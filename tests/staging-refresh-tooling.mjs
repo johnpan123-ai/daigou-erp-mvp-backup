@@ -4,6 +4,7 @@ import {
   PRODUCTION_PROJECT_REF,
   REQUIRED_TABLES,
   RESTORE_WRITER_ROLE,
+  SNAPSHOT_SCHEMA_CONTRACT_VERSION,
   STAGING_PROJECT_REF,
   StagingRefreshPolicyError,
   assertConnectionTargetsProject,
@@ -19,6 +20,7 @@ import {
   buildSnapshotManifest,
   compareManifests,
   createSnapshotEnvelope,
+  sha256,
   validateSnapshotEnvelope,
 } from '../tools/staging-refresh/manifest.mjs';
 import {
@@ -101,6 +103,20 @@ const schema = {
     },
   ],
 };
+
+const refreshSchemaContractEvidence = candidate => {
+  const foreignKeys = candidate.foreignKeys || [];
+  candidate.schemaContract = {
+    version: SNAPSHOT_SCHEMA_CONTRACT_VERSION,
+    foreignKeysComplete: true,
+    foreignKeyConstraintCount: new Set(foreignKeys.map(reference => (
+      `${reference.childSchema}.${reference.constraintName}`
+    ))).size,
+    foreignKeyColumnCount: foreignKeys.length,
+  };
+  return candidate;
+};
+refreshSchemaContractEvidence(schema);
 
 assert.deepEqual(assertRefreshDirection(PRODUCTION_PROJECT_REF, STAGING_PROJECT_REF), {
   source: PRODUCTION_PROJECT_REF,
@@ -203,6 +219,11 @@ assert.doesNotMatch(writerInspectionSql, /INSERT|UPDATE|DELETE|TRUNCATE/i);
 
 const schemaInspectionSql = buildSchemaInspectionSql();
 assert.match(schemaInspectionSql, /REPEATABLE READ READ ONLY/);
+assert.match(schemaInspectionSql, /'schemaContract'/);
+assert.match(schemaInspectionSql, new RegExp(`'version', ${SNAPSHOT_SCHEMA_CONTRACT_VERSION}`));
+assert.match(schemaInspectionSql, /'foreignKeysComplete', true/);
+assert.match(schemaInspectionSql, /'foreignKeyConstraintCount', count\(\*\)/);
+assert.match(schemaInspectionSql, /'foreignKeyColumnCount', COALESCE\(sum\(cardinality\(constraint_record\.conkey\)\), 0\)/);
 assert.match(schemaInspectionSql, /pg_catalog\.pg_constraint/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.conkey\) WITH ORDINALITY/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.confkey\) WITH ORDINALITY/);
@@ -223,6 +244,8 @@ const snapshot = createSnapshotEnvelope({
 });
 assert.equal(validateSnapshotEnvelope(snapshot).snapshotHash, snapshot.snapshotHash);
 const manifest = buildSnapshotManifest(snapshot);
+assert.equal(snapshot.schemaContractVersion, SNAPSHOT_SCHEMA_CONTRACT_VERSION);
+assert.equal(manifest.schemaContractVersion, SNAPSHOT_SCHEMA_CONTRACT_VERSION);
 assert.equal(manifest.anomalies.unknownProduct.count, 0);
 assert.equal(manifest.anomalies.duplicateVariantId.count, 0);
 assert.equal(manifest.relationships['bundle_components.component_variant_id->product_variants.id'].orphanCount, 1);
@@ -237,6 +260,11 @@ const restoredSnapshot = createSnapshotEnvelope({
   snapshotId: snapshot.snapshotId,
   capturedAt: snapshot.capturedAt,
 });
+assert.doesNotThrow(() => assertSchemaCompatible(
+  snapshot.schema,
+  restoredSnapshot.schema,
+  REQUIRED_TABLES,
+));
 assert.equal(compareManifests(manifest, buildSnapshotManifest(restoredSnapshot)).accepted, true);
 
 restoredData.bundle_components.push({ id: 'new-orphan', bundle_variant_id: ids.variant, component_variant_id: 'new-missing' });
@@ -266,6 +294,7 @@ changedSchema.columns.find(column => column.tableName === 'product_variants' && 
 assert.throws(() => assertSchemaCompatible(schema, changedSchema, REQUIRED_TABLES), /SCHEMA_MISMATCH:product_variants/);
 const changedForeignKeySchema = structuredClone(schema);
 changedForeignKeySchema.foreignKeys = changedForeignKeySchema.foreignKeys.filter(reference => reference.constraintName !== 'fixture_fk_1');
+refreshSchemaContractEvidence(changedForeignKeySchema);
 assert.throws(() => assertSchemaCompatible(schema, changedForeignKeySchema, REQUIRED_TABLES), /SCHEMA_MISMATCH:foreign_keys/);
 
 const cascadeForeignKeySchema = structuredClone(schema);
@@ -308,20 +337,6 @@ assert.throws(
   /SCHEMA_MISMATCH:foreign_keys/,
 );
 
-for (const [code, action] of [
-  ['a', 'NO ACTION'],
-  ['r', 'RESTRICT'],
-  ['c', 'CASCADE'],
-  ['n', 'SET NULL'],
-  ['d', 'SET DEFAULT'],
-]) {
-  const namedActionSchema = structuredClone(schema);
-  const codedActionSchema = structuredClone(schema);
-  namedActionSchema.foreignKeys[0].onDelete = action;
-  codedActionSchema.foreignKeys[0].onDelete = code;
-  assert.doesNotThrow(() => assertSchemaCompatible(namedActionSchema, codedActionSchema, REQUIRED_TABLES));
-}
-
 const compositeForeignKeySchema = structuredClone(schema);
 compositeForeignKeySchema.foreignKeys.push(
   {
@@ -335,6 +350,7 @@ compositeForeignKeySchema.foreignKeys.push(
     parentColumn: 'product_group_id', ordinalPosition: 2, onDelete: 'CASCADE', onUpdate: 'NO ACTION', validated: true,
   },
 );
+refreshSchemaContractEvidence(compositeForeignKeySchema);
 const reorderedCompositeForeignKeySchema = structuredClone(compositeForeignKeySchema);
 reorderedCompositeForeignKeySchema.foreignKeys.reverse();
 assert.doesNotThrow(() => assertSchemaCompatible(
@@ -352,6 +368,91 @@ const compositeReferences = changedCompositeOrdinalSchema.foreignKeys
 assert.throws(
   () => assertSchemaCompatible(compositeForeignKeySchema, changedCompositeOrdinalSchema, REQUIRED_TABLES),
   /SCHEMA_MISMATCH:foreign_keys/,
+);
+
+const rehashSnapshot = candidate => {
+  const { snapshotHash: _discardedHash, ...unsigned } = candidate;
+  return { ...unsigned, snapshotHash: sha256(unsigned) };
+};
+const legacySnapshot = structuredClone(snapshot);
+delete legacySnapshot.schemaContractVersion;
+delete legacySnapshot.schema.schemaContract;
+const hashValidLegacySnapshot = rehashSnapshot(legacySnapshot);
+assert.throws(
+  () => validateSnapshotEnvelope(hashValidLegacySnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+const unsupportedVersionSnapshot = structuredClone(snapshot);
+unsupportedVersionSnapshot.schemaContractVersion = SNAPSHOT_SCHEMA_CONTRACT_VERSION - 1;
+unsupportedVersionSnapshot.schema.schemaContract.version = SNAPSHOT_SCHEMA_CONTRACT_VERSION - 1;
+assert.throws(
+  () => validateSnapshotEnvelope(rehashSnapshot(unsupportedVersionSnapshot)),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+const zeroEvidenceLegacySnapshot = structuredClone(hashValidLegacySnapshot);
+zeroEvidenceLegacySnapshot.schema.foreignKeys = [];
+const hashValidZeroEvidenceLegacySnapshot = rehashSnapshot(zeroEvidenceLegacySnapshot);
+assert.throws(
+  () => validateSnapshotEnvelope(hashValidZeroEvidenceLegacySnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+assert.throws(
+  () => buildSnapshotManifest(hashValidZeroEvidenceLegacySnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+assert.throws(
+  () => buildSnapshotManifest(hashValidLegacySnapshot),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+assert.throws(
+  () => assertSchemaCompatible(
+    hashValidLegacySnapshot.schema,
+    hashValidLegacySnapshot.schema,
+    REQUIRED_TABLES,
+  ),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+
+const missingActionSnapshot = structuredClone(snapshot);
+delete missingActionSnapshot.schema.foreignKeys[0].onDelete;
+assert.throws(
+  () => validateSnapshotEnvelope(rehashSnapshot(missingActionSnapshot)),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+const malformedActionSnapshot = structuredClone(snapshot);
+malformedActionSnapshot.schema.foreignKeys[0].onUpdate = 'MAGIC ACTION';
+assert.throws(
+  () => validateSnapshotEnvelope(rehashSnapshot(malformedActionSnapshot)),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+const rawActionCodeSnapshot = structuredClone(snapshot);
+rawActionCodeSnapshot.schema.foreignKeys[0].onDelete = 'c';
+assert.throws(
+  () => validateSnapshotEnvelope(rehashSnapshot(rawActionCodeSnapshot)),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
+);
+
+const provenEmptyForeignKeySchema = structuredClone(schema);
+provenEmptyForeignKeySchema.foreignKeys = [];
+refreshSchemaContractEvidence(provenEmptyForeignKeySchema);
+const provenEmptyForeignKeySnapshot = createSnapshotEnvelope({
+  sourceProjectRef: STAGING_PROJECT_REF,
+  schema: provenEmptyForeignKeySchema,
+  data,
+  piiMode: 'internal-preserve',
+  snapshotId: '20000000-0000-4000-8000-000000000099',
+  capturedAt: '2026-09-03T00:00:00.000Z',
+});
+assert.doesNotThrow(() => validateSnapshotEnvelope(provenEmptyForeignKeySnapshot));
+const unprovenEmptyForeignKeySchema = structuredClone(provenEmptyForeignKeySchema);
+delete unprovenEmptyForeignKeySchema.schemaContract.foreignKeysComplete;
+assert.throws(
+  () => createSnapshotEnvelope({
+    sourceProjectRef: STAGING_PROJECT_REF,
+    schema: unprovenEmptyForeignKeySchema,
+    data,
+  }),
+  /SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED/,
 );
 
 assert.doesNotThrow(() => assertNoSecrets(data));
@@ -388,4 +489,6 @@ console.log('PASS manifest compares counts, ID/row/relationship/identity hashes 
 console.log('PASS historical orphan baseline is preserved while new anomaly delta is rejected');
 console.log('PASS schema mismatch and unresolved Auth attribution are rejected');
 console.log('PASS FK names, schemas, composite ordinals, actions and validation state are deterministic and fail closed');
+console.log('PASS legacy snapshots and incomplete FK evidence are rejected instead of being rebuilt or self-accepted');
+console.log('PASS versioned Production snapshot, Staging rollback and dry-run schema contracts remain compatible');
 console.log('PASS transactional restore contract rolls back injected failure and retry creates no duplicate');

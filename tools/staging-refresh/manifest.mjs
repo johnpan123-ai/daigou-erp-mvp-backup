@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   LOGICAL_RELATIONSHIPS,
+  SNAPSHOT_SCHEMA_CONTRACT_VERSION,
   TABLE_KEY_COLUMNS,
   assertNoSecrets,
   assertPiiMode,
@@ -102,12 +103,91 @@ const FOREIGN_KEY_ACTIONS = Object.freeze({
   n: 'SET NULL',
   d: 'SET DEFAULT',
 });
+const NORMALIZED_FOREIGN_KEY_ACTIONS = new Set(Object.values(FOREIGN_KEY_ACTIONS));
 
 const normalizeForeignKeyAction = value => {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim().replace(/\s+/g, ' ').toUpperCase();
   return FOREIGN_KEY_ACTIONS[normalized.toLowerCase()] || normalized;
 };
+
+const schemaContractUnsupported = () => {
+  throw new Error('SNAPSHOT_SCHEMA_CONTRACT_UNSUPPORTED');
+};
+
+export function assertSnapshotSchemaContract(schema) {
+  const evidence = schema?.schemaContract;
+  const foreignKeys = schema?.foreignKeys;
+  if (evidence?.version !== SNAPSHOT_SCHEMA_CONTRACT_VERSION
+      || evidence?.foreignKeysComplete !== true
+      || !Number.isSafeInteger(evidence?.foreignKeyConstraintCount)
+      || evidence.foreignKeyConstraintCount < 0
+      || !Number.isSafeInteger(evidence?.foreignKeyColumnCount)
+      || evidence.foreignKeyColumnCount < 0
+      || !Array.isArray(foreignKeys)
+      || evidence.foreignKeyColumnCount !== foreignKeys.length) {
+    schemaContractUnsupported();
+  }
+
+  const constraints = new Map();
+  for (const reference of foreignKeys) {
+    const requiredStrings = [
+      reference.constraintName,
+      reference.childSchema,
+      reference.childTable,
+      reference.childColumn,
+      reference.parentSchema,
+      reference.parentTable,
+      reference.parentColumn,
+    ];
+    const onDelete = normalizeForeignKeyAction(reference.onDelete);
+    const onUpdate = normalizeForeignKeyAction(reference.onUpdate);
+    if (requiredStrings.some(value => typeof value !== 'string' || value.length === 0)
+        || !Number.isSafeInteger(reference.ordinalPosition)
+        || reference.ordinalPosition < 1
+        || !NORMALIZED_FOREIGN_KEY_ACTIONS.has(onDelete)
+        || !NORMALIZED_FOREIGN_KEY_ACTIONS.has(onUpdate)
+        || reference.onDelete !== onDelete
+        || reference.onUpdate !== onUpdate
+        || typeof reference.validated !== 'boolean') {
+      schemaContractUnsupported();
+    }
+
+    const constraintKey = `${reference.childSchema}.${reference.constraintName}`;
+    const contract = constraints.get(constraintKey) || {
+      identity: stableStringify({
+        childSchema: reference.childSchema,
+        childTable: reference.childTable,
+        parentSchema: reference.parentSchema,
+        parentTable: reference.parentTable,
+        onDelete,
+        onUpdate,
+        validated: reference.validated,
+      }),
+      ordinals: [],
+    };
+    if (contract.identity !== stableStringify({
+      childSchema: reference.childSchema,
+      childTable: reference.childTable,
+      parentSchema: reference.parentSchema,
+      parentTable: reference.parentTable,
+      onDelete,
+      onUpdate,
+      validated: reference.validated,
+    })) {
+      schemaContractUnsupported();
+    }
+    contract.ordinals.push(reference.ordinalPosition);
+    constraints.set(constraintKey, contract);
+  }
+
+  if (constraints.size !== evidence.foreignKeyConstraintCount) schemaContractUnsupported();
+  for (const contract of constraints.values()) {
+    const ordinals = [...contract.ordinals].sort((left, right) => left - right);
+    if (ordinals.some((ordinal, index) => ordinal !== index + 1)) schemaContractUnsupported();
+  }
+  return schema;
+}
 
 const foreignKeyContractProjection = schema => (schema.foreignKeys || [])
   .map(reference => ({
@@ -141,8 +221,10 @@ const schemaFingerprintProjection = schema => ({
 export function createSnapshotEnvelope({ sourceProjectRef, schema, data, piiMode = 'internal-preserve', capturedAt, snapshotId }) {
   assertPiiMode(piiMode);
   assertNoSecrets(data);
+  assertSnapshotSchemaContract(schema);
   const envelope = {
     formatVersion: SNAPSHOT_FORMAT_VERSION,
+    schemaContractVersion: SNAPSHOT_SCHEMA_CONTRACT_VERSION,
     snapshotId: snapshotId || randomUUID(),
     sourceProjectRef,
     capturedAt: capturedAt || new Date().toISOString(),
@@ -155,6 +237,8 @@ export function createSnapshotEnvelope({ sourceProjectRef, schema, data, piiMode
 
 export function validateSnapshotEnvelope(snapshot) {
   if (!snapshot || snapshot.formatVersion !== SNAPSHOT_FORMAT_VERSION) throw new Error('SNAPSHOT_FORMAT_UNSUPPORTED');
+  if (snapshot.schemaContractVersion !== SNAPSHOT_SCHEMA_CONTRACT_VERSION) schemaContractUnsupported();
+  assertSnapshotSchemaContract(snapshot.schema);
   const { snapshotHash, ...unsigned } = snapshot;
   if (sha256(unsigned) !== snapshotHash) throw new Error('SNAPSHOT_HASH_MISMATCH');
   assertNoSecrets(snapshot.data);
@@ -191,6 +275,7 @@ export function buildSnapshotManifest(snapshot) {
   const relationships = buildRelationshipState(snapshot.data);
   const manifest = {
     formatVersion: snapshot.formatVersion,
+    schemaContractVersion: snapshot.schemaContractVersion,
     snapshotId: snapshot.snapshotId,
     sourceProjectRef: snapshot.sourceProjectRef,
     capturedAt: snapshot.capturedAt,
@@ -218,6 +303,7 @@ export function compareManifests(expected, actual) {
     if (stableStringify(left) !== stableStringify(right)) differences.push(label);
   };
   check('schemaFingerprint', expected.schemaFingerprint, actual.schemaFingerprint);
+  check('schemaContractVersion', expected.schemaContractVersion, actual.schemaContractVersion);
   check('tables', expected.tables, actual.tables);
   check('relationships', expected.relationships, actual.relationships);
   check('productVariantIdentityHash', expected.productVariantIdentityHash, actual.productVariantIdentityHash);
@@ -226,6 +312,8 @@ export function compareManifests(expected, actual) {
 }
 
 export function assertSchemaCompatible(sourceSchema, targetSchema, tables) {
+  assertSnapshotSchemaContract(sourceSchema);
+  assertSnapshotSchemaContract(targetSchema);
   const columnsFor = (schema, table) => (schema.columns || [])
     .filter(column => column.tableName === table)
     .map(column => ({

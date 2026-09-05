@@ -3,6 +3,7 @@ import pg from 'pg';
 import {
   RESTORE_WRITER_ROLE,
   RESTORE_ORDER,
+  SNAPSHOT_SCHEMA_CONTRACT_VERSION,
   assertConnectionTargetsProject,
   classifyPublicTables,
 } from './policy.mjs';
@@ -50,6 +51,16 @@ export async function runPostgresJson(options) {
 const schemaJsonExpression = `jsonb_build_object(
   'publicTables', (SELECT COALESCE(jsonb_agg(table_name ORDER BY table_name), '[]'::jsonb)
     FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'),
+  'schemaContract', (SELECT jsonb_build_object(
+      'version', ${SNAPSHOT_SCHEMA_CONTRACT_VERSION},
+      'foreignKeysComplete', true,
+      'foreignKeyConstraintCount', count(*),
+      'foreignKeyColumnCount', COALESCE(sum(cardinality(constraint_record.conkey)), 0)
+    )
+    FROM pg_catalog.pg_constraint constraint_record
+    JOIN pg_catalog.pg_class child_table ON child_table.oid = constraint_record.conrelid
+    JOIN pg_catalog.pg_namespace child_namespace ON child_namespace.oid = child_table.relnamespace
+    WHERE constraint_record.contype = 'f' AND child_namespace.nspname = 'public'),
   'columns', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
       'tableName', table_name, 'columnName', column_name, 'dataType', data_type,
       'udtName', udt_name, 'nullable', is_nullable = 'YES', 'defaultValue', column_default,

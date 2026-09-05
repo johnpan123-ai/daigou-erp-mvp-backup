@@ -1,3 +1,5 @@
+import { SNAPSHOT_SCHEMA_CONTRACT_VERSION } from './policy.mjs';
+
 const PARITY_TABLES = Object.freeze([
   'inventory_items',
   'product_groups',
@@ -302,5 +304,18 @@ export function toRefreshToolingSchema(fixture) {
     ...foreignKey,
     parentSchema: 'public',
   }));
-  return { publicTables: Object.keys(fixture.schema.tables), columns, constraints, foreignKeys };
+  return {
+    publicTables: Object.keys(fixture.schema.tables),
+    schemaContract: {
+      version: SNAPSHOT_SCHEMA_CONTRACT_VERSION,
+      foreignKeysComplete: true,
+      foreignKeyConstraintCount: new Set(foreignKeys.map(reference => (
+        `${reference.childSchema}.${reference.constraintName}`
+      ))).size,
+      foreignKeyColumnCount: foreignKeys.length,
+    },
+    columns,
+    constraints,
+    foreignKeys,
+  };
 }
