@@ -227,12 +227,16 @@ assert.match(schemaInspectionSql, /'foreignKeyColumnCount', COALESCE\(sum\(cardi
 assert.match(schemaInspectionSql, /pg_catalog\.pg_constraint/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.conkey\) WITH ORDINALITY/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.confkey\) WITH ORDINALITY/);
-assert.match(schemaInspectionSql, /constraint_record\.confdeltype AS delete_action/);
-assert.match(schemaInspectionSql, /constraint_record\.confupdtype AS update_action/);
+assert.match(schemaInspectionSql, /constraint_record\.confdeltype::text AS delete_action/);
+assert.match(schemaInspectionSql, /constraint_record\.confupdtype::text AS update_action/);
+assert.doesNotMatch(schemaInspectionSql, /constraint_record\.confdeltype AS delete_action/);
+assert.doesNotMatch(schemaInspectionSql, /constraint_record\.confupdtype AS update_action/);
 assert.match(schemaInspectionSql, /constraint_record\.convalidated AS validated/);
 for (const action of ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']) {
   assert.match(schemaInspectionSql, new RegExp(`THEN '${action}'`));
 }
+assert.match(schemaInspectionSql, /ELSE 'UNKNOWN:' \|\| delete_action/);
+assert.match(schemaInspectionSql, /ELSE 'UNKNOWN:' \|\| update_action/);
 
 const snapshot = createSnapshotEnvelope({
   sourceProjectRef: PRODUCTION_PROJECT_REF,

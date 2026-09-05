@@ -108,8 +108,8 @@ const schemaJsonExpression = `jsonb_build_object(
         parent_table.relname AS foreign_table_name,
         parent_attribute.attname AS foreign_column_name,
         child_key.ordinal_position,
-        constraint_record.confdeltype AS delete_action,
-        constraint_record.confupdtype AS update_action,
+        constraint_record.confdeltype::text AS delete_action,
+        constraint_record.confupdtype::text AS update_action,
         constraint_record.convalidated AS validated
       FROM pg_catalog.pg_constraint constraint_record
       JOIN pg_catalog.pg_class child_table
