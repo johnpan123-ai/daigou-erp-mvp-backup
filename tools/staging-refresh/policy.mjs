@@ -59,7 +59,7 @@ export const RESTORE_ORDER = Object.freeze([
 ]);
 
 export const TABLE_KEY_COLUMNS = Object.freeze({
-  inventory_items: ['myacg_item_code'],
+  inventory_items: ['id'],
   import_batches: ['id'],
   dashboard_category_images: ['id'],
   product_groups: ['id'],

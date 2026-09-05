@@ -95,6 +95,20 @@ const identityProjection = data => ({
   })),
 });
 
+// PostgreSQL ALTER TABLE appends new columns and has no safe in-place column
+// reorder. The restore contract addresses JSON fields by name, and
+// assertSchemaCompatible already compares the complete column definition by
+// name. Keep the manifest fingerprint equally strict while making catalog array
+// order deterministic; constraint ordinalPosition remains part of each entry.
+const schemaFingerprintProjection = schema => ({
+  columns: [...(schema.columns || [])]
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+  foreignKeys: [...(schema.foreignKeys || [])]
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+  constraints: [...(schema.constraints || [])]
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+});
+
 export function createSnapshotEnvelope({ sourceProjectRef, schema, data, piiMode = 'internal-preserve', capturedAt, snapshotId }) {
   assertPiiMode(piiMode);
   assertNoSecrets(data);
@@ -153,11 +167,7 @@ export function buildSnapshotManifest(snapshot) {
     capturedAt: snapshot.capturedAt,
     piiMode: snapshot.piiMode,
     snapshotHash: snapshot.snapshotHash,
-    schemaFingerprint: sha256({
-      columns: snapshot.schema.columns,
-      foreignKeys: snapshot.schema.foreignKeys,
-      constraints: snapshot.schema.constraints,
-    }),
+    schemaFingerprint: sha256(schemaFingerprintProjection(snapshot.schema)),
     schemaClassification: classification,
     tables,
     relationships,

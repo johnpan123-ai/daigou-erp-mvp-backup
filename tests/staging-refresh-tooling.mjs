@@ -49,7 +49,7 @@ const ids = {
 
 const data = Object.fromEntries(REQUIRED_TABLES.map(table => [table, []]));
 Object.assign(data, {
-  inventory_items: [{ myacg_item_code: 'SKU-1', product_title: '商品', updated_by: ids.actor }],
+  inventory_items: [{ id: '10000000-0000-4000-8000-000000000010', inventory_key: 'SKU-1::通常版', myacg_item_code: 'SKU-1', product_title: '商品', updated_by: ids.actor }],
   product_groups: [{ id: ids.group, local_id: 'group-local', title: '商品群組', updated_by: ids.actor }],
   product_categories: [{ id: ids.category, product_group_id: ids.group, title: '分類' }],
   product_variants: [{ id: ids.variant, local_id: 'variant-local', product_group_id: ids.group, product_category_id: ids.category, myacg_item_code: 'SKU-1', raw_variant_name: '通常版' }],

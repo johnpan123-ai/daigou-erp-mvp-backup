@@ -35,6 +35,63 @@ uses IndexedDB as a Production source and never accepts Production as a target.
    authorized internal operators. `masked` intentionally remains blocked until
    its field-by-field policy is implemented and accepted.
 
+## Staging-only schema parity (2026-09-05 live audit)
+
+The targeted SQL artifact is:
+
+```text
+tools/staging-refresh/sql/staging_schema_parity_20260905.sql
+```
+
+It is deliberately outside `supabase/sql`, so it cannot be swept into a normal
+Production migration or deploy. It is a one-time, fail-closed migration for the
+audited legacy schema on `rhfdjsklfrgpoqsaqpkn`; it is not a general migration
+and is not idempotent. The preflight requires the exact legacy Staging columns,
+constraints and standalone indexes. The current Production schema already has
+the target columns and therefore refuses the preflight before any `ALTER`.
+
+The SQL performs all changes and postflight row-projection checks in one
+transaction. Invalid non-empty date text, nullable `sales_orders.buyer_name`,
+unexpected/partial schema state, data drift or a postflight mismatch aborts the
+transaction. Empty legacy date strings are explicitly mapped to SQL `NULL`.
+
+The SQL does not rebuild business tables merely to copy Production's physical
+column order. Rebuilding would replace table identity and risk grants, RLS,
+triggers and dependencies. Refresh schema compatibility already compares every
+named column's type/null/default/generated/identity contract. The manifest now
+sorts catalog arrays before hashing so the post-restore fingerprint follows the
+same strict semantic contract: array order alone is ignored, while any column,
+FK or constraint definition change still fails.
+
+The migration:
+
+- makes `inventory_items.id` the UUID primary key while retaining a UNIQUE
+  `inventory_key` for existing importer upserts; snapshot ID-set hashing now
+  follows the canonical UUID primary key;
+- adds the two catalog metadata columns and the Production index;
+- converts `product_groups.purchase_date` and `purchase_batches.date` to
+  PostgreSQL `date` after exact `YYYY-MM-DD` validation;
+- makes the two optional Product Variant adjustment columns nullable with no
+  default, without changing existing values;
+- adds Sales row `version`, enforces non-null buyer names, and permits nullable
+  item `price` / `amount` while keeping their default of 0;
+- changes the two audited Product Group header FKs from RESTRICT to CASCADE;
+- changes only the standalone sales order-number index to non-unique, preserves
+  the constraint-backed UNIQUE index, and removes the two audited Staging-only
+  `deleted_at` indexes.
+
+This artifact has no automatic Cloud execution path. Applying it requires a
+separately authorized operator step that proves the target project ref is the
+isolated Staging project. Do not run it with a Production URL, `service_role`,
+the read-only snapshot credentials or the restore writer. Migrations 018/019
+are unrelated and are not included.
+
+Offline verification:
+
+```text
+npm run test:staging-schema-parity
+```
+
 ## Read-only snapshot commands
 
 Set `STAGING_REFRESH_SOURCE_DATABASE_URL` to a Production read-only PostgreSQL

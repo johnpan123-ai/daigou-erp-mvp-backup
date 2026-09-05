@@ -74,6 +74,7 @@
     "test:data-size-advisory": "node tests/data-size-advisory.mjs",
     "test:supabase-environment-boundary": "node tests/supabase-environment-boundary.mjs",
     "test:staging-refresh-tooling": "node tests/staging-refresh-tooling.mjs",
+    "test:staging-schema-parity": "node tests/staging-schema-parity-migration.mjs",
     "test:staging-sidecar-refresh": "node tests/staging-sidecar-refresh.mjs"
   },
   "dependencies": {
