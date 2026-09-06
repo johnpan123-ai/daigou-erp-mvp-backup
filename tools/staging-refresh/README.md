@@ -159,18 +159,39 @@ authorized, it requires all of the following and still cannot target Production:
 - `--maintenance-ack=STAGING_WRITES_PAUSED`;
 - `--approval-snapshot-id=<exact snapshot id>`.
 
-The restore creates temporary tables, validates counts and logical relations,
-then replaces included Staging tables inside one serializable PostgreSQL
-transaction. A forced error, constraint failure, count mismatch or readback
-mismatch rolls the entire transaction back. After commit it creates a fresh
-read-only snapshot and compares counts, ID hashes, relationship hashes,
-Product/Variant identity and anomaly ID sets.
+The restore creates temporary tables and replaces only the snapshot's included
+Staging tables inside one serializable PostgreSQL transaction. Before commit,
+the same database session reads those tables back and compares the prepared
+snapshot's counts, ID and row hashes, relationship hashes, Product/Variant
+identity and anomaly ID sets. Its schema fingerprint is limited to the same
+restore-table scope, so environment-only tables do not create false failures.
+A forced error, constraint failure, count/readback mismatch or manifest
+integrity failure rolls the entire transaction back. `COMMIT` is sent only
+after every integrity check passes.
+
+Schema discovery uses deterministic `pg_catalog` metadata for public tables,
+columns, PK/UNIQUE constraints and foreign keys. Reader and writer roles
+therefore use one schema contract rather than role-filtered
+`information_schema` visibility.
 
 The restore role contract is limited to `SELECT`, `DELETE` and `INSERT` on the
 included business tables plus `CREATE TEMP TABLE`. The current SQL does not use
 `UPDATE`, `TRUNCATE`, persistent schema `CREATE` / `ALTER` / `DROP`,
 `BYPASSRLS`, Production credentials or `service_role`. Snapshot and dry-run
 commands do not require the restore writer credential.
+
+## Verify the already-restored Staging data without writes
+
+`verify-only` uses only `STAGING_REFRESH_TARGET_DATABASE_URL`. It applies the
+same explicit Auth attribution transformation to the Production snapshot and
+compares current Staging using the restore-table schema scope. It never opens a
+writer session and performs no database writes:
+
+```text
+node tools/staging-refresh/cli.mjs verify-only --snapshot=production-snapshot-pgcat.json --auth-attribution=null
+```
+
+Success is reported as `STAGING_VERIFY_ONLY_PASS` with `databaseWrite: 0`.
 
 ## Closing Date sidecar
 

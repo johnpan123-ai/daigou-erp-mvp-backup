@@ -258,6 +258,20 @@ const schemaFingerprintProjection = schema => ({
     .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
 });
 
+const restoreScopeSchemaFingerprintProjection = (schema, tables) => {
+  const included = new Set(tables);
+  return {
+    columns: (schema.columns || [])
+      .filter(column => included.has(column.tableName))
+      .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+    foreignKeys: foreignKeyContractProjection(schema)
+      .filter(reference => included.has(reference.childTable)),
+    constraints: (schema.constraints || [])
+      .filter(constraint => included.has(constraint.tableName))
+      .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+  };
+};
+
 export function createSnapshotEnvelope({ sourceProjectRef, schema, data, piiMode = 'internal-preserve', capturedAt, snapshotId }) {
   assertPiiMode(piiMode);
   assertNoSecrets(data);
@@ -337,6 +351,20 @@ export function buildSnapshotManifest(snapshot) {
   return { ...manifest, manifestHash: sha256(manifest) };
 }
 
+export function buildRestoreScopeManifest(snapshot, tables = Object.keys(snapshot.data || {})) {
+  const manifest = buildSnapshotManifest(snapshot);
+  const schemaScopeTables = [...new Set(tables)].sort();
+  const scoped = {
+    ...manifest,
+    schemaScopeTables,
+    schemaFingerprint: sha256(
+      restoreScopeSchemaFingerprintProjection(snapshot.schema, schemaScopeTables),
+    ),
+  };
+  const { manifestHash: _discardedManifestHash, ...unsigned } = scoped;
+  return { ...unsigned, manifestHash: sha256(unsigned) };
+}
+
 export function compareManifests(expected, actual) {
   const differences = [];
   const check = (label, left, right) => {
@@ -344,6 +372,9 @@ export function compareManifests(expected, actual) {
   };
   check('schemaFingerprint', expected.schemaFingerprint, actual.schemaFingerprint);
   check('schemaContractVersion', expected.schemaContractVersion, actual.schemaContractVersion);
+  if (expected.schemaScopeTables || actual.schemaScopeTables) {
+    check('schemaScopeTables', expected.schemaScopeTables, actual.schemaScopeTables);
+  }
   check('tables', expected.tables, actual.tables);
   check('relationships', expected.relationships, actual.relationships);
   check('productVariantIdentityHash', expected.productVariantIdentityHash, actual.productVariantIdentityHash);

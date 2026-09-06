@@ -37,6 +37,10 @@ export async function runPostgres({ connectionUrl, expectedRef, label, sql }) {
 
 export async function runPostgresJson(options) {
   const rawResult = await runPostgres(options);
+  return parsePostgresJsonResult(rawResult);
+}
+
+function parsePostgresJsonResult(rawResult) {
   const results = Array.isArray(rawResult) ? rawResult : [rawResult];
   const payload = results.flatMap(result => result.rows || [])
     .map(row => row.hippo_payload)
@@ -48,9 +52,16 @@ export async function runPostgresJson(options) {
   return JSON.parse(payload.slice(start + JSON_BEGIN.length, end));
 }
 
+export async function runPostgresJsonWithClient(client, sql) {
+  return parsePostgresJsonResult(await client.query(sql));
+}
+
 const schemaJsonExpression = `jsonb_build_object(
-  'publicTables', (SELECT COALESCE(jsonb_agg(table_name ORDER BY table_name), '[]'::jsonb)
-    FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'),
+  'publicTables', (SELECT COALESCE(jsonb_agg(table_record.relname ORDER BY table_record.relname), '[]'::jsonb)
+    FROM pg_catalog.pg_class table_record
+    JOIN pg_catalog.pg_namespace table_namespace ON table_namespace.oid = table_record.relnamespace
+    WHERE table_namespace.nspname = 'public'
+      AND table_record.relkind::text IN ('r', 'p')),
   'schemaContract', (SELECT jsonb_build_object(
       'version', ${SNAPSHOT_SCHEMA_CONTRACT_VERSION},
       'foreignKeysComplete', true,
@@ -70,10 +81,42 @@ const schemaJsonExpression = `jsonb_build_object(
       AND child_table.relkind::text IN ('r', 'p')),
   'columns', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
       'tableName', table_name, 'columnName', column_name, 'dataType', data_type,
-      'udtName', udt_name, 'nullable', is_nullable = 'YES', 'defaultValue', column_default,
-      'generated', is_generated, 'identityGeneration', identity_generation
+      'udtName', udt_name, 'nullable', nullable, 'defaultValue', default_value,
+      'generated', generated, 'identityGeneration', identity_generation
     ) ORDER BY table_name, ordinal_position), '[]'::jsonb)
-    FROM information_schema.columns WHERE table_schema = 'public'),
+    FROM (
+      SELECT table_record.relname AS table_name,
+        attribute_record.attname AS column_name,
+        attribute_record.attnum AS ordinal_position,
+        CASE
+          WHEN type_record.typelem <> 0 AND type_record.typlen = -1 THEN 'ARRAY'
+          WHEN type_record.typtype::text IN ('c', 'e') THEN 'USER-DEFINED'
+          ELSE pg_catalog.format_type(attribute_record.atttypid, NULL)
+        END AS data_type,
+        type_record.typname AS udt_name,
+        NOT attribute_record.attnotnull AS nullable,
+        pg_catalog.pg_get_expr(default_record.adbin, default_record.adrelid) AS default_value,
+        CASE attribute_record.attgenerated::text
+          WHEN 's' THEN 'ALWAYS'
+          ELSE 'NEVER'
+        END AS generated,
+        CASE attribute_record.attidentity::text
+          WHEN 'a' THEN 'ALWAYS'
+          WHEN 'd' THEN 'BY DEFAULT'
+          ELSE NULL
+        END AS identity_generation
+      FROM pg_catalog.pg_attribute attribute_record
+      JOIN pg_catalog.pg_class table_record ON table_record.oid = attribute_record.attrelid
+      JOIN pg_catalog.pg_namespace table_namespace ON table_namespace.oid = table_record.relnamespace
+      JOIN pg_catalog.pg_type type_record ON type_record.oid = attribute_record.atttypid
+      LEFT JOIN pg_catalog.pg_attrdef default_record
+        ON default_record.adrelid = attribute_record.attrelid
+        AND default_record.adnum = attribute_record.attnum
+      WHERE table_namespace.nspname = 'public'
+        AND table_record.relkind::text IN ('r', 'p')
+        AND attribute_record.attnum > 0
+        AND NOT attribute_record.attisdropped
+    ) public_column),
   'constraints', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
       'tableName', table_name, 'constraintName', constraint_name,
       'constraintType', constraint_type, 'columnName', column_name,
@@ -170,17 +213,22 @@ SELECT '${JSON_BEGIN}' || (${schemaJsonExpression})::text || '${JSON_END}' AS hi
 COMMIT;`;
 }
 
-export function buildSnapshotSql(tables) {
+function buildSnapshotPayloadSql(tables) {
   const tablePairs = tables.flatMap(table => [
     `'${table}'`,
     `(SELECT COALESCE(jsonb_agg(to_jsonb(source_row) ORDER BY COALESCE(to_jsonb(source_row)->>'id', to_jsonb(source_row)->>'myacg_item_code', '')), '[]'::jsonb) FROM public.${identifier(table)} source_row)`,
   ]);
-  return `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY DEFERRABLE;
-SET LOCAL statement_timeout = '5min';
-SELECT '${JSON_BEGIN}' || jsonb_build_object(
+  return `SELECT '${JSON_BEGIN}' || jsonb_build_object(
   'schema', ${schemaJsonExpression},
   'data', jsonb_build_object(${tablePairs.join(',\n')})
 )::text || '${JSON_END}' AS hippo_payload;
+`;
+}
+
+export function buildSnapshotSql(tables) {
+  return `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY DEFERRABLE;
+SET LOCAL statement_timeout = '5min';
+${buildSnapshotPayloadSql(tables)}
 COMMIT;`;
 }
 
@@ -229,7 +277,7 @@ export async function assertRestoreWriterRole(connection) {
   return assertRestoreWriterInspection(result);
 }
 
-export async function captureConsistentSnapshot(connection) {
+export async function captureConsistentSnapshot(connection, options = {}) {
   const schema = await inspectSchema(connection);
   const classification = classifyPublicTables(schema.publicTables || []);
   if (classification.requiredMissing.length) {
@@ -238,12 +286,50 @@ export async function captureConsistentSnapshot(connection) {
   if (classification.unclassified.length) {
     throw new Error(`UNCLASSIFIED_PUBLIC_TABLES:${classification.unclassified.join(',')}`);
   }
-  const captured = await runPostgresJson({ ...connection, sql: buildSnapshotSql(classification.included) });
+  const tables = options.tables || classification.included;
+  const unavailable = tables.filter(table => !classification.included.includes(table));
+  if (unavailable.length) throw new Error(`SNAPSHOT_SCOPE_TABLES_MISSING:${unavailable.join(',')}`);
+  const captured = await runPostgresJson({ ...connection, sql: buildSnapshotSql(tables) });
   const capturedClassification = classifyPublicTables(captured.schema.publicTables || []);
   if (JSON.stringify(capturedClassification.included) !== JSON.stringify(classification.included)) {
     throw new Error('SCHEMA_CHANGED_DURING_SNAPSHOT');
   }
   return { ...captured, classification: capturedClassification };
+}
+
+export async function captureSnapshotWithClient(client, tables) {
+  return runPostgresJsonWithClient(client, buildSnapshotPayloadSql(tables));
+}
+
+export async function withSerializableRestoreTransaction(
+  { connectionUrl, expectedRef, label },
+  operation,
+  { clientFactory = options => new Client(options) } = {},
+) {
+  assertConnectionTargetsProject(connectionUrl, expectedRef, label);
+  const client = clientFactory({
+    connectionString: connectionUrl,
+    application_name: 'hippo_staging_refresh_tooling',
+    connectionTimeoutMillis: 15_000,
+  });
+  let transactionStarted = false;
+  try {
+    await client.connect();
+    await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE;');
+    transactionStarted = true;
+    await client.query("SET LOCAL lock_timeout = '15s'; SET LOCAL statement_timeout = '15min';");
+    const result = await operation(client);
+    await client.query('COMMIT;');
+    transactionStarted = false;
+    return result;
+  } catch (error) {
+    if (transactionStarted) await client.query('ROLLBACK;').catch(() => undefined);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('POST_RESTORE_INTEGRITY_FAILED:')) throw error;
+    throw new Error(`POSTGRES_OPERATION_FAILED:${message}`);
+  } finally {
+    await client.end().catch(() => undefined);
+  }
 }
 
 const dollarQuote = json => {
@@ -253,7 +339,7 @@ const dollarQuote = json => {
   return `${tag}${json}${tag}`;
 };
 
-export function buildTransactionalRestoreSql(snapshot) {
+export function buildRestoreMutationSql(snapshot) {
   const tables = RESTORE_ORDER.filter(table => snapshot.data[table]);
   const tempName = table => `refresh_${table}`;
   const stageStatements = tables.map(table => {
@@ -280,16 +366,12 @@ END $$;`;
   ) THEN RAISE EXCEPTION 'STAGING_READBACK_MISMATCH:${table}'; END IF;
 END $$;`).join('\n');
 
-  return `BEGIN ISOLATION LEVEL SERIALIZABLE;
-SET LOCAL lock_timeout = '15s';
-SET LOCAL statement_timeout = '15min';
-SELECT pg_advisory_xact_lock(hashtext('hippo-production-to-staging-refresh-v1'));
+  return `SELECT pg_advisory_xact_lock(hashtext('hippo-production-to-staging-refresh-v1'));
 ${stageStatements}
 ${deletes}
 ${inserts}
 SET CONSTRAINTS ALL IMMEDIATE;
-${readbackChecks}
-COMMIT;`;
+${readbackChecks}`;
 }
 
 export function assertNoExternalIncomingReferences(schema, includedTables) {

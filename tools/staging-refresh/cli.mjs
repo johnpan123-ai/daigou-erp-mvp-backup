@@ -12,6 +12,7 @@ import {
 import {
   applyAuthAttributionPolicy,
   assertSchemaCompatible,
+  buildRestoreScopeManifest,
   buildSnapshotManifest,
   compareManifests,
   createSnapshotEnvelope,
@@ -21,10 +22,11 @@ import {
   assertNoExternalIncomingReferences,
   assertRestoreWriterRole,
   assertStagingActorExists,
-  buildTransactionalRestoreSql,
+  buildRestoreMutationSql,
   captureConsistentSnapshot,
+  captureSnapshotWithClient,
   inspectSchema,
-  runPostgres,
+  withSerializableRestoreTransaction,
 } from './postgres.mjs';
 
 const args = Object.fromEntries(process.argv.slice(3).map(argument => {
@@ -92,8 +94,15 @@ async function prepareRestore(connection) {
     );
   }
   const prepared = applyAuthAttributionPolicy(snapshot, targetSchema, authPolicy);
-  const preparedManifest = buildSnapshotManifest(prepared);
-  return { connectionUrl, targetSchema, prepared, preparedManifest, sql: buildTransactionalRestoreSql(prepared) };
+  const preparedManifest = buildRestoreScopeManifest(prepared, tables);
+  return {
+    connectionUrl,
+    targetSchema,
+    tables,
+    prepared,
+    preparedManifest,
+    sql: buildRestoreMutationSql(prepared),
+  };
 }
 
 async function dryRunCommand() {
@@ -115,28 +124,74 @@ async function restoreCommand() {
   await assertRestoreWriterRole(restoreConnection);
   const result = await prepareRestore(restoreConnection);
   if (required('approval-snapshot-id') !== result.prepared.snapshotId) throw new Error('SNAPSHOT_APPROVAL_MISMATCH');
-  await runPostgres({
+  const comparison = await withSerializableRestoreTransaction({
     connectionUrl: result.connectionUrl,
     expectedRef: STAGING_PROJECT_REF,
     label: 'Staging restore writer',
-    sql: result.sql,
+  }, async client => {
+    await client.query(result.sql);
+    const after = await captureSnapshotWithClient(client, result.tables);
+    const afterSnapshot = createSnapshotEnvelope({
+      sourceProjectRef: STAGING_PROJECT_REF,
+      schema: after.schema,
+      data: after.data,
+      piiMode: result.prepared.piiMode,
+      snapshotId: result.prepared.snapshotId,
+      capturedAt: result.prepared.capturedAt,
+    });
+    const afterManifest = buildRestoreScopeManifest(afterSnapshot, result.tables);
+    const transactionComparison = compareManifests(result.preparedManifest, afterManifest);
+    if (!transactionComparison.accepted) {
+      throw new Error(`POST_RESTORE_INTEGRITY_FAILED:${transactionComparison.differences.join(',')}`);
+    }
+    return transactionComparison;
   });
-  const after = await captureConsistentSnapshot({
-    connectionUrl: result.connectionUrl,
-    expectedRef: STAGING_PROJECT_REF,
-    label: 'Staging restore writer readback',
-  });
-  const afterSnapshot = createSnapshotEnvelope({
-    sourceProjectRef: STAGING_PROJECT_REF,
-    schema: after.schema,
-    data: after.data,
-    piiMode: result.prepared.piiMode,
-    snapshotId: result.prepared.snapshotId,
-    capturedAt: result.prepared.capturedAt,
-  });
-  const comparison = compareManifests(result.preparedManifest, buildSnapshotManifest(afterSnapshot));
-  if (!comparison.accepted) throw new Error(`POST_RESTORE_INTEGRITY_FAILED:${comparison.differences.join(',')}`);
   console.log(JSON.stringify({ status: 'STAGING_REFRESHED', snapshotId: result.prepared.snapshotId, comparison }));
+}
+
+async function verifyOnlyCommand() {
+  const connection = resolveDryRunConnection(process.env);
+  const snapshot = validateSnapshotEnvelope(await readJson(required('snapshot')));
+  assertRefreshDirection(snapshot.sourceProjectRef, STAGING_PROJECT_REF);
+  const { connectionUrl, expectedRef, label } = connection;
+  const targetSchema = await inspectSchema(connection);
+  const tables = Object.keys(snapshot.data);
+  assertSchemaCompatible(snapshot.schema, targetSchema, tables);
+  const prepared = applyAuthAttributionPolicy(snapshot, targetSchema, authPolicyFromArgs());
+  const expectedManifest = buildRestoreScopeManifest(prepared, tables);
+  const current = await captureConsistentSnapshot(
+    { connectionUrl, expectedRef, label },
+    { tables },
+  );
+  const currentSnapshot = createSnapshotEnvelope({
+    sourceProjectRef: STAGING_PROJECT_REF,
+    schema: current.schema,
+    data: current.data,
+    piiMode: prepared.piiMode,
+    snapshotId: prepared.snapshotId,
+    capturedAt: prepared.capturedAt,
+  });
+  const comparison = compareManifests(
+    expectedManifest,
+    buildRestoreScopeManifest(currentSnapshot, tables),
+  );
+  if (!comparison.accepted) {
+    throw new Error(`VERIFY_ONLY_INTEGRITY_FAILED:${comparison.differences.join(',')}`);
+  }
+  console.log(JSON.stringify({
+    status: 'STAGING_VERIFY_ONLY_PASS',
+    snapshotId: prepared.snapshotId,
+    targetProjectRef: STAGING_PROJECT_REF,
+    comparison,
+    verified: {
+      schemaFingerprint: expectedManifest.schemaFingerprint,
+      tables: expectedManifest.tables,
+      relationships: expectedManifest.relationships,
+      productVariantIdentityHash: expectedManifest.productVariantIdentityHash,
+      anomalies: expectedManifest.anomalies,
+    },
+    databaseWrite: 0,
+  }));
 }
 
 try {
@@ -146,13 +201,15 @@ try {
 Commands:
   snapshot  Create a read-only Production or Staging rollback snapshot
   dry-run   Validate direction, schema, attribution and restore plan only
+  verify-only  Compare current Staging to the prepared Production snapshot without writes
   restore   Execute only with a fresh rollback snapshot and explicit approvals
 
 See tools/staging-refresh/README.md for the guarded operator procedure.`);
   } else if (command === 'snapshot') await snapshotCommand();
   else if (command === 'dry-run') await dryRunCommand();
+  else if (command === 'verify-only') await verifyOnlyCommand();
   else if (command === 'restore') await restoreCommand();
-  else throw new Error('COMMAND_REQUIRED:snapshot|dry-run|restore');
+  else throw new Error('COMMAND_REQUIRED:snapshot|dry-run|verify-only|restore');
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

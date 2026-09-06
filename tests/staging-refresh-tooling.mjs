@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   LOGICAL_RELATIONSHIPS,
   PRODUCTION_PROJECT_REF,
@@ -18,6 +19,7 @@ import {
   applyAuthAttributionPolicy,
   assertSchemaCompatible,
   assertSnapshotSchemaContract,
+  buildRestoreScopeManifest,
   buildSnapshotManifest,
   compareManifests,
   createSnapshotEnvelope,
@@ -26,10 +28,11 @@ import {
 } from '../tools/staging-refresh/manifest.mjs';
 import {
   assertRestoreWriterInspection,
+  buildRestoreMutationSql,
   buildSchemaInspectionSql,
   buildRestoreWriterInspectionSql,
   buildSnapshotSql,
-  buildTransactionalRestoreSql,
+  withSerializableRestoreTransaction,
 } from '../tools/staging-refresh/postgres.mjs';
 import { replaceFixtureAtomically } from '../tools/staging-refresh/fixtureTransaction.mjs';
 
@@ -268,6 +271,8 @@ assert.match(schemaInspectionSql, /pg_catalog\.pg_constraint/);
 assert.match(schemaInspectionSql, /pg_catalog\.pg_class/);
 assert.match(schemaInspectionSql, /pg_catalog\.pg_namespace/);
 assert.match(schemaInspectionSql, /pg_catalog\.pg_attribute/);
+assert.match(schemaInspectionSql, /pg_catalog\.pg_type/);
+assert.match(schemaInspectionSql, /pg_catalog\.pg_attrdef/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.conkey\) WITH ORDINALITY/);
 assert.match(schemaInspectionSql, /unnest\(constraint_record\.confkey\) WITH ORDINALITY/);
 assert.match(schemaInspectionSql, /CASE constraint_record\.contype::text/);
@@ -282,6 +287,7 @@ for (const field of ['tableName', 'constraintName', 'constraintType', 'columnNam
 assert.match(schemaInspectionSql, /ORDER BY table_name, constraint_name, ordinal_position/);
 assert.doesNotMatch(schemaInspectionSql, /information_schema\.table_constraints/);
 assert.doesNotMatch(schemaInspectionSql, /information_schema\.key_column_usage/);
+assert.doesNotMatch(schemaInspectionSql, /information_schema\.(?:tables|columns)/);
 assert.match(schemaInspectionSql, /constraint_record\.confdeltype::text AS delete_action/);
 assert.match(schemaInspectionSql, /constraint_record\.confupdtype::text AS update_action/);
 assert.doesNotMatch(schemaInspectionSql, /constraint_record\.confdeltype AS delete_action/);
@@ -665,11 +671,10 @@ assert.throws(
 
 assert.doesNotThrow(() => assertNoSecrets(data));
 assert.throws(() => assertNoSecrets({ access_token: 'forbidden' }), /敏感欄位/);
-const restoreSql = buildTransactionalRestoreSql(snapshot);
-assert.match(restoreSql, /^BEGIN ISOLATION LEVEL SERIALIZABLE;/);
+const restoreSql = buildRestoreMutationSql(snapshot);
 assert.match(restoreSql, /CREATE TEMP TABLE/);
 assert.match(restoreSql, /STAGING_READBACK_MISMATCH/);
-assert.match(restoreSql, /COMMIT;$/);
+assert.doesNotMatch(restoreSql, /(?:^|\n)(?:BEGIN ISOLATION|COMMIT;|ROLLBACK;)/);
 assert.doesNotMatch(restoreSql, new RegExp(PRODUCTION_PROJECT_REF));
 assert.doesNotMatch(restoreSql, /\bUPDATE\b|\bTRUNCATE\b|\bALTER\b|\bDROP\b|BYPASSRLS/i);
 const snapshotSql = buildSnapshotSql(REQUIRED_TABLES);
@@ -687,6 +692,165 @@ assert.equal((await replaceFixtureAtomically(cleanTarget, snapshot)).accepted, t
 assert.equal((await replaceFixtureAtomically(cleanTarget, snapshot)).accepted, true);
 assert.equal(cleanTarget.product_variants.length, 1);
 assert.equal(cleanTarget.product_variants[0].id, ids.variant);
+
+const preparedTarget = {};
+assert.equal((await replaceFixtureAtomically(preparedTarget, nullAttributed)).accepted, true);
+assert.equal(preparedTarget.product_groups[0].updated_by, null);
+assert.equal(
+  compareManifests(
+    buildRestoreScopeManifest(snapshot, REQUIRED_TABLES),
+    buildRestoreScopeManifest(nullAttributed, REQUIRED_TABLES),
+  ).accepted,
+  false,
+);
+
+const scopeExtraSchema = structuredClone(schema);
+scopeExtraSchema.publicTables.push('erp_healthcheck');
+scopeExtraSchema.constraints.push({
+  tableName: 'erp_healthcheck',
+  constraintName: 'erp_healthcheck_pkey',
+  constraintType: 'PRIMARY KEY',
+  columnName: 'id',
+  ordinalPosition: 1,
+});
+refreshSchemaContractEvidence(scopeExtraSchema);
+assert.equal((await replaceFixtureAtomically(
+  {},
+  nullAttributed,
+  { readbackSchema: scopeExtraSchema },
+)).accepted, true);
+
+const writerVisibilitySchema = structuredClone(scopeExtraSchema);
+writerVisibilitySchema.publicTables.push('dashboard_category_images');
+writerVisibilitySchema.columns.push({
+  tableName: 'dashboard_category_images',
+  columnName: 'id',
+  dataType: 'uuid',
+  udtName: 'uuid',
+  nullable: false,
+  defaultValue: 'gen_random_uuid()',
+  generated: 'NEVER',
+  identityGeneration: null,
+});
+refreshSchemaContractEvidence(writerVisibilitySchema);
+const readerScopeSnapshot = createSnapshotEnvelope({
+  sourceProjectRef: STAGING_PROJECT_REF,
+  schema,
+  data,
+  piiMode: 'internal-preserve',
+});
+const writerScopeSnapshot = createSnapshotEnvelope({
+  sourceProjectRef: STAGING_PROJECT_REF,
+  schema: writerVisibilitySchema,
+  data,
+  piiMode: 'internal-preserve',
+  snapshotId: readerScopeSnapshot.snapshotId,
+  capturedAt: readerScopeSnapshot.capturedAt,
+});
+assert.equal(
+  compareManifests(
+    buildRestoreScopeManifest(readerScopeSnapshot, REQUIRED_TABLES),
+    buildRestoreScopeManifest(writerScopeSnapshot, REQUIRED_TABLES),
+  ).accepted,
+  true,
+);
+assert.notEqual(
+  buildSnapshotManifest(readerScopeSnapshot).schemaFingerprint,
+  buildSnapshotManifest(writerScopeSnapshot).schemaFingerprint,
+);
+
+const postWriteFailureTarget = { product_groups: [{ id: 'before-post-write-failure' }] };
+await assert.rejects(
+  replaceFixtureAtomically(postWriteFailureTarget, nullAttributed, { forceIntegrityFailure: true }),
+  /INJECTED_POST_WRITE_INTEGRITY_FAILURE/,
+);
+assert.deepEqual(postWriteFailureTarget, {
+  product_groups: [{ id: 'before-post-write-failure' }],
+});
+
+const failedTransactionQueries = [];
+const failedClient = {
+  connect: async () => undefined,
+  query: async sql => {
+    failedTransactionQueries.push(sql);
+    return { rows: [] };
+  },
+  end: async () => undefined,
+};
+await assert.rejects(
+  withSerializableRestoreTransaction(
+    {
+      connectionUrl: restoreWriterUrl,
+      expectedRef: STAGING_PROJECT_REF,
+      label: 'fixture restore writer',
+    },
+    async client => {
+      await client.query('FIXTURE_WRITE_PHASE');
+      await client.query('FIXTURE_INTEGRITY_PHASE');
+      throw new Error('POST_RESTORE_INTEGRITY_FAILED:tables');
+    },
+    { clientFactory: () => failedClient },
+  ),
+  /POST_RESTORE_INTEGRITY_FAILED:tables/,
+);
+assert.deepEqual(failedTransactionQueries.slice(-2), [
+  'FIXTURE_INTEGRITY_PHASE',
+  'ROLLBACK;',
+]);
+assert.equal(failedTransactionQueries.includes('COMMIT;'), false);
+
+const successfulTransactionQueries = [];
+const successfulClient = {
+  connect: async () => undefined,
+  query: async sql => {
+    successfulTransactionQueries.push(sql);
+    return { rows: [] };
+  },
+  end: async () => undefined,
+};
+await withSerializableRestoreTransaction(
+  {
+    connectionUrl: restoreWriterUrl,
+    expectedRef: STAGING_PROJECT_REF,
+    label: 'fixture restore writer',
+  },
+  async client => {
+    await client.query('FIXTURE_WRITE_PHASE');
+    await client.query('FIXTURE_INTEGRITY_PASS');
+    return { accepted: true };
+  },
+  { clientFactory: () => successfulClient },
+);
+assert.equal(successfulTransactionQueries.at(-1), 'COMMIT;');
+assert.ok(
+  successfulTransactionQueries.indexOf('FIXTURE_INTEGRITY_PASS')
+    < successfulTransactionQueries.indexOf('COMMIT;'),
+);
+
+const cliSource = await readFile(
+  new URL('../tools/staging-refresh/cli.mjs', import.meta.url),
+  'utf8',
+);
+const restoreCommandSource = cliSource.slice(
+  cliSource.indexOf('async function restoreCommand()'),
+  cliSource.indexOf('async function verifyOnlyCommand()'),
+);
+assert.match(restoreCommandSource, /withSerializableRestoreTransaction/);
+assert.match(restoreCommandSource, /captureSnapshotWithClient\(client, result\.tables\)/);
+assert.match(restoreCommandSource, /buildRestoreScopeManifest\(afterSnapshot, result\.tables\)/);
+assert.match(restoreCommandSource, /compareManifests\(result\.preparedManifest, afterManifest\)/);
+assert.ok(
+  restoreCommandSource.indexOf('compareManifests(result.preparedManifest, afterManifest)')
+    < restoreCommandSource.indexOf("status: 'STAGING_REFRESHED'"),
+);
+const verifyOnlySource = cliSource.slice(
+  cliSource.indexOf('async function verifyOnlyCommand()'),
+  cliSource.indexOf('try {', cliSource.indexOf('async function verifyOnlyCommand()')),
+);
+assert.match(verifyOnlySource, /resolveDryRunConnection\(process\.env\)/);
+assert.doesNotMatch(verifyOnlySource, /resolveRestoreConnection|assertRestoreWriterRole|buildRestoreMutationSql/);
+assert.match(verifyOnlySource, /buildRestoreScopeManifest\(prepared, tables\)/);
+assert.match(verifyOnlySource, /STAGING_VERIFY_ONLY_PASS/);
 
 console.log('PASS source/target project-ref direction is fail closed; Production target has no override');
 console.log('PASS source reader, target reader and restore writer credentials are strictly separated');

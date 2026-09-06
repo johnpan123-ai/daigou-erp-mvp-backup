@@ -1,4 +1,4 @@
-import { buildSnapshotManifest, compareManifests, createSnapshotEnvelope } from './manifest.mjs';
+import { buildRestoreScopeManifest, compareManifests, createSnapshotEnvelope } from './manifest.mjs';
 
 /**
  * Isolated regression model for the all-or-nothing replacement contract.
@@ -7,6 +7,7 @@ import { buildSnapshotManifest, compareManifests, createSnapshotEnvelope } from 
  */
 export async function replaceFixtureAtomically(target, snapshot, options = {}) {
   const before = structuredClone(target);
+  const tables = Object.keys(snapshot.data || {});
   try {
     let index = 0;
     for (const [table, rows] of Object.entries(snapshot.data)) {
@@ -16,14 +17,18 @@ export async function replaceFixtureAtomically(target, snapshot, options = {}) {
     }
     const readback = createSnapshotEnvelope({
       sourceProjectRef: snapshot.sourceProjectRef,
-      schema: snapshot.schema,
+      schema: options.readbackSchema || snapshot.schema,
       data: target,
       piiMode: snapshot.piiMode,
       snapshotId: snapshot.snapshotId,
       capturedAt: snapshot.capturedAt,
     });
-    const comparison = compareManifests(buildSnapshotManifest(snapshot), buildSnapshotManifest(readback));
+    const comparison = compareManifests(
+      buildRestoreScopeManifest(snapshot, tables),
+      buildRestoreScopeManifest(readback, tables),
+    );
     if (!comparison.accepted) throw new Error(`FIXTURE_INTEGRITY_FAILED:${comparison.differences.join(',')}`);
+    if (options.forceIntegrityFailure) throw new Error('INJECTED_POST_WRITE_INTEGRITY_FAILURE');
     return comparison;
   } catch (error) {
     for (const key of Object.keys(target)) delete target[key];
