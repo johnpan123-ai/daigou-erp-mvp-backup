@@ -271,7 +271,7 @@ assert.deepEqual(
 );
 
 const inventorySave = providerSource.slice(
-  providerSource.indexOf('const upsertData = allInventory.map'),
+  providerSource.indexOf('const upsertData = preparedInventory.map'),
   providerSource.indexOf('async getSalesOrders'),
 );
 assert.match(inventorySave, /onConflict: 'inventory_key'/);

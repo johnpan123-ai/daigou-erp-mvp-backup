@@ -1986,6 +1986,18 @@ const OPTIONAL_ATOMIC_IMPORT_COLLECTIONS = [
   ['importBatches', 'erp_import_batches'],
 ] as const;
 
+/**
+ * Local Mode owns this database.  It is authoritative for Local Mode only and
+ * must never be used as the Cloud provider's cache.
+ */
+export const LOCAL_AUTHORITATIVE_INDEXED_DB_NAME = 'daigou-erp-local-authoritative-v1';
+
+/** Cloud Mode cache only.  Supabase remains authoritative. */
+export const CLOUD_CACHE_INDEXED_DB_NAME = 'daigou-erp-cloud-cache-v1';
+
+/** Pre-isolation database name retained solely for one-time Local data migration. */
+export const LEGACY_SHARED_INDEXED_DB_NAME = 'daigou-erp-db';
+
 type AtomicImportEntry = {
   storageKey: string;
   value: unknown[];
@@ -2025,18 +2037,188 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
   return entries;
 };
 
+const readAllKeyValues = (database: IDBDatabase): Promise<Array<{ key: IDBValidKey; value: unknown }>> => (
+  new Promise((resolve, reject) => {
+    const transaction = database.transaction('kv', 'readonly');
+    const request = transaction.objectStore('kv').openCursor();
+    const entries: Array<{ key: IDBValidKey; value: unknown }> = [];
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      entries.push({ key: cursor.key, value: cursor.value });
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => resolve(entries);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB read transaction aborted'));
+  })
+);
+
+const putAllKeyValues = (
+  database: IDBDatabase,
+  entries: Array<{ key: IDBValidKey; value: unknown }>,
+): Promise<void> => new Promise((resolve, reject) => {
+  if (entries.length === 0) {
+    resolve();
+    return;
+  }
+  const transaction = database.transaction('kv', 'readwrite');
+  const store = transaction.objectStore('kv');
+  entries.forEach(entry => store.put(entry.value, entry.key));
+  transaction.oncomplete = () => resolve();
+  transaction.onerror = () => reject(transaction.error);
+  transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB migration transaction aborted'));
+});
+
+const openExistingDatabase = async (name: string): Promise<IDBDatabase | null> => {
+  const databaseFactory = window.indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
+  if (databaseFactory.databases) {
+    const databases = await databaseFactory.databases();
+    if (!databases.some(database => database.name === name)) return null;
+  }
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(name, 1);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error(`Legacy IndexedDB open blocked: ${name}`));
+  });
+};
+
+/** Copy legacy shared data once into the Local authoritative namespace only. */
+const migrateLegacyLocalDatabase = async (target: IDBDatabase, targetName: string): Promise<void> => {
+  if (targetName === LEGACY_SHARED_INDEXED_DB_NAME) return;
+  if (['test', 'next', 'experimental'].includes(import.meta.env.MODE)) return;
+  if ((await readAllKeyValues(target)).length > 0) return;
+
+  const legacy = await openExistingDatabase(LEGACY_SHARED_INDEXED_DB_NAME);
+  if (!legacy) return;
+  try {
+    if (!legacy.objectStoreNames.contains('kv')) return;
+    const entries = await readAllKeyValues(legacy);
+    await putAllKeyValues(target, entries);
+    if (entries.length > 0) {
+      console.info(`[IndexedDB Migration] Copied ${entries.length} Local records into ${targetName}`);
+    }
+  } finally {
+    legacy.close();
+  }
+};
+
+/** Pure inventory projection used by Cloud Mode before its server mutation commits. */
+export const prepareInventoryUpsert = (
+  currentRows: InventoryItem[],
+  incomingRows: InventoryItem[],
+): { inventory: InventoryItem[]; stats: ImportStats } => {
+  const current = currentRows.map(item => ({ ...item }));
+  const items = incomingRows.map(item => ({ ...item }));
+  const parentCodes = new Set<string>();
+  const normalizedTitles = new Set<string>();
+  for (const item of items) {
+    const parentCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
+    if (parentCode) parentCodes.add(parentCode.trim().toUpperCase());
+    else {
+      const normalizedTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
+      if (normalizedTitle) normalizedTitles.add(normalizedTitle);
+    }
+  }
+
+  const parentCodeList = [...parentCodes];
+  const normalizedTitleList = [...normalizedTitles];
+  const filteredCurrent = current.filter(item => {
+    if (parentCodeList.length > 0) {
+      const code = (item.myacg_item_code || '').trim().toUpperCase();
+      const parent = (item.myacg_parent_code || '').trim().toUpperCase();
+      if (parentCodeList.some(candidate => parent === candidate || code === candidate || code.startsWith(`${candidate}_`))) {
+        return false;
+      }
+    } else {
+      const normalizedTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
+      if (normalizedTitle && normalizedTitleList.includes(normalizedTitle)) return false;
+    }
+    return true;
+  });
+
+  const currentMap = new Map<string, InventoryItem>();
+  for (const item of filteredCurrent) {
+    const key = item.inventory_key || `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`;
+    item.inventory_key = key;
+    currentMap.set(key, item);
+  }
+
+  const aggregated = new Map<string, InventoryItem>();
+  for (const item of items) {
+    const key = `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`;
+    item.inventory_key = key;
+    const existing = aggregated.get(key);
+    if (!existing) aggregated.set(key, { ...item });
+    else {
+      existing.raw_variant_name = item.raw_variant_name || existing.raw_variant_name;
+      existing.product_title = item.product_title || existing.product_title;
+      existing.myacg_sold_quantity = (existing.myacg_sold_quantity ?? 0) + (item.myacg_sold_quantity ?? 0);
+      existing.myacg_available_quantity = (existing.myacg_available_quantity ?? 0) + (item.myacg_available_quantity ?? 0);
+      if (item.myacg_demand_quantity !== undefined) {
+        existing.myacg_demand_quantity = (existing.myacg_demand_quantity ?? 0) + (item.myacg_demand_quantity ?? 0);
+      }
+    }
+  }
+
+  let newCount = 0;
+  let updatedCount = 0;
+  let unchangedCount = 0;
+  const groupSet = new Set<string>();
+  for (const item of aggregated.values()) {
+    item.normalized_product_title = normalizeProductTitle(item.product_title);
+    item.listing_type = determineListingType(item.product_title);
+    groupSet.add(item.normalized_product_title);
+    const existing = currentMap.get(item.inventory_key!);
+    if (!existing) {
+      newCount += 1;
+      currentMap.set(item.inventory_key!, item);
+      continue;
+    }
+    item.raw_variant_name = item.raw_variant_name || existing.raw_variant_name;
+    item.product_title = item.product_title || existing.product_title;
+    item.normalized_product_title = normalizeProductTitle(item.product_title);
+    item.listing_type = determineListingType(item.product_title);
+    const changed = existing.product_title !== item.product_title
+      || existing.raw_variant_name !== item.raw_variant_name
+      || existing.final_price !== item.final_price
+      || existing.myacg_available_quantity !== item.myacg_available_quantity
+      || existing.myacg_sold_quantity !== item.myacg_sold_quantity
+      || existing.myacg_demand_quantity !== item.myacg_demand_quantity
+      || existing.myacg_listed_at !== item.myacg_listed_at;
+    if (changed) updatedCount += 1;
+    else unchangedCount += 1;
+    currentMap.set(item.inventory_key!, { ...existing, ...item });
+  }
+
+  return {
+    inventory: [...currentMap.values()],
+    stats: { total: items.length, newCount, updatedCount, unchangedCount, groupCount: groupSet.size },
+  };
+};
+
 export class IndexedDbAdapter implements DatabaseAdapter {
   private dbPromise: Promise<IDBDatabase>;
+  private readonly allowLegacyLocalStorageFallback: boolean;
 
-  constructor() {
-    console.log('[IndexedDB Init]');
+  readonly databaseName: string;
+
+  constructor(
+    databaseName = LOCAL_AUTHORITATIVE_INDEXED_DB_NAME,
+    options: { allowLegacyLocalStorageFallback?: boolean; migrateLegacyLocalData?: boolean } = {},
+  ) {
+    this.databaseName = databaseName;
+    this.allowLegacyLocalStorageFallback = options.allowLegacyLocalStorageFallback ?? true;
+    console.log(`[IndexedDB Init] ${databaseName}`);
     this.dbPromise = new Promise((resolve, reject) => {
       if (typeof window === 'undefined' || !window.indexedDB) {
         console.warn('[IndexedDB] Not supported in this environment');
         reject(new Error('IndexedDB not supported'));
         return;
       }
-      const request = window.indexedDB.open('daigou-erp-db', 1);
+      const request = window.indexedDB.open(databaseName, 1);
 
       request.onupgradeneeded = () => {
         const db = request.result;
@@ -2045,10 +2227,20 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         }
       };
 
-      request.onsuccess = () => {
-        console.log('[IndexedDB Open Success]');
-        this.removeRedundantLocalStorageBackups(request.result);
-        resolve(request.result);
+      request.onsuccess = async () => {
+        console.log(`[IndexedDB Open Success] ${databaseName}`);
+        try {
+          if (options.migrateLegacyLocalData) {
+            await migrateLegacyLocalDatabase(request.result, databaseName);
+          }
+          if (this.allowLegacyLocalStorageFallback) {
+            this.removeRedundantLocalStorageBackups(request.result);
+          }
+          resolve(request.result);
+        } catch (error) {
+          request.result.close();
+          reject(error);
+        }
       };
 
       request.onerror = () => {
@@ -2237,7 +2429,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
             resolve(request.result as T);
           } else {
             // Fallback & Migration: Check if exists in localStorage
-            const localStored = localStorage.getItem(key);
+            const localStored = this.allowLegacyLocalStorageFallback ? localStorage.getItem(key) : null;
             if (localStored) {
               try {
                 const parsed = JSON.parse(localStored) as T;
@@ -2255,7 +2447,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
         request.onerror = () => {
           // Fallback to localStorage on request error
-          const localStored = localStorage.getItem(key);
+          const localStored = this.allowLegacyLocalStorageFallback ? localStorage.getItem(key) : null;
           if (localStored) {
             try {
               resolve(JSON.parse(localStored) as T);
@@ -2267,7 +2459,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       });
     } catch (e) {
       // Fallback if DB open failed
-      const localStored = localStorage.getItem(key);
+      const localStored = this.allowLegacyLocalStorageFallback ? localStorage.getItem(key) : null;
       if (localStored) {
         try {
           return JSON.parse(localStored) as T;
@@ -2288,9 +2480,13 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         request.onsuccess = () => {
           // IndexedDB is the primary store. Remove any old duplicate instead
           // of filling localStorage and blocking Supabase Auth persistence.
-          try {
-            localStorage.removeItem(key);
-          } catch (e) {}
+          if (this.allowLegacyLocalStorageFallback) {
+            try {
+              localStorage.removeItem(key);
+            } catch {
+              // Storage cleanup is best-effort after the IndexedDB write succeeds.
+            }
+          }
           resolve();
         };
 
@@ -2299,6 +2495,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         };
       });
     } catch (e) {
+      if (!this.allowLegacyLocalStorageFallback) throw e;
       console.warn(`[IndexedDB Write Fallback] Writing to localStorage for ${key}`, e);
       try {
         localStorage.setItem(key, JSON.stringify(value));
@@ -3626,7 +3823,18 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 }
 
-export const db: DatabaseAdapter = new IndexedDbAdapter();
+export const localDb: DatabaseAdapter = new IndexedDbAdapter(
+  LOCAL_AUTHORITATIVE_INDEXED_DB_NAME,
+  { migrateLegacyLocalData: true },
+);
+
+export const cloudCacheDb: DatabaseAdapter = new IndexedDbAdapter(
+  CLOUD_CACHE_INDEXED_DB_NAME,
+  { allowLegacyLocalStorageFallback: false },
+);
+
+/** Backward-compatible name: direct callers always mean Local authoritative data. */
+export const db: DatabaseAdapter = localDb;
 if (typeof window !== 'undefined') {
   // Diagnostic only: lets an operator run `await window.db.getVariantDuplicateReport()`
   // in the browser console to see which product_variants rows were merged as duplicates.

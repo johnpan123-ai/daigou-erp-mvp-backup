@@ -1,6 +1,8 @@
 import { PRODUCTION_SUPABASE_PROJECT_REF, parseSupabaseProjectRef } from './supabaseEnvironmentBoundary';
 
 export const PRODUCTION_INDEXED_DB_NAME = 'daigou-erp-db';
+export const LOCAL_AUTHORITATIVE_INDEXED_DB_NAME = 'daigou-erp-local-authoritative-v1';
+export const CLOUD_CACHE_INDEXED_DB_NAME = 'daigou-erp-cloud-cache-v1';
 export const TEST_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-test-v1';
 export const NEXT_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-next-v1';
 export const EXPERIMENTAL_SANDBOX_INDEXED_DB_NAME = 'daigou-erp-db-experimental-v1';
@@ -15,6 +17,7 @@ export type SandboxMode = 'test' | 'next' | 'experimental';
 export interface SandboxConfig {
   mode: SandboxMode;
   dbName: string;
+  cloudCacheDbName: string;
   storagePrefix: string;
   label: string;
   title: string;
@@ -30,6 +33,7 @@ const SANDBOX_CONFIGS: Record<SandboxMode, SandboxConfig> = {
   test: {
     mode: 'test',
     dbName: TEST_SANDBOX_INDEXED_DB_NAME,
+    cloudCacheDbName: `${TEST_SANDBOX_INDEXED_DB_NAME}-cloud-cache`,
     storagePrefix: TEST_SANDBOX_STORAGE_PREFIX,
     label: 'TEST SANDBOX',
     title: '[TEST] 小河馬 ERP',
@@ -37,6 +41,7 @@ const SANDBOX_CONFIGS: Record<SandboxMode, SandboxConfig> = {
   next: {
     mode: 'next',
     dbName: NEXT_SANDBOX_INDEXED_DB_NAME,
+    cloudCacheDbName: `${NEXT_SANDBOX_INDEXED_DB_NAME}-cloud-cache`,
     storagePrefix: NEXT_SANDBOX_STORAGE_PREFIX,
     label: 'NEXT SANDBOX',
     title: '[NEXT] 小河馬 ERP',
@@ -44,6 +49,7 @@ const SANDBOX_CONFIGS: Record<SandboxMode, SandboxConfig> = {
   experimental: {
     mode: 'experimental',
     dbName: EXPERIMENTAL_SANDBOX_INDEXED_DB_NAME,
+    cloudCacheDbName: `${EXPERIMENTAL_SANDBOX_INDEXED_DB_NAME}-cloud-cache`,
     storagePrefix: EXPERIMENTAL_SANDBOX_STORAGE_PREFIX,
     label: 'EXPERIMENTAL',
     title: '[EXPERIMENTAL] 小河馬 ERP',
@@ -214,9 +220,11 @@ export function installTestSandboxEnvironment(): void {
 
   IDBFactory.prototype.open = function sandboxedOpen(name: string, version?: number): IDBOpenDBRequest {
     const config = getActiveSandboxConfig();
-    const routedName = config && (name === PRODUCTION_INDEXED_DB_NAME || SANDBOX_DATABASE_NAMES.has(name))
-      ? config.dbName
-      : name;
+    const routedName = config && name === CLOUD_CACHE_INDEXED_DB_NAME
+      ? config.cloudCacheDbName
+      : config && (name === PRODUCTION_INDEXED_DB_NAME || name === LOCAL_AUTHORITATIVE_INDEXED_DB_NAME || SANDBOX_DATABASE_NAMES.has(name))
+        ? config.dbName
+        : name;
     return version === undefined
       ? nativeIndexedDbOpen!.call(this, routedName)
       : nativeIndexedDbOpen!.call(this, routedName, version);
@@ -260,17 +268,19 @@ const openPhysicalDatabase = (name: string, version = 1): Promise<IDBDatabase> =
 });
 
 const clearPhysicalSandbox = async (config: SandboxConfig): Promise<void> => {
-  const database = await openPhysicalDatabase(config.dbName);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction('kv', 'readwrite');
-      transaction.objectStore('kv').clear();
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error ?? new Error(`${config.label} clear aborted`));
-    });
-  } finally {
-    database.close();
+  for (const databaseName of [config.dbName, config.cloudCacheDbName]) {
+    const database = await openPhysicalDatabase(databaseName);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('kv', 'readwrite');
+        transaction.objectStore('kv').clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error ?? new Error(`${config.label} clear aborted`));
+      });
+    } finally {
+      database.close();
+    }
   }
 
   const remove = nativeStorageRemoveItem ?? Storage.prototype.removeItem;

@@ -8,10 +8,11 @@ import type {
   PrivateOrderItem,
   PurchaseBatchItem,
 } from '../../lib/db';
-import { db } from '../../lib/db';
+import { cloudCacheDb as db } from '../../lib/db';
 import { supabase } from './supabaseClient';
 import type { CloudChange, CloudRefreshRequest, CloudResource } from './cloudSyncDomain';
 import { CLOUD_TABLE_RESOURCE, resolveCloudRowIdentity } from './cloudSyncDomain';
+import { markCloudReachable, markCloudRequestFailed } from './cloudConnectivity';
 
 type Row = Record<string, unknown> & { id?: string; local_id?: string; deleted_at?: string | null; updated_at?: string };
 
@@ -172,7 +173,11 @@ export class CloudTargetedCache {
     if (request.databaseIds) query = query.in('id', request.databaseIds);
     if (request.updatedAfter) query = query.gt('updated_at', request.updatedAfter).order('updated_at');
     const result = await query;
-    if (result.error) throw result.error;
+    if (result.error) {
+      markCloudRequestFailed(result.error);
+      throw result.error;
+    }
+    markCloudReachable();
     const rows = (result.data || []) as Row[];
     this.rowsFetched += rows.length;
     return rows;

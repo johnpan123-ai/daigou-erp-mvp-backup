@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode } from '../providers/providerMode';
@@ -12,6 +12,13 @@ import {
 } from '../providers/cloud/cloudSyncDomain';
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
 import { consumeLocalCloudEcho } from '../providers/cloud/cloudRealtimeEchoRegistry';
+import {
+  getCloudConnectivitySnapshot,
+  markCloudReachable,
+  markCloudRequestFailed,
+  markCloudUnavailable,
+  subscribeCloudConnectivity,
+} from '../providers/cloud/cloudConnectivity';
 
 interface CloudRealtimeContextValue {
   conflictedResources: ReadonlySet<CloudResource>;
@@ -31,6 +38,19 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean }>());
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
   const [conflictedResources, setConflictedResources] = useState<Set<CloudResource>>(new Set());
+  const connectivity = useSyncExternalStore(
+    subscribeCloudConnectivity,
+    getCloudConnectivitySnapshot,
+    getCloudConnectivitySnapshot,
+  );
+  const cloudMode = ['cloud', 'fallback'].includes(getProviderMode());
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const isCloudOffline = cloudMode && connectivity.status !== 'online';
+    document.body.dataset.cloudConnectivity = isCloudOffline ? connectivity.status : 'inactive';
+    return () => { delete document.body.dataset.cloudConnectivity; };
+  }, [cloudMode, connectivity.status]);
 
   const isEditing = useCallback((resource: CloudResource) => (
     [...editingOwners.current.values()].some(scope => scope.editing && scope.resources.has(resource))
@@ -80,11 +100,14 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     let subscribedOnce = false;
     channel.subscribe(status => {
       if (status === 'SUBSCRIBED') {
+        markCloudReachable();
         if (subscribedOnce) {
           const active = [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
           void coordinator.fallback('reconnect', active);
         }
         subscribedOnce = true;
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        markCloudUnavailable(`realtime-${status.toLowerCase()}`);
       }
     });
 
@@ -93,11 +116,16 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') void coordinator.fallback('visibility', activeResources());
     };
+    const handleOnline = () => {
+      void coordinator.fallback('reconnect', activeResources()).catch(markCloudRequestFailed);
+    };
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
       coordinator.dispose();
       void supabase.removeChannel(channel);
@@ -126,8 +154,15 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
 
   return (
     <CloudRealtimeContext.Provider value={value}>
+      {cloudMode && connectivity.status !== 'online' && (
+        <div role="status" aria-live="polite" style={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10060, padding: '9px 15px', borderRadius: 8, background: '#7f1d1d', color: '#fff', border: '1px solid #fecaca', boxShadow: '0 4px 12px rgba(15,23,42,.18)', fontSize: 13, fontWeight: 700 }}>
+          {connectivity.status === 'checking'
+            ? '雲端連線確認中｜所有新增、修改、刪除與匯入暫停'
+            : 'Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用'}
+        </div>
+      )}
       {conflictedResources.size > 0 && (
-        <div role="alert" style={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
+        <div role="alert" style={{ position: 'fixed', top: connectivity.status === 'online' ? 8 : 54, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
           資料已被其他使用者更新；目前編輯內容未被覆蓋，請重新載入後再儲存。
         </div>
       )}
