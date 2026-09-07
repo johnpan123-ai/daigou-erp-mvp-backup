@@ -35,6 +35,7 @@
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
     "test:cloud-multi-user-sync": "node tests/cloud-multi-user-sync.mjs",
     "test:cloud-realtime-draft-catchup": "node tests/cloud-realtime-draft-catchup.mjs",
+    "test:cloud-realtime-react-pages": "node tests/cloud-realtime-react-pages.mjs",
     "test:dashboard-cloud-resilience": "node tests/dashboard-cloud-resilience.mjs",
     "test:cloud-canonical-identity": "node tests/cloud-canonical-identity-integration.mjs",
     "test:cloud-local-data-isolation": "node tests/cloud-local-data-isolation.mjs",

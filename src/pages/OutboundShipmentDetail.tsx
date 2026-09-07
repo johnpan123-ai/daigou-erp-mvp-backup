@@ -219,6 +219,18 @@ export default function OutboundShipmentDetail() {
     || formTracking !== (shipment.tracking_number || '')
     || formNote !== (shipment.note || '')
   ));
+
+  const closeHeaderEdit = () => {
+    if (shipment) {
+      setFormTitle(shipment.title);
+      setFormCarrier(shipment.carrier || '');
+      setFormTracking(shipment.tracking_number || '');
+      setFormWeight(shipment.weight_kg?.toString() || '');
+      setFormCost(shipment.shipping_cost?.toString() || '');
+      setFormNote(shipment.note || '');
+    }
+    setShowHeaderEdit(false);
+  };
   useCloudResourceSync(
     `outbound-shipment-detail:${id || 'unknown'}`,
     ['outboundShipments', 'japanPackages', 'products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
@@ -1275,7 +1287,7 @@ export default function OutboundShipmentDetail() {
             padding: '3px 12px', borderRadius: 12, fontSize: 12, fontWeight: 600,
             background: badge.bg, color: badge.color, flexShrink: 0,
           }}>{STATUS_LABELS[shipment.status] || shipment.status}</span>
-          <button onClick={() => setShowHeaderEdit(!showHeaderEdit)} style={{
+          <button onClick={() => showHeaderEdit ? closeHeaderEdit() : setShowHeaderEdit(true)} style={{
             background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4,
           }}>✏️</button>
         </div>
@@ -1445,7 +1457,7 @@ export default function OutboundShipmentDetail() {
             <button onClick={saveHeader} style={{
               padding: '8px 20px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer',
             }}>儲存</button>
-            <button onClick={() => setShowHeaderEdit(false)} style={{
+            <button onClick={closeHeaderEdit} style={{
               padding: '8px 16px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer',
             }}>取消</button>
           </div>

@@ -13,6 +13,10 @@ import {
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
 import { consumeLocalCloudEcho } from '../providers/cloud/cloudRealtimeEchoRegistry';
 import {
+  getCloudRealtimeTestBridge,
+  type CloudRealtimeTestPayload,
+} from './cloudRealtimeTestBridge';
+import {
   getCloudConnectivitySnapshot,
   markCloudReachable,
   markCloudRequestFailed,
@@ -34,7 +38,8 @@ const REALTIME_TABLES = Object.keys(CLOUD_TABLE_RESOURCE);
 
 export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const enabled = getProviderMode() === 'cloud' && Boolean(user);
+  const testBridge = getCloudRealtimeTestBridge();
+  const enabled = (getProviderMode() === 'cloud' || Boolean(testBridge)) && Boolean(user);
   const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean }>());
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
   const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
@@ -44,7 +49,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     getCloudConnectivitySnapshot,
     getCloudConnectivitySnapshot,
   );
-  const cloudMode = ['cloud', 'fallback'].includes(getProviderMode());
+  const cloudMode = ['cloud', 'fallback'].includes(getProviderMode()) || Boolean(testBridge);
   const showCloudReadStatus = connectivity.status !== 'online'
     || connectivity.readStatus === 'loading'
     || connectivity.readStatus === 'stale-cache'
@@ -81,7 +86,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
 
   useEffect(() => {
     if (!enabled) return;
-    const cache = new CloudTargetedCache();
+    const cache = new CloudTargetedCache(testBridge ? { query: testBridge.query } : undefined);
     cache.initializeCursor();
     const coordinator = new CloudSyncCoordinator({
       refresh: request => cache.refresh(request),
@@ -90,42 +95,63 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       onConflict: notifyConflict,
     });
     coordinatorRef.current = coordinator;
+    const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
 
-    let channel = supabase.channel(`erp-live-${user!.id}`);
-    for (const table of REALTIME_TABLES) {
-      channel = channel.on('postgres_changes' as any, { event: '*', schema: 'public', table }, (payload: any) => {
-        const row = payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old;
-        const { canonicalId, databaseId, localId } = resolveCloudRowIdentity(table, row || {});
-        if (!canonicalId) return;
-        const isLocalEcho = consumeLocalCloudEcho(table, canonicalId);
-        coordinator.receive({
-          table,
-          canonicalId,
-          databaseId,
-          localId,
-          resource: CLOUD_TABLE_RESOURCE[table],
-          kind: payload.eventType,
-          committedAt: payload.commit_timestamp,
-          origin: isLocalEcho ? 'local' : 'remote',
-        } as CloudChange);
+    const handlePayload = (table: string, payload: CloudRealtimeTestPayload) => {
+      const row = payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old;
+      const { canonicalId, databaseId, localId } = resolveCloudRowIdentity(table, row || {});
+      if (!canonicalId) return;
+      const isLocalEcho = consumeLocalCloudEcho(table, canonicalId);
+      coordinator.receive({
+        table,
+        canonicalId,
+        databaseId,
+        localId,
+        resource: CLOUD_TABLE_RESOURCE[table],
+        kind: payload.eventType,
+        committedAt: payload.commit_timestamp,
+        origin: isLocalEcho ? 'local' : 'remote',
+      } as CloudChange);
+    };
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    if (testBridge) {
+      testBridge.attach({
+        emit: async (table, payload) => {
+          handlePayload(table, payload);
+          await coordinator.flush();
+        },
+        emitMany: async events => {
+          events.forEach(({ table, payload }) => handlePayload(table, payload));
+          await coordinator.flush();
+        },
+        fallback: (reason, resources) => coordinator.fallback(reason, resources ?? activeResources()),
+        metrics: () => coordinator.snapshotMetrics(),
+      });
+      markCloudReachable();
+    } else {
+      channel = supabase.channel(`erp-live-${user!.id}`);
+      for (const table of REALTIME_TABLES) {
+        channel = channel.on('postgres_changes' as never, { event: '*', schema: 'public', table }, payload => {
+          handlePayload(table, payload as unknown as CloudRealtimeTestPayload);
+        });
+      }
+
+      let subscribedOnce = false;
+      channel.subscribe(status => {
+        if (status === 'SUBSCRIBED') {
+          markCloudReachable();
+          if (subscribedOnce) {
+            const active = [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
+            void coordinator.fallback('reconnect', active);
+          }
+          subscribedOnce = true;
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          markCloudUnavailable(`realtime-${status.toLowerCase()}`);
+        }
       });
     }
 
-    let subscribedOnce = false;
-    channel.subscribe(status => {
-      if (status === 'SUBSCRIBED') {
-        markCloudReachable();
-        if (subscribedOnce) {
-          const active = [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
-          void coordinator.fallback('reconnect', active);
-        }
-        subscribedOnce = true;
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        markCloudUnavailable(`realtime-${status.toLowerCase()}`);
-      }
-    });
-
-    const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
     const handleFocus = () => { void coordinator.fallback('focus', activeResources()); };
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') void coordinator.fallback('visibility', activeResources());
@@ -142,10 +168,11 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+      testBridge?.detach?.();
       coordinator.dispose();
-      void supabase.removeChannel(channel);
+      if (channel) void supabase.removeChannel(channel);
     };
-  }, [enabled, isEditing, notifyConflict, notifyRefreshed, user]);
+  }, [enabled, isEditing, notifyConflict, notifyRefreshed, testBridge, user]);
 
   const resumeAfterEditing = useCallback((resources: CloudResource[]) => {
     if (resources.length === 0) return;
