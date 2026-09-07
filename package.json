@@ -41,6 +41,8 @@
     "test:cloud-local-data-isolation": "node tests/cloud-local-data-isolation.mjs",
     "test:cloud-cache-authority": "node tests/cloud-cache-authority.mjs",
     "test:cloud-mutation-ordering": "node tests/cloud-mutation-ordering-dynamic.mjs",
+    "test:cloud-field-cas": "node tests/cloud-field-cas.mjs",
+    "test:cloud-field-cas-react": "node tests/cloud-field-cas-react.mjs",
     "test:p0-eslint-baseline": "node tests/p0-eslint-baseline-delta.mjs",
     "test:cloud-private-order-hydration": "node tests/cloud-private-order-hydration.mjs",
     "test:purchase-management-actions": "node tests/purchase-management-actions.mjs",

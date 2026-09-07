@@ -54,6 +54,8 @@ try {
       categoryB: '90000000-0000-4000-8000-000000000004',
       variantA: '90000000-0000-4000-8000-000000000005',
       variantB: '90000000-0000-4000-8000-000000000006',
+      privateItemDb: '90000000-0000-4000-8000-000000000007',
+      privateOrderDb: '90000000-0000-4000-8000-000000000008',
     };
     await localDb.saveProductGroups([{ id: ids.local, title: 'Local authoritative sentinel', priority: 'Medium' }]);
     const localHash = JSON.stringify(await localDb.getProductGroups());
@@ -63,6 +65,7 @@ try {
       ['product_variants', []],
     ]);
     let failNext = null;
+    let conflictNext = null;
     let canonicalLabel = '';
     const calls = [];
 
@@ -73,54 +76,60 @@ try {
     });
 
     supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-user' } } }, error: null });
+    supabase.rpc = async (name, args) => {
+      const table = args?.p_entity;
+      calls.push({ table, operation: 'rpc', name });
+      if (failNext && failNext.table === table && failNext.operation === 'rpc') {
+        failNext = null;
+        return { data: null, error: { message: 'network request timed out', code: 'ETIMEDOUT' } };
+      }
+      if (conflictNext === table) {
+        conflictNext = null;
+        return {
+          data: {
+            ok: false, code: 'FIELD_CONFLICT', entity: table,
+            recordId: args.p_operations[0].id,
+            conflicts: [{ field: 'title', expected: 'Client update', current: 'Remote title' }],
+          },
+          error: null,
+        };
+      }
+      const rows = server.get(table) || [];
+      const next = new Map(rows.map(row => [row.id, row]));
+      for (const operation of args?.p_operations || []) {
+        const current = next.get(operation.id);
+        if (operation.kind === 'create') {
+          next.set(operation.id, {
+            id: operation.id, ...operation.values,
+            ...(canonicalLabel ? { canonical_label: canonicalLabel } : {}),
+            version: 1, updated_at: '2026-09-07T01:00:00.000Z',
+          });
+        } else if (operation.kind === 'delete') {
+          next.set(operation.id, { ...current, deleted_at: '2026-09-07T01:00:02.000Z', version: Number(current.version) + 1 });
+        } else {
+          next.set(operation.id, {
+            ...current, ...operation.changes,
+            ...(canonicalLabel ? { canonical_label: canonicalLabel } : {}),
+            version: Number(current.version) + 1, updated_at: '2026-09-07T01:00:01.000Z',
+          });
+        }
+      }
+      server.set(table, [...next.values()]);
+      return { data: { ok: true, entity: table, rows: [...next.values()] }, error: null };
+    };
     supabase.from = table => {
-      let operation = 'select';
-      let payload = null;
       const filters = [];
       const builder = {
         select() { return builder; },
-        upsert(value) { operation = 'upsert'; payload = value; return builder; },
-        update(value) { operation = 'update'; payload = value; return builder; },
-        delete() { operation = 'delete'; return builder; },
         eq(column, value) { filters.push({ kind: 'eq', column, value }); return builder; },
         in(column, values) { filters.push({ kind: 'in', column, values }); return builder; },
-        is() { return builder; }, order() { return builder; }, range() { return builder; }, limit() { return builder; },
+        is(column, value) { filters.push({ kind: 'eq', column, value }); return builder; }, order() { return builder; }, range() { return builder; }, limit() { return builder; },
         single: async () => table === 'profiles'
           ? ({ data: { role: 'owner' }, error: null })
           : ({ data: null, error: null }),
         then(resolve, reject) {
-          calls.push({ table, operation });
-          if (failNext && failNext.table === table && failNext.operation === operation) {
-            failNext = null;
-            return Promise.resolve({ data: null, error: { message: 'network request timed out', code: 'ETIMEDOUT' } }).then(resolve, reject);
-          }
+          calls.push({ table, operation: 'select' });
           const rows = server.get(table) || [];
-          if (operation === 'upsert') {
-            const next = new Map(rows.map(row => [row.id, row]));
-            for (const item of Array.isArray(payload) ? payload : [payload]) {
-              const current = next.get(item.id) || {};
-              next.set(item.id, {
-                ...current,
-                ...item,
-                ...(canonicalLabel ? { canonical_label: canonicalLabel } : {}),
-                version: Number(current.version || item.version || 0) + 1,
-                updated_at: '2026-09-07T01:00:00.000Z',
-              });
-            }
-            server.set(table, [...next.values()]);
-            return Promise.resolve({ data: [...next.values()], error: null }).then(resolve, reject);
-          }
-          if (operation === 'update') {
-            const updated = rows.map(row => matches(row, filters)
-              ? { ...row, ...payload, version: Number(row.version || 0) + 1, updated_at: '2026-09-07T01:00:01.000Z' }
-              : row);
-            server.set(table, updated);
-            return Promise.resolve({ data: updated.filter(row => matches(row, filters)), error: null }).then(resolve, reject);
-          }
-          if (operation === 'delete') {
-            server.set(table, rows.filter(row => !matches(row, filters)));
-            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
-          }
           return Promise.resolve({ data: rows.filter(row => matches(row, filters)), error: null }).then(resolve, reject);
         },
       };
@@ -139,7 +148,7 @@ try {
     const updateCache = await cloudCacheDb.getProductGroups();
 
     const beforeFailedUpdate = JSON.stringify(updateCache);
-    failNext = { table: 'product_groups', operation: 'upsert' };
+    failNext = { table: 'product_groups', operation: 'rpc' };
     markCloudReadFresh(1);
     let updateFailure = false;
     try {
@@ -148,13 +157,23 @@ try {
       updateFailure = true;
     }
     const failedUpdateCacheStable = beforeFailedUpdate === JSON.stringify(await cloudCacheDb.getProductGroups());
+    const beforeConflictUpdate = JSON.stringify(await cloudCacheDb.getProductGroups());
+    conflictNext = 'product_groups';
+    markCloudReadFresh(1);
+    let structuredConflict = null;
+    try {
+      await dataProvider.saveProductGroups([{ ...updateCache[0], title: 'Conflicting client title' }]);
+    } catch (error) {
+      structuredConflict = { code: error?.code, fields: error?.conflicts?.map(item => item.field) };
+    }
+    const conflictCacheStable = beforeConflictUpdate === JSON.stringify(await cloudCacheDb.getProductGroups());
 
     const categories = [
       { id: ids.categoryA, product_group_id: ids.group, title: 'A', sort_order: 1 },
       { id: ids.categoryB, product_group_id: ids.group, title: 'B', sort_order: 2 },
     ];
     server.set('product_categories', categories.map(row => ({ ...row, version: 1 })));
-    await cloudCacheDb.saveProductCategories(categories);
+    await cloudCacheDb.saveProductCategories(categories.map(row => ({ ...row, version: 1 })));
     canonicalLabel = 'server-reorder';
     markCloudReadFresh(1);
     await dataProvider.saveProductCategories([
@@ -163,7 +182,7 @@ try {
     ]);
     const reorderCache = await cloudCacheDb.getProductCategories();
     const beforeFailedReorder = JSON.stringify(reorderCache);
-    failNext = { table: 'product_categories', operation: 'upsert' };
+    failNext = { table: 'product_categories', operation: 'rpc' };
     markCloudReadFresh(1);
     let reorderFailure = false;
     try {
@@ -189,7 +208,7 @@ try {
     await dataProvider.updateProductVariantPatchBulk(variants.map(row => ({ id: row.id, patch: { note: 'bulk update' } })));
     const bulkCache = await cloudCacheDb.getProductVariants();
     const beforeFailedBulk = JSON.stringify(bulkCache);
-    failNext = { table: 'product_variants', operation: 'upsert' };
+    failNext = { table: 'product_variants', operation: 'rpc' };
     markCloudReadFresh(1);
     let bulkFailure = false;
     try {
@@ -204,7 +223,7 @@ try {
     await dataProvider.deleteProductVariant(ids.variantA);
     const deleteCache = await cloudCacheDb.getProductVariants();
     const beforeFailedDelete = JSON.stringify(deleteCache);
-    failNext = { table: 'product_variants', operation: 'update' };
+    failNext = { table: 'product_variants', operation: 'rpc' };
     markCloudReadFresh(1);
     let deleteFailure = false;
     try {
@@ -213,6 +232,17 @@ try {
       deleteFailure = true;
     }
     const failedDeleteCacheStable = beforeFailedDelete === JSON.stringify(await cloudCacheDb.getProductVariants());
+
+    const privateLocalId = '90000000-0000-4000-8000-000000000009';
+    const privateItem = {
+      id: privateLocalId, database_id: ids.privateItemDb, private_order_id: ids.privateOrderDb,
+      product_variant_id: ids.variantB, quantity: 1, amount: 200, note: '', version: 1,
+    };
+    await cloudCacheDb.savePrivateOrderItems([privateItem]);
+    server.set('private_order_items', [{ ...privateItem, id: ids.privateItemDb, local_id: privateLocalId }]);
+    markCloudReadFresh(1);
+    await dataProvider.deletePrivateOrderItems([privateLocalId]);
+    const legacyDeleteRemoved = !(await cloudCacheDb.getPrivateOrderItems()).some(item => item.id === privateLocalId);
 
     const beforeImport = JSON.stringify({
       groups: await cloudCacheDb.getProductGroups(),
@@ -237,6 +267,8 @@ try {
       updateCanonical: updateCache[0]?.canonical_label,
       updateFailure,
       failedUpdateCacheStable,
+      structuredConflict,
+      conflictCacheStable,
       reorderCanonical: reorderCache.map(row => row.canonical_label),
       reorderSort: reorderCache.map(row => row.sort_order).sort(),
       reorderFailure,
@@ -248,6 +280,7 @@ try {
       deletedVariantAbsent: !deleteCache.some(row => row.id === ids.variantA),
       deleteFailure,
       failedDeleteCacheStable,
+      legacyDeleteRemoved,
       importFailure,
       importCacheStable: beforeImport === afterImport,
       localStable: localHash === JSON.stringify(await localDb.getProductGroups()),
@@ -259,6 +292,8 @@ try {
   assert.equal(result.updateCanonical, 'server-update');
   assert.equal(result.updateFailure, true);
   assert.equal(result.failedUpdateCacheStable, true);
+  assert.deepEqual(result.structuredConflict, { code: 'FIELD_CONFLICT', fields: ['title'] });
+  assert.equal(result.conflictCacheStable, true);
   assert.deepEqual(result.reorderCanonical, ['server-reorder', 'server-reorder']);
   assert.deepEqual(result.reorderSort, [1, 2]);
   assert.equal(result.reorderFailure, true);
@@ -270,15 +305,18 @@ try {
   assert.equal(result.deletedVariantAbsent, true);
   assert.equal(result.deleteFailure, true);
   assert.equal(result.failedDeleteCacheStable, true);
+  assert.equal(result.legacyDeleteRemoved, true, 'DB UUID delete left a local_id-keyed cache row behind');
   assert.equal(result.importFailure, true);
   assert.equal(result.importCacheStable, true);
   assert.equal(result.localStable, true);
   assert.equal(supabaseRequests.length, 0, 'Mutation ordering fixture contacted Supabase');
 
   console.log('PASS create/update use server canonical readback; failed update leaves cache unchanged');
+  console.log('PASS structured server conflict leaves Cloud cache and Local DB unchanged');
   console.log('PASS reorder uses server canonical readback; failed reorder leaves cache unchanged');
   console.log('PASS bulk update uses server canonical readback; failed bulk leaves cache unchanged');
   console.log('PASS delete removes cache only after server acknowledgement; failed delete leaves cache unchanged');
+  console.log('PASS acknowledged delete removes legacy local_id-keyed cache rows by database_id');
   console.log('PASS browser Cloud import is fail-closed and changes neither cache nor Local DB');
   console.log('PASS dynamic mutation families leave Local authoritative DB unchanged and make 0 live Supabase requests');
 } finally {

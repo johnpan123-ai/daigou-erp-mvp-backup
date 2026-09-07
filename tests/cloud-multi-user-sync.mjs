@@ -169,10 +169,11 @@ try {
   assert.equal(result.saved.version, 4);
   assert.equal(productionRequests.length, 0, 'NEXT integration test contacted Production Supabase');
 
-  const [contextSource, cacheSource, providerSource] = await Promise.all([
+  const [contextSource, cacheSource, providerSource, fieldCasSql] = await Promise.all([
     readFile(new URL('../src/contexts/CloudRealtimeSyncContext.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/providers/cloud/cloudTargetedCache.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/sql/020_cloud_field_cas.sql', import.meta.url), 'utf8'),
   ]);
   assert.match(contextSource, /postgres_changes/);
   assert.match(contextSource, /visibilitychange/);
@@ -180,8 +181,9 @@ try {
   assert.match(cacheSource, /\.in\('id', request\.databaseIds\)/, 'Realtime changes must refetch changed rows by database id');
   assert.match(cacheSource, /\.gt\('updated_at', request\.updatedAfter\)/, 'Focus/reconnect must use incremental catch-up');
   assert.doesNotMatch(cacheSource, /pullCoreProductData/, 'Realtime cache path must not full-pull ERP data');
-  assert.match(providerSource, /assertCloudRowsFresh\('product_groups'/);
-  assert.match(providerSource, /\.eq\('version', localVariant\.version \?\? -1\)/);
+  assert.match(providerSource, /supabase\.rpc\('erp_apply_field_mutations'/);
+  assert.match(providerSource, /buildCloudPatchOperation/);
+  assert.match(fieldCasSql, /IS NOT DISTINCT FROM/, 'Server field CAS must compare touched fields atomically');
   console.log('PASS two-client viewing refreshes without F5');
   console.log('PASS editing draft is preserved and remote change is surfaced');
   console.log('PASS stale write is blocked by optimistic version contract');

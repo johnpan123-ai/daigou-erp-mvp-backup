@@ -44,6 +44,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
   const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
   const [conflictedResources, setConflictedResources] = useState<Set<CloudResource>>(new Set());
+  const [mutationConflictMessage, setMutationConflictMessage] = useState('');
   const connectivity = useSyncExternalStore(
     subscribeCloudConnectivity,
     getCloudConnectivitySnapshot,
@@ -63,6 +64,15 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     document.body.dataset.cloudConnectivity = isCloudOffline ? connectivity.status : 'inactive';
     return () => { delete document.body.dataset.cloudConnectivity; };
   }, [cloudMode, connectivity.status]);
+
+  useEffect(() => {
+    const handleMutationConflict = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setMutationConflictMessage(detail?.message || '資料已由其他裝置更新，請重新確認後再儲存。');
+    };
+    window.addEventListener('cloud-field-mutation-conflict', handleMutationConflict);
+    return () => window.removeEventListener('cloud-field-mutation-conflict', handleMutationConflict);
+  }, []);
 
   const isEditing = useCallback((resource: CloudResource) => (
     [...editingOwners.current.values()].some(scope => scope.editing && scope.resources.has(resource))
@@ -242,6 +252,12 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       {conflictedResources.size > 0 && (
         <div role="alert" style={{ position: 'fixed', top: showCloudReadStatus ? 54 : 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
           資料已被其他使用者更新；目前編輯內容未被覆蓋，結束編輯後會自動更新。
+        </div>
+      )}
+      {mutationConflictMessage && (
+        <div role="alert" data-cloud-field-conflict style={{ position: 'fixed', top: showCloudReadStatus || conflictedResources.size > 0 ? 54 : 8, right: 16, zIndex: 10070, maxWidth: 420, padding: '9px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
+          {mutationConflictMessage}
+          <button type="button" aria-label="關閉衝突提示" onClick={() => setMutationConflictMessage('')} style={{ marginLeft: 12, border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 }}>×</button>
         </div>
       )}
       {children}

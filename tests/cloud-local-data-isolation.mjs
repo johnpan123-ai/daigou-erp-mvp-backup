@@ -156,11 +156,14 @@ try {
     let mutationRequests = 0;
     let canonicalReads = 0;
     supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-user' } } }, error: null });
+    supabase.rpc = async (name, args) => {
+      mutationRequests += 1;
+      if (rejectMutation) return { data: null, error: { message: 'fixture server rejected write', code: 'FIXTURE_REJECT' } };
+      return { data: { ok: true, entity: args.p_entity, rows: [serverCanonicalGroup] }, error: null };
+    };
     supabase.from = table => {
-      let operation = 'select';
       const builder = {
-        select() { if (operation !== 'upsert') operation = 'select'; return builder; },
-        upsert() { operation = 'upsert'; return builder; },
+        select() { return builder; },
         eq() { return builder; },
         in() { return builder; },
         single: async () => table === 'profiles'
@@ -168,12 +171,7 @@ try {
           : ({ data: null, error: null }),
         then(resolve, reject) {
           let response = { data: [], error: null };
-          if (table === 'product_groups' && operation === 'upsert') {
-            mutationRequests += 1;
-            response = rejectMutation
-              ? { data: null, error: { message: 'fixture server rejected write', code: 'FIXTURE_REJECT' } }
-              : { data: [serverCanonicalGroup], error: null };
-          } else if (table === 'product_groups' && operation === 'select') {
+          if (table === 'product_groups') {
             canonicalReads += 1;
             response = { data: [serverCanonicalGroup], error: null };
           }
@@ -271,8 +269,8 @@ try {
   ]);
   assert.match(providerSource, /cloudCacheDb as db/);
   assert.doesNotMatch(providerSource, /from ['"]\.\.\/\.\.\/lib\/db['"];?\s*\/\/.*local/u);
-  assert.match(providerSource, /refreshAcknowledgedCloudRows\('product_groups'/, 'Cloud save does not read back the acknowledged server row');
-  assert.match(providerSource, /\.upsert\(upsertData, \{ onConflict: 'inventory_key' \}\)\s*\.select\('\*'\)/u);
+  assert.match(providerSource, /supabase\.rpc\('erp_apply_field_mutations'/, 'Cloud save does not use the field-CAS RPC');
+  assert.match(providerSource, /applyCloudCollection\('inventory_items'/u);
   assert.match(targetedSource, /cloudCacheDb as db/);
   assert.match(modeSource, /assertCloudWriteAllowed\(\)/);
   assert.match(realtimeContextSource, /Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用/);
@@ -296,7 +294,7 @@ try {
     'deleteProductGroups',
   ]) {
     const body = methodBody(name);
-    assert.match(body, /refreshAcknowledgedCloudRows/, `${name} does not refresh from acknowledged Cloud rows`);
+    assert.match(body, /applyCloudCollection|applyCloudFieldMutations|deleteCloudProductGroupTrees/, `${name} does not use the field-CAS boundary`);
     assert.doesNotMatch(body, /await db\.(?:save|update|delete)/, `${name} writes optimistic input directly to Cloud cache`);
   }
   for (const name of [

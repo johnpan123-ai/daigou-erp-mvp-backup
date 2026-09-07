@@ -1,6 +1,10 @@
 import { reportStorageWriteFailure } from './storageGuard';
 
 export interface InventoryItem {
+  id?: string;
+  database_id?: string; // Canonical Cloud UUID; never used as Local Mode identity.
+  version?: number;
+  updated_at?: string;
   import_sort_index?: number;
   myacg_item_code: string; // PK
   myacg_parent_code?: string;
@@ -20,6 +24,9 @@ export interface InventoryItem {
 }
 
 export interface SalesOrder {
+  database_id?: string; // Canonical Cloud UUID when id is a source-local order id.
+  version?: number;
+  updated_at?: string;
   id: string; // PK
   platform: string;
   order_number: string;
@@ -28,6 +35,10 @@ export interface SalesOrder {
 }
 
 export interface SalesOrderItem {
+  database_id?: string;
+  order_database_id?: string;
+  version?: number;
+  updated_at?: string;
   id: string; // PK
   order_id: string; // FK
   product_variant_id?: string; // FK
@@ -45,6 +56,7 @@ export interface SalesOrderItem {
 // === Single Document (Header) - Multiple Items (Lines) ===
 
 export interface PurchaseBatch {
+  database_id?: string;
   id: string; // PK
   product_group_id: string; // FK
   name: string;
@@ -56,6 +68,7 @@ export interface PurchaseBatch {
 }
 
 export interface PurchaseBatchItem {
+  database_id?: string;
   id: string; // PK
   purchase_batch_id: string; // FK
   product_variant_id: string; // FK
@@ -67,6 +80,7 @@ export interface PurchaseBatchItem {
 }
 
 export interface JapanPackage {
+  database_id?: string;
   id: string;
   title: string;
   vendor_name?: string;
@@ -83,6 +97,7 @@ export interface JapanPackage {
 }
 
 export interface JapanPackageItem {
+  database_id?: string;
   id: string;
   japan_package_id: string;
   product_group_id?: string;
@@ -103,6 +118,7 @@ export interface JapanPackageItem {
 }
 
 export interface OutboundShipment {
+  database_id?: string;
   id: string;
   title: string;
   status: string;
@@ -119,6 +135,7 @@ export interface OutboundShipment {
 }
 
 export interface OutboundShipmentItem {
+  database_id?: string;
   id: string;
   outbound_shipment_id: string;
   japan_package_item_id?: string;
@@ -137,6 +154,7 @@ export interface OutboundShipmentItem {
 }
 
 export interface PrivateOrder {
+  database_id?: string;
   id: string; // PK
   product_group_id: string; // FK
   customer_name: string;
@@ -148,6 +166,7 @@ export interface PrivateOrder {
 }
 
 export interface PrivateOrderItem {
+  database_id?: string;
   id: string; // PK
   private_order_id: string; // FK
   product_variant_id: string; // FK
@@ -159,6 +178,7 @@ export interface PrivateOrderItem {
 }
 
 export interface BundleComponent {
+  database_id?: string;
   id: string; // PK
   bundle_variant_id: string; // FK to product_variants.id
   component_variant_id: string; // FK to product_variants.id
@@ -168,6 +188,7 @@ export interface BundleComponent {
 }
 
 export interface ProductGroup {
+  database_id?: string;
   id: string; // PK (We will use product_title as ID for simplicity, or UUID)
   purchase_date: string;
   priority: 'High' | 'Medium' | 'Low';
@@ -187,6 +208,7 @@ export interface ProductGroup {
 }
 
 export interface ProductCategory {
+  database_id?: string;
   id: string; // PK
   product_group_id: string; // FK
   title: string;
@@ -196,6 +218,7 @@ export interface ProductCategory {
 }
 
 export interface ProductVariant {
+  database_id?: string;
   id: string; // PK
   product_group_id?: string; // FK
   product_category_id?: string; // FK (Deprecated)

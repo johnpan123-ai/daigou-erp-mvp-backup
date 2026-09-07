@@ -1,5 +1,6 @@
 import type {
   BundleComponent,
+  InventoryItem,
   JapanPackage,
   JapanPackageItem,
   OutboundShipment,
@@ -39,6 +40,7 @@ interface TableCacheAdapter<T extends { id: string }> {
 
 const canonicalId = (table: string, row: Row): string => resolveCloudRowIdentity(table, row).canonicalId;
 const commonMeta = (row: Row) => ({
+  database_id: typeof row.id === 'string' ? row.id : undefined,
   local_id: typeof row.local_id === 'string' && row.local_id ? row.local_id : undefined,
   updated_at: typeof row.updated_at === 'string' ? row.updated_at : undefined,
   version: typeof row.version === 'number' ? row.version : undefined,
@@ -48,6 +50,30 @@ const TABLES: Readonly<Record<string, TableCacheAdapter<any>>> = {
   product_groups: { get: () => db.getProductGroups(), save: rows => db.saveProductGroups(rows), map: row => ({ ...row, id: canonicalId('product_groups', row), ...commonMeta(row) }), supportsIncremental: true },
   product_categories: { get: () => db.getProductCategories(), save: rows => db.saveProductCategories(rows), map: row => ({ ...row, id: canonicalId('product_categories', row), ...commonMeta(row) }), supportsIncremental: true },
   product_variants: { get: () => db.getProductVariants(), save: rows => db.replaceProductVariantsFromAuthoritativeCloud(rows), map: row => ({ ...row, id: canonicalId('product_variants', row), ...commonMeta(row) }), supportsIncremental: true },
+  inventory_items: {
+    get: () => db.getInventory(),
+    save: rows => db.saveInventory(rows),
+    map: row => ({
+      id: canonicalId('inventory_items', row),
+      inventory_key: String(row.inventory_key || ''),
+      myacg_item_code: String(row.myacg_item_code || ''),
+      product_id: typeof row.product_id === 'string' ? row.product_id : undefined,
+      product_title: String(row.product_title || ''),
+      normalized_product_title: typeof row.normalized_product_title === 'string' ? row.normalized_product_title : undefined,
+      raw_variant_name: String(row.raw_variant_name || ''),
+      listing_type: String(row.listing_type || ''),
+      final_price: Number(row.final_price ?? 0),
+      myacg_available_quantity: Number(row.myacg_available_quantity ?? 0),
+      myacg_sold_quantity: Number(row.myacg_sold_quantity ?? 0),
+      myacg_demand_quantity: Number(row.myacg_demand_quantity ?? 0),
+      myacg_listed_at: String(row.myacg_listed_at || ''),
+      import_sort_index: row.import_sort_index == null ? undefined : Number(row.import_sort_index),
+      latest_catalog_import_id: typeof row.latest_catalog_import_id === 'string' ? row.latest_catalog_import_id : undefined,
+      catalog_last_seen_at: typeof row.catalog_last_seen_at === 'string' ? row.catalog_last_seen_at : undefined,
+      ...commonMeta(row),
+    } as InventoryItem),
+    supportsIncremental: true,
+  },
   purchase_batches: { get: () => db.getPurchaseBatches(), save: rows => db.savePurchaseBatches(rows), map: row => ({ ...row, id: canonicalId('purchase_batches', row), ...commonMeta(row) }), supportsIncremental: true },
   purchase_batch_items: {
     get: () => db.getPurchaseBatchItems(),
@@ -252,7 +278,11 @@ export class CloudTargetedCache {
   private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[]): Promise<void> {
     const current = await adapter.get();
     const next = new Map(current.map(row => [row.id, row]));
-    for (const id of touchedIds) next.delete(id);
+    const touched = new Set(touchedIds);
+    for (const row of current) {
+      const databaseId = (row as T & { database_id?: string }).database_id;
+      if (touched.has(row.id) || (databaseId && touched.has(databaseId))) next.delete(row.id);
+    }
     for (const row of rows) {
       if (!row.deleted_at) next.set(canonicalId(table, row), adapter.map(row));
     }
