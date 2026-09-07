@@ -6,6 +6,7 @@ import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../li
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrder, PrivateOrderItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { allocatePurchaseBatchFreight } from '../lib/purchaseBatchFreightAllocation';
+import { purchaseBatchIntentCoordinator } from '../providers/cloud/purchaseBatchTransaction';
 
 interface PurchaseBatchModalProps {
   show: boolean;
@@ -169,6 +170,8 @@ export default function PurchaseBatchModal({
   const [freightStatus, setFreightStatus] = useState<{ kind: 'success' | 'warning' | 'error'; message: string } | null>(null);
   const freightAllocationRef = useRef<FreightAllocationSnapshot | null>(null);
   const initializedRef = useRef<string | null>(null);
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const isDaili = group?.listing_type === '代理版';
 
@@ -509,7 +512,7 @@ export default function PurchaseBatchModal({
     }
   };
 
-  const handleAddBatchSubmit = async () => {
+  const performBatchSubmit = async () => {
     const validLines = batchLines.filter(l => l.quantity > 0);
     if (!group || validLines.length === 0) return;
     if (editingBatchId && !batchForm.name.trim()) return;
@@ -517,47 +520,56 @@ export default function PurchaseBatchModal({
     try {
       const allBatches = await dataProvider.getPurchaseBatches();
       const allBatchItems = await dataProvider.getPurchaseBatchItems();
-
-      if (editingBatchId) {
-        const idx = allBatches.findIndex(b => b.id === editingBatchId);
-        if (idx !== -1) {
-          allBatches[idx] = { ...allBatches[idx], name: batchForm.name, date: batchForm.date, note: batchForm.note };
-        }
-        const newItems = allBatchItems.filter(i => i.purchase_batch_id !== editingBatchId);
-        const updatedItems: PurchaseBatchItem[] = validLines.map(line => ({
-          id: crypto.randomUUID(),
-          purchase_batch_id: editingBatchId,
-          product_variant_id: line.variant_id,
+      const scope = `${group.id}:${editingBatchId || 'new'}`;
+      const draft = {
+        groupId: group.id,
+        editingBatchId,
+        form: { name: batchForm.name, date: batchForm.date, note: batchForm.note },
+        lines: validLines.map(line => ({
+          variantId: line.variant_id,
           quantity: line.quantity,
           cost: typeof line.cost === 'string' ? (parseFloat(line.cost) || 0) : (line.cost || 0),
-          note: line.note
-        }));
-        await dataProvider.savePurchaseBatches(allBatches);
-        await dataProvider.savePurchaseBatchItems([...newItems, ...updatedItems]);
-      } else {
-        const newBatchId = crypto.randomUUID();
-        const finalName = batchForm.name.trim() || getAutoBatchName(allBatches);
-        const newBatch: PurchaseBatch = {
-          id: newBatchId,
-          product_group_id: group.id,
-          name: finalName,
-          date: batchForm.date,
-          note: batchForm.note,
-          created_at: new Date().toISOString()
-        };
+          note: line.note,
+        })),
+      };
+      const command = purchaseBatchIntentCoordinator.resolve(scope, draft, idempotencyKey => {
+        const existingBatch = editingBatchId
+          ? allBatches.find(batch => batch.id === editingBatchId)
+          : undefined;
+        if (editingBatchId && !existingBatch) throw new Error('PURCHASE_BATCH_EDIT_BASE_MISSING');
+        const batchId = existingBatch?.id || crypto.randomUUID();
+        const batch: PurchaseBatch = existingBatch
+          ? { ...existingBatch, name: batchForm.name, date: batchForm.date, note: batchForm.note }
+          : {
+              id: batchId,
+              product_group_id: group.id,
+              name: batchForm.name.trim() || getAutoBatchName(allBatches),
+              date: batchForm.date,
+              note: batchForm.note,
+              created_at: new Date().toISOString(),
+            };
+        const existingItems = new Map(
+          allBatchItems
+            .filter(item => item.purchase_batch_id === batchId)
+            .map(item => [item.product_variant_id, item]),
+        );
+        const items: PurchaseBatchItem[] = validLines.map(line => {
+          const existing = existingItems.get(line.variant_id);
+          return {
+            ...existing,
+            id: existing?.id || crypto.randomUUID(),
+            purchase_batch_id: batchId,
+            product_variant_id: line.variant_id,
+            quantity: line.quantity,
+            cost: typeof line.cost === 'string' ? (parseFloat(line.cost) || 0) : (line.cost || 0),
+            note: line.note,
+          };
+        });
+        return { idempotencyKey, batch, items };
+      });
 
-        const newItems: PurchaseBatchItem[] = validLines.map(line => ({
-          id: crypto.randomUUID(),
-          purchase_batch_id: newBatchId,
-          product_variant_id: line.variant_id,
-          quantity: line.quantity,
-          cost: typeof line.cost === 'string' ? (parseFloat(line.cost) || 0) : (line.cost || 0),
-          note: line.note
-        }));
-
-        await dataProvider.savePurchaseBatches([...allBatches, newBatch]);
-        await dataProvider.savePurchaseBatchItems([...allBatchItems, ...newItems]);
-      }
+      await dataProvider.savePurchaseBatchTransaction(command);
+      purchaseBatchIntentCoordinator.complete(scope, command.idempotencyKey);
       
       onClose();
       onSaveSuccess();
@@ -568,8 +580,24 @@ export default function PurchaseBatchModal({
         onClose();
         return;
       }
+      if (err instanceof Error && err.name === 'PurchaseBatchTransactionError') {
+        alert(err.message);
+        onStale?.();
+        return;
+      }
       throw err;
     }
+  };
+
+  const handleAddBatchSubmit = () => {
+    if (saveInFlightRef.current) return saveInFlightRef.current;
+    setIsSaving(true);
+    const pending = performBatchSubmit().finally(() => {
+      saveInFlightRef.current = null;
+      setIsSaving(false);
+    });
+    saveInFlightRef.current = pending;
+    return pending;
   };
 
   const batchTotal = batchLines.reduce((sum, line) => {
@@ -1178,7 +1206,7 @@ export default function PurchaseBatchModal({
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={onClose}>取消</button>
-                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={!!editingBatchId && !batchForm.name.trim()}>儲存</button>
+                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={isSaving || (!!editingBatchId && !batchForm.name.trim())}>{isSaving ? '儲存中…' : '儲存'}</button>
               </div>
             </div>
             {(() => {

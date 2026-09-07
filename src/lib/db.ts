@@ -541,6 +541,7 @@ export interface DatabaseAdapter {
   savePurchaseBatches(batches: PurchaseBatch[]): Promise<void>;
   getPurchaseBatchItems(): Promise<PurchaseBatchItem[]>;
   savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void>;
+  savePurchaseBatchTransaction(batches: PurchaseBatch[], items: PurchaseBatchItem[]): Promise<void>;
 
   getPrivateOrders(): Promise<PrivateOrder[]>;
   savePrivateOrders(orders: PrivateOrder[]): Promise<void>;
@@ -1814,6 +1815,21 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
     saveData('erp_purchase_batch_items', items);
+  }
+
+  async savePurchaseBatchTransaction(batches: PurchaseBatch[], items: PurchaseBatchItem[]): Promise<void> {
+    const beforeBatches = localStorage.getItem('erp_purchase_batches');
+    const beforeItems = localStorage.getItem('erp_purchase_batch_items');
+    try {
+      saveData('erp_purchase_batches', batches);
+      saveData('erp_purchase_batch_items', items);
+    } catch (error) {
+      if (beforeBatches === null) localStorage.removeItem('erp_purchase_batches');
+      else localStorage.setItem('erp_purchase_batches', beforeBatches);
+      if (beforeItems === null) localStorage.removeItem('erp_purchase_batch_items');
+      else localStorage.setItem('erp_purchase_batch_items', beforeItems);
+      throw error;
+    }
   }
 
   async getPrivateOrders(): Promise<PrivateOrder[]> {
@@ -3634,6 +3650,19 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
     await this.set('erp_purchase_batch_items', items);
+  }
+
+  async savePurchaseBatchTransaction(batches: PurchaseBatch[], items: PurchaseBatchItem[]): Promise<void> {
+    const database = await this.dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      store.put(batches, 'erp_purchase_batches');
+      store.put(items, 'erp_purchase_batch_items');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Purchase Batch cache transaction failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Purchase Batch cache transaction aborted'));
+    });
   }
 
   async getPrivateOrders(): Promise<PrivateOrder[]> {

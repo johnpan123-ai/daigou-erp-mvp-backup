@@ -284,7 +284,7 @@ try {
       await modal.waitFor({ state: 'detached' });
       await waitText(page, 'save catchup remote b');
       const result = await snap(page);
-      assert.equal(result.writes, 2, 'Actual modal save did not execute the canonical fixture mutation path');
+      assert.equal(result.writes, 1, 'Actual modal save did not execute one atomic Batch+Items transaction');
       assert.ok(result.metrics.editingCatchUps >= 1);
     } finally { await closeSession(session); }
   }

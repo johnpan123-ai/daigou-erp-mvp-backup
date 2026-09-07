@@ -109,6 +109,14 @@ import {
 } from './cloudConnectivity';
 import { CloudTargetedCache } from './cloudTargetedCache';
 import { CLOUD_TABLE_RESOURCE } from './cloudSyncDomain';
+import {
+  PURCHASE_BATCH_TRANSACTION_RPC,
+  assertPurchaseBatchTransactionSucceeded,
+  buildPurchaseBatchTransactionRequest,
+  clearPendingRpcRequest,
+  readOrCreatePendingRpcRequest,
+  type PurchaseBatchTransactionCommand,
+} from './purchaseBatchTransaction';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -1444,6 +1452,81 @@ export class SupabaseProvider implements IDataProvider {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
       if (!isCloudFieldMutationError(err)) alert(`雲端同步採購批次明細發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
+    }
+  }
+
+  async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
+    await this.requireCloudWritePermission();
+    assertCloudWriteAllowed();
+    const [currentBatches, currentItems] = await Promise.all([
+      db.getPurchaseBatches(),
+      db.getPurchaseBatchItems(),
+    ]);
+    const currentBatch = currentBatches.find(batch => batch.id === command.batch.id);
+    const scopedItems = currentItems.filter(item => item.purchase_batch_id === command.batch.id);
+    const request = readOrCreatePendingRpcRequest(
+      command,
+      () => buildPurchaseBatchTransactionRequest(currentBatch, scopedItems, command),
+    );
+    const batchIds = request.batchOperations.map(operation => operation.id);
+    const itemIds = request.itemOperations.map(operation => operation.id);
+    markLocalCloudWrite('purchase_batches', batchIds);
+    markLocalCloudWrite('purchase_batch_items', itemIds);
+
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(PURCHASE_BATCH_TRANSACTION_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_request: request,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (error) {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
+
+    try {
+      const result = assertPurchaseBatchTransactionSucceeded(data);
+      const canonicalBatch = {
+        ...result.batch,
+        id: String(result.batch.id),
+        database_id: String(result.batch.id),
+        note: String(result.batch.note || ''),
+        date: String(result.batch.date || ''),
+      } as unknown as PurchaseBatch;
+      const canonicalItems = result.items.map(row => ({
+        ...row,
+        id: String(row.id),
+        database_id: String(row.id),
+        purchase_batch_id: String(row.purchase_batch_id),
+        product_variant_id: String(row.product_variant_id),
+        quantity: Number(row.quantity ?? 0),
+        cost: Number(row.cost ?? 0),
+        note: String(row.note || ''),
+      } as PurchaseBatchItem));
+      const nextBatches = [...currentBatches.filter(batch => batch.id !== canonicalBatch.id), canonicalBatch];
+      const nextItems = [
+        ...currentItems.filter(item => item.purchase_batch_id !== canonicalBatch.id),
+        ...canonicalItems,
+      ];
+      // The Server mutation commits before the two cache collections are replaced
+      // together; a failed/unknown RPC never reaches this cache transaction.
+      await db.savePurchaseBatchTransaction(nextBatches, nextItems);
+      clearPendingRpcRequest(command.idempotencyKey);
+    } catch (transactionError) {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      if (isCloudFieldMutationError(transactionError)) notifyCloudFieldMutationConflict(transactionError);
+      throw transactionError;
     }
   }
 

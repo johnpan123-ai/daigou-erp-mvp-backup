@@ -25,6 +25,7 @@ import type {
 import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
+import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -209,6 +210,9 @@ class DynamicDataProvider implements IDataProvider {
   }
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
     await this.guardedWrite(() => this.getActiveProvider().savePurchaseBatchItems(items));
+  }
+  async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
+    await this.guardedWrite(() => this.getActiveProvider().savePurchaseBatchTransaction(command));
   }
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return this.getActiveProvider().getPrivateOrders();

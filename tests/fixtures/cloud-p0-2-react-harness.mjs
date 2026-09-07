@@ -165,6 +165,22 @@ for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAda
   };
 }
 
+dataProvider.savePurchaseBatchTransaction = async command => {
+  writes += 1;
+  server.purchaseBatches = [
+    ...server.purchaseBatches.filter(batch => batch.id !== command.batch.id),
+    clone(command.batch),
+  ];
+  server.purchaseBatchItems = [
+    ...server.purchaseBatchItems.filter(item => item.purchase_batch_id !== command.batch.id),
+    ...clone(command.items),
+  ];
+  await cloudCacheDb.savePurchaseBatchTransaction(
+    clone(server.purchaseBatches),
+    clone(server.purchaseBatchItems),
+  );
+};
+
 dataProvider.canWriteCloud = async () => true;
 dataProvider.updateProductVariantPatch = async (id, patch) => {
   writes += 1;

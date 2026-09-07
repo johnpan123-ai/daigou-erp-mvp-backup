@@ -1,4 +1,5 @@
 import type { IDataProvider } from './types';
+import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { 
   InventoryItem, 
@@ -88,6 +89,12 @@ export class LocalProvider implements IDataProvider {
   }
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
     return db.savePurchaseBatchItems(items);
+  }
+  async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
+    const [batches, items] = await Promise.all([this.getPurchaseBatches(), this.getPurchaseBatchItems()]);
+    const nextBatches = [...batches.filter(batch => batch.id !== command.batch.id), command.batch];
+    const nextItems = [...items.filter(item => item.purchase_batch_id !== command.batch.id), ...command.items];
+    return db.savePurchaseBatchTransaction(nextBatches, nextItems);
   }
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return db.getPrivateOrders();

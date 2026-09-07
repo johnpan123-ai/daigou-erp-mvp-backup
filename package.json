@@ -43,6 +43,8 @@
     "test:cloud-mutation-ordering": "node tests/cloud-mutation-ordering-dynamic.mjs",
     "test:cloud-field-cas": "node tests/cloud-field-cas.mjs",
     "test:cloud-field-cas-react": "node tests/cloud-field-cas-react.mjs",
+    "test:cloud-purchase-batch-transaction": "node tests/cloud-purchase-batch-transaction-idempotency.mjs",
+    "test:cloud-purchase-batch-provider": "node tests/cloud-purchase-batch-provider-integration.mjs",
     "test:p0-eslint-baseline": "node tests/p0-eslint-baseline-delta.mjs",
     "test:cloud-private-order-hydration": "node tests/cloud-private-order-hydration.mjs",
     "test:purchase-management-actions": "node tests/purchase-management-actions.mjs",
