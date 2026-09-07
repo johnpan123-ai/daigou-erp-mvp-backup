@@ -50,6 +50,7 @@ try {
     const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');
     const {
       getCloudConnectivitySnapshot,
+      markCloudReadFresh,
       markCloudReachable,
     } = await import('/src/providers/cloud/cloudConnectivity.ts');
     const { dataProvider } = await import('/src/providers/dataProvider.ts');
@@ -125,6 +126,7 @@ try {
     }
     const localAfterOfflineAttempts = JSON.stringify(await localDb.getProductGroups());
     const cloudAfterOfflineAttempts = JSON.stringify(await cloudCacheDb.getProductGroups());
+    const offlineState = getCloudConnectivitySnapshot();
 
     // Reconnect changes only connectivity state; it does not flush any local/cache data.
     const beforeReconnect = { local: localAfterOfflineAttempts, cloud: cloudAfterOfflineAttempts };
@@ -182,6 +184,7 @@ try {
     };
 
     markCloudReachable();
+    markCloudReadFresh(1);
     let rejectedOnlineSave = null;
     try {
       await dataProvider.saveProductGroups([cloudMutationGroup]);
@@ -191,10 +194,12 @@ try {
     const cacheAfterRejectedOnlineSave = JSON.stringify(await cloudCacheDb.getProductGroups());
     rejectMutation = false;
     markCloudReachable();
+    markCloudReadFresh(1);
     await dataProvider.saveProductGroups([cloudMutationGroup]);
     const cacheAfterAcknowledgedSave = await cloudCacheDb.getProductGroups();
     const localAfterCloudMutation = JSON.stringify(await localDb.getProductGroups());
     markCloudReachable();
+    markCloudReadFresh(1);
 
     return {
       namespaces: {
@@ -214,6 +219,7 @@ try {
       rejected,
       localAfterOfflineAttempts,
       cloudAfterOfflineAttempts,
+      offlineState,
       beforeReconnect,
       reconnectState,
       afterReconnect,
@@ -242,8 +248,11 @@ try {
   }
   assert.equal(result.localAfterOfflineAttempts, JSON.stringify(result.localAfterLocalWrite));
   assert.equal(result.cloudAfterOfflineAttempts, result.cloudAfterLocalWrite, 'Offline Cloud mutation changed cache');
+  assert.equal(result.offlineState.status, 'offline');
+  assert.equal(result.offlineState.readStatus, 'offline');
   assert.deepEqual(result.afterReconnect, result.beforeReconnect, 'Reconnect flushed local/cache data as an outbound mutation');
   assert.equal(result.reconnectState.status, 'checking');
+  assert.equal(result.reconnectState.readStatus, 'loading');
   assert.match(result.rejectedOnlineSave, /fixture server rejected write/);
   assert.equal(result.cacheAfterRejectedOnlineSave, '[]', 'Rejected Cloud save mutated Cloud cache');
   assert.equal(result.cacheAfterAcknowledgedSave[0].title, 'Server canonical title after save');

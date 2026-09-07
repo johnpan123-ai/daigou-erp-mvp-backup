@@ -91,6 +91,9 @@ import { markLocalCloudWrite } from './cloudRealtimeEchoRegistry';
 import {
   assertCloudWriteAllowed,
   isLikelyCloudConnectivityError,
+  markCloudReadFailed,
+  markCloudReadFresh,
+  markCloudReadLoading,
   markCloudReachable,
   markCloudRequestFailed,
 } from './cloudConnectivity';
@@ -415,6 +418,7 @@ export class SupabaseProvider implements IDataProvider {
     const syncPromise = (async () => {
       try {
         try {
+          markCloudReadLoading();
           console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
           
           // 等待並獲取當前登入的 session，確保 JWT token 已載入 client
@@ -422,6 +426,8 @@ export class SupabaseProvider implements IDataProvider {
           
           if (!session) {
             console.warn('[Sync] Supabase 尚未偵測到有效登入 Session，略過雲端 Pull 以避免覆蓋本機資料。');
+            const cachedGroups = await db.getProductGroups();
+            markCloudReadFailed(new Error('Cloud session unavailable'), cachedGroups.length > 0);
             return;
           }
 
@@ -438,6 +444,22 @@ export class SupabaseProvider implements IDataProvider {
             fetchAll<any>(async (from, to) => supabase.from('private_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
             fetchAll<any>(async (from, to) => supabase.from('japan_packages').select('*').is('deleted_at', null).order('id').range(from, to)),
             fetchAll<any>(async (from, to) => supabase.from('japan_package_items').select('*').is('deleted_at', null).order('id').range(from, to))
+          ]);
+          const [bcData, osData, osiData, salesOrderRows, salesOrderItemRows, inventoryRows, dashboardImageRows] = await Promise.all([
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('outbound_shipments').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('outbound_shipment_items').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('sales_orders').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('sales_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('inventory_items').select('*').is('deleted_at', null).order('inventory_key').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('dashboard_category_images').select('category_key, image_url, storage_path').is('deleted_at', null).order('category_key').range(from, to)),
           ]);
 
           const gLen = groups.length;
@@ -481,38 +503,14 @@ export class SupabaseProvider implements IDataProvider {
           console.log(`[Cloud Pull Guard] local counts - groups: ${lg}, variants: ${lv}, orders: ${lso}, items: ${lsoi}`);
           console.log(`[Cloud Pull Guard] remote counts - groups: ${gLen}, variants: ${vLen}`);
 
-          // If local has data, but remote returns 0 for core tables, treat as suspicious empty pull.
-          // Exception: new empty account initialization (local count is 0).
-          const isNewAccount = (lg === 0 && lv === 0);
-          const isSuspicious = !isNewAccount && (
-            (lg > 0 && gLen === 0) || 
-            (lv > 0 && vLen === 0)
-          );
-
-          if (isSuspicious) {
-            const msg = `[Cloud Pull Guard] Suspicious empty pull detected! Local variants: ${lv}, remote variants: ${vLen}. Local groups: ${lg}, remote groups: ${gLen}.`;
-            console.warn(msg);
-            console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-            console.log('[Cloud Pull Guard] keep local cache');
-            throw new Error(msg);
-          }
-
-          // Check if all of them are empty
-          if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0 && poLen === 0 && poiLen === 0) {
-            console.log('[Sync Pull] core skipped: empty cloud result');
-            this.isPulled = true;
-            return;
-          }
+          // A complete successful response is authoritative even when it contains zero rows.
+          // The Cloud cache must reflect that empty server state instead of reviving stale rows.
 
           // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
           console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆, privateOrders: ${poLen} 筆, privateOrderItems: ${poiLen} 筆`);
           
-          await db.saveProductGroups(groups);
-          await db.saveProductCategories(categories);
           console.log(`[Before IndexedDB Save Variants] count: ${variants.length}`);
           console.log('[Before IndexedDB Save Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
-          await db.saveProductVariants(variants);
-          await db.savePurchaseBatches(batches);
           const mappedBatchItems = batchItems.map((r: any) => ({
             id: r.local_id || r.id,
             purchase_batch_id: r.purchase_batch_id,
@@ -523,8 +521,6 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-          await db.savePurchaseBatchItems(mappedBatchItems);
-
           const mappedOrders: PrivateOrder[] = po.map(r => ({
             id: r.local_id || r.id,
             product_group_id: r.product_group_id,
@@ -547,9 +543,6 @@ export class SupabaseProvider implements IDataProvider {
             version: r.version
           }));
 
-          await db.savePrivateOrders(mappedOrders);
-          await db.savePrivateOrderItems(mappedItems);
-
           // Japan Packages Sync
           const mappedPackages = jp.map((r: any) => ({
             id: r.id,
@@ -566,8 +559,6 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-          await db.saveJapanPackages(mappedPackages);
-
           const mappedPackageItems = jpi.map((r: any) => ({
             id: r.id,
             japan_package_id: r.japan_package_id,
@@ -587,34 +578,14 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-          await db.saveJapanPackageItems(mappedPackageItems);
-
-          // 2.5 Pull and save bundle components (gracefully handle missing table)
-          let bcData: any[] = [];
-          try {
-            bcData = await fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').order('id').range(from, to));
-            console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
-          } catch (e: any) {
-            console.warn('[Sync WARNING] 抓取 bundle_components 發生異常:', e.message || e);
-          }
+          console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
           const mappedBundleComponents: BundleComponent[] = bcData.map(r => ({
             id: r.id,
             bundle_variant_id: r.bundle_variant_id,
             component_variant_id: r.component_variant_id,
             created_at: r.created_at
           }));
-          await db.saveBundleComponents(mappedBundleComponents);
-
-          // 2.6 Pull and save outbound shipments (gracefully handle missing table)
-          let osData: any[] = [];
-          let osiData: any[] = [];
-          try {
-            osData = await fetchAll<any>(async (from, to) => supabase.from('outbound_shipments').select('*').is('deleted_at', null).order('id').range(from, to));
-            osiData = await fetchAll<any>(async (from, to) => supabase.from('outbound_shipment_items').select('*').is('deleted_at', null).order('id').range(from, to));
-            console.log(`[Sync] 從 Supabase 成功拉取到 outbound_shipments = ${osData.length} 筆, outbound_shipment_items = ${osiData.length} 筆`);
-          } catch (e: any) {
-            console.warn('[Sync WARNING] 抓取 outbound_shipments 發生異常:', e.message || e);
-          }
+          console.log(`[Sync] 從 Supabase 成功拉取到 outbound_shipments = ${osData.length} 筆, outbound_shipment_items = ${osiData.length} 筆`);
           const mappedShipments: OutboundShipment[] = osData.map(r => ({
             id: r.id, title: r.title, status: r.status || 'draft',
             carrier: r.carrier || '', tracking_number: r.tracking_number || '',
@@ -623,7 +594,6 @@ export class SupabaseProvider implements IDataProvider {
             shipped_at: r.shipped_at || '', received_at: r.received_at || '',
             note: r.note || '', created_at: r.created_at, updated_at: r.updated_at, version: r.version
           }));
-          await db.saveOutboundShipments(mappedShipments);
           const mappedShipmentItems: OutboundShipmentItem[] = osiData.map(r => ({
             id: r.id, outbound_shipment_id: r.outbound_shipment_id,
             japan_package_item_id: r.japan_package_item_id || null,
@@ -634,21 +604,91 @@ export class SupabaseProvider implements IDataProvider {
             checked: Boolean(r.checked ?? false), checked_at: r.checked_at || null,
             note: r.note || '', created_at: r.created_at, updated_at: r.updated_at, version: r.version
           }));
-          await db.saveOutboundShipmentItems(mappedShipmentItems);
+          const mappedSalesOrders: SalesOrder[] = salesOrderRows.map(r => ({
+            id: r.local_id || r.id,
+            platform: r.platform,
+            order_number: r.order_number,
+            buyer_name: r.buyer_name,
+            created_at: r.created_at
+          }));
+          const orderUuidToLocalIdMap = new Map<string, string>();
+          for (const order of mappedSalesOrders) {
+            const uuid = getDeterministicUuid(order.id.trim().toUpperCase());
+            orderUuidToLocalIdMap.set(uuid, order.id);
+          }
+          const mappedSalesOrderItems: SalesOrderItem[] = salesOrderItemRows.map(r => ({
+            id: r.local_id || r.id,
+            order_id: orderUuidToLocalIdMap.get(r.order_id) || r.order_id,
+            product_variant_id: r.product_variant_id || undefined,
+            myacg_item_code: r.myacg_item_code,
+            product_name: r.product_name || undefined,
+            variant_name: r.variant_name || undefined,
+            quantity: r.quantity,
+            price: r.price !== null ? Number(r.price) : undefined,
+            amount: r.amount !== null ? Number(r.amount) : undefined,
+            order_status: r.order_status || undefined
+          }));
+          const mappedInventory: InventoryItem[] = inventoryRows.map(r => ({
+            inventory_key: r.inventory_key || `${normalizeProductTitle(r.product_title)}::${r.myacg_item_code}::${r.raw_variant_name || ''}`,
+            myacg_item_code: r.myacg_item_code,
+            product_id: r.product_id || undefined,
+            product_title: r.product_title,
+            normalized_product_title: r.normalized_product_title || undefined,
+            raw_variant_name: r.raw_variant_name || '',
+            listing_type: r.listing_type || '',
+            final_price: r.final_price || 0,
+            myacg_available_quantity: r.myacg_available_quantity || 0,
+            myacg_sold_quantity: r.myacg_sold_quantity || 0,
+            myacg_demand_quantity: r.myacg_demand_quantity || undefined,
+            myacg_listed_at: r.myacg_listed_at || '',
+            import_sort_index: r.import_sort_index || undefined,
+            latest_catalog_import_id: r.latest_catalog_import_id || undefined,
+            catalog_last_seen_at: r.catalog_last_seen_at || undefined
+          }));
 
-          // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
-          await this.pullSalesOrders();
-          await this.pullSalesOrderItems();
-          await this.pullDashboardCategoryImages();
+          // A successful Cloud read is applied as one all-or-nothing cache transaction.
+          // Until this point every operation is read-only, so any failed/timeout request
+          // leaves the previous Cloud cache intact.
+          const cacheApplied = await db.importData(JSON.stringify({
+            inventory: mappedInventory,
+            salesOrders: mappedSalesOrders,
+            salesOrderItems: mappedSalesOrderItems,
+            productGroups: groups,
+            productCategories: categories,
+            productVariants: variants,
+            purchaseBatches: batches,
+            purchaseBatchItems: mappedBatchItems,
+            privateOrders: mappedOrders,
+            privateOrderItems: mappedItems,
+            japanPackages: mappedPackages,
+            japanPackageItems: mappedPackageItems,
+            outboundShipments: mappedShipments,
+            outboundShipmentItems: mappedShipmentItems,
+            bundleComponents: mappedBundleComponents,
+            importBatches: [],
+          }));
+          if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
 
-          // 4. 呼叫既有的重新計算流程（即 db.getProductVariants），依雲端訂單重新計算
-          console.log('[Sync] 觸發本地變體 auto quantity 重新計算...');
-          const recalculatedVariants = await db.getProductVariants();
-
-          // 5. 將重新計算後的變體資料庫存儲存至本地，絕不推送回雲端，防止洗掉雲端數量
-          await db.saveProductVariants(recalculatedVariants);
+          // Dashboard images are cache-only and are replaced only after the complete
+          // server read and IndexedDB transaction have succeeded.
+          for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+            const key = localStorage.key(index);
+            if (key?.startsWith('dashboard_cloud_img_') || key?.startsWith('dashboard_cloud_path_')) {
+              localStorage.removeItem(key);
+            }
+          }
+          dashboardImageRows.forEach(item => {
+            if (!item.category_key) return;
+            if (item.image_url) localStorage.setItem(`dashboard_cloud_img_${item.category_key}`, item.image_url);
+            if (item.storage_path) localStorage.setItem(`dashboard_cloud_path_${item.category_key}`, item.storage_path);
+          });
 
           this.isPulled = true;
+          const completeCloudRowCount = gLen + cLen + vLen + bLen + biLen + poLen + poiLen
+            + jp.length + jpi.length + bcData.length + osData.length + osiData.length
+            + mappedSalesOrders.length + mappedSalesOrderItems.length + mappedInventory.length
+            + dashboardImageRows.length;
+          markCloudReadFresh(completeCloudRowCount);
           console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
 
           checkDataSizeWarnings({
@@ -658,20 +698,22 @@ export class SupabaseProvider implements IDataProvider {
           }, role);
         } catch (err: any) {
           console.error('[Sync] 商品核心主檔同步失敗:', err);
+          const cachedRows = await Promise.all([
+            db.getProductGroups(),
+            db.getProductCategories(),
+            db.getProductVariants(),
+            db.getPurchaseBatches(),
+            db.getPurchaseBatchItems(),
+            db.getPrivateOrders(),
+            db.getPrivateOrderItems(),
+          ]);
+          markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
           if (isSchemaMissingError(err)) {
             alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
             this.isPulled = false;
             throw err;
           }
           console.log('[Sync Pull] core failed: keep local cache');
-        }
-        
-        // === pullCoreProductData() ↓ pullInventory() ===
-        // 在 core sync 成功或失敗完畢後，接續拉取庫存 (使用獨立 try-catch 避免阻礙 core data 流程)
-        try {
-          await this.pullInventory();
-        } catch (e) {
-          console.error('[Sync] 庫存拉取失敗，但不影響核心主檔：', e);
         }
       } finally {
         this.pullPromise = null;
@@ -682,9 +724,19 @@ export class SupabaseProvider implements IDataProvider {
       setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
     });
 
-    this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(err => {
+    this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(async err => {
       console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
-      this.isPulled = true; // Bypasses future blockages
+      const cachedRows = await Promise.all([
+        db.getProductGroups(),
+        db.getProductCategories(),
+        db.getProductVariants(),
+        db.getPurchaseBatches(),
+        db.getPurchaseBatchItems(),
+        db.getPrivateOrders(),
+        db.getPrivateOrderItems(),
+      ]);
+      markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
+      this.isPulled = false;
     });
 
     return this.pullPromise;
@@ -1403,7 +1455,7 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
-  async pullSalesOrders(): Promise<void> {
+  async pullSalesOrders(): Promise<number> {
     try {
       const data = await fetchAll<any>(async (from, to) =>
         supabase
@@ -1414,19 +1466,9 @@ export class SupabaseProvider implements IDataProvider {
           .range(from, to)
       );
 
-      const localOrders = await db.getSalesOrders();
-      const lso = localOrders.length;
       const rso = data?.length || 0;
 
-      console.log(`[Cloud Pull Guard] sales_orders - local count: ${lso}, remote count: ${rso}`);
-
-      if (lso > 0 && rso === 0) {
-        const msg = '[Cloud Pull Guard] Suspicious empty pull for sales_orders!';
-        console.warn(msg);
-        console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-        console.log('[Cloud Pull Guard] keep local cache');
-        throw new Error(msg);
-      }
+      console.log(`[Cloud Pull] sales_orders remote count: ${rso}`);
 
       const rows = data || [];
       const mappedOrders: SalesOrder[] = rows.map(r => ({
@@ -1440,6 +1482,7 @@ export class SupabaseProvider implements IDataProvider {
       // Write directly to local DB
       await db.saveSalesOrders(mappedOrders);
       console.log(`[Sync Pull] sales_orders applied: ${mappedOrders.length} rows`);
+      return mappedOrders.length;
     } catch (err: any) {
       console.error(`[Sync Pull ERROR] sales_orders failed (Schema 缺失?): ${err.message || err}`);
       if (err.message && (err.message.includes('42P01') || err.message.toLowerCase().includes('relation') || err.message.toLowerCase().includes('could not find the table'))) {
@@ -1449,7 +1492,7 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
-  async pullSalesOrderItems(): Promise<void> {
+  async pullSalesOrderItems(): Promise<number> {
     try {
       const data = await fetchAll<any>(async (from, to) =>
         supabase
@@ -1460,19 +1503,9 @@ export class SupabaseProvider implements IDataProvider {
           .range(from, to)
       );
 
-      const localItems = await db.getSalesOrderItems();
-      const lsoi = localItems.length;
       const rsoi = data?.length || 0;
 
-      console.log(`[Cloud Pull Guard] sales_order_items - local count: ${lsoi}, remote count: ${rsoi}`);
-
-      if (lsoi > 0 && rsoi === 0) {
-        const msg = '[Cloud Pull Guard] Suspicious empty pull for sales_order_items!';
-        console.warn(msg);
-        console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-        console.log('[Cloud Pull Guard] keep local cache');
-        throw new Error(msg);
-      }
+      console.log(`[Cloud Pull] sales_order_items remote count: ${rsoi}`);
 
       const orders = await db.getSalesOrders();
       const orderUuidToLocalIdMap = new Map<string, string>();
@@ -1501,6 +1534,7 @@ export class SupabaseProvider implements IDataProvider {
       // Write directly to local DB
       await db.saveSalesOrderItems(mappedItems);
       console.log(`[Sync Pull] sales_order_items applied: ${mappedItems.length} rows`);
+      return mappedItems.length;
     } catch (err: any) {
       console.error(`[Sync Pull ERROR] sales_order_items failed (Schema 缺失?): ${err.message || err}`);
       if (err.message && (err.message.includes('42P01') || err.message.toLowerCase().includes('relation') || err.message.toLowerCase().includes('could not find the table'))) {
@@ -1510,7 +1544,7 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
-  async pullInventory(): Promise<void> {
+  async pullInventory(): Promise<number> {
     try {
       const data = await fetchAll<any>(async (from, to) =>
         supabase
@@ -1521,16 +1555,9 @@ export class SupabaseProvider implements IDataProvider {
           .range(from, to)
       );
 
-      const localInv = await db.getInventory();
-      const linv = localInv.length;
       const rinv = data?.length || 0;
 
       console.log(`[Inventory Sync] pulled count: ${rinv}`);
-
-      if (linv > 0 && rinv === 0) {
-        console.warn('[Inventory Sync] Suspicious empty pull for inventory_items, aborting save');
-        return;
-      }
 
       const rows = data || [];
       const mappedItems: InventoryItem[] = rows.map(r => ({
@@ -1556,6 +1583,7 @@ export class SupabaseProvider implements IDataProvider {
       if (mappedItems.length > 0) {
         console.log(`[Inventory Sync] sample: ${JSON.stringify(mappedItems[0])}`);
       }
+      return mappedItems.length;
     } catch (err: any) {
       console.error(`[Inventory Sync ERROR] pull failed: ${err.message || err}`);
       throw err;
@@ -2407,8 +2435,8 @@ export class SupabaseProvider implements IDataProvider {
       console.error('[Sync] 同步首頁大類圖片失敗:', err.message || err);
       if (isSchemaMissingError(err)) {
         alert('雲端資料表 dashboard_category_images 缺失，同步流程已中斷，請匯入 SQL Migration 建立表格！');
-        throw err;
       }
+      throw err;
     }
   }
 

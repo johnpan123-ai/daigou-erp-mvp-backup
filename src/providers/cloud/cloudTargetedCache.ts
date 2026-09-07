@@ -12,7 +12,13 @@ import { cloudCacheDb as db } from '../../lib/db';
 import { supabase } from './supabaseClient';
 import type { CloudChange, CloudRefreshRequest, CloudResource } from './cloudSyncDomain';
 import { CLOUD_TABLE_RESOURCE, resolveCloudRowIdentity } from './cloudSyncDomain';
-import { markCloudReachable, markCloudRequestFailed } from './cloudConnectivity';
+import {
+  markCloudReadFailed,
+  markCloudReadFresh,
+  markCloudReadLoading,
+  markCloudReachable,
+  markCloudRequestFailed,
+} from './cloudConnectivity';
 
 type Row = Record<string, unknown> & { id?: string; local_id?: string; deleted_at?: string | null; updated_at?: string };
 
@@ -41,7 +47,7 @@ const commonMeta = (row: Row) => ({
 const TABLES: Readonly<Record<string, TableCacheAdapter<any>>> = {
   product_groups: { get: () => db.getProductGroups(), save: rows => db.saveProductGroups(rows), map: row => ({ ...row, id: canonicalId('product_groups', row), ...commonMeta(row) }), supportsIncremental: true },
   product_categories: { get: () => db.getProductCategories(), save: rows => db.saveProductCategories(rows), map: row => ({ ...row, id: canonicalId('product_categories', row), ...commonMeta(row) }), supportsIncremental: true },
-  product_variants: { get: () => db.getProductVariants(), save: rows => db.saveProductVariants(rows), map: row => ({ ...row, id: canonicalId('product_variants', row), ...commonMeta(row) }), supportsIncremental: true },
+  product_variants: { get: () => db.getProductVariants(), save: rows => db.replaceProductVariantsFromAuthoritativeCloud(rows), map: row => ({ ...row, id: canonicalId('product_variants', row), ...commonMeta(row) }), supportsIncremental: true },
   purchase_batches: { get: () => db.getPurchaseBatches(), save: rows => db.savePurchaseBatches(rows), map: row => ({ ...row, id: canonicalId('purchase_batches', row), ...commonMeta(row) }), supportsIncremental: true },
   purchase_batch_items: {
     get: () => db.getPurchaseBatchItems(),
@@ -125,7 +131,7 @@ export class CloudTargetedCache {
   private readonly now: () => Date;
   private readonly queryOverride?: CloudTargetedQuery;
   private cursors = new Map<string, string>();
-  private singleFlight = new Map<string, Promise<void>>();
+  private singleFlight = new Map<string, Promise<number>>();
   private targetedQueries = 0;
   private rowsFetched = 0;
   private requestsByTable = new Map<string, number>();
@@ -146,14 +152,26 @@ export class CloudTargetedCache {
       byTable.set(change.table, [...(byTable.get(change.table) || []), change]);
     }
     const tables = request.reason === 'realtime' ? [...byTable.keys()] : tablesForResources(request.resources);
-    await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
-      const changes = byTable.get(table) || [];
-      if (changes.length > 0) await this.refreshChanges(table, changes);
-      else await this.refreshSince(table);
-    })));
+    markCloudReadLoading();
+    try {
+      const rowCounts = await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
+        const changes = byTable.get(table) || [];
+        if (changes.length > 0) return this.refreshChanges(table, changes);
+        if (request.reason === 'reconnect') return this.refreshAuthoritative(table);
+        return this.refreshSince(table);
+      })));
+      const isAuthoritativeResourceRead = request.reason === 'reconnect';
+      markCloudReadFresh(isAuthoritativeResourceRead
+        ? rowCounts.reduce((sum, count) => sum + count, 0)
+        : undefined);
+    } catch (error) {
+      const cachedRows = await Promise.all(tables.map(table => TABLES[table]?.get() ?? Promise.resolve([])));
+      markCloudReadFailed(error, cachedRows.some(rows => rows.length > 0));
+      throw error;
+    }
   }
 
-  private runSingleFlight(table: string, task: () => Promise<void>): Promise<void> {
+  private runSingleFlight(table: string, task: () => Promise<number>): Promise<number> {
     const existing = this.singleFlight.get(table);
     if (existing) return existing;
     const promise = task().finally(() => this.singleFlight.delete(table));
@@ -192,26 +210,39 @@ export class CloudTargetedCache {
     };
   }
 
-  private async refreshChanges(table: string, changes: CloudChange[]): Promise<void> {
+  private async refreshChanges(table: string, changes: CloudChange[]): Promise<number> {
     const adapter = TABLES[table];
-    if (!adapter) return;
+    if (!adapter) return 0;
     const touchedIds = [...new Set(changes.map(change => change.canonicalId).filter(Boolean))];
     const databaseIds = [...new Set(changes.map(change => change.databaseId).filter(Boolean))];
-    if (databaseIds.length === 0) return;
+    if (databaseIds.length === 0) return 0;
     const rows = await this.query({ table, databaseIds });
     await this.merge(table, adapter, touchedIds, rows);
     const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
     if (newest) this.cursors.set(table, newest);
+    return rows.length;
   }
 
-  private async refreshSince(table: string): Promise<void> {
+  private async refreshSince(table: string): Promise<number> {
     const adapter = TABLES[table];
-    if (!adapter?.supportsIncremental) return;
+    if (!adapter?.supportsIncremental) return 0;
     const cursor = this.cursors.get(table) || this.now().toISOString();
     const nextCursor = this.now().toISOString();
     const rows = await this.query({ table, updatedAfter: cursor });
     await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows);
     this.cursors.set(table, nextCursor);
+    return rows.length;
+  }
+
+  private async refreshAuthoritative(table: string): Promise<number> {
+    const adapter = TABLES[table];
+    if (!adapter) return 0;
+    const rows = await this.query({ table });
+    const activeRows = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
+    await adapter.save(activeRows);
+    const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
+    this.cursors.set(table, newest || this.now().toISOString());
+    return activeRows.length;
   }
 
   private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[]): Promise<void> {

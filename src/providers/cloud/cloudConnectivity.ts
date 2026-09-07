@@ -1,8 +1,17 @@
 export type CloudConnectivityStatus = 'checking' | 'online' | 'offline';
+export type CloudReadFreshnessStatus =
+  | 'loading'
+  | 'fresh-online'
+  | 'fresh-empty'
+  | 'stale-cache'
+  | 'read-error'
+  | 'offline';
 
 export interface CloudConnectivitySnapshot {
   status: CloudConnectivityStatus;
+  readStatus: CloudReadFreshnessStatus;
   lastReachableAt: number | null;
+  lastFreshReadAt: number | null;
   reason: string | null;
 }
 
@@ -10,7 +19,7 @@ export class CloudOfflineWriteError extends Error {
   readonly code = 'CLOUD_OFFLINE_WRITE_BLOCKED';
 
   constructor() {
-    super('目前為離線狀態。雲端新增、修改、刪除與匯入已停用；重新連線後會讀取雲端最新資料。');
+    super('雲端資料目前不是可確認的最新狀態。新增、修改、刪除與匯入已停用；重新連線後會讀取雲端最新資料。');
     this.name = 'CloudOfflineWriteError';
   }
 }
@@ -19,14 +28,18 @@ const listeners = new Set<() => void>();
 
 let snapshot: CloudConnectivitySnapshot = {
   status: typeof navigator === 'undefined' ? 'online' : navigator.onLine === false ? 'offline' : 'checking',
+  readStatus: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'loading',
   lastReachableAt: null,
+  lastFreshReadAt: null,
   reason: typeof navigator !== 'undefined' && navigator.onLine === false ? 'browser-offline' : null,
 };
 
 const publish = (next: CloudConnectivitySnapshot): void => {
   if (
     snapshot.status === next.status
+    && snapshot.readStatus === next.readStatus
     && snapshot.lastReachableAt === next.lastReachableAt
+    && snapshot.lastFreshReadAt === next.lastFreshReadAt
     && snapshot.reason === next.reason
   ) return;
   snapshot = next;
@@ -41,20 +54,51 @@ export const subscribeCloudConnectivity = (listener: () => void): (() => void) =
 };
 
 export const markCloudReachable = (): void => publish({
+  ...snapshot,
   status: 'online',
   lastReachableAt: Date.now(),
-  reason: null,
+  reason: snapshot.readStatus === 'stale-cache' || snapshot.readStatus === 'read-error' || snapshot.readStatus === 'offline'
+    ? snapshot.reason
+    : null,
 });
+
+export const markCloudReadLoading = (): void => publish({
+  ...snapshot,
+  readStatus: 'loading',
+  reason: 'cloud-read-loading',
+});
+
+export const markCloudReadFresh = (rowCount?: number): void => {
+  const now = Date.now();
+  publish({
+    ...snapshot,
+    status: 'online',
+    readStatus: rowCount === 0 ? 'fresh-empty' : 'fresh-online',
+    lastReachableAt: now,
+    lastFreshReadAt: now,
+    reason: null,
+  });
+};
+
+export const markCloudReadFailed = (error: unknown, hasCachedData: boolean): void => {
+  publish({
+    ...snapshot,
+    readStatus: hasCachedData ? 'stale-cache' : 'read-error',
+    reason: String((error as { message?: unknown } | null)?.message ?? error ?? 'cloud-read-failed'),
+  });
+};
 
 export const markCloudReconnectPending = (): void => publish({
   ...snapshot,
   status: 'checking',
+  readStatus: 'loading',
   reason: 'reconnect-pending',
 });
 
 export const markCloudUnavailable = (reason = 'cloud-unavailable'): void => publish({
   ...snapshot,
   status: 'offline',
+  readStatus: 'offline',
   reason,
 });
 
@@ -82,14 +126,15 @@ export const markCloudRequestFailed = (error: unknown): void => {
 
 export const assertCloudWriteAllowed = (): void => {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    publish({ ...snapshot, status: 'offline', reason: 'browser-offline' });
+    markCloudUnavailable('browser-offline');
   }
-  if (snapshot.status !== 'online') throw new CloudOfflineWriteError();
+  const hasFreshServerRead = snapshot.readStatus === 'fresh-online' || snapshot.readStatus === 'fresh-empty';
+  if (snapshot.status !== 'online' || !hasFreshServerRead) throw new CloudOfflineWriteError();
 };
 
 if (typeof window !== 'undefined') {
   window.addEventListener('offline', () => {
-    publish({ ...snapshot, status: 'offline', reason: 'browser-offline' });
+    markCloudUnavailable('browser-offline');
   });
   window.addEventListener('online', markCloudReconnectPending);
 }

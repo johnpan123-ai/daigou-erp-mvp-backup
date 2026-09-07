@@ -3511,6 +3511,19 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     this.variantVersion++;
   }
 
+  /**
+   * Replace only the isolated Cloud cache with a complete, successful server
+   * response. This intentionally accepts an empty array; Local authoritative
+   * data must continue to use saveProductVariants() and its destructive guard.
+   */
+  async replaceProductVariantsFromAuthoritativeCloud(variants: ProductVariant[]): Promise<void> {
+    if (this.databaseName !== CLOUD_CACHE_INDEXED_DB_NAME) {
+      throw new Error('Authoritative Cloud Variant replacement is restricted to the Cloud cache namespace.');
+    }
+    await this.set('erp_product_variants', variants);
+    this.variantVersion++;
+  }
+
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
     const whitelist = new Set([
       'myacg_manual_adjustment',
@@ -3701,6 +3714,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         }
       });
 
+      if (entries.some(({ storageKey }) => storageKey === 'erp_product_variants')) {
+        this.variantVersion++;
+        this.variantDedupeCache = null;
+        this.variantDedupeCacheVersion = -1;
+      }
+
       // IndexedDB is authoritative. Remove duplicate fallbacks only after the
       // all-or-nothing transaction commits successfully.
       entries.forEach(({ storageKey }) => {
@@ -3828,7 +3847,7 @@ export const localDb: DatabaseAdapter = new IndexedDbAdapter(
   { migrateLegacyLocalData: true },
 );
 
-export const cloudCacheDb: DatabaseAdapter = new IndexedDbAdapter(
+export const cloudCacheDb = new IndexedDbAdapter(
   CLOUD_CACHE_INDEXED_DB_NAME,
   { allowLegacyLocalStorageFallback: false },
 );

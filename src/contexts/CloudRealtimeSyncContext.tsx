@@ -44,6 +44,12 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     getCloudConnectivitySnapshot,
   );
   const cloudMode = ['cloud', 'fallback'].includes(getProviderMode());
+  const showCloudReadStatus = connectivity.status !== 'online'
+    || connectivity.readStatus === 'loading'
+    || connectivity.readStatus === 'stale-cache'
+    || connectivity.readStatus === 'read-error'
+    || connectivity.readStatus === 'offline'
+    || connectivity.readStatus === 'fresh-empty';
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -154,15 +160,23 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
 
   return (
     <CloudRealtimeContext.Provider value={value}>
-      {cloudMode && connectivity.status !== 'online' && (
-        <div role="status" aria-live="polite" style={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10060, padding: '9px 15px', borderRadius: 8, background: '#7f1d1d', color: '#fff', border: '1px solid #fecaca', boxShadow: '0 4px 12px rgba(15,23,42,.18)', fontSize: 13, fontWeight: 700 }}>
-          {connectivity.status === 'checking'
-            ? '雲端連線確認中｜所有新增、修改、刪除與匯入暫停'
-            : 'Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用'}
+      {cloudMode && showCloudReadStatus && (
+        <div role="status" aria-live="polite" style={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10060, padding: '9px 15px', borderRadius: 8, background: connectivity.readStatus === 'fresh-empty' ? '#065f46' : '#7f1d1d', color: '#fff', border: `1px solid ${connectivity.readStatus === 'fresh-empty' ? '#6ee7b7' : '#fecaca'}`, boxShadow: '0 4px 12px rgba(15,23,42,.18)', fontSize: 13, fontWeight: 700 }}>
+          {connectivity.status === 'offline'
+            ? 'Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用'
+            : connectivity.readStatus === 'stale-cache'
+              ? '雲端讀取失敗｜目前顯示舊快取，資料不是最新；寫入已暫停'
+              : connectivity.readStatus === 'read-error'
+                ? '雲端讀取失敗｜目前沒有可確認的最新資料；寫入已暫停'
+                : connectivity.readStatus === 'offline'
+                  ? '雲端已恢復連線｜等待重新讀取雲端最新資料；寫入仍暫停'
+                : connectivity.readStatus === 'fresh-empty'
+                  ? '雲端已確認｜目前沒有資料'
+                  : '雲端資料讀取中｜所有新增、修改、刪除與匯入暫停'}
         </div>
       )}
       {conflictedResources.size > 0 && (
-        <div role="alert" style={{ position: 'fixed', top: connectivity.status === 'online' ? 8 : 54, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
+        <div role="alert" style={{ position: 'fixed', top: showCloudReadStatus ? 54 : 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
           資料已被其他使用者更新；目前編輯內容未被覆蓋，請重新載入後再儲存。
         </div>
       )}
