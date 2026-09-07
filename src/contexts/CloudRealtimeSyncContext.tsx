@@ -37,6 +37,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const enabled = getProviderMode() === 'cloud' && Boolean(user);
   const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean }>());
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
+  const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
   const [conflictedResources, setConflictedResources] = useState<Set<CloudResource>>(new Set());
   const connectivity = useSyncExternalStore(
     subscribeCloudConnectivity,
@@ -64,6 +65,12 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
 
   const notifyRefreshed = useCallback((resources: CloudResource[]) => {
     dataProvider.clearCloudStale(resources);
+    setConflictedResources(current => {
+      if (!resources.some(resource => current.has(resource))) return current;
+      const next = new Set(current);
+      resources.forEach(resource => next.delete(resource));
+      return next;
+    });
     listeners.current.forEach(listener => listener(resources));
   }, []);
 
@@ -82,6 +89,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       onRefreshed: notifyRefreshed,
       onConflict: notifyConflict,
     });
+    coordinatorRef.current = coordinator;
 
     let channel = supabase.channel(`erp-live-${user!.id}`);
     for (const table of REALTIME_TABLES) {
@@ -133,30 +141,59 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
+      if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
       coordinator.dispose();
       void supabase.removeChannel(channel);
     };
   }, [enabled, isEditing, notifyConflict, notifyRefreshed, user]);
 
+  const resumeAfterEditing = useCallback((resources: CloudResource[]) => {
+    if (resources.length === 0) return;
+    queueMicrotask(() => {
+      void coordinatorRef.current?.resume(resources).catch(error => {
+        console.error('Failed to catch up deferred Cloud updates after editing ended', error);
+      });
+    });
+  }, []);
+
+  const registerEditing = useCallback((owner: string, resources: CloudResource[], editing: boolean) => {
+    const previous = editingOwners.current.get(owner);
+    const affected = [...new Set([...(previous?.resources ?? []), ...resources])];
+    const wasEditing = new Set(affected.filter(isEditing));
+    editingOwners.current.set(owner, { resources: new Set(resources), editing });
+    resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
+  }, [isEditing, resumeAfterEditing]);
+
+  const unregister = useCallback((owner: string) => {
+    const previous = editingOwners.current.get(owner);
+    if (!previous) return;
+    const affected = [...previous.resources];
+    const wasEditing = new Set(affected.filter(isEditing));
+    editingOwners.current.delete(owner);
+    resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
+  }, [isEditing, resumeAfterEditing]);
+
+  const subscribe = useCallback((listener: (resources: CloudResource[]) => void) => {
+    listeners.current.add(listener);
+    return () => { listeners.current.delete(listener); };
+  }, []);
+
+  const clearConflict = useCallback((resources: CloudResource[]) => {
+    setConflictedResources(current => {
+      const next = new Set(current);
+      resources.forEach(resource => next.delete(resource));
+      return next;
+    });
+    dataProvider.clearCloudStale(resources);
+  }, []);
+
   const value = useMemo<CloudRealtimeContextValue>(() => ({
     conflictedResources,
-    registerEditing: (owner, resources, editing) => {
-      editingOwners.current.set(owner, { resources: new Set(resources), editing });
-    },
-    unregister: owner => { editingOwners.current.delete(owner); },
-    subscribe: listener => {
-      listeners.current.add(listener);
-      return () => { listeners.current.delete(listener); };
-    },
-    clearConflict: resources => {
-      setConflictedResources(current => {
-        const next = new Set(current);
-        resources.forEach(resource => next.delete(resource));
-        return next;
-      });
-      dataProvider.clearCloudStale(resources);
-    },
-  }), [conflictedResources]);
+    registerEditing,
+    unregister,
+    subscribe,
+    clearConflict,
+  }), [clearConflict, conflictedResources, registerEditing, subscribe, unregister]);
 
   return (
     <CloudRealtimeContext.Provider value={value}>
@@ -177,7 +214,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       )}
       {conflictedResources.size > 0 && (
         <div role="alert" style={{ position: 'fixed', top: showCloudReadStatus ? 54 : 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
-          資料已被其他使用者更新；目前編輯內容未被覆蓋，請重新載入後再儲存。
+          資料已被其他使用者更新；目前編輯內容未被覆蓋，結束編輯後會自動更新。
         </div>
       )}
       {children}
@@ -194,20 +231,29 @@ export function useCloudResourceSync(
   const context = useContext(CloudRealtimeContext);
   const resourceKey = resources.join('|');
   const refreshRef = useRef(onRefresh);
-  refreshRef.current = onRefresh;
+  const resourcesRef = useRef(resources);
+
+  const registerEditing = context?.registerEditing;
+  const unregister = context?.unregister;
+  const subscribe = context?.subscribe;
 
   useEffect(() => {
-    if (!context) return;
-    context.registerEditing(owner, resources, editing);
-    return () => context.unregister(owner);
-  }, [context, editing, owner, resourceKey]);
+    refreshRef.current = onRefresh;
+    resourcesRef.current = resources;
+  }, [onRefresh, resourceKey, resources]);
 
   useEffect(() => {
-    if (!context) return;
-    return context.subscribe(changed => {
-      if (!editing && changed.some(resource => resources.includes(resource))) void refreshRef.current();
+    registerEditing?.(owner, resourcesRef.current, editing);
+  }, [editing, owner, registerEditing, resourceKey]);
+
+  useEffect(() => () => unregister?.(owner), [owner, unregister]);
+
+  useEffect(() => {
+    if (!subscribe) return;
+    return subscribe(changed => {
+      if (!editing && changed.some(resource => resourcesRef.current.includes(resource))) void refreshRef.current();
     });
-  }, [context, editing, resourceKey]);
+  }, [editing, resourceKey, subscribe]);
 
   return {
     hasRemoteConflict: Boolean(context && resources.some(resource => context.conflictedResources.has(resource))),

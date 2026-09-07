@@ -151,16 +151,20 @@ export class CloudTargetedCache {
     for (const change of request.changes) {
       byTable.set(change.table, [...(byTable.get(change.table) || []), change]);
     }
-    const tables = request.reason === 'realtime' ? [...byTable.keys()] : tablesForResources(request.resources);
+    const hasRowChanges = request.changes.length > 0;
+    const tables = (request.reason === 'realtime' || (request.reason === 'editing-ended' && hasRowChanges))
+      ? [...byTable.keys()]
+      : tablesForResources(request.resources);
     markCloudReadLoading();
     try {
       const rowCounts = await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
         const changes = byTable.get(table) || [];
         if (changes.length > 0) return this.refreshChanges(table, changes);
-        if (request.reason === 'reconnect') return this.refreshAuthoritative(table);
+        if (request.reason === 'reconnect' || request.reason === 'editing-ended') return this.refreshAuthoritative(table);
         return this.refreshSince(table);
       })));
-      const isAuthoritativeResourceRead = request.reason === 'reconnect';
+      const isAuthoritativeResourceRead = request.reason === 'reconnect'
+        || (request.reason === 'editing-ended' && !hasRowChanges);
       markCloudReadFresh(isAuthoritativeResourceRead
         ? rowCounts.reduce((sum, count) => sum + count, 0)
         : undefined);

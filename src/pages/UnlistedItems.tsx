@@ -5,6 +5,7 @@ import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateGroupDemandAndPurchased, normalizeProductTitle } from '../lib/db';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 interface UnlistedItemSku {
   sku: string;
@@ -277,6 +278,13 @@ export default function UnlistedItems() {
       setLoading(false);
     }
   };
+
+  useCloudResourceSync(
+    'unlisted-items',
+    ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
+    false,
+    loadData,
+  );
 
   useEffect(() => {
     loadData();

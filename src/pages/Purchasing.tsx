@@ -1,12 +1,13 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrder, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
 import { mapPrivateOrderItemsByGroup } from '../lib/purchaseBatchScope';
-import { ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, ExternalLink, Plus } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, ExternalLink, Plus } from 'lucide-react';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useViewport } from '../contexts/ViewportContext';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 interface VariantDetail {
   id: string;
@@ -157,6 +158,9 @@ export default function Purchasing() {
   const [showBatchModal, setShowBatchModal] = useState(false);
   
   const [loading, setLoading] = useState(true);
+  const [hasCompletedLoad, setHasCompletedLoad] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadSequenceRef = useRef(0);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -293,6 +297,7 @@ export default function Purchasing() {
   }, []);
 
   const loadAllData = async () => {
+    const requestId = ++loadSequenceRef.current;
     setLoading(true);
     try {
       const [
@@ -306,16 +311,18 @@ export default function Purchasing() {
         fetchedSalesOrderItems,
         fetchedBatches
       ] = await Promise.all([
-        dataProvider.getProductGroups().catch(() => []),
-        dataProvider.getProductVariants().catch(() => []),
-        dataProvider.getProductCategories().catch(() => []),
-        dataProvider.getPrivateOrders().catch(() => []),
-        dataProvider.getPrivateOrderItems().catch(() => []),
-        dataProvider.getInventory().catch(() => []),
-        dataProvider.getPurchaseBatchItems().catch(() => []),
-        dataProvider.getSalesOrderItems().catch(() => []),
-        dataProvider.getPurchaseBatches().catch(() => [])
+        dataProvider.getProductGroups(),
+        dataProvider.getProductVariants(),
+        dataProvider.getProductCategories(),
+        dataProvider.getPrivateOrders(),
+        dataProvider.getPrivateOrderItems(),
+        dataProvider.getInventory(),
+        dataProvider.getPurchaseBatchItems(),
+        dataProvider.getSalesOrderItems(),
+        dataProvider.getPurchaseBatches()
       ]);
+
+      if (requestId !== loadSequenceRef.current) return;
 
       setGroups(fetchedGroups);
       setVariants(fetchedVars);
@@ -326,11 +333,16 @@ export default function Purchasing() {
       setPurchaseBatchItems(fetchedBatchItems);
       setSalesOrderItems(fetchedSalesOrderItems);
       setPurchaseBatches(fetchedBatches);
+      setLoadError(null);
+      setHasCompletedLoad(true);
       dataProvider.registerFreshLoad();
     } catch (err) {
       console.error("Failed to load data for mobile purchase summary:", err);
+      if (requestId === loadSequenceRef.current) {
+        setLoadError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadSequenceRef.current) setLoading(false);
     }
   };
 
@@ -338,7 +350,18 @@ export default function Purchasing() {
     loadAllData();
   }, []);
 
+  useCloudResourceSync(
+    'purchasing-summary',
+    ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
+    showBatchModal,
+    loadAllData,
+  );
+
   const guardAgainstStaleWrite = (): boolean => {
+    if (!hasCompletedLoad || loadError) {
+      alert('採購資料尚未完整載入，請重試載入後再操作。');
+      return true;
+    }
     const liveStale = dataProvider.checkIsStaleLive();
     if (isStale || liveStale) {
       alert('資料已在其他分頁更新，請重新載入最新資料後再編輯。');
@@ -613,6 +636,17 @@ export default function Purchasing() {
       <div className="mobile-summary-loading">
         <div className="spinner"></div>
         <p>載入採購數據中...</p>
+      </div>
+    );
+  }
+
+  if (loadError && !hasCompletedLoad) {
+    return (
+      <div className="mobile-summary-loading" role="alert">
+        <AlertTriangle size={28} color="#b42318" />
+        <strong>採購資料載入失敗</strong>
+        <p style={{ margin: 0, textAlign: 'center' }}>{loadError}</p>
+        <button type="button" className="btn btn-outline" onClick={() => void loadAllData()}>重新載入</button>
       </div>
     );
   }
@@ -1095,6 +1129,13 @@ export default function Purchasing() {
           }
         }
       `}</style>
+
+      {loadError && hasCompletedLoad && (
+        <div role="status" style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #fbbf24', background: '#fffbeb', color: '#92400e', fontSize: 13 }}>
+          更新失敗，暫時保留上次成功資料。
+          <button type="button" onClick={() => void loadAllData()} style={{ marginLeft: 8, border: 0, background: 'transparent', color: '#1d4ed8', fontWeight: 700, cursor: 'pointer' }}>重試</button>
+        </div>
+      )}
 
       {!selectedGroup ? (
         // List View

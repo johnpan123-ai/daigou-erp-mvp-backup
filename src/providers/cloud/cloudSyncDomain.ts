@@ -65,7 +65,7 @@ export const resolveCloudRowIdentity = (
 };
 
 export interface CloudRefreshRequest {
-  reason: 'realtime' | 'focus' | 'visibility' | 'reconnect';
+  reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect';
   changes: CloudChange[];
   resources: CloudResource[];
 }
@@ -73,6 +73,8 @@ export interface CloudRefreshRequest {
 export interface CloudSyncMetrics {
   receivedEvents: number;
   dedupedEvents: number;
+  deferredEvents: number;
+  editingCatchUps: number;
   targetedRefreshes: number;
   fallbackRefreshes: number;
   conflicts: number;
@@ -95,15 +97,20 @@ const uniqueResources = (resources: CloudResource[]): CloudResource[] => (
 export class CloudSyncCoordinator {
   private readonly options: CloudSyncCoordinatorOptions;
   private pending = new Map<string, CloudChange>();
+  private deferred = new Map<string, CloudChange>();
+  private deferredFallbackResources = new Set<CloudResource>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private inFlight: Promise<void> | null = null;
+  private resumeInFlight: Promise<void> | null = null;
   private readonly coalesceMs: number;
   private readonly now: () => number;
   private lastFallbackAt = 0;
   private readonly metrics: CloudSyncMetrics = {
     receivedEvents: 0,
     dedupedEvents: 0,
+    deferredEvents: 0,
+    editingCatchUps: 0,
     targetedRefreshes: 0,
     fallbackRefreshes: 0,
     conflicts: 0,
@@ -145,6 +152,14 @@ export class CloudSyncCoordinator {
     const refreshable = resources.filter(resource => !editing.includes(resource));
 
     if (editing.length > 0) {
+      changes
+        .filter(change => change.origin !== 'local' && editing.includes(change.resource))
+        .forEach(change => {
+          const key = `${change.table}:${change.canonicalId}`;
+          if (this.deferred.has(key)) this.metrics.dedupedEvents += 1;
+          else this.metrics.deferredEvents += 1;
+          this.deferred.set(key, change);
+        });
       this.metrics.conflicts += 1;
       this.options.onConflict(editing);
     }
@@ -158,6 +173,42 @@ export class CloudSyncCoordinator {
     await this.inFlight;
   }
 
+  async resume(resources: CloudResource[]): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.inFlight) await this.inFlight;
+    if (this.resumeInFlight) await this.resumeInFlight;
+
+    const eligible = uniqueResources(resources).filter(resource => !this.options.isEditing(resource));
+    if (eligible.length === 0) return false;
+
+    const changes = [...this.deferred.values()].filter(change => eligible.includes(change.resource));
+    const fallbackResources = eligible.filter(resource => this.deferredFallbackResources.has(resource));
+    const changedResources = uniqueResources(changes.map(change => change.resource));
+    const refreshedResources = uniqueResources([...changedResources, ...fallbackResources]);
+    if (refreshedResources.length === 0) return false;
+
+    changes.forEach(change => this.deferred.delete(`${change.table}:${change.canonicalId}`));
+    fallbackResources.forEach(resource => this.deferredFallbackResources.delete(resource));
+    const needsResourceCatchUp = fallbackResources.length > 0;
+
+    this.metrics.editingCatchUps += 1;
+    this.metrics.targetedRefreshes += 1;
+    this.resumeInFlight = this.options.refresh({
+      reason: needsResourceCatchUp ? 'editing-ended' : 'realtime',
+      changes: needsResourceCatchUp ? [] : changes,
+      resources: refreshedResources,
+    })
+      .then(() => this.options.onRefreshed(refreshedResources))
+      .catch(error => {
+        changes.forEach(change => this.deferred.set(`${change.table}:${change.canonicalId}`, change));
+        fallbackResources.forEach(resource => this.deferredFallbackResources.add(resource));
+        throw error;
+      })
+      .finally(() => { this.resumeInFlight = null; });
+    await this.resumeInFlight;
+    return true;
+  }
+
   async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[]): Promise<boolean> {
     if (this.disposed) return false;
     const now = this.now();
@@ -165,6 +216,7 @@ export class CloudSyncCoordinator {
     const unique = uniqueResources(resources);
     const editing = unique.filter(resource => this.options.isEditing(resource));
     if (editing.length > 0) {
+      editing.forEach(resource => this.deferredFallbackResources.add(resource));
       this.metrics.conflicts += 1;
       this.options.onConflict(editing);
     }
@@ -173,6 +225,10 @@ export class CloudSyncCoordinator {
     this.lastFallbackAt = now;
     this.metrics.fallbackRefreshes += 1;
     await this.options.refresh({ reason, changes: [], resources: refreshable });
+    [...this.deferred.entries()].forEach(([key, change]) => {
+      if (refreshable.includes(change.resource)) this.deferred.delete(key);
+    });
+    refreshable.forEach(resource => this.deferredFallbackResources.delete(resource));
     this.options.onRefreshed(refreshable);
     return true;
   }
@@ -184,6 +240,8 @@ export class CloudSyncCoordinator {
   dispose(): void {
     this.disposed = true;
     this.pending.clear();
+    this.deferred.clear();
+    this.deferredFallbackResources.clear();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }

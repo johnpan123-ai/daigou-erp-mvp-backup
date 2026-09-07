@@ -1499,7 +1499,7 @@ export default function PurchaseRecords() {
   useCloudResourceSync(
     'purchase-records',
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
-    editMode,
+    editMode || showWacaDialog || showClosingDateWorkbench,
     loadFreshData,
   );
 
