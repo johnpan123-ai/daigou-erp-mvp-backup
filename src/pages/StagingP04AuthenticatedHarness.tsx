@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useAuth } from '../auth/authContext';
 import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import {
   P0_4_HARNESS_SCENARIOS,
   StagingP04AuthenticatedHarness as HarnessController,
@@ -30,6 +31,14 @@ export default function StagingP04AuthenticatedHarness() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<unknown>(null);
   const [cleanup, setCleanup] = useState<unknown>(null);
+  const [faultBusy, setFaultBusy] = useState(false);
+  const [faultResult, setFaultResult] = useState<unknown>(null);
+  const { stagingFaultControl: realtimeFaultControl } = useCloudResourceSync(
+    'p0-4-auth-harness-purchases',
+    ['purchases'],
+    false,
+    () => {},
+  );
   const harness = useMemo(() => {
     try {
       return new HarnessController(boundaryInput, rpcInvoker);
@@ -73,6 +82,21 @@ export default function StagingP04AuthenticatedHarness() {
     }
   };
 
+  const controlRealtime = async (action: 'disconnect' | 'reconnect') => {
+    if (!realtimeFaultControl) return;
+    setFaultBusy(true);
+    try {
+      const snapshot = action === 'disconnect'
+        ? await realtimeFaultControl.disconnect()
+        : await realtimeFaultControl.reconnect();
+      setFaultResult({ passed: true, action, snapshot });
+    } catch (error) {
+      setFaultResult({ passed: false, action, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setFaultBusy(false);
+    }
+  };
+
   if (boundaryError) {
     return (
       <main data-testid="p0-4-harness-blocked" style={{ maxWidth: 900, margin: '40px auto', padding: 24 }}>
@@ -110,6 +134,47 @@ export default function StagingP04AuthenticatedHarness() {
         <pre data-testid="harness-result" style={{ whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 12 }}>{result ? JSON.stringify(result, null, 2) : 'Not run'}</pre>
         <h2>Cleanup result</h2>
         <pre data-testid="harness-cleanup" style={{ whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 12 }}>{cleanup ? JSON.stringify(cleanup, null, 2) : 'Not run'}</pre>
+
+        <section aria-labelledby="p0-4-realtime-fault-title" style={{ marginTop: 28, paddingTop: 20, borderTop: '2px solid #fdba74' }}>
+          <h2 id="p0-4-realtime-fault-title">Realtime Fault Control</h2>
+          <p>此控制會真正移除／重建目前 Client 的 Supabase Realtime channel；重新連線沿用正式 authoritative catch-up。</p>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button
+              type="button"
+              data-testid="realtime-disconnect"
+              onClick={() => void controlRealtime('disconnect')}
+              disabled={faultBusy || !editorEligible || !realtimeFaultControl?.available || realtimeFaultControl.snapshot.channelState !== 'subscribed'}
+            >
+              Disconnect Realtime
+            </button>
+            <button
+              type="button"
+              data-testid="realtime-reconnect"
+              onClick={() => void controlRealtime('reconnect')}
+              disabled={faultBusy || !editorEligible || !realtimeFaultControl?.available || realtimeFaultControl.snapshot.channelState === 'subscribing'}
+            >
+              Reconnect Realtime
+            </button>
+          </div>
+          <dl data-testid="realtime-diagnostics" style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 8, marginTop: 16 }}>
+            <dt>Channel</dt><dd data-testid="realtime-channel-state">{realtimeFaultControl?.snapshot.channelState ?? 'unavailable'}</dd>
+            <dt>Active resources</dt><dd>{realtimeFaultControl?.snapshot.activeResources.join(', ') || 'none'}</dd>
+            <dt>Read status</dt><dd data-testid="realtime-read-status">{realtimeFaultControl?.snapshot.readStatus ?? 'unavailable'}</dd>
+            <dt>Reconnect generation</dt><dd>{realtimeFaultControl?.snapshot.reconnectGeneration ?? 0}</dd>
+            <dt>Catch-up attempt</dt><dd>{realtimeFaultControl?.snapshot.catchUpAttempt ?? 0}</dd>
+            <dt>Retry count</dt><dd>{realtimeFaultControl?.snapshot.retryCount ?? 0}</dd>
+            <dt>Last catch-up</dt><dd>{realtimeFaultControl?.snapshot.lastCatchUpResult ?? 'none'}</dd>
+            <dt>Received events</dt><dd data-testid="realtime-received-events">{realtimeFaultControl?.snapshot.metrics.receivedEvents ?? 0}</dd>
+            <dt>Targeted refreshes</dt><dd data-testid="realtime-targeted-refreshes">{realtimeFaultControl?.snapshot.targetedRefreshCount ?? 0}</dd>
+            <dt>fullPulls</dt><dd data-testid="realtime-full-pulls">{realtimeFaultControl?.snapshot.fullPulls ?? 0}</dd>
+          </dl>
+          <h3>Reconnect diagnostics</h3>
+          <pre data-testid="realtime-diagnostic-events" style={{ whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 12 }}>
+            {JSON.stringify(realtimeFaultControl?.snapshot.diagnostics.slice(-10) ?? [], null, 2)}
+          </pre>
+          <h3>Fault control result</h3>
+          <pre data-testid="realtime-fault-result" style={{ whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 12 }}>{faultResult ? JSON.stringify(faultResult, null, 2) : 'Not run'}</pre>
+        </section>
       </div>
     </main>
   );

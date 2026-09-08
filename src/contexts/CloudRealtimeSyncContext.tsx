@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../auth/authContext';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode } from '../providers/providerMode';
-import { supabase } from '../providers/cloud/supabaseClient';
+import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import {
   CLOUD_TABLE_RESOURCE,
   CloudReconnectCatchUp,
@@ -20,10 +20,17 @@ import {
 } from './cloudRealtimeTestBridge';
 import {
   getCloudConnectivitySnapshot,
+  markCloudReconnectPending,
   markCloudReachable,
   markCloudUnavailable,
   subscribeCloudConnectivity,
 } from '../providers/cloud/cloudConnectivity';
+import {
+  StagingRealtimeFaultControl,
+  type RealtimeChannelState,
+  type StagingRealtimeFaultSnapshot,
+} from '../lib/stagingRealtimeFaultControl';
+import { assertP04HarnessBoundary } from '../lib/stagingP04AuthenticatedHarness';
 
 interface CloudRealtimeContextValue {
   conflictedResources: ReadonlySet<CloudResource>;
@@ -31,11 +38,41 @@ interface CloudRealtimeContextValue {
   unregister: (owner: string) => void;
   subscribe: (listener: (resources: CloudResource[]) => void) => () => void;
   clearConflict: (resources: CloudResource[]) => void;
+  stagingFaultControl: {
+    available: boolean;
+    snapshot: StagingRealtimeFaultSnapshot;
+    disconnect: () => Promise<StagingRealtimeFaultSnapshot>;
+    reconnect: () => Promise<StagingRealtimeFaultSnapshot>;
+  };
 }
 
 const CloudRealtimeContext = createContext<CloudRealtimeContextValue | null>(null);
 
 const REALTIME_TABLES = Object.keys(CLOUD_TABLE_RESOURCE);
+const EMPTY_SYNC_METRICS = {
+  receivedEvents: 0,
+  dedupedEvents: 0,
+  deferredEvents: 0,
+  editingCatchUps: 0,
+  targetedRefreshes: 0,
+  fallbackRefreshes: 0,
+  conflicts: 0,
+  fullPulls: 0,
+};
+
+const EMPTY_FAULT_SNAPSHOT: StagingRealtimeFaultSnapshot = {
+  channelState: 'unavailable',
+  activeResources: [],
+  readStatus: 'loading',
+  reconnectGeneration: 0,
+  catchUpAttempt: 0,
+  retryCount: 0,
+  lastCatchUpResult: 'none',
+  targetedRefreshCount: 0,
+  fullPulls: 0,
+  diagnostics: [],
+  metrics: EMPTY_SYNC_METRICS,
+};
 
 export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -45,7 +82,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
   const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
   const reconnectRef = useRef<CloudReconnectCatchUp | null>(null);
+  const faultControllerRef = useRef<StagingRealtimeFaultControl | null>(null);
   const reconnectDiagnostics = useRef<CloudReconnectDiagnostic[]>([]);
+  const [faultSnapshot, setFaultSnapshot] = useState<StagingRealtimeFaultSnapshot>(EMPTY_FAULT_SNAPSHOT);
   const [conflictedResources, setConflictedResources] = useState<Set<CloudResource>>(new Set());
   const [mutationConflictMessage, setMutationConflictMessage] = useState('');
   const connectivity = useSyncExternalStore(
@@ -54,6 +93,19 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     getCloudConnectivitySnapshot,
   );
   const cloudMode = ['cloud', 'fallback'].includes(getProviderMode()) || Boolean(testBridge);
+  const faultControlAllowed = (() => {
+    try {
+      assertP04HarnessBoundary({
+        projectRef: supabaseEnvironment.projectRef,
+        runtimeRole: supabaseEnvironment.role,
+        viteMode: import.meta.env.MODE,
+        deploymentEnvironment: import.meta.env.VITE_DEPLOYMENT_ENV,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
   const showCloudReadStatus = connectivity.status !== 'online'
     || connectivity.readStatus === 'loading'
     || connectivity.readStatus === 'stale-cache'
@@ -109,11 +161,38 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     });
     coordinatorRef.current = coordinator;
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
+    let channelState: RealtimeChannelState = 'unavailable';
+    const buildFaultSnapshot = (): StagingRealtimeFaultSnapshot => {
+      const diagnostics = [...reconnectDiagnostics.current];
+      const latest = diagnostics.at(-1);
+      const metrics = coordinator.snapshotMetrics();
+      const latestGeneration = latest?.generation ?? 0;
+      const latestGenerationDiagnostics = diagnostics.filter(entry => entry.generation === latestGeneration);
+      return {
+        channelState,
+        activeResources: activeResources().sort(),
+        readStatus: getCloudConnectivitySnapshot().readStatus,
+        reconnectGeneration: latestGeneration,
+        catchUpAttempt: latest?.attempt ?? 0,
+        retryCount: latestGenerationDiagnostics.filter(entry => entry.event === 'retry-scheduled').length,
+        lastCatchUpResult: latestGenerationDiagnostics.some(entry => entry.event === 'complete')
+          ? 'success'
+          : latestGenerationDiagnostics.some(entry => entry.event === 'attempt-failed' || entry.event === 'exhausted')
+            ? 'failure'
+            : 'none',
+        targetedRefreshCount: metrics.targetedRefreshes + metrics.fallbackRefreshes,
+        fullPulls: metrics.fullPulls,
+        diagnostics,
+        metrics,
+      };
+    };
+    const publishFaultSnapshot = () => setFaultSnapshot(buildFaultSnapshot());
     const reconnect = new CloudReconnectCatchUp({
       refresh: (resources, signal) => coordinator.fallback('reconnect', resources, signal),
       retryDelaysMs: testBridge ? [10, 25, 50, 100] : undefined,
       onDiagnostic: diagnostic => {
         reconnectDiagnostics.current = [...reconnectDiagnostics.current.slice(-49), diagnostic];
+        publishFaultSnapshot();
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('cloud-reconnect-diagnostic', { detail: diagnostic }));
         }
@@ -140,6 +219,65 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     };
 
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let channelGeneration = 0;
+    let subscribedOnce = false;
+    let faultDisconnected = false;
+    let disposed = false;
+    let stagingFaultController: StagingRealtimeFaultControl | null = null;
+
+    const removeRealtimeChannel = async (currentChannel: NonNullable<typeof channel>) => {
+      const result = await supabase.removeChannel(currentChannel);
+      if (result !== 'ok') throw new Error(`P0_4_REALTIME_DISCONNECT_${String(result).toUpperCase().replaceAll(' ', '_')}`);
+    };
+
+    const subscribeRealtimeChannel = (forceAuthoritativeCatchUp: boolean): Promise<boolean> => {
+      channelState = 'subscribing';
+      publishFaultSnapshot();
+      const generation = ++channelGeneration;
+      let nextChannel = supabase.channel(`erp-live-${user!.id}`);
+      for (const table of REALTIME_TABLES) {
+        nextChannel = nextChannel.on('postgres_changes' as never, { event: '*', schema: 'public', table }, payload => {
+          if (disposed || generation !== channelGeneration || channel !== nextChannel) return;
+          handlePayload(table, payload as unknown as CloudRealtimeTestPayload);
+        });
+      }
+      channel = nextChannel;
+
+      return new Promise<boolean>((resolve, reject) => {
+        let settled = false;
+        const settle = (result: boolean, error?: Error) => {
+          if (settled) return;
+          settled = true;
+          if (error) reject(error);
+          else resolve(result);
+        };
+        nextChannel.subscribe(status => {
+          if (disposed || generation !== channelGeneration || channel !== nextChannel) return;
+          if (status === 'SUBSCRIBED') {
+            channelState = 'subscribed';
+            markCloudReachable();
+            const needsCatchUp = forceAuthoritativeCatchUp || subscribedOnce || reconnect.isPending();
+            subscribedOnce = true;
+            publishFaultSnapshot();
+            if (!needsCatchUp) {
+              settle(true);
+              return;
+            }
+            void reconnect.request('subscribed', activeResources()).then(completed => {
+              publishFaultSnapshot();
+              settle(completed, completed ? undefined : new Error('P0_4_REALTIME_CATCH_UP_INCOMPLETE'));
+            });
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            channelState = 'error';
+            markCloudUnavailable(`realtime-${status.toLowerCase()}`);
+            reconnect.markNeeded('channel-interrupted');
+            publishFaultSnapshot();
+            settle(false, new Error(`P0_4_REALTIME_${status}`));
+          }
+        });
+      });
+    };
+
     if (testBridge) {
       testBridge.attach({
         emit: async (table, payload) => {
@@ -159,42 +297,77 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       });
       markCloudReachable();
     } else {
-      channel = supabase.channel(`erp-live-${user!.id}`);
-      for (const table of REALTIME_TABLES) {
-        channel = channel.on('postgres_changes' as never, { event: '*', schema: 'public', table }, payload => {
-          handlePayload(table, payload as unknown as CloudRealtimeTestPayload);
+      const environment = {
+        projectRef: supabaseEnvironment.projectRef,
+        runtimeRole: supabaseEnvironment.role,
+        viteMode: import.meta.env.MODE,
+        deploymentEnvironment: import.meta.env.VITE_DEPLOYMENT_ENV,
+      } as const;
+      try {
+        stagingFaultController = new StagingRealtimeFaultControl(environment, {
+          snapshot: buildFaultSnapshot,
+          disconnect: async () => {
+            faultDisconnected = true;
+            channelState = 'disconnecting';
+            publishFaultSnapshot();
+            reconnect.markNeeded('channel-interrupted');
+            markCloudUnavailable('realtime-test-disconnected');
+            const currentChannel = channel;
+            channel = null;
+            channelGeneration += 1;
+            if (currentChannel) {
+              try {
+                await removeRealtimeChannel(currentChannel);
+              } catch (error) {
+                channelState = 'error';
+                publishFaultSnapshot();
+                throw error;
+              }
+            }
+            channelState = 'unsubscribed';
+            publishFaultSnapshot();
+            return buildFaultSnapshot();
+          },
+          reconnect: async () => {
+            faultDisconnected = false;
+            const currentChannel = channel;
+            channel = null;
+            channelGeneration += 1;
+            if (currentChannel) await removeRealtimeChannel(currentChannel);
+            reconnect.markNeeded('channel-interrupted');
+            markCloudReconnectPending();
+            await subscribeRealtimeChannel(true);
+            publishFaultSnapshot();
+            return buildFaultSnapshot();
+          },
         });
+        faultControllerRef.current = stagingFaultController;
+      } catch {
+        faultControllerRef.current = null;
       }
-
-      let subscribedOnce = false;
-      channel.subscribe(status => {
-        if (status === 'SUBSCRIBED') {
-          markCloudReachable();
-          if (subscribedOnce || reconnect.isPending()) {
-            void reconnect.request('subscribed', activeResources());
-          }
-          subscribedOnce = true;
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          markCloudUnavailable(`realtime-${status.toLowerCase()}`);
-          reconnect.markNeeded('channel-interrupted');
-        }
+      void subscribeRealtimeChannel(false).catch(() => {
+        // Realtime status and reconnect diagnostics already preserve the
+        // fail-closed state. A later native SUBSCRIBED transition or explicit
+        // Staging reconnect control can start the authoritative catch-up.
       });
     }
-
     const needsAuthoritativeCatchUp = () => {
       const { readStatus } = getCloudConnectivitySnapshot();
       return reconnect.isPending() && readStatus !== 'fresh-online' && readStatus !== 'fresh-empty';
     };
     const handleFocus = () => {
+      if (faultDisconnected) return;
       if (needsAuthoritativeCatchUp()) void reconnect.request('focus', activeResources());
       else void coordinator.fallback('focus', activeResources());
     };
     const handleVisibility = () => {
+      if (faultDisconnected) return;
       if (document.visibilityState !== 'visible') return;
       if (needsAuthoritativeCatchUp()) void reconnect.request('visibility', activeResources());
       else void coordinator.fallback('visibility', activeResources());
     };
     const handleOnline = () => {
+      if (faultDisconnected) return;
       void reconnect.request('online', activeResources());
     };
     window.addEventListener('focus', handleFocus);
@@ -202,11 +375,14 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      disposed = true;
+      channelGeneration += 1;
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
       if (reconnectRef.current === reconnect) reconnectRef.current = null;
+      if (faultControllerRef.current === stagingFaultController) faultControllerRef.current = null;
       testBridge?.detach?.();
       reconnect.dispose();
       coordinator.dispose();
@@ -223,14 +399,25 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     });
   }, []);
 
+  const refreshFaultSnapshot = useCallback(() => {
+    const controller = faultControllerRef.current;
+    if (!controller) return;
+    try {
+      setFaultSnapshot(controller.snapshot());
+    } catch {
+      setFaultSnapshot(EMPTY_FAULT_SNAPSHOT);
+    }
+  }, []);
+
   const registerEditing = useCallback((owner: string, resources: CloudResource[], editing: boolean) => {
     const previous = editingOwners.current.get(owner);
     const affected = [...new Set([...(previous?.resources ?? []), ...resources])];
     const wasEditing = new Set(affected.filter(isEditing));
     editingOwners.current.set(owner, { resources: new Set(resources), editing });
     reconnectRef.current?.updateResources([...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))]);
+    refreshFaultSnapshot();
     resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
-  }, [isEditing, resumeAfterEditing]);
+  }, [isEditing, refreshFaultSnapshot, resumeAfterEditing]);
 
   const unregister = useCallback((owner: string) => {
     const previous = editingOwners.current.get(owner);
@@ -239,8 +426,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const wasEditing = new Set(affected.filter(isEditing));
     editingOwners.current.delete(owner);
     reconnectRef.current?.updateResources([...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))]);
+    refreshFaultSnapshot();
     resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
-  }, [isEditing, resumeAfterEditing]);
+  }, [isEditing, refreshFaultSnapshot, resumeAfterEditing]);
 
   const subscribe = useCallback((listener: (resources: CloudResource[]) => void) => {
     listeners.current.add(listener);
@@ -256,13 +444,51 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     dataProvider.clearCloudStale(resources);
   }, []);
 
+  const disconnectStagingRealtime = useCallback(async () => {
+    const controller = faultControllerRef.current;
+    if (!controller) throw new Error('P0_4_STAGING_REALTIME_FAULT_CONTROL_DISABLED');
+    const snapshot = await controller.disconnect();
+    setFaultSnapshot(snapshot);
+    return snapshot;
+  }, []);
+
+  const reconnectStagingRealtime = useCallback(async () => {
+    const controller = faultControllerRef.current;
+    if (!controller) throw new Error('P0_4_STAGING_REALTIME_FAULT_CONTROL_DISABLED');
+    const snapshot = await controller.reconnect();
+    setFaultSnapshot(snapshot);
+    return snapshot;
+  }, []);
+
   const value = useMemo<CloudRealtimeContextValue>(() => ({
     conflictedResources,
     registerEditing,
     unregister,
     subscribe,
     clearConflict,
-  }), [clearConflict, conflictedResources, registerEditing, subscribe, unregister]);
+    stagingFaultControl: {
+      available: faultControlAllowed && enabled && !testBridge,
+      snapshot: {
+        ...faultSnapshot,
+        readStatus: connectivity.readStatus,
+      },
+      disconnect: disconnectStagingRealtime,
+      reconnect: reconnectStagingRealtime,
+    },
+  }), [
+    clearConflict,
+    conflictedResources,
+    connectivity.readStatus,
+    disconnectStagingRealtime,
+    enabled,
+    faultSnapshot,
+    faultControlAllowed,
+    reconnectStagingRealtime,
+    registerEditing,
+    subscribe,
+    testBridge,
+    unregister,
+  ]);
 
   return (
     <CloudRealtimeContext.Provider value={value}>
@@ -333,5 +559,6 @@ export function useCloudResourceSync(
   return {
     hasRemoteConflict: Boolean(context && resources.some(resource => context.conflictedResources.has(resource))),
     clearRemoteConflict: () => context?.clearConflict(resources),
+    stagingFaultControl: context?.stagingFaultControl ?? null,
   };
 }

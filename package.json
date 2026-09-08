@@ -47,6 +47,7 @@
     "test:cloud-purchase-batch-provider": "node tests/cloud-purchase-batch-provider-integration.mjs",
     "test:cloud-auth-recovery": "node tests/cloud-auth-recovery-react.mjs",
     "test:p0-4-auth-harness": "node tests/staging-p0-4-authenticated-harness.mjs",
+    "test:p0-4-realtime-fault-control": "node tests/staging-p0-4-realtime-fault-control.mjs",
     "test:p0-eslint-baseline": "node tests/p0-eslint-baseline-delta.mjs",
     "test:cloud-private-order-hydration": "node tests/cloud-private-order-hydration.mjs",
     "test:purchase-management-actions": "node tests/purchase-management-actions.mjs",
