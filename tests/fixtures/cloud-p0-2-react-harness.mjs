@@ -209,11 +209,20 @@ let controllerResolve;
 const controllerReady = new Promise(resolve => { controllerResolve = resolve; });
 let controller = null;
 let targetedQueries = 0;
+const targetedQueriesByTable = {};
 let failNextQuery = false;
+const targetedReadFailures = new Map();
+let idempotentReplays = 0;
 
 installCloudRealtimeTestBridge({
   query: async request => {
     targetedQueries += 1;
+    targetedQueriesByTable[request.table] = (targetedQueriesByTable[request.table] || 0) + 1;
+    const tableFailures = targetedReadFailures.get(request.table) || 0;
+    if (tableFailures > 0) {
+      targetedReadFailures.set(request.table, tableFailures - 1);
+      throw new Error(`INJECTED_TARGETED_READ_FAILURE:${request.table}`);
+    }
     if (failNextQuery) {
       failNextQuery = false;
       throw new Error('INJECTED_TARGETED_READ_FAILURE');
@@ -323,11 +332,24 @@ window.__P0_REACT_HARNESS__ = {
     return activeController.fallback(reason, resources);
   },
   failTargetedReadOnce() { failNextQuery = true; },
+  failTargetedTableRead(table, count = 1) { targetedReadFailures.set(table, count); },
+  replaySameKey(canonicalResult) {
+    idempotentReplays += 1;
+    return clone(canonicalResult);
+  },
+  markReconnectNeeded() {
+    const activeController = controller;
+    activeController?.markReconnectNeeded();
+  },
   offline() {
     markCloudUnavailable('test-offline');
     window.dispatchEvent(new Event('offline'));
   },
-  online() { window.dispatchEvent(new Event('online')); },
+  async online() {
+    window.dispatchEvent(new Event('online'));
+    const activeController = controller || await controllerReady;
+    return activeController.waitForReconnect();
+  },
   focus() { window.dispatchEvent(new Event('focus')); },
   visibility(state) {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
@@ -337,9 +359,12 @@ window.__P0_REACT_HARNESS__ = {
     return {
       metrics: controller?.metrics() || null,
       targetedQueries,
+      targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,
+      idempotentReplays,
       connectivity: getCloudConnectivitySnapshot(),
+      reconnectDiagnostics: controller?.reconnectDiagnostics() || [],
     };
   },
 };

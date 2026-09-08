@@ -359,6 +359,184 @@ try {
     } finally { await closeSession(session); }
   }
 
+  // A missed INSERT followed only by an idempotent replay still converges on reconnect.
+  // The first item read fails: both purchase tables retry and become visible without a new event or F5.
+  {
+    const session = await boot('/purchase-records/g-holo');
+    const { page } = session;
+    try {
+      await page.getByText('採購批次紀錄', { exact: true }).click();
+      await waitText(page, 'React Batch A');
+      const before = await snap(page);
+      await page.evaluate(() => {
+        const h = window.__P0_REACT_HARNESS__;
+        h.offline();
+        h.setServerRows('purchase_batches', [
+          ...h.server.purchaseBatches,
+          {
+            id: 'p0-4-replay-missed-batch', product_group_id: 'g-holo', name: 'P0-4 Missed Replay Batch',
+            date: '2026-09-08', note: 'same-key replay has no second event',
+            created_at: '2026-09-08T00:00:00.000Z', updated_at: '2026-09-08T00:00:00.000Z',
+          },
+        ]);
+        h.setServerRows('purchase_batch_items', [
+          ...h.server.purchaseBatchItems,
+          {
+            id: 'p0-4-replay-missed-item', purchase_batch_id: 'p0-4-replay-missed-batch',
+            product_variant_id: 'v-holo', quantity: 3, cost: 777, note: 'P0-4 Missed Replay Item',
+            updated_at: '2026-09-08T00:00:00.000Z',
+          },
+        ]);
+        // The same-key replay returns the existing canonical result and intentionally emits no DB event.
+        h.replaySameKey({ batchId: 'p0-4-replay-missed-batch', itemIds: ['p0-4-replay-missed-item'], replayed: true });
+        h.failTargetedTableRead('purchase_batch_items', 1);
+      });
+      const completed = await page.evaluate(() => window.__P0_REACT_HARNESS__.online());
+      assert.equal(completed, true, 'Reconnect retries did not reach an authoritative success');
+      await waitText(page, 'P0-4 Missed Replay Batch');
+      const after = await snap(page);
+      assert.ok(after.targetedQueriesByTable.purchase_batches - (before.targetedQueriesByTable.purchase_batches || 0) >= 2);
+      assert.ok(after.targetedQueriesByTable.purchase_batch_items - (before.targetedQueriesByTable.purchase_batch_items || 0) >= 2);
+      assert.equal(after.connectivity.readStatus, 'fresh-online');
+      assert.equal(after.idempotentReplays, before.idempotentReplays + 1);
+      assert.equal(after.writes, before.writes, 'Idempotent replay performed a second client mutation');
+      assert.equal(after.metrics.fullPulls, 0);
+      assert.ok(after.reconnectDiagnostics.some(entry => entry.event === 'attempt-failed'));
+      assert.ok(after.reconnectDiagnostics.some(entry => entry.event === 'retry-scheduled'));
+      assert.ok(after.reconnectDiagnostics.some(entry => entry.event === 'complete'));
+    } finally { await closeSession(session); }
+  }
+
+  // Reconnect before resource registration is retained, and rapid triggers share one active generation.
+  {
+    const session = await boot('/dashboard');
+    const { page } = session;
+    try {
+      const guarantee = await page.evaluate(async () => {
+        const { CloudReconnectCatchUp } = await import('/src/providers/cloud/cloudSyncDomain.ts');
+        let emptyRaceCalls = 0;
+        const emptyRace = new CloudReconnectCatchUp({
+          retryDelaysMs: [0],
+          refresh: async resources => {
+            emptyRaceCalls += 1;
+            return resources.includes('purchases');
+          },
+        });
+        const pending = emptyRace.request('online', []);
+        await Promise.resolve();
+        const beforeRegistration = emptyRaceCalls;
+        emptyRace.updateResources(['purchases']);
+        const emptyRaceCompleted = await pending;
+        emptyRace.dispose();
+
+        let dedupedCalls = 0;
+        let release;
+        const blocked = new Promise(resolve => { release = resolve; });
+        const deduped = new CloudReconnectCatchUp({
+          retryDelaysMs: [0],
+          refresh: async () => {
+            dedupedCalls += 1;
+            await blocked;
+            return true;
+          },
+        });
+        const cycles = [
+          deduped.request('online', ['purchases']),
+          deduped.request('subscribed', ['purchases']),
+          deduped.request('focus', ['purchases']),
+          deduped.request('visibility', ['purchases']),
+        ];
+        await Promise.resolve();
+        const callsWhileBlocked = dedupedCalls;
+        release();
+        const results = await Promise.all(cycles);
+        deduped.dispose();
+
+        let supersedeCalls = 0;
+        let supersededSignalAborted = false;
+        const superseded = new CloudReconnectCatchUp({
+          retryDelaysMs: [0],
+          refresh: async (_resources, signal) => {
+            supersedeCalls += 1;
+            if (supersedeCalls > 1) return true;
+            return new Promise((resolve, reject) => {
+              signal.addEventListener('abort', () => {
+                supersededSignalAborted = true;
+                reject(new DOMException('Superseded', 'AbortError'));
+              }, { once: true });
+              void resolve;
+            });
+          },
+        });
+        const oldGeneration = superseded.request('online', ['purchases']);
+        await Promise.resolve();
+        superseded.markNeeded('channel-interrupted');
+        const newGeneration = superseded.request('subscribed', ['purchases']);
+        const supersededResults = await Promise.all([oldGeneration, newGeneration]);
+        superseded.dispose();
+        return {
+          beforeRegistration, emptyRaceCalls, emptyRaceCompleted, callsWhileBlocked, dedupedCalls, results,
+          supersedeCalls, supersededSignalAborted, supersededResults,
+        };
+      });
+      assert.deepEqual(guarantee, {
+        beforeRegistration: 0,
+        emptyRaceCalls: 1,
+        emptyRaceCompleted: true,
+        callsWhileBlocked: 1,
+        dedupedCalls: 1,
+        results: [true, true, true, true],
+        supersedeCalls: 2,
+        supersededSignalAborted: true,
+        supersededResults: [false, true],
+      });
+    } finally { await closeSession(session); }
+  }
+
+  // Parent/item authoritative reads are prepared before one atomic purchase cache commit.
+  {
+    const session = await boot('/dashboard');
+    const { page } = session;
+    try {
+      const atomic = await page.evaluate(async () => {
+        const { cloudCacheDb } = await import('/src/lib/db.ts');
+        const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');
+        const oldBatch = { id: 'atomic-old-batch', product_group_id: 'g-holo', name: 'Atomic Old Batch', date: '2026-09-08' };
+        const oldItem = { id: 'atomic-old-item', purchase_batch_id: oldBatch.id, product_variant_id: 'v-holo', quantity: 1, cost: 1 };
+        const newBatch = { ...oldBatch, id: 'atomic-new-batch', name: 'Atomic New Batch' };
+        const newItem = { ...oldItem, id: 'atomic-new-item', purchase_batch_id: newBatch.id, quantity: 2 };
+        await cloudCacheDb.savePurchaseBatchTransaction([oldBatch], [oldItem]);
+        let failItem = true;
+        const cache = new CloudTargetedCache({
+          query: async ({ table }) => {
+            if (table === 'purchase_batch_items' && failItem) throw new Error('ITEM_READ_FAILED');
+            return table === 'purchase_batches' ? [newBatch] : table === 'purchase_batch_items' ? [newItem] : [];
+          },
+        });
+        try {
+          await cache.refresh({ reason: 'reconnect', changes: [], resources: ['purchases'] });
+        } catch { /* expected */ }
+        const afterFailure = {
+          batches: await cloudCacheDb.getPurchaseBatches(),
+          items: await cloudCacheDb.getPurchaseBatchItems(),
+        };
+        failItem = false;
+        await cache.refresh({ reason: 'reconnect', changes: [], resources: ['purchases'] });
+        return {
+          afterFailure,
+          afterSuccess: {
+            batches: await cloudCacheDb.getPurchaseBatches(),
+            items: await cloudCacheDb.getPurchaseBatchItems(),
+          },
+        };
+      });
+      assert.equal(atomic.afterFailure.batches[0].id, 'atomic-old-batch');
+      assert.equal(atomic.afterFailure.items[0].id, 'atomic-old-item');
+      assert.equal(atomic.afterSuccess.batches[0].id, 'atomic-new-batch');
+      assert.equal(atomic.afterSuccess.items[0].id, 'atomic-new-item');
+    } finally { await closeSession(session); }
+  }
+
   assert.equal(supabaseRequests.length, 0, 'React acceptance harness contacted Supabase');
   assert.equal(consoleErrors.length, 0, `React acceptance harness console errors:\n${consoleErrors.join('\n')}`);
   assert.ok(coverage.some(entry => entry.route === '/dashboard'));
@@ -371,6 +549,9 @@ try {
   console.log('PASS Visibility, Focus and reconnect preserve Draft and catch up at edit end');
   console.log('PASS inline commit, self echo and second save actual React flow');
   console.log('PASS duplicate event dedupe and fullPulls = 0');
+  console.log('PASS missed INSERT + same-key replay no-event reconnect convergence');
+  console.log('PASS first-read failure retry and purchase parent/item atomic cache commit');
+  console.log('PASS resource-registration race and multi-trigger reconnect dedupe');
   console.log(`PASS coverage=${JSON.stringify(coverage)}`);
   console.log('PASS fixture Supabase requests = 0');
 } finally {

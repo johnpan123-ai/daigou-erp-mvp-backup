@@ -1,6 +1,6 @@
 import { isSandboxProviderMode } from '../providers/providerMode';
 import type { CloudTargetedQuery } from '../providers/cloud/cloudTargetedCache';
-import type { CloudResource, CloudSyncCoordinator } from '../providers/cloud/cloudSyncDomain';
+import type { CloudReconnectDiagnostic, CloudResource, CloudSyncCoordinator } from '../providers/cloud/cloudSyncDomain';
 
 export interface CloudRealtimeTestPayload {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -13,6 +13,10 @@ export interface CloudRealtimeTestController {
   emit: (table: string, payload: CloudRealtimeTestPayload) => Promise<void>;
   emitMany: (events: Array<{ table: string; payload: CloudRealtimeTestPayload }>) => Promise<void>;
   fallback: (reason: 'focus' | 'visibility' | 'reconnect', resources?: CloudResource[]) => Promise<boolean>;
+  reconnect: (trigger: 'online' | 'subscribed' | 'focus' | 'visibility', resources?: CloudResource[]) => Promise<boolean>;
+  markReconnectNeeded: () => void;
+  waitForReconnect: () => Promise<boolean>;
+  reconnectDiagnostics: () => CloudReconnectDiagnostic[];
   metrics: () => ReturnType<CloudSyncCoordinator['snapshotMetrics']>;
 }
 

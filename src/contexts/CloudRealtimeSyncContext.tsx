@@ -5,9 +5,11 @@ import { getProviderMode } from '../providers/providerMode';
 import { supabase } from '../providers/cloud/supabaseClient';
 import {
   CLOUD_TABLE_RESOURCE,
+  CloudReconnectCatchUp,
   CloudSyncCoordinator,
   resolveCloudRowIdentity,
   type CloudChange,
+  type CloudReconnectDiagnostic,
   type CloudResource,
 } from '../providers/cloud/cloudSyncDomain';
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
@@ -19,7 +21,6 @@ import {
 import {
   getCloudConnectivitySnapshot,
   markCloudReachable,
-  markCloudRequestFailed,
   markCloudUnavailable,
   subscribeCloudConnectivity,
 } from '../providers/cloud/cloudConnectivity';
@@ -43,6 +44,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean }>());
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
   const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
+  const reconnectRef = useRef<CloudReconnectCatchUp | null>(null);
+  const reconnectDiagnostics = useRef<CloudReconnectDiagnostic[]>([]);
   const [conflictedResources, setConflictedResources] = useState<Set<CloudResource>>(new Set());
   const [mutationConflictMessage, setMutationConflictMessage] = useState('');
   const connectivity = useSyncExternalStore(
@@ -99,13 +102,25 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const cache = new CloudTargetedCache(testBridge ? { query: testBridge.query } : undefined);
     cache.initializeCursor();
     const coordinator = new CloudSyncCoordinator({
-      refresh: request => cache.refresh(request),
+      refresh: (request, signal) => cache.refresh(request, signal),
       isEditing,
       onRefreshed: notifyRefreshed,
       onConflict: notifyConflict,
     });
     coordinatorRef.current = coordinator;
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
+    const reconnect = new CloudReconnectCatchUp({
+      refresh: (resources, signal) => coordinator.fallback('reconnect', resources, signal),
+      retryDelaysMs: testBridge ? [10, 25, 50, 100] : undefined,
+      onDiagnostic: diagnostic => {
+        reconnectDiagnostics.current = [...reconnectDiagnostics.current.slice(-49), diagnostic];
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cloud-reconnect-diagnostic', { detail: diagnostic }));
+        }
+      },
+    });
+    reconnectRef.current = reconnect;
+    reconnect.updateResources(activeResources());
 
     const handlePayload = (table: string, payload: CloudRealtimeTestPayload) => {
       const row = payload.new && Object.keys(payload.new).length > 0 ? payload.new : payload.old;
@@ -136,6 +151,10 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
           await coordinator.flush();
         },
         fallback: (reason, resources) => coordinator.fallback(reason, resources ?? activeResources()),
+        reconnect: (trigger, resources) => reconnect.request(trigger, resources ?? activeResources()),
+        markReconnectNeeded: () => reconnect.markNeeded('channel-interrupted'),
+        waitForReconnect: () => reconnect.waitForCurrentCycle(),
+        reconnectDiagnostics: () => [...reconnectDiagnostics.current],
         metrics: () => coordinator.snapshotMetrics(),
       });
       markCloudReachable();
@@ -151,23 +170,32 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       channel.subscribe(status => {
         if (status === 'SUBSCRIBED') {
           markCloudReachable();
-          if (subscribedOnce) {
-            const active = [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
-            void coordinator.fallback('reconnect', active);
+          if (subscribedOnce || reconnect.isPending()) {
+            void reconnect.request('subscribed', activeResources());
           }
           subscribedOnce = true;
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           markCloudUnavailable(`realtime-${status.toLowerCase()}`);
+          reconnect.markNeeded('channel-interrupted');
         }
       });
     }
 
-    const handleFocus = () => { void coordinator.fallback('focus', activeResources()); };
+    const needsAuthoritativeCatchUp = () => {
+      const { readStatus } = getCloudConnectivitySnapshot();
+      return reconnect.isPending() && readStatus !== 'fresh-online' && readStatus !== 'fresh-empty';
+    };
+    const handleFocus = () => {
+      if (needsAuthoritativeCatchUp()) void reconnect.request('focus', activeResources());
+      else void coordinator.fallback('focus', activeResources());
+    };
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void coordinator.fallback('visibility', activeResources());
+      if (document.visibilityState !== 'visible') return;
+      if (needsAuthoritativeCatchUp()) void reconnect.request('visibility', activeResources());
+      else void coordinator.fallback('visibility', activeResources());
     };
     const handleOnline = () => {
-      void coordinator.fallback('reconnect', activeResources()).catch(markCloudRequestFailed);
+      void reconnect.request('online', activeResources());
     };
     window.addEventListener('focus', handleFocus);
     window.addEventListener('online', handleOnline);
@@ -178,7 +206,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+      if (reconnectRef.current === reconnect) reconnectRef.current = null;
       testBridge?.detach?.();
+      reconnect.dispose();
       coordinator.dispose();
       if (channel) void supabase.removeChannel(channel);
     };
@@ -198,6 +228,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const affected = [...new Set([...(previous?.resources ?? []), ...resources])];
     const wasEditing = new Set(affected.filter(isEditing));
     editingOwners.current.set(owner, { resources: new Set(resources), editing });
+    reconnectRef.current?.updateResources([...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))]);
     resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
   }, [isEditing, resumeAfterEditing]);
 
@@ -207,6 +238,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const affected = [...previous.resources];
     const wasEditing = new Set(affected.filter(isEditing));
     editingOwners.current.delete(owner);
+    reconnectRef.current?.updateResources([...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))]);
     resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
   }, [isEditing, resumeAfterEditing]);
 

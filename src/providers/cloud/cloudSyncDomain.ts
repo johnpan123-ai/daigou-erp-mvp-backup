@@ -82,7 +82,7 @@ export interface CloudSyncMetrics {
 }
 
 export interface CloudSyncCoordinatorOptions {
-  refresh: (request: CloudRefreshRequest) => Promise<void>;
+  refresh: (request: CloudRefreshRequest, signal?: AbortSignal) => Promise<void>;
   isEditing: (resource: CloudResource) => boolean;
   onRefreshed: (resources: CloudResource[]) => void;
   onConflict: (resources: CloudResource[]) => void;
@@ -209,7 +209,7 @@ export class CloudSyncCoordinator {
     return true;
   }
 
-  async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[]): Promise<boolean> {
+  async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[], signal?: AbortSignal): Promise<boolean> {
     if (this.disposed) return false;
     const now = this.now();
     if (reason !== 'reconnect' && now - this.lastFallbackAt < 15_000) return false;
@@ -224,7 +224,8 @@ export class CloudSyncCoordinator {
     if (refreshable.length === 0) return false;
     this.lastFallbackAt = now;
     this.metrics.fallbackRefreshes += 1;
-    await this.options.refresh({ reason, changes: [], resources: refreshable });
+    await this.options.refresh({ reason, changes: [], resources: refreshable }, signal);
+    signal?.throwIfAborted();
     [...this.deferred.entries()].forEach(([key, change]) => {
       if (refreshable.includes(change.resource)) this.deferred.delete(key);
     });
@@ -244,6 +245,202 @@ export class CloudSyncCoordinator {
     this.deferredFallbackResources.clear();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+}
+
+export type CloudReconnectTrigger =
+  | 'online'
+  | 'subscribed'
+  | 'focus'
+  | 'visibility'
+  | 'resource-registration'
+  | 'channel-interrupted';
+
+export interface CloudReconnectDiagnostic {
+  event: 'trigger' | 'deferred-no-resources' | 'attempt-start' | 'attempt-succeeded' | 'attempt-failed' | 'retry-scheduled' | 'complete' | 'exhausted' | 'cancelled';
+  trigger: CloudReconnectTrigger;
+  generation: number;
+  attempt: number;
+  resources: CloudResource[];
+  retryDelayMs?: number;
+}
+
+interface CloudReconnectCatchUpOptions {
+  refresh: (resources: CloudResource[], signal: AbortSignal) => Promise<boolean>;
+  retryDelaysMs?: readonly number[];
+  onDiagnostic?: (diagnostic: CloudReconnectDiagnostic) => void;
+}
+
+const sortedResources = (resources: CloudResource[]): CloudResource[] => (
+  uniqueResources(resources).sort()
+);
+
+/**
+ * Owns the reconnect-to-fresh transition. Connectivity events merely request
+ * a cycle; this controller keeps retrying authoritative targeted reads without
+ * requiring another Realtime event. Only one generation is active at a time.
+ */
+export class CloudReconnectCatchUp {
+  private readonly options: CloudReconnectCatchUpOptions;
+  private readonly retryDelaysMs: readonly number[];
+  private resources: CloudResource[] = [];
+  private pending = false;
+  private armed = false;
+  private exhausted = false;
+  private disposed = false;
+  private generation = 0;
+  private resourceRevision = 0;
+  private attempt = 0;
+  private trigger: CloudReconnectTrigger = 'online';
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private inFlight: Promise<void> | null = null;
+  private abortController: AbortController | null = null;
+  private waiters: Array<(completed: boolean) => void> = [];
+
+  constructor(options: CloudReconnectCatchUpOptions) {
+    this.options = options;
+    this.retryDelaysMs = options.retryDelaysMs ?? [500, 1_500, 5_000, 15_000];
+  }
+
+  updateResources(resources: CloudResource[]): void {
+    if (this.disposed) return;
+    const next = sortedResources(resources);
+    const changed = next.join('|') !== this.resources.join('|');
+    this.resources = next;
+    if (changed) this.resourceRevision += 1;
+    if (!changed || !this.pending || next.length === 0) return;
+    this.trigger = 'resource-registration';
+    this.emit('trigger');
+    this.startIfReady();
+  }
+
+  markNeeded(trigger: CloudReconnectTrigger): void {
+    if (this.disposed) return;
+    this.generation += 1;
+    this.attempt = 0;
+    this.pending = true;
+    this.armed = false;
+    this.exhausted = false;
+    this.trigger = trigger;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.abortController?.abort();
+    this.resolveWaiters(false);
+    this.emit('trigger');
+  }
+
+  request(trigger: CloudReconnectTrigger, resources?: CloudResource[]): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
+    if (resources) {
+      const next = sortedResources(resources);
+      if (next.join('|') !== this.resources.join('|')) this.resourceRevision += 1;
+      this.resources = next;
+    }
+    if (!this.pending) {
+      this.generation += 1;
+      this.attempt = 0;
+    } else if (this.exhausted) {
+      this.attempt = 0;
+      this.exhausted = false;
+    }
+    this.pending = true;
+    this.armed = true;
+    this.trigger = trigger;
+    this.emit('trigger');
+    const completion = new Promise<boolean>(resolve => this.waiters.push(resolve));
+    this.startIfReady();
+    return completion;
+  }
+
+  isPending(): boolean {
+    return this.pending;
+  }
+
+  waitForCurrentCycle(): Promise<boolean> {
+    if (this.exhausted) return Promise.resolve(false);
+    if (!this.pending) return Promise.resolve(true);
+    return new Promise<boolean>(resolve => this.waiters.push(resolve));
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.pending = false;
+    this.armed = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.abortController?.abort();
+    this.abortController = null;
+    this.emit('cancelled');
+    this.resolveWaiters(false);
+  }
+
+  private startIfReady(): void {
+    if (this.disposed || !this.pending || !this.armed || this.timer || this.inFlight) return;
+    if (this.resources.length === 0) {
+      this.emit('deferred-no-resources');
+      return;
+    }
+    const generation = this.generation;
+    const resourceRevision = this.resourceRevision;
+    const resources = [...this.resources];
+    const attempt = this.attempt + 1;
+    this.attempt = attempt;
+    const abortController = new AbortController();
+    this.abortController = abortController;
+    this.emit('attempt-start');
+    this.inFlight = this.options.refresh(resources, abortController.signal)
+      .then(completed => {
+        if (this.disposed || generation !== this.generation) return;
+        if (!completed) throw new Error('RECONNECT_CATCH_UP_DEFERRED');
+        this.emit('attempt-succeeded');
+        if (resourceRevision !== this.resourceRevision) {
+          this.attempt = 0;
+          return;
+        }
+        this.pending = false;
+        this.exhausted = false;
+        this.attempt = 0;
+        this.emit('complete');
+        this.resolveWaiters(true);
+      })
+      .catch(() => {
+        if (this.disposed || generation !== this.generation) return;
+        this.emit('attempt-failed');
+        const retryDelayMs = this.retryDelaysMs[attempt - 1];
+        if (retryDelayMs === undefined) {
+          this.exhausted = true;
+          this.emit('exhausted');
+          this.resolveWaiters(false);
+          return;
+        }
+        this.emit('retry-scheduled', retryDelayMs);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.startIfReady();
+        }, retryDelayMs);
+      })
+      .finally(() => {
+        if (this.abortController === abortController) this.abortController = null;
+        this.inFlight = null;
+        this.startIfReady();
+      });
+  }
+
+  private emit(event: CloudReconnectDiagnostic['event'], retryDelayMs?: number): void {
+    this.options.onDiagnostic?.({
+      event,
+      trigger: this.trigger,
+      generation: this.generation,
+      attempt: this.attempt,
+      resources: [...this.resources],
+      ...(retryDelayMs === undefined ? {} : { retryDelayMs }),
+    });
+  }
+
+  private resolveWaiters(completed: boolean): void {
+    const waiters = this.waiters.splice(0);
+    waiters.forEach(resolve => resolve(completed));
   }
 }
 

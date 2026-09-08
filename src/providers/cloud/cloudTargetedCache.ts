@@ -27,6 +27,7 @@ export interface CloudTargetedQueryRequest {
   table: string;
   databaseIds?: string[];
   updatedAfter?: string;
+  signal?: AbortSignal;
 }
 
 export type CloudTargetedQuery = (request: CloudTargetedQueryRequest) => Promise<Row[]>;
@@ -172,7 +173,7 @@ export class CloudTargetedCache {
     for (const table of Object.keys(TABLES)) this.cursors.set(table, cursor);
   }
 
-  async refresh(request: CloudRefreshRequest): Promise<void> {
+  async refresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<void> {
     const byTable = new Map<string, CloudChange[]>();
     for (const change of request.changes) {
       byTable.set(change.table, [...(byTable.get(change.table) || []), change]);
@@ -183,14 +184,16 @@ export class CloudTargetedCache {
       : tablesForResources(request.resources);
     markCloudReadLoading();
     try {
-      const rowCounts = await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
-        const changes = byTable.get(table) || [];
-        if (changes.length > 0) return this.refreshChanges(table, changes);
-        if (request.reason === 'reconnect' || request.reason === 'editing-ended') return this.refreshAuthoritative(table);
-        return this.refreshSince(table);
-      })));
       const isAuthoritativeResourceRead = request.reason === 'reconnect'
         || (request.reason === 'editing-ended' && !hasRowChanges);
+      const rowCounts = isAuthoritativeResourceRead
+        ? await this.refreshAuthoritativeTables(tables, signal)
+        : await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
+          const changes = byTable.get(table) || [];
+          if (changes.length > 0) return this.refreshChanges(table, changes, signal);
+          return this.refreshSince(table, signal);
+        })));
+      signal?.throwIfAborted();
       markCloudReadFresh(isAuthoritativeResourceRead
         ? rowCounts.reduce((sum, count) => sum + count, 0)
         : undefined);
@@ -210,6 +213,7 @@ export class CloudTargetedCache {
   }
 
   private async query(request: CloudTargetedQueryRequest): Promise<Row[]> {
+    request.signal?.throwIfAborted();
     this.targetedQueries += 1;
     this.requestsByTable.set(request.table, (this.requestsByTable.get(request.table) || 0) + 1);
     if (this.queryOverride) {
@@ -218,6 +222,7 @@ export class CloudTargetedCache {
       return rows;
     }
     let query = (supabase as any).from(request.table).select('*');
+    if (request.signal) query = query.abortSignal(request.signal);
     if (request.databaseIds) query = query.in('id', request.databaseIds);
     if (request.updatedAfter) query = query.gt('updated_at', request.updatedAfter).order('updated_at');
     const result = await query;
@@ -240,39 +245,76 @@ export class CloudTargetedCache {
     };
   }
 
-  private async refreshChanges(table: string, changes: CloudChange[]): Promise<number> {
+  private async refreshChanges(table: string, changes: CloudChange[], signal?: AbortSignal): Promise<number> {
     const adapter = TABLES[table];
     if (!adapter) return 0;
     const touchedIds = [...new Set(changes.map(change => change.canonicalId).filter(Boolean))];
     const databaseIds = [...new Set(changes.map(change => change.databaseId).filter(Boolean))];
     if (databaseIds.length === 0) return 0;
-    const rows = await this.query({ table, databaseIds });
+    const rows = await this.query({ table, databaseIds, signal });
+    signal?.throwIfAborted();
     await this.merge(table, adapter, touchedIds, rows);
     const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
     if (newest) this.cursors.set(table, newest);
     return rows.length;
   }
 
-  private async refreshSince(table: string): Promise<number> {
+  private async refreshSince(table: string, signal?: AbortSignal): Promise<number> {
     const adapter = TABLES[table];
     if (!adapter?.supportsIncremental) return 0;
     const cursor = this.cursors.get(table) || this.now().toISOString();
     const nextCursor = this.now().toISOString();
-    const rows = await this.query({ table, updatedAfter: cursor });
+    const rows = await this.query({ table, updatedAfter: cursor, signal });
+    signal?.throwIfAborted();
     await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows);
     this.cursors.set(table, nextCursor);
     return rows.length;
   }
 
-  private async refreshAuthoritative(table: string): Promise<number> {
-    const adapter = TABLES[table];
-    if (!adapter) return 0;
-    const rows = await this.query({ table });
-    const activeRows = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
-    await adapter.save(activeRows);
-    const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
-    this.cursors.set(table, newest || this.now().toISOString());
-    return activeRows.length;
+  private async refreshAuthoritativeTables(tables: string[], signal?: AbortSignal): Promise<number[]> {
+    const attemptController = new AbortController();
+    const abortAttempt = () => attemptController.abort();
+    signal?.addEventListener('abort', abortAttempt, { once: true });
+    signal?.throwIfAborted();
+    let prepared;
+    try {
+      prepared = await Promise.all(tables.map(async table => {
+        const adapter = TABLES[table];
+        if (!adapter) return { table, adapter: null, rows: [], activeRows: [], newest: undefined };
+        const rows = await this.query({ table, signal: attemptController.signal });
+        attemptController.signal.throwIfAborted();
+        const activeRows = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
+        const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
+        return { table, adapter, rows, activeRows, newest };
+      }));
+    } catch (error) {
+      attemptController.abort();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abortAttempt);
+    }
+
+    signal?.throwIfAborted();
+    const committed = new Set<string>();
+    const purchaseBatches = prepared.find(entry => entry.table === 'purchase_batches');
+    const purchaseItems = prepared.find(entry => entry.table === 'purchase_batch_items');
+    if (purchaseBatches?.adapter && purchaseItems?.adapter) {
+      await db.savePurchaseBatchTransaction(
+        purchaseBatches.activeRows as Parameters<typeof db.savePurchaseBatchTransaction>[0],
+        purchaseItems.activeRows as Parameters<typeof db.savePurchaseBatchTransaction>[1],
+      );
+      committed.add('purchase_batches');
+      committed.add('purchase_batch_items');
+    }
+
+    for (const entry of prepared) {
+      signal?.throwIfAborted();
+      if (entry.adapter && !committed.has(entry.table)) await entry.adapter.save(entry.activeRows);
+    }
+    for (const entry of prepared) {
+      if (entry.adapter) this.cursors.set(entry.table, entry.newest || this.now().toISOString());
+    }
+    return prepared.map(entry => entry.activeRows.length);
   }
 
   private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[]): Promise<void> {
