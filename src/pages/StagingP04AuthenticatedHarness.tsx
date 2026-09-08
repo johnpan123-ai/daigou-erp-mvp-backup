@@ -30,7 +30,13 @@ export default function StagingP04AuthenticatedHarness() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<unknown>(null);
   const [cleanup, setCleanup] = useState<unknown>(null);
-  const harness = useMemo(() => new HarnessController(rpcInvoker), []);
+  const harness = useMemo(() => {
+    try {
+      return new HarnessController(boundaryInput, rpcInvoker);
+    } catch {
+      return null;
+    }
+  }, []);
 
   let boundaryError: string | null = null;
   try {
@@ -41,6 +47,7 @@ export default function StagingP04AuthenticatedHarness() {
 
   const editorEligible = Boolean(user && profile && ['owner', 'staff', 'helper'].includes(profile.role));
   const run = async () => {
+    if (!harness) return;
     setBusy(true);
     setResult(null);
     try {
@@ -55,6 +62,7 @@ export default function StagingP04AuthenticatedHarness() {
   };
 
   const clean = async () => {
+    if (!harness) return;
     setBusy(true);
     try {
       setCleanup(await harness.cleanup());
@@ -86,7 +94,7 @@ export default function StagingP04AuthenticatedHarness() {
           <dt>Profile role</dt><dd data-testid="harness-role">{profileLoading ? 'checking' : profile?.role ?? 'none'}</dd>
           <dt>Editor eligibility</dt><dd data-testid="harness-editor">{editorEligible ? 'true' : 'false'}</dd>
           <dt>Device/client credentials</dt><dd>App session only；token exposure = 0</dd>
-          <dt>Fixture marker</dt><dd data-testid="harness-marker">{harness.marker}</dd>
+          <dt>Fixture marker</dt><dd data-testid="harness-marker">{harness?.marker ?? 'disabled'}</dd>
         </dl>
 
         <label htmlFor="p0-4-case" style={{ display: 'block', marginTop: 20, fontWeight: 700 }}>Test case</label>
@@ -94,8 +102,8 @@ export default function StagingP04AuthenticatedHarness() {
           {P0_4_HARNESS_SCENARIOS.map(scenario => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
         </select>
         <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-          <button type="button" onClick={run} disabled={busy || !editorEligible}>Run selected test</button>
-          <button type="button" onClick={clean} disabled={busy || !editorEligible}>Cleanup this run</button>
+          <button type="button" onClick={run} disabled={busy || !editorEligible || !harness}>Run selected test</button>
+          <button type="button" onClick={clean} disabled={busy || !editorEligible || !harness}>Cleanup this run</button>
         </div>
 
         <h2>Result</h2>

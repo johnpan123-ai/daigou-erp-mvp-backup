@@ -45,11 +45,15 @@ export interface P04HarnessBoundaryInput {
 export function assertP04HarnessBoundary(input: P04HarnessBoundaryInput): void {
   const mode = input.viteMode?.trim().toLowerCase();
   const deployment = input.deploymentEnvironment?.trim().toLowerCase();
+  const allowedRuntimeRoles: ReadonlyArray<SupabaseRuntimeRole> = ['staging', 'experimental', 'test'];
+  const allowedModes = ['staging', 'experimental', 'test', 'development'];
+  const allowedDeployments = ['staging', 'experimental', 'test', 'development'];
   if (input.projectRef !== STAGING_SUPABASE_PROJECT_REF
-    || input.runtimeRole === 'production'
-    || mode === 'production'
-    || deployment === 'production'
-    || deployment === 'prod') {
+    || !allowedRuntimeRoles.includes(input.runtimeRole)
+    || !mode
+    || !allowedModes.includes(mode)
+    || !deployment
+    || !allowedDeployments.includes(deployment)) {
     throw new Error('P0_4_STAGING_TEST_HARNESS_DISABLED');
   }
 }
@@ -111,6 +115,7 @@ const failureCode = (value: unknown): string | null => {
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 export class StagingP04AuthenticatedHarness {
+  private readonly environment: Readonly<P04HarnessBoundaryInput>;
   private readonly invokeRpc: P04HarnessRpcInvoker;
   private readonly createUuid: () => string;
   private readonly now: () => Date;
@@ -118,17 +123,25 @@ export class StagingP04AuthenticatedHarness {
   private status: P04HarnessStatus | null = null;
 
   constructor(
+    environment: P04HarnessBoundaryInput,
     invokeRpc: P04HarnessRpcInvoker,
     createUuid: () => string = () => crypto.randomUUID(),
     now: () => Date = () => new Date(),
   ) {
+    this.environment = Object.freeze({ ...environment });
+    this.assertEnvironment();
     this.invokeRpc = invokeRpc;
     this.createUuid = createUuid;
     this.now = now;
     this.marker = `${P0_4_TEST_PREFIX}${this.now().toISOString().replace(/[^0-9A-Z]/giu, '-')}-${this.createUuid().slice(0, 8).toUpperCase()}`;
   }
 
+  private assertEnvironment(): void {
+    assertP04HarnessBoundary(this.environment);
+  }
+
   private async call(functionName: string, args?: Record<string, unknown>): Promise<unknown> {
+    this.assertEnvironment();
     const response = await this.invokeRpc(functionName, args);
     if (response.error) {
       const error = new Error(response.error.message) as Error & { code?: string };
@@ -197,6 +210,7 @@ export class StagingP04AuthenticatedHarness {
   }
 
   private apply(key: string, request: PurchaseBatchTransactionRpcRequest): Promise<unknown> {
+    this.assertEnvironment();
     return this.call(PURCHASE_BATCH_TRANSACTION_RPC, {
       p_idempotency_key: key,
       p_request: request,
@@ -308,6 +322,7 @@ export class StagingP04AuthenticatedHarness {
   }
 
   async cleanup(): Promise<unknown> {
+    this.assertEnvironment();
     const result = objectValue(await this.call(P0_4_HARNESS_CLEANUP_RPC, { p_marker: this.marker }));
     const residual = objectValue(result.residual);
     if (Object.values(residual).some(value => Number(value) !== 0)) throw new Error('P0_4_TEST_CLEANUP_RESIDUAL');
@@ -315,6 +330,7 @@ export class StagingP04AuthenticatedHarness {
   }
 
   async residuals(): Promise<unknown> {
+    this.assertEnvironment();
     return this.call(P0_4_HARNESS_RESIDUAL_RPC, { p_marker: this.marker });
   }
 }

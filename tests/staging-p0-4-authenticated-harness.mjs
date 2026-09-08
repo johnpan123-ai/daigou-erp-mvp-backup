@@ -126,11 +126,70 @@ try {
     { projectRef: 'rhfdjsklfrgpoqsaqpkn', runtimeRole: 'production', viteMode: 'production', deploymentEnvironment: 'production' },
   ]) assert.throws(() => module.assertP04HarnessBoundary(boundary), /P0_4_STAGING_TEST_HARNESS_DISABLED/u);
 
+  // The immutable controller boundary is authoritative even when the React/UI
+  // route guard is completely bypassed. Rejected construction makes zero RPCs.
+  for (const boundary of [
+    { projectRef: 'twzpqyesbtnfxdkorluf', runtimeRole: 'production', viteMode: 'production', deploymentEnvironment: 'production' },
+    { projectRef: 'twzpqyesbtnfxdkorluf', runtimeRole: 'experimental', viteMode: 'experimental', deploymentEnvironment: 'experimental' },
+    { projectRef: 'unknown-project', runtimeRole: 'staging', viteMode: 'staging', deploymentEnvironment: 'staging' },
+    { projectRef: '', runtimeRole: 'staging', viteMode: 'staging', deploymentEnvironment: 'staging' },
+    { projectRef: undefined, runtimeRole: 'staging', viteMode: 'staging', deploymentEnvironment: 'staging' },
+    { projectRef: 'rhfdjsklfrgpoqsaqpkn', runtimeRole: 'local', viteMode: 'development', deploymentEnvironment: 'development' },
+    { projectRef: 'rhfdjsklfrgpoqsaqpkn', runtimeRole: 'staging', viteMode: undefined, deploymentEnvironment: 'staging' },
+  ]) {
+    const rpcCalls = [];
+    assert.throws(
+      () => new module.StagingP04AuthenticatedHarness(boundary, async functionName => {
+        rpcCalls.push(functionName);
+        return { data: null, error: null };
+      }),
+      /P0_4_STAGING_TEST_HARNESS_DISABLED/u,
+    );
+    assert.equal(rpcCalls.length, 0, `Rejected controller must make zero RPCs: ${JSON.stringify(boundary)}`);
+  }
+
+  // Defense in depth: even an artificial caller that bypasses both React and
+  // the constructor cannot reach apply/cleanup/residual with a Production or
+  // unknown identity. This directly exercises the final RPC boundaries.
+  for (const projectRef of ['twzpqyesbtnfxdkorluf', 'unknown-project', '', undefined]) {
+    const rpcCalls = [];
+    const bypassed = Object.create(module.StagingP04AuthenticatedHarness.prototype);
+    Object.defineProperties(bypassed, {
+      environment: { value: Object.freeze({
+        projectRef,
+        runtimeRole: projectRef === 'twzpqyesbtnfxdkorluf' ? 'production' : 'staging',
+        viteMode: projectRef === 'twzpqyesbtnfxdkorluf' ? 'production' : 'staging',
+        deploymentEnvironment: projectRef === 'twzpqyesbtnfxdkorluf' ? 'production' : 'staging',
+      }) },
+      invokeRpc: { value: async functionName => {
+        rpcCalls.push(functionName);
+        return { data: null, error: null };
+      } },
+      marker: { value: 'P0-4-IDEMPOTENCY-TEST-BOUNDARY-BYPASS' },
+    });
+    const request = { operationType: 'create', batchId: uuid(900), batchOperations: [], itemOperations: [] };
+    await assert.rejects(async () => bypassed.apply(uuid(901), request), /P0_4_STAGING_TEST_HARNESS_DISABLED/u);
+    await assert.rejects(async () => bypassed.cleanup(), /P0_4_STAGING_TEST_HARNESS_DISABLED/u);
+    await assert.rejects(async () => bypassed.residuals(), /P0_4_STAGING_TEST_HARNESS_DISABLED/u);
+    assert.equal(rpcCalls.length, 0, `Final boundaries must make zero RPCs: ${String(projectRef)}`);
+  }
+
+  const mutableInput = {
+    projectRef: 'rhfdjsklfrgpoqsaqpkn', runtimeRole: 'staging', viteMode: 'staging', deploymentEnvironment: 'staging',
+  };
+  const immutableServer = new FakeAuthenticatedRpcServer();
+  const immutableHarness = new module.StagingP04AuthenticatedHarness(mutableInput, immutableServer.rpc.bind(immutableServer));
+  mutableInput.projectRef = 'twzpqyesbtnfxdkorluf';
+  assert.equal(immutableHarness.environment.projectRef, 'rhfdjsklfrgpoqsaqpkn');
+  assert.equal(Object.isFrozen(immutableHarness.environment), true);
+
   let sequence = 10;
   const createUuid = () => uuid(sequence++);
   for (const scenario of module.P0_4_HARNESS_SCENARIOS.map(entry => entry.id)) {
     const server = new FakeAuthenticatedRpcServer();
-    const harness = new module.StagingP04AuthenticatedHarness(server.rpc.bind(server), createUuid, () => new Date('2026-09-08T12:00:00Z'));
+    const harness = new module.StagingP04AuthenticatedHarness({
+      projectRef: 'rhfdjsklfrgpoqsaqpkn', runtimeRole: 'staging', viteMode: 'staging', deploymentEnvironment: 'staging',
+    }, server.rpc.bind(server), createUuid, () => new Date('2026-09-08T12:00:00Z'));
     assert.match(harness.marker, /^P0-4-IDEMPOTENCY-TEST-/u);
     assert.equal((await harness.loadStatus()).editor, true);
     const result = await harness.run(scenario);
