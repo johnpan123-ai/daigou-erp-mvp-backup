@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers, PackageOpen, History } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
-import { getProviderMode, setProviderMode } from '../../providers/providerMode';
+import { getProviderMode, markManualLocalEntry, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/AuthProvider';
 import { useRole } from '../../auth/useRole';
+import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
+import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 
 interface SidebarItemProps {
@@ -111,6 +113,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     : providerMode === 'experimental'
       ? 'EXPERIMENTAL'
       : 'TEST SANDBOX';
+  const environmentModeLabel = getEnvironmentModeLabel(providerMode, supabaseEnvironment.role);
 
   useEffect(() => {
     document.title = providerMode === 'next'
@@ -123,8 +126,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, [providerMode]);
 
   const handleEnterLocalMode = () => {
+    if (user) markManualLocalEntry();
     setProviderMode('local');
-    window.location.replace('/dashboard');
+    navigate('/dashboard', { replace: true });
   };
 
   if (isCloudOrFallback && loading) {
@@ -175,9 +179,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             ? 'EXPERIMENTAL｜高風險實驗環境，所有修改只存在本機'
             : providerMode === 'test'
               ? '測試模式｜所有修改只存在本機，不會寫入正式雲端'
-          : isCloudOrFallback
-            ? '正式模式｜目前操作會修改正式資料'
-            : '本機模式｜資料只保存在目前瀏覽器'}
+          : environmentModeLabel}
       </div>
       
       {/* Backdrop overlay for mobile drawer */}
@@ -260,11 +262,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   </span>
                   {(() => {
                     const mode = getProviderMode();
-                    let modeLabel = '本地模式';
+                    let modeLabel = environmentModeLabel;
                     let dotColor = '#10B981'; // green
 
                     if (mode === 'cloud') {
-                      modeLabel = '雲端模式';
+                      modeLabel = environmentModeLabel;
                       dotColor = '#6366f1'; // indigo
                     } else if (mode === 'fallback') {
                       modeLabel = '備援模式';
@@ -477,13 +479,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </h2>
             {!isMobile && (() => {
               const mode = getProviderMode();
-              let modeLabel = '本地模式';
+              let modeLabel = environmentModeLabel;
               let badgeColor = '#319795';
               let badgeBg = '#e6fffa';
               let badgeBorder = '#b2f5ea';
 
               if (mode === 'cloud') {
-                modeLabel = '雲端模式';
+                modeLabel = environmentModeLabel;
                 badgeColor = '#6366f1';
                 badgeBg = '#e0e7ff';
                 badgeBorder = '#c7d2fe';
@@ -639,7 +641,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Page Content */}
         <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''}`}>
-          {getProviderMode() === 'local' && location.pathname !== '/login' && (
+          {getProviderMode() === 'local' && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && (
             <div style={{
               backgroundColor: '#fffbeb',
               border: '1px solid #fef3c7',
@@ -658,7 +660,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <>
                   <div className="flex items-center gap-sm">
                     <span style={{ fontSize: '16px' }}>💡</span>
-                    <span>目前為本地模式，資料只存在此瀏覽器。登入後可啟用雲端同步。</span>
+                    <span>本地模式｜資料不會同步雲端。登入成功後會自動進入測試／正式雲端。</span>
                   </div>
                   <Link to="/login" className="btn btn-primary" style={{ padding: '6px 12px', fontSize: '12px', height: 'auto', minHeight: 'auto', backgroundColor: '#d97706', borderColor: '#d97706', color: '#fff', fontWeight: 600 }}>
                     登入雲端
@@ -668,7 +670,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <>
                   <div className="flex items-center gap-sm">
                     <span style={{ fontSize: '16px' }}>⚠️</span>
-                    <span>目前使用本地模式，資料不會同步至雲端。</span>
+                    <span>本地模式｜資料不會同步雲端；原本的本地資料會保留。</span>
                   </div>
                   <button 
                     onClick={() => {

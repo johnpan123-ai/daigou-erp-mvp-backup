@@ -15,18 +15,25 @@ import JapanPackagesList from './pages/JapanPackagesList';
 import JapanPackageDetail from './pages/JapanPackageDetail';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import PasswordRecovery from './pages/PasswordRecovery';
 import UnlistedItems from './pages/UnlistedItems';
 import DuplicateVariants from './pages/DuplicateVariants';
 import OutboundShipmentsList from './pages/OutboundShipmentsList';
 import OutboundShipmentDetail from './pages/OutboundShipmentDetail';
 import NextRawDbIntegrityProbe from './pages/NextRawDbIntegrityProbe';
 import { CloudRealtimeSyncBoundary } from './contexts/CloudRealtimeSyncContext';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-function App() {
+interface AppProps {
+  authClient?: SupabaseClient;
+  navigateAuth?: (path: string) => void;
+}
+
+function App({ authClient, navigateAuth }: AppProps = {}) {
   return (
     <ErrorBoundary>
     <ViewportProvider>
-      <AuthProvider>
+      <AuthProvider authClient={authClient} navigateAuth={navigateAuth}>
         <BrowserRouter>
           <CloudRealtimeSyncBoundary>
           <StorageWarningBanner />
@@ -52,6 +59,7 @@ function App() {
               <Route path="/unlisted-items" element={<UnlistedItems />} />
               <Route path="/duplicate-variants" element={<DuplicateVariants />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/auth/recovery" element={<PasswordRecovery />} />
               <Route path="/diagnostics/next-raw-db" element={<NextRawDbIntegrityProbe />} />
             </Routes>
           </AppLayout>

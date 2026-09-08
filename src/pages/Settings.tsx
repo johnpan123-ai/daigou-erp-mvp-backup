@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { dataProvider } from '../providers/dataProvider';
-import { getProviderMode, setProviderMode } from '../providers/providerMode';
+import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
 import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
   isCloudRestoreDisabledMode,
@@ -8,7 +8,8 @@ import {
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { useRole } from '../auth/useRole';
-import { supabase } from '../providers/cloud/supabaseClient';
+import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
+import { getEnvironmentModeLabel } from '../lib/environmentModeLabel';
 import { clearSandboxData, getActiveSandboxConfig, isSandboxEnvironmentActive } from '../lib/testSandboxEnvironment';
 import {
   getTestSnapshotMetadata,
@@ -44,6 +45,7 @@ export default function Settings() {
   const isSandbox = isSandboxEnvironmentActive();
   const sandboxConfig = getActiveSandboxConfig();
   const sandboxLabel = sandboxConfig?.label ?? 'Sandbox';
+  const environmentModeLabel = getEnvironmentModeLabel(currentMode, supabaseEnvironment.role);
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -512,11 +514,11 @@ export default function Settings() {
             資料來源模式
           </h3>
           <p className="text-muted text-sm" style={{ marginBottom: '16px' }}>
-            設定系統的資料讀寫來源。目前系統雲端化規劃中，目前預設並強制為「本地模式」。
+            本地資料與雲端資料永久隔離；登入成功預設進入雲端，已登入時仍可手動切回本地 Sandbox。
           </p>
           
           <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: 'var(--color-text)' }}>
-            目前模式：{isSandbox ? `${sandboxLabel}（${sandboxConfig?.dbName}）` : currentMode === 'local' ? '本地模式' : currentMode === 'cloud' ? '雲端模式' : '備援模式'}
+            目前模式：{isSandbox ? `${sandboxLabel}（${sandboxConfig?.dbName}）` : environmentModeLabel}
           </div>
 
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -545,6 +547,7 @@ export default function Settings() {
             <label 
               onClick={() => {
                 if (currentMode !== 'local') {
+                  if (user) markManualLocalEntry();
                   setProviderMode('local');
                   window.location.reload();
                 }
@@ -561,8 +564,8 @@ export default function Settings() {
               }}
             >
               <input type="radio" checked={currentMode === 'local'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
-              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px' }}>本地模式（可用）</div>
-              <div className="text-xs text-muted">使用瀏覽器 LocalStorage/IndexedDB 儲存資料，完全在本地執行。</div>
+              <div className="font-semibold" style={{ fontSize: '15px', marginBottom: '4px' }}>本地模式｜資料不會同步雲端</div>
+              <div className="text-xs text-muted">使用獨立 Local authoritative IndexedDB；不會上傳、合併或被 Cloud cache 覆蓋。</div>
             </label>
 
             <label 
@@ -590,7 +593,7 @@ export default function Settings() {
               }}
             >
               <input type="radio" checked={currentMode === 'cloud'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
-              <div className={`font-semibold ${currentMode === 'cloud' ? '' : 'text-muted'}`} style={{ fontSize: '15px', marginBottom: '4px' }}>雲端模式</div>
+              <div className={`font-semibold ${currentMode === 'cloud' ? '' : 'text-muted'}`} style={{ fontSize: '15px', marginBottom: '4px' }}>{getEnvironmentModeLabel('cloud', supabaseEnvironment.role)}</div>
               <div className="text-xs text-muted">與 Supabase 雲端資料庫同步，支援多使用者即時協同編輯。</div>
             </label>
 
@@ -609,7 +612,7 @@ export default function Settings() {
             >
               <input type="radio" checked={false} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
               <div className="font-semibold text-muted" style={{ fontSize: '15px', marginBottom: '4px' }}>備援模式（尚未啟用）</div>
-              <div className="text-xs text-muted">雲端模式無法連線時，自動切換至本地快取編輯，並在連線後自動同步。</div>
+              <div className="text-xs text-muted">雲端離線時只顯示 stale cache，所有寫入暫停；重連後只重新讀取 Server。</div>
             </label>
           </div>
 
@@ -737,7 +740,7 @@ export default function Settings() {
 
               <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div>
-                  <strong>目前模式：</strong>{currentMode === 'local' ? '本地模式' : currentMode === 'cloud' ? '雲端模式' : '備援模式'}
+                  <strong>目前模式：</strong>{environmentModeLabel}
                 </div>
                 <div>
                   <strong>Supabase 狀態：</strong>
@@ -904,7 +907,7 @@ export default function Settings() {
             <div>
               <span className="text-muted text-xs" style={{ display: 'block', marginBottom: '4px' }}>資料來源模式 (Provider Mode)</span>
               <strong style={{ fontSize: '15px', color: 'var(--color-primary)' }}>
-                {isSandbox ? `${sandboxLabel} (${sandboxConfig?.dbName})` : currentMode === 'local' ? '本地模式 (Local)' : currentMode === 'cloud' ? '雲端模式 (Cloud)' : '備援模式 (Fallback)'}
+                {isSandbox ? `${sandboxLabel} (${sandboxConfig?.dbName})` : environmentModeLabel}
               </strong>
             </div>
           </div>

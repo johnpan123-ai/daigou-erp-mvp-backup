@@ -1,20 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
-import { supabase } from '../providers/cloud/supabaseClient';
 import { getProviderMode, setProviderMode } from '../providers/providerMode';
+import { formatLoginError, formatPasswordResetRequestError } from '../auth/authErrors';
 import { Box, Lock, Mail } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState(() => localStorage.getItem('remembered_email') || '');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => (
+    new URLSearchParams(window.location.search).get('reason') === 'session_expired'
+      ? '登入狀態已過期，請重新登入；本地模式仍可正常使用。'
+      : null
+  ));
+  const [success, setSuccess] = useState<string | null>(() => (
+    new URLSearchParams(window.location.search).get('reason') === 'password_updated'
+      ? '密碼已更新，請使用新密碼登入。'
+      : null
+  ));
   const [isLoading, setIsLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(() => localStorage.getItem('remember_me') === 'true');
   const [isForgotPasswordMode, setIsForgotPasswordMode] = useState(false);
+  const { user, loading, authFlow, signInWithPassword, requestPasswordReset } = useAuth();
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
   const isCloudMode = getProviderMode() === 'cloud' || getProviderMode() === 'fallback';
 
   const handleEnterLocalMode = () => {
@@ -23,10 +31,11 @@ export default function Login() {
   };
 
   useEffect(() => {
-    if (!loading && user) {
+    if (!loading && user && authFlow === 'normal') {
+      setProviderMode('cloud');
       navigate('/', { replace: true });
     }
-  }, [user, loading, navigate]);
+  }, [user, loading, authFlow, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,12 +44,7 @@ export default function Login() {
     setSuccess(null);
 
     try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) throw signInError;
+      await signInWithPassword(email, password);
       
       // Save or remove login email based on rememberMe checkbox
       if (rememberMe) {
@@ -52,11 +56,9 @@ export default function Login() {
       }
 
       // Redirect on success
-      if (data?.session || data?.user) {
-        navigate('/', { replace: true });
-      }
-    } catch (err: any) {
-      setError(err.message || '登入失敗，請檢查您的帳號與密碼。');
+      navigate('/', { replace: true });
+    } catch (err: unknown) {
+      setError(formatLoginError(err));
     } finally {
       setIsLoading(false);
     }
@@ -69,15 +71,10 @@ export default function Login() {
     setSuccess(null);
 
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/login`,
-      });
-
-      if (resetError) throw resetError;
-      
+      await requestPasswordReset(email);
       setSuccess('密碼重設信件已寄出，請檢查您的電子信箱。');
-    } catch (err: any) {
-      setError(err.message || '傳送重設信件失敗，請檢查電子郵件。');
+    } catch (err: unknown) {
+      setError(formatPasswordResetRequestError(err));
     } finally {
       setIsLoading(false);
     }
