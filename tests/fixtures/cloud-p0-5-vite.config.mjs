@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const fixturePath = fileURLToPath(new URL('./cloud-p0-5-auth-harness.html', import.meta.url));
-const appRoutes = new Set(['/', '/login', '/dashboard', '/auth/recovery']);
+const appRoutes = new Set(['/', '/login', '/dashboard', '/products', '/auth/recovery']);
 
 export default defineConfig({
   plugins: [

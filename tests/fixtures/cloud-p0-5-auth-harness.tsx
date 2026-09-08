@@ -2,7 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { AuthChangeEvent, Session, SupabaseClient, User } from '@supabase/supabase-js';
-import { AuthProvider, useAuth } from '../../src/auth/AuthProvider';
+import { AuthProvider } from '../../src/auth/AuthProvider';
+import { useAuth } from '../../src/auth/authContext';
 import { useRole } from '../../src/auth/useRole';
 import { ViewportProvider } from '../../src/contexts/ViewportContext';
 import { AppLayout } from '../../src/components/layout/AppLayout';
@@ -100,7 +101,7 @@ const fakeClient = {
   },
 } as unknown as SupabaseClient;
 
-function AuthDashboard() {
+export function AuthDashboard() {
   const { user, profile, loading, authFlow, signOut } = useAuth();
   const { canEdit } = useRole();
   const navigate = useNavigate();
@@ -155,7 +156,7 @@ window.__P0_5_AUTH_HARNESS__ = {
   snapshot: () => ({
     mode: getProviderMode(),
     session: localStorage.getItem(SESSION_KEY),
-    passwordSet: localStorage.hasOwnProperty(PASSWORD_KEY),
+    passwordSet: localStorage.getItem(PASSWORD_KEY) !== null,
     recoveryActive: sessionStorage.getItem('erp_password_recovery_active'),
     localSentinel: localStorage.getItem('p0_5_local_sentinel'),
     cloudSentinel: localStorage.getItem('p0_5_cloud_sentinel'),

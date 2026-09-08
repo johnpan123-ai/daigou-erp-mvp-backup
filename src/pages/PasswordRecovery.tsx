@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { KeyRound, Lock } from 'lucide-react';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth } from '../auth/authContext';
 import { formatRecoveryError } from '../auth/authErrors';
 
 export default function PasswordRecovery() {

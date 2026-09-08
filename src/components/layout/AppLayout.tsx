@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers, PackageOpen, History } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../../providers/providerMode';
-import { useAuth } from '../../auth/AuthProvider';
+import { useAuth } from '../../auth/authContext';
 import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
@@ -60,7 +60,7 @@ function SidebarItem({ to, icon, label, onClick, state }: SidebarItemProps) {
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { mode, setMode, isMobile } = useViewport();
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, authFlow, signOut } = useAuth();
   const { role, displayName, isProfileLoading, canViewPage } = useRole();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -79,12 +79,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    if (authFlow === 'recovery' && location.pathname !== '/auth/recovery') {
+      navigate('/auth/recovery', { replace: true });
+      return;
+    }
     if (!loading && !isProfileLoading) {
       if (!canViewPage(location.pathname)) {
         navigate('/dashboard', { replace: true });
       }
     }
-  }, [loading, isProfileLoading, location.pathname, navigate, canViewPage]);
+  }, [authFlow, loading, isProfileLoading, location.pathname, navigate, canViewPage]);
 
   // Force automatic mode on mount so the layout responds dynamically to simulated or real mobile screens
   useEffect(() => {
@@ -130,6 +134,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     setProviderMode('local');
     navigate('/dashboard', { replace: true });
   };
+
+  if (authFlow === 'recovery' && location.pathname !== '/auth/recovery') {
+    return (
+      <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        正在返回密碼設定頁...
+      </div>
+    );
+  }
 
   if (isCloudOrFallback && loading) {
     return (

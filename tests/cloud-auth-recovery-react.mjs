@@ -127,6 +127,30 @@ try {
     // G/H: recovery callback, validation, password update, login with the new password.
     await page.goto(`${BASE_URL}/auth/recovery?fixture=recovery`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('heading', { name: '設定新密碼' }).waitFor();
+    const assertRecoveryContained = async () => {
+      await page.waitForURL(url => url.pathname === '/auth/recovery');
+      await page.getByRole('heading', { name: '設定新密碼' }).waitFor();
+      await waitMode('local');
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('erp_password_recovery_active')), 'true');
+    };
+
+    // An active recovery session owns routing until password update succeeds.
+    await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'domcontentloaded' });
+    await assertRecoveryContained();
+    await page.goto(`${BASE_URL}/products`, { waitUntil: 'domcontentloaded' });
+    await assertRecoveryContained();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await assertRecoveryContained();
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/dashboard');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await assertRecoveryContained();
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await assertRecoveryContained();
+    await page.goForward({ waitUntil: 'domcontentloaded' });
+    await assertRecoveryContained();
+
     await page.getByLabel('新密碼').fill('NewPassword123!');
     await page.getByLabel('再次確認').fill('different');
     await page.getByRole('button', { name: '設定新密碼' }).click();
@@ -188,6 +212,7 @@ try {
     console.log('PASS real reload session restore and expired-session fallback');
     console.log('PASS Local/Cloud switch isolation and environment labels');
     console.log('PASS Forgot Password -> dedicated recovery callback');
+    console.log('PASS recovery route containment across URL navigation, F5, and back/forward');
     console.log('PASS recovery validation -> set password -> login with new password');
     console.log('PASS invalid recovery link and logout semantics');
     console.log('PASS Cloud requests = 0; credentials/tokens exposed = 0');

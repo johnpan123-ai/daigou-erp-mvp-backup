@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth } from '../auth/authContext';
 import { getProviderMode, setProviderMode } from '../providers/providerMode';
 import { formatLoginError, formatPasswordResetRequestError } from '../auth/authErrors';
 import { Box, Lock, Mail } from 'lucide-react';

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth } from '../auth/authContext';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode } from '../providers/providerMode';
 import { supabase } from '../providers/cloud/supabaseClient';

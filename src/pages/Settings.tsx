@@ -6,7 +6,7 @@ import {
   isCloudRestoreDisabledMode,
 } from '../providers/cloudRestorePolicy';
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } from 'lucide-react';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth } from '../auth/authContext';
 import { useRole } from '../auth/useRole';
 import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../lib/environmentModeLabel';

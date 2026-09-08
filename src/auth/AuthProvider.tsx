@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import {
   clearStoredSupabaseAuthToken,
@@ -21,27 +21,9 @@ import {
   markCloudLoginIntent,
   markRecoverySession,
 } from './authRecoveryState';
+import { AuthContext } from './authContext';
+import type { AuthFlowState, UserProfile } from './authContext';
 import { TEST_OWNER_PROFILE, TEST_OWNER_USER } from './testOwner';
-
-export interface UserProfile {
-  role: 'owner' | 'staff' | 'viewer' | 'helper';
-  display_name: string | null;
-  is_active: boolean;
-}
-
-export type AuthFlowState = 'normal' | 'checking-recovery' | 'recovery' | 'invalid-recovery';
-
-interface AuthContextType {
-  user: User | null;
-  profile: UserProfile | null;
-  loading: boolean;
-  profileLoading: boolean;
-  authFlow: AuthFlowState;
-  signInWithPassword: (email: string, password: string) => Promise<void>;
-  requestPasswordReset: (email: string) => Promise<void>;
-  setNewPassword: (password: string) => Promise<void>;
-  signOut: () => Promise<void>;
-}
 
 interface AuthProviderProps {
   children: React.ReactNode;
@@ -51,7 +33,6 @@ interface AuthProviderProps {
 
 const RECOVERY_PATH = '/auth/recovery';
 const defaultAuthNavigation = (path: string): void => window.location.replace(path);
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children, authClient, navigateAuth }: AuthProviderProps) {
   const client = authClient ?? supabase;
@@ -102,23 +83,22 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
             await client.auth.signOut({ scope: 'local' });
           } catch (error) {
             if (import.meta.env.DEV) console.debug('[Auth] Local session cleanup fallback:', error);
-          } finally {
-            clearStoredSupabaseAuthToken();
-            clearRecoverySession();
-            clearCloudLoginIntent();
-            clearManualLocalEntry();
-            setProviderMode('local');
-            if (!active) return;
-            profileRequestId += 1;
-            setUser(null);
-            setProfile(null);
-            setProfileLoading(false);
-            setAuthFlow('normal');
-            setLoading(false);
-            const loginPath = '/login?reason=session_expired';
-            if (`${window.location.pathname}${window.location.search}` !== loginPath) {
-              redirect(loginPath);
-            }
+          }
+          clearStoredSupabaseAuthToken();
+          clearRecoverySession();
+          clearCloudLoginIntent();
+          clearManualLocalEntry();
+          setProviderMode('local');
+          if (!active) return;
+          profileRequestId += 1;
+          setUser(null);
+          setProfile(null);
+          setProfileLoading(false);
+          setAuthFlow('normal');
+          setLoading(false);
+          const loginPath = '/login?reason=session_expired';
+          if (`${window.location.pathname}${window.location.search}` !== loginPath) {
+            redirect(loginPath);
           }
         })();
       }, 0);
@@ -169,13 +149,25 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
         return;
       }
 
+      if (hasRecoverySession()) {
+        profileRequestId += 1;
+        setProviderMode('local');
+        setUser(currentUser);
+        setProfile(null);
+        setProfileLoading(false);
+        setAuthFlow('recovery');
+        setLoading(false);
+        if (!onRecoveryRoute) redirect(RECOVERY_PATH);
+        return;
+      }
+
       if (onRecoveryRoute) {
         profileRequestId += 1;
         setProviderMode('local');
         setUser(currentUser);
         setProfile(null);
         setProfileLoading(false);
-        setAuthFlow(hasRecoverySession() ? 'recovery' : 'invalid-recovery');
+        setAuthFlow('invalid-recovery');
         setLoading(false);
         return;
       }
@@ -286,10 +278,4 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
-  return context;
 }
