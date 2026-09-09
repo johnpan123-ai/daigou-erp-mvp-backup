@@ -208,6 +208,59 @@ function countOrphans(data: CloudRestoreSnapshotData): number {
 
 const duplicateCount = (values: string[]): number => values.length - new Set(values).size;
 
+const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestoreManifest> => {
+  const relationshipProjection = CLOUD_RESTORE_TABLES.flatMap(([, table]) => data[table].map(row => ({
+    table,
+    id: canonicalId(row, table),
+    relations: Object.fromEntries(Object.entries(row).filter(([key]) => key.endsWith('_id') && key !== 'local_id')),
+  }))).sort((left, right) => `${left.table}:${left.id}`.localeCompare(`${right.table}:${right.id}`));
+  const counts = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [table, data[table].length])) as Record<CloudRestoreTable, number>;
+  const snapshotFingerprint = await sha256Hex(stableCloudRestoreJson(data));
+  const relationshipHash = await sha256Hex(stableCloudRestoreJson(relationshipProjection));
+  const unknownProductCount = data.product_groups.filter(row => {
+    const title = String(row.normalized_title ?? row.title ?? '').trim().toLowerCase();
+    return title === '未知商品' || title === 'unknown product';
+  }).length;
+  return {
+    schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
+    resourceCount: CLOUD_RESTORE_TABLES.length,
+    counts,
+    totalRows: Object.values(counts).reduce((sum, count) => sum + count, 0),
+    snapshotFingerprint,
+    unknownProductCount,
+    orphanCount: 0,
+    duplicateVariantIdCount: 0,
+    duplicateVariantLocalIdCount: 0,
+    relationshipHash,
+  };
+};
+
+const assertManifestMatches = (provided: unknown, expected: CloudRestoreManifest): void => {
+  if (!isRecord(provided)) throw new CloudRestoreValidationError('RESTORE_MANIFEST_REQUIRED', 'JSON 缺少 manifest。');
+  const providedCounts = isRecord(provided.counts) ? provided.counts : null;
+  if (provided.schemaVersion !== expected.schemaVersion
+    || provided.resourceCount !== expected.resourceCount
+    || provided.totalRows !== expected.totalRows
+    || provided.snapshotFingerprint !== expected.snapshotFingerprint
+    || provided.relationshipHash !== expected.relationshipHash
+    || provided.unknownProductCount !== expected.unknownProductCount
+    || provided.orphanCount !== expected.orphanCount
+    || provided.duplicateVariantIdCount !== expected.duplicateVariantIdCount
+    || provided.duplicateVariantLocalIdCount !== expected.duplicateVariantLocalIdCount
+    || !providedCounts
+    || CLOUD_RESTORE_TABLES.some(([, table]) => providedCounts[table] !== expected.counts[table])) {
+    throw new CloudRestoreValidationError('RESTORE_MANIFEST_MISMATCH', 'JSON manifest 與資料內容不一致。');
+  }
+};
+
+export async function buildCloudRestoreManifest(source: Record<string, unknown>): Promise<{
+  data: CloudRestoreSnapshotData;
+  manifest: CloudRestoreManifest;
+}> {
+  const data = normalizeRows(source);
+  return { data, manifest: await manifestFor(data) };
+}
+
 export async function prepareCloudRestoreSnapshot(
   input: string | unknown,
   options: { fileName?: string; sourceEnvironment?: string } = {},
@@ -222,9 +275,13 @@ export async function prepareCloudRestoreSnapshot(
   if (parsed.schemaVersion !== CLOUD_RESTORE_SCHEMA_VERSION) {
     throw new CloudRestoreValidationError('UNSUPPORTED_SCHEMA_VERSION', `不支援的 schemaVersion：${String(parsed.schemaVersion ?? 'missing')}`);
   }
-  const rawData = isRecord(parsed.data) ? parsed.data : parsed;
+  const rawData = isRecord(parsed.data) ? parsed.data : null;
+  if (!rawData) throw new CloudRestoreValidationError('RESTORE_DATA_REQUIRED', 'JSON 缺少 data 物件。');
+  const allowedCollections = new Set<string>(CLOUD_RESTORE_TABLES.map(([collection]) => collection));
+  const unexpected = Object.keys(rawData).filter(key => !allowedCollections.has(key));
+  if (unexpected.length > 0) throw new CloudRestoreValidationError('UNEXPECTED_RESOURCE', `JSON 含不支援的 resource：${unexpected.join(', ')}`);
   const data = normalizeRows(rawData);
-  for (const table of CLOUD_RESTORE_TABLES.map(([, table]) => table)) {
+  for (const [, table] of CLOUD_RESTORE_TABLES) {
     const ids = data[table].map(row => canonicalId(row, table));
     if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
   }
@@ -237,30 +294,8 @@ export async function prepareCloudRestoreSnapshot(
   if (duplicateVariantLocalIdCount > 0) {
     throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
   }
-  const counts = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [table, data[table].length])) as Record<CloudRestoreTable, number>;
-  const relationshipProjection = CLOUD_RESTORE_TABLES.flatMap(([, table]) => data[table].map(row => ({
-    table,
-    id: canonicalId(row, table),
-    relations: Object.fromEntries(Object.entries(row).filter(([key]) => key.endsWith('_id') && key !== 'local_id')),
-  }))).sort((left, right) => `${left.table}:${left.id}`.localeCompare(`${right.table}:${right.id}`));
-  const snapshotFingerprint = await sha256Hex(stableCloudRestoreJson(data));
-  const relationshipHash = await sha256Hex(stableCloudRestoreJson(relationshipProjection));
-  const unknownProductCount = data.product_groups.filter(row => {
-    const title = String(row.normalized_title ?? row.title ?? '').trim().toLowerCase();
-    return title === '未知商品' || title === 'unknown product';
-  }).length;
-  const manifest: CloudRestoreManifest = {
-    schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
-    resourceCount: CLOUD_RESTORE_TABLES.length,
-    counts,
-    totalRows: Object.values(counts).reduce((sum, count) => sum + count, 0),
-    snapshotFingerprint,
-    unknownProductCount,
-    orphanCount: 0,
-    duplicateVariantIdCount: 0,
-    duplicateVariantLocalIdCount: 0,
-    relationshipHash,
-  };
+  const manifest = await manifestFor(data);
+  assertManifestMatches(parsed.manifest, manifest);
   return {
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
     data,

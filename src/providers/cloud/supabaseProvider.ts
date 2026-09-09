@@ -120,7 +120,9 @@ import {
 import {
   CLOUD_RESTORE_RPC,
   CLOUD_RESTORE_SCHEMA_VERSION,
+  CLOUD_RESTORE_TABLES,
   assertCloudRestoreServerResult,
+  buildCloudRestoreManifest,
   type CloudRestoreCommand,
   type CloudRestoreResult,
 } from './cloudAtomicRestore';
@@ -1869,14 +1871,18 @@ export class SupabaseProvider implements IDataProvider {
       this.getBundleComponents(), this.getJapanPackages(), this.getJapanPackageItems(),
       this.getOutboundShipments(), this.getOutboundShipmentItems(),
     ]);
+    const rawData = {
+      inventory, salesOrders, salesOrderItems, productGroups, productCategories, productVariants,
+      purchaseBatches, purchaseBatchItems, privateOrders, privateOrderItems, bundleComponents,
+      japanPackages, japanPackageItems, outboundShipments, outboundShipmentItems,
+    };
+    const prepared = await buildCloudRestoreManifest(rawData);
+    const fileData = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([collection, table]) => [collection, prepared.data[table]]));
     const snapshot = {
       schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
       sourceEnvironment: 'cloud-authoritative',
-      data: {
-        inventory, salesOrders, salesOrderItems, productGroups, productCategories, productVariants,
-        purchaseBatches, purchaseBatchItems, privateOrders, privateOrderItems, bundleComponents,
-        japanPackages, japanPackageItems, outboundShipments, outboundShipmentItems,
-      },
+      manifest: prepared.manifest,
+      data: fileData,
     };
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

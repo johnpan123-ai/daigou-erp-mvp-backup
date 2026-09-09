@@ -70,6 +70,7 @@ class AtomicServer {
 
 const vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
 let candidateTables;
+let validDocument;
 try {
   const domain = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
   const stagingHarness = await vite.ssrLoadModule('/src/lib/stagingCloudRestoreHarness.ts');
@@ -95,18 +96,27 @@ try {
   assert.equal(safeHarness.environment.projectRef, 'rhfdjsklfrgpoqsaqpkn');
   assert.equal(Object.isFrozen(safeHarness.environment), true);
   candidateTables = domain.CLOUD_RESTORE_TABLES;
-  const candidate = await domain.prepareCloudRestoreSnapshot(JSON.stringify(documentFor()));
+  const makeDocument = async (suffix = '') => {
+    const document = documentFor(suffix);
+    const prepared = await domain.buildCloudRestoreManifest(document.data);
+    return { ...document, manifest: prepared.manifest };
+  };
+  validDocument = await makeDocument();
+  const candidate = await domain.prepareCloudRestoreSnapshot(JSON.stringify(validDocument));
   assert.equal(candidate.manifest.resourceCount, 15);
   assert.equal(candidate.manifest.orphanCount, 0);
   assert.equal(candidate.manifest.duplicateVariantIdCount, 0);
   assert.equal(candidate.manifest.snapshotFingerprint.length, 64);
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot('{'), error => error.code === 'MALFORMED_JSON');
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot({ ...documentFor(), schemaVersion: 'old' }), error => error.code === 'UNSUPPORTED_SCHEMA_VERSION');
-  const duplicate = documentFor(); duplicate.data.productVariants.push(clone(duplicate.data.productVariants[0]));
+  await assert.rejects(() => domain.prepareCloudRestoreSnapshot(documentFor()), error => error.code === 'RESTORE_MANIFEST_REQUIRED');
+  const unexpected = await makeDocument(); unexpected.data.activityLog = [];
+  await assert.rejects(() => domain.prepareCloudRestoreSnapshot(unexpected), error => error.code === 'UNEXPECTED_RESOURCE');
+  const duplicate = await makeDocument(); duplicate.data.productVariants.push(clone(duplicate.data.productVariants[0]));
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot(duplicate), error => error.code === 'DUPLICATE_CANONICAL_ID');
-  const orphan = documentFor(); orphan.data.purchaseBatchItems[0].purchase_batch_id = uuid(999);
+  const orphan = await makeDocument(); orphan.data.purchaseBatchItems[0].purchase_batch_id = uuid(999);
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot(orphan), error => error.code === 'ORPHAN_RELATION');
-  const localId = documentFor(); localId.data.productVariants[0].id = 'local-only'; delete localId.data.productVariants[0].database_id;
+  const localId = await makeDocument(); localId.data.productVariants[0].id = 'local-only'; delete localId.data.productVariants[0].database_id;
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot(localId), error => error.code === 'CANONICAL_UUID_REQUIRED');
 
   const metrics = { partial: 0, duplicates: 0, wrongCanonical: 0, stuckLocks: 0, missingRollback: 0 };
@@ -127,8 +137,9 @@ try {
   }
   for (let round = 0; round < 30; round += 1) {
     const server = new AtomicServer(); const key = uuid(5000 + round); await server.apply(key, candidate);
-    const otherDoc = documentFor(`-${round}`); otherDoc.data.productGroups[0].title = `Changed ${round}`;
-    const other = await domain.prepareCloudRestoreSnapshot(otherDoc);
+    const otherDoc = await makeDocument(`-${round}`); otherDoc.data.productGroups[0].title = `Changed ${round}`;
+    const rebuilt = await domain.buildCloudRestoreManifest(otherDoc.data);
+    const other = { ...otherDoc, data: rebuilt.data, manifest: rebuilt.manifest };
     await assert.rejects(() => server.apply(key, other), /RESTORE_IDEMPOTENCY_PAYLOAD_MISMATCH/u);
   }
   for (let round = 0; round < 30; round += 1) {
@@ -178,7 +189,7 @@ try {
     await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
     await page.getByTestId('cloud-restore-harness-auth').getByText('true').waitFor();
     const input = page.locator('input[type=file]');
-    await input.setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(documentFor())) });
+    await input.setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
     await page.getByTestId('cloud-restore-preflight').waitFor();
     assert.match(await page.getByTestId('cloud-restore-status').innerText(), /Preflight/u);
     await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
