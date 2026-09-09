@@ -2508,6 +2508,36 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
   }
 
+  async replaceAuthoritativeCloudCollections(entries: ReadonlyArray<{ storageKey: string; value: unknown[] }>): Promise<void> {
+    if (this.databaseName !== CLOUD_CACHE_INDEXED_DB_NAME) {
+      throw new Error('CLOUD_CACHE_ATOMIC_REPLACE_WRONG_NAMESPACE');
+    }
+    const allowed = new Set<string>(INDEXED_DB_BACKED_STORAGE_KEYS);
+    if (entries.length === 0 || entries.some(entry => !allowed.has(entry.storageKey) || !Array.isArray(entry.value))) {
+      throw new Error('CLOUD_CACHE_ATOMIC_REPLACE_INVALID_COLLECTION');
+    }
+    const database = await this.dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      let failure: unknown = null;
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(failure ?? transaction.error ?? new Error('Cloud cache atomic replace failed'));
+      transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Cloud cache atomic replace aborted'));
+      try {
+        entries.forEach(entry => store.put(entry.value, entry.storageKey));
+      } catch (error) {
+        failure = error;
+        transaction.abort();
+      }
+    });
+    if (entries.some(entry => entry.storageKey === 'erp_product_variants')) {
+      this.variantVersion++;
+      this.variantDedupeCache = null;
+      this.variantDedupeCacheVersion = -1;
+    }
+  }
+
   private async set<T>(key: string, value: T): Promise<void> {
     try {
       const db = await this.dbPromise;

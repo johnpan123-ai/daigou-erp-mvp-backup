@@ -18,6 +18,7 @@ import type {
   OutboundShipmentItem
 } from '../lib/db';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
 
 export interface IDataProvider {
   getInventory(): Promise<InventoryItem[]>;
@@ -81,5 +82,6 @@ export interface IDataProvider {
   getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
   saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
   restoreBackup(backupData: any): Promise<boolean>;
+  restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult>;
 }
 

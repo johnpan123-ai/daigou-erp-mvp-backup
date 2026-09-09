@@ -49,6 +49,7 @@ interface CloudRealtimeContextValue {
 const CloudRealtimeContext = createContext<CloudRealtimeContextValue | null>(null);
 
 const REALTIME_TABLES = Object.keys(CLOUD_TABLE_RESOURCE);
+const CLOUD_RESTORE_EPOCH_TABLE = 'erp_cloud_restore_epoch';
 const EMPTY_SYNC_METRICS = {
   receivedEvents: 0,
   dedupedEvents: 0,
@@ -241,6 +242,13 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
           handlePayload(table, payload as unknown as CloudRealtimeTestPayload);
         });
       }
+      nextChannel = nextChannel.on('postgres_changes' as never, {
+        event: 'UPDATE', schema: 'public', table: CLOUD_RESTORE_EPOCH_TABLE,
+      }, () => {
+        if (disposed || generation !== channelGeneration || channel !== nextChannel) return;
+        reconnect.markNeeded('channel-interrupted');
+        void reconnect.request('subscribed', activeResources());
+      });
       channel = nextChannel;
 
       return new Promise<boolean>((resolve, reject) => {

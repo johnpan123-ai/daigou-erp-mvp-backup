@@ -22,6 +22,7 @@ import OutboundShipmentsList from './pages/OutboundShipmentsList';
 import OutboundShipmentDetail from './pages/OutboundShipmentDetail';
 import NextRawDbIntegrityProbe from './pages/NextRawDbIntegrityProbe';
 import StagingP04AuthenticatedHarness from './pages/StagingP04AuthenticatedHarness';
+import StagingCloudRestoreHarness from './pages/StagingCloudRestoreHarness';
 import { CloudRealtimeSyncBoundary } from './contexts/CloudRealtimeSyncContext';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -63,6 +64,7 @@ function App({ authClient, navigateAuth }: AppProps = {}) {
               <Route path="/auth/recovery" element={<PasswordRecovery />} />
               <Route path="/diagnostics/next-raw-db" element={<NextRawDbIntegrityProbe />} />
               <Route path="/__staging/p0-4-auth-harness" element={<StagingP04AuthenticatedHarness />} />
+              <Route path="/__staging/cloud-restore-harness" element={<StagingCloudRestoreHarness />} />
             </Routes>
           </AppLayout>
           </CloudRealtimeSyncBoundary>

@@ -39,6 +39,14 @@ interface TableCacheAdapter<T extends { id: string }> {
   supportsIncremental: boolean;
 }
 
+const TABLE_STORAGE_KEYS: Readonly<Record<string, string>> = {
+  product_groups: 'erp_product_groups', product_categories: 'erp_product_categories', product_variants: 'erp_product_variants',
+  inventory_items: 'erp_inventory', purchase_batches: 'erp_purchase_batches', purchase_batch_items: 'erp_purchase_batch_items',
+  private_orders: 'erp_private_orders', private_order_items: 'erp_private_order_items', japan_packages: 'erp_japan_packages',
+  japan_package_items: 'erp_japan_package_items', bundle_components: 'erp_bundle_components', outbound_shipments: 'erp_outbound_shipments',
+  outbound_shipment_items: 'erp_outbound_shipment_items', sales_orders: 'erp_sales_orders', sales_order_items: 'erp_sales_order_items',
+};
+
 const canonicalId = (table: string, row: Row): string => resolveCloudRowIdentity(table, row).canonicalId;
 const commonMeta = (row: Row) => ({
   database_id: typeof row.id === 'string' ? row.id : undefined,
@@ -295,22 +303,10 @@ export class CloudTargetedCache {
     }
 
     signal?.throwIfAborted();
-    const committed = new Set<string>();
-    const purchaseBatches = prepared.find(entry => entry.table === 'purchase_batches');
-    const purchaseItems = prepared.find(entry => entry.table === 'purchase_batch_items');
-    if (purchaseBatches?.adapter && purchaseItems?.adapter) {
-      await db.savePurchaseBatchTransaction(
-        purchaseBatches.activeRows as Parameters<typeof db.savePurchaseBatchTransaction>[0],
-        purchaseItems.activeRows as Parameters<typeof db.savePurchaseBatchTransaction>[1],
-      );
-      committed.add('purchase_batches');
-      committed.add('purchase_batch_items');
-    }
-
-    for (const entry of prepared) {
-      signal?.throwIfAborted();
-      if (entry.adapter && !committed.has(entry.table)) await entry.adapter.save(entry.activeRows);
-    }
+    signal?.throwIfAborted();
+    await db.replaceAuthoritativeCloudCollections(prepared
+      .filter(entry => entry.adapter && TABLE_STORAGE_KEYS[entry.table])
+      .map(entry => ({ storageKey: TABLE_STORAGE_KEYS[entry.table], value: entry.activeRows })));
     for (const entry of prepared) {
       if (entry.adapter) this.cursors.set(entry.table, entry.newest || this.now().toISOString());
     }

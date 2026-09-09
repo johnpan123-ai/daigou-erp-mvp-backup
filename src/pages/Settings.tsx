@@ -19,6 +19,7 @@ import {
   type TestSnapshotCollectionName,
   type TestSnapshotMetadata,
 } from '../lib/testSnapshotImport';
+import CloudAtomicRestorePanel from '../components/CloudAtomicRestorePanel';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
   { field: 'productGroups', label: '商品群組' },
@@ -390,7 +391,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            {!isCloudRestoreDisabledMode(currentMode) ? <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
                 <div className="text-xs text-muted">
@@ -415,24 +416,7 @@ export default function Settings() {
                 disabled={isCloudRestoreDisabledMode(currentMode)}
                 style={{ display: 'none' }} 
               />
-            </div>
-
-            {isCloudRestoreDisabledMode(currentMode) && (
-              <div
-                role="alert"
-                style={{
-                  padding: '12px 16px',
-                  border: '1px solid #f59e0b',
-                  borderRadius: '8px',
-                  background: '#fffbeb',
-                  color: '#92400e',
-                  fontSize: '13px',
-                  lineHeight: 1.6,
-                }}
-              >
-                {CLOUD_RESTORE_DISABLED_MESSAGE}
-              </div>
-            )}
+            </div> : <CloudAtomicRestorePanel />}
 
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>

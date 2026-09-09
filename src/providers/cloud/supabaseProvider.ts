@@ -117,6 +117,13 @@ import {
   readOrCreatePendingRpcRequest,
   type PurchaseBatchTransactionCommand,
 } from './purchaseBatchTransaction';
+import {
+  CLOUD_RESTORE_RPC,
+  CLOUD_RESTORE_SCHEMA_VERSION,
+  assertCloudRestoreServerResult,
+  type CloudRestoreCommand,
+  type CloudRestoreResult,
+} from './cloudAtomicRestore';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -278,6 +285,39 @@ const fetchAll = async <T>(
 
 export class SupabaseProvider implements IDataProvider {
   private readonly mutationCache = new CloudTargetedCache();
+
+  async restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
+    assertCloudWriteAllowed();
+    if (command.confirmation !== 'OVERWRITE CLOUD DATA') {
+      throw new Error('CLOUD_RESTORE_EXPLICIT_CONFIRMATION_REQUIRED');
+    }
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_snapshot_fingerprint: command.candidate.manifest.snapshotFingerprint,
+        p_snapshot: command.candidate.data,
+        p_manifest: command.candidate.manifest,
+        p_source_environment: command.candidate.sourceEnvironment,
+      }));
+    } catch (caughtError) {
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (error) {
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
+    const result = assertCloudRestoreServerResult(data);
+    await this.mutationCache.refresh({
+      reason: 'reconnect',
+      resources: ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'japanPackages', 'outboundShipments', 'salesOrders'],
+      changes: [],
+    });
+    return result;
+  }
 
   private async applyCloudFieldMutations(
     entity: CloudMutableEntity,
@@ -1818,7 +1858,35 @@ export class SupabaseProvider implements IDataProvider {
 
   // === 資料庫管理與輔助方法 (完全委託本地 db) ===
   async exportData(): Promise<void> {
-    return db.exportData();
+    const [
+      inventory, salesOrders, salesOrderItems, productGroups, productCategories, productVariants,
+      purchaseBatches, purchaseBatchItems, privateOrders, privateOrderItems, bundleComponents,
+      japanPackages, japanPackageItems, outboundShipments, outboundShipmentItems,
+    ] = await Promise.all([
+      this.getInventory(), this.getSalesOrders(), this.getSalesOrderItems(), this.getProductGroups(),
+      this.getProductCategories(), this.getProductVariants(), this.getPurchaseBatches(),
+      this.getPurchaseBatchItems(), this.getPrivateOrders(), this.getPrivateOrderItems(),
+      this.getBundleComponents(), this.getJapanPackages(), this.getJapanPackageItems(),
+      this.getOutboundShipments(), this.getOutboundShipmentItems(),
+    ]);
+    const snapshot = {
+      schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
+      sourceEnvironment: 'cloud-authoritative',
+      data: {
+        inventory, salesOrders, salesOrderItems, productGroups, productCategories, productVariants,
+        purchaseBatches, purchaseBatchItems, privateOrders, privateOrderItems, bundleComponents,
+        japanPackages, japanPackageItems, outboundShipments, outboundShipmentItems,
+      },
+    };
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `cloud-authoritative-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   }
 
   async importData(jsonString: string): Promise<boolean> {
