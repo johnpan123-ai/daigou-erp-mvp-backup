@@ -119,6 +119,60 @@ try {
   const localId = await makeDocument(); localId.data.productVariants[0].id = 'local-only'; delete localId.data.productVariants[0].database_id;
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot(localId), error => error.code === 'CANONICAL_UUID_REQUIRED');
 
+  const legacyGroupId = '99999999-9999-9999-9999-999999999999';
+  const legacyCategoryId = '88888888-8888-8888-8888-888888888888';
+  const legacyDocument = documentFor('-legacy-postgres-uuid');
+  legacyDocument.data.productGroups[0].id = legacyGroupId;
+  legacyDocument.data.productCategories[0].id = legacyCategoryId;
+  for (const collection of Object.values(legacyDocument.data)) {
+    for (const row of collection) {
+      if (row.product_group_id === uuid(1)) row.product_group_id = legacyGroupId;
+      if (row.product_category_id === uuid(2)) row.product_category_id = legacyCategoryId;
+    }
+  }
+  const legacyPrepared = await domain.buildCloudRestoreManifest(legacyDocument.data);
+  const legacyCandidate = await domain.prepareCloudRestoreSnapshot({
+    ...legacyDocument,
+    manifest: legacyPrepared.manifest,
+  });
+  assert.equal(legacyCandidate.data.product_groups[0].id, legacyGroupId);
+  assert.equal(legacyCandidate.data.product_categories[0].id, legacyCategoryId);
+
+  const uppercaseDocument = documentFor('-uppercase-postgres-uuid');
+  const lowercaseOrderId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+  const uppercaseOrderId = lowercaseOrderId.toUpperCase();
+  uppercaseDocument.data.salesOrders[0].id = uppercaseOrderId;
+  uppercaseDocument.data.salesOrderItems[0].order_id = uppercaseOrderId;
+  const uppercasePrepared = await domain.buildCloudRestoreManifest(uppercaseDocument.data);
+  const uppercaseCandidate = await domain.prepareCloudRestoreSnapshot({
+    ...uppercaseDocument,
+    manifest: uppercasePrepared.manifest,
+  });
+  assert.equal(uppercaseCandidate.data.sales_orders[0].id, lowercaseOrderId);
+  assert.equal(uppercaseCandidate.data.sales_order_items[0].order_id, lowercaseOrderId);
+
+  for (const invalidId of [
+    'not-a-uuid',
+    '123',
+    'local_abc123',
+    '99999999999999999999999999999999',
+    '99999999-9999-9999-9999',
+    'gggggggg-gggg-gggg-gggg-gggggggggggg',
+    '',
+    '   ',
+    null,
+    undefined,
+  ]) {
+    const invalidDocument = clone(validDocument);
+    invalidDocument.data.productGroups[0].id = invalidId;
+    delete invalidDocument.data.productGroups[0].database_id;
+    await assert.rejects(
+      () => domain.prepareCloudRestoreSnapshot(invalidDocument),
+      error => error.code === 'CANONICAL_UUID_REQUIRED',
+      `Restore must reject non-PostgreSQL UUID identity: ${String(invalidId)}`,
+    );
+  }
+
   const metrics = { partial: 0, duplicates: 0, wrongCanonical: 0, stuckLocks: 0, missingRollback: 0 };
   for (let round = 0; round < 30; round += 1) {
     const server = new AtomicServer(); const key = uuid(2000 + round);
