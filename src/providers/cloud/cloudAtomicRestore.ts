@@ -1,8 +1,10 @@
 import type { CloudMutableEntity } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
+import { CLOUD_RESTORE_RELATIONS, cloudRestoreRelationKey, type CloudRestoreRelationSpec } from './cloudRestoreRelations';
 
 export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
 export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot' as const;
+export const CLOUD_RESTORE_SNAPSHOT_RPC = 'erp_export_cloud_restore_snapshot' as const;
 export const CLOUD_RESTORE_TABLES = [
   ['inventory', 'inventory_items'],
   ['productGroups', 'product_groups'],
@@ -35,7 +37,26 @@ export interface CloudRestoreManifest {
   orphanCount: number;
   duplicateVariantIdCount: number;
   duplicateVariantLocalIdCount: number;
+  duplicateCanonicalIdCount: number;
+  optionalMetadataMissingReferenceCount: number;
+  canonicalIdentityAnomalyCount: number;
   relationshipHash: string;
+}
+
+export interface CloudRestoreRelationAuditEntry {
+  relation: string;
+  childTable: CloudRestoreTable;
+  field: string;
+  parentTable: CloudRestoreTable;
+  kind: 'blocking' | 'metadata';
+  invalidCount: number;
+  uniqueMissingParentIds: number;
+}
+
+export interface CloudRestoreRelationAudit {
+  blockingOrphanCount: number;
+  optionalMetadataMissingReferenceCount: number;
+  entries: CloudRestoreRelationAuditEntry[];
 }
 
 export interface CloudRestoreCandidate {
@@ -111,10 +132,12 @@ const canonicalId = (row: Record<string, unknown>, table: CloudRestoreTable): st
   return id.toLowerCase();
 };
 
+const SAFE_SNAPSHOT_METADATA = ['created_at', 'updated_at', 'updated_by', 'deleted_at', 'sync_status'] as const;
+
 const normalizeRows = (
   source: Record<string, unknown>,
 ): CloudRestoreSnapshotData => Object.fromEntries(CLOUD_RESTORE_TABLES.map(([collection, table]) => {
-  const rows = source[collection];
+  const rows = source[collection] ?? source[table];
   if (!Array.isArray(rows)) {
     throw new CloudRestoreValidationError('RESTORE_COLLECTION_REQUIRED', `JSON 缺少 ${collection} 陣列。`);
   }
@@ -137,6 +160,9 @@ const normalizeRows = (
       const orderDatabaseId = String(value.order_database_id ?? value.order_id ?? '').trim();
       if (UUID_PATTERN.test(orderDatabaseId)) row.order_id = orderDatabaseId.toLowerCase();
     }
+    for (const metadataField of SAFE_SNAPSHOT_METADATA) {
+      if (metadataField in value) row[metadataField] = value[metadataField];
+    }
     delete row.version;
     return Object.fromEntries(Object.entries(row).filter(([, fieldValue]) => fieldValue !== undefined));
   });
@@ -147,64 +173,85 @@ const idsFor = (data: CloudRestoreSnapshotData, table: CloudRestoreTable): Set<s
   data[table].map(row => canonicalId(row, table)),
 );
 
-const requireRelation = (
-  row: Record<string, unknown>, field: string, parents: Set<string>, optional = false,
-): number => {
-  const value = String(row[field] ?? '').trim().toLowerCase();
-  if (!value && optional) return 0;
-  return value && parents.has(value) ? 0 : 1;
-};
-
-function countOrphans(data: CloudRestoreSnapshotData): number {
-  const groups = idsFor(data, 'product_groups');
-  const categories = idsFor(data, 'product_categories');
-  const variants = idsFor(data, 'product_variants');
-  const batches = idsFor(data, 'purchase_batches');
-  const batchItems = idsFor(data, 'purchase_batch_items');
-  const privateOrders = idsFor(data, 'private_orders');
-  const salesOrders = idsFor(data, 'sales_orders');
-  const packages = idsFor(data, 'japan_packages');
-  const packageItems = idsFor(data, 'japan_package_items');
-  const shipments = idsFor(data, 'outbound_shipments');
-  let count = 0;
-  data.product_categories.forEach(row => { count += requireRelation(row, 'product_group_id', groups); });
-  data.product_variants.forEach(row => {
-    count += requireRelation(row, 'product_group_id', groups);
-    count += requireRelation(row, 'product_category_id', categories, true);
+export function auditCloudRestoreRelations(data: CloudRestoreSnapshotData): CloudRestoreRelationAudit {
+  const parentIds = new Map<CloudRestoreTable, Set<string>>(
+    CLOUD_RESTORE_TABLES.map(([, table]) => [table, idsFor(data, table)]),
+  );
+  let blockingOrphanCount = 0;
+  let optionalMetadataMissingReferenceCount = 0;
+  const entries = CLOUD_RESTORE_RELATIONS.map((relation: CloudRestoreRelationSpec) => {
+    const missingIds = new Set<string>();
+    let invalidCount = 0;
+    const parents = parentIds.get(relation.parentTable) ?? new Set<string>();
+    for (const row of data[relation.childTable]) {
+      const value = String(row[relation.field] ?? '').trim().toLowerCase();
+      if (!value) {
+        if (relation.optional) continue;
+        invalidCount += 1;
+        continue;
+      }
+      if (!parents.has(value)) {
+        invalidCount += 1;
+        missingIds.add(value);
+      }
+    }
+    if (relation.kind === 'blocking') blockingOrphanCount += invalidCount;
+    else optionalMetadataMissingReferenceCount += invalidCount;
+    return {
+      relation: cloudRestoreRelationKey(relation),
+      childTable: relation.childTable,
+      field: relation.field,
+      parentTable: relation.parentTable,
+      kind: relation.kind,
+      invalidCount,
+      uniqueMissingParentIds: missingIds.size,
+    };
   });
-  data.bundle_components.forEach(row => {
-    count += requireRelation(row, 'bundle_variant_id', variants);
-    count += requireRelation(row, 'component_variant_id', variants);
-  });
-  data.purchase_batches.forEach(row => { count += requireRelation(row, 'product_group_id', groups); });
-  data.purchase_batch_items.forEach(row => {
-    count += requireRelation(row, 'purchase_batch_id', batches);
-    count += requireRelation(row, 'product_variant_id', variants);
-  });
-  data.private_orders.forEach(row => { count += requireRelation(row, 'product_group_id', groups); });
-  data.private_order_items.forEach(row => {
-    count += requireRelation(row, 'private_order_id', privateOrders);
-    count += requireRelation(row, 'product_variant_id', variants);
-  });
-  data.sales_order_items.forEach(row => {
-    count += requireRelation(row, 'order_id', salesOrders);
-    count += requireRelation(row, 'product_variant_id', variants, true);
-  });
-  data.japan_package_items.forEach(row => {
-    count += requireRelation(row, 'japan_package_id', packages);
-    count += requireRelation(row, 'product_group_id', groups, true);
-    count += requireRelation(row, 'product_variant_id', variants, true);
-    count += requireRelation(row, 'purchase_batch_id', batches, true);
-    count += requireRelation(row, 'purchase_batch_item_id', batchItems, true);
-  });
-  data.outbound_shipment_items.forEach(row => {
-    count += requireRelation(row, 'outbound_shipment_id', shipments);
-    count += requireRelation(row, 'japan_package_item_id', packageItems, true);
-    count += requireRelation(row, 'product_group_id', groups, true);
-    count += requireRelation(row, 'product_variant_id', variants, true);
-  });
-  return count;
+  return { blockingOrphanCount, optionalMetadataMissingReferenceCount, entries };
 }
+
+export const countOrphans = (data: CloudRestoreSnapshotData): number => auditCloudRestoreRelations(data).blockingOrphanCount;
+
+export const closeCloudRestoreData = (
+  seed: CloudRestoreSnapshotData,
+  raw: CloudRestoreSnapshotData,
+): CloudRestoreSnapshotData => {
+  const result = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [table, seed[table].map(row => ({ ...row }))])) as CloudRestoreSnapshotData;
+  const rawByTable = new Map<CloudRestoreTable, Map<string, Record<string, unknown>>>();
+  for (const [, table] of CLOUD_RESTORE_TABLES) {
+    const map = new Map<string, Record<string, unknown>>();
+    for (const row of raw[table]) {
+      const id = canonicalId(row, table);
+      if (map.has(id)) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
+      map.set(id, row);
+    }
+    rawByTable.set(table, map);
+  }
+  const seen = new Map<CloudRestoreTable, Set<string>>();
+  for (const [, table] of CLOUD_RESTORE_TABLES) seen.set(table, new Set(result[table].map(row => canonicalId(row, table))));
+  const maxIterations = Math.max(1, CLOUD_RESTORE_TABLES.reduce((sum, [, table]) => sum + raw[table].length, 0) + 1);
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    let added = 0;
+    for (const relation of CLOUD_RESTORE_RELATIONS) {
+      const currentParents = seen.get(relation.parentTable) ?? new Set<string>();
+      for (const child of result[relation.childTable]) {
+        const value = String(child[relation.field] ?? '').trim();
+        if (!value || currentParents.has(value.toLowerCase())) continue;
+        const parent = rawByTable.get(relation.parentTable)?.get(value.toLowerCase());
+        if (!parent) continue;
+        result[relation.parentTable].push({ ...parent });
+        currentParents.add(value.toLowerCase());
+        added += 1;
+      }
+    }
+    if (added === 0) break;
+    if (iteration === maxIterations - 1) throw new CloudRestoreValidationError('CLOUD_RESTORE_CLOSURE_UNSTABLE', 'Cloud Restore snapshot closure 無法收斂。');
+  }
+  for (const [, table] of CLOUD_RESTORE_TABLES) {
+    result[table].sort((left, right) => canonicalId(left, table).localeCompare(canonicalId(right, table)));
+  }
+  return result;
+};
 
 const duplicateCount = (values: string[]): number => values.length - new Set(values).size;
 
@@ -221,6 +268,18 @@ const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestore
     const title = String(row.normalized_title ?? row.title ?? '').trim().toLowerCase();
     return title === '未知商品' || title === 'unknown product';
   }).length;
+  const relationAudit = auditCloudRestoreRelations(data);
+  const duplicateCanonicalIdCount = CLOUD_RESTORE_TABLES.reduce(
+    (sum, [, table]) => sum + duplicateCount(data[table].map(row => canonicalId(row, table))),
+    0,
+  );
+  const duplicateVariantIdCount = duplicateCount(data.product_variants.map(row => canonicalId(row, 'product_variants')));
+  const duplicateVariantLocalIdCount = duplicateCount(data.product_variants.map(row => String(row.local_id ?? '').trim()).filter(Boolean));
+  const canonicalIdentityAnomalyCount = CLOUD_RESTORE_TABLES.reduce((sum, [, table]) => sum + (
+    table === 'inventory_items'
+      ? 0
+      : data[table].reduce((anomalies, row) => anomalies + (UUID_PATTERN.test(String(row.id ?? '').trim()) ? 0 : 1), 0)
+  ), 0);
   return {
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
     resourceCount: CLOUD_RESTORE_TABLES.length,
@@ -228,9 +287,12 @@ const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestore
     totalRows: Object.values(counts).reduce((sum, count) => sum + count, 0),
     snapshotFingerprint,
     unknownProductCount,
-    orphanCount: 0,
-    duplicateVariantIdCount: 0,
-    duplicateVariantLocalIdCount: 0,
+    orphanCount: relationAudit.blockingOrphanCount,
+    duplicateVariantIdCount,
+    duplicateVariantLocalIdCount,
+    duplicateCanonicalIdCount,
+    optionalMetadataMissingReferenceCount: relationAudit.optionalMetadataMissingReferenceCount,
+    canonicalIdentityAnomalyCount,
     relationshipHash,
   };
 };
@@ -247,17 +309,22 @@ const assertManifestMatches = (provided: unknown, expected: CloudRestoreManifest
     || provided.orphanCount !== expected.orphanCount
     || provided.duplicateVariantIdCount !== expected.duplicateVariantIdCount
     || provided.duplicateVariantLocalIdCount !== expected.duplicateVariantLocalIdCount
+    || provided.duplicateCanonicalIdCount !== expected.duplicateCanonicalIdCount
+    || provided.optionalMetadataMissingReferenceCount !== expected.optionalMetadataMissingReferenceCount
+    || provided.canonicalIdentityAnomalyCount !== expected.canonicalIdentityAnomalyCount
     || !providedCounts
     || CLOUD_RESTORE_TABLES.some(([, table]) => providedCounts[table] !== expected.counts[table])) {
     throw new CloudRestoreValidationError('RESTORE_MANIFEST_MISMATCH', 'JSON manifest 與資料內容不一致。');
   }
 };
 
-export async function buildCloudRestoreManifest(source: Record<string, unknown>): Promise<{
+export async function buildCloudRestoreManifest(source: Record<string, unknown>, rawSource?: Record<string, unknown>): Promise<{
   data: CloudRestoreSnapshotData;
   manifest: CloudRestoreManifest;
 }> {
-  const data = normalizeRows(source);
+  const seed = normalizeRows(source);
+  const raw = normalizeRows(rawSource ?? source);
+  const data = closeCloudRestoreData(seed, raw);
   return { data, manifest: await manifestFor(data) };
 }
 
@@ -285,8 +352,8 @@ export async function prepareCloudRestoreSnapshot(
     const ids = data[table].map(row => canonicalId(row, table));
     if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
   }
-  const orphanCount = countOrphans(data);
-  if (orphanCount > 0) throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${orphanCount} 筆無效關聯。`);
+  const relationAudit = auditCloudRestoreRelations(data);
+  if (relationAudit.blockingOrphanCount > 0) throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
   const variants = data.product_variants;
   const duplicateVariantLocalIdCount = duplicateCount(variants
     .map(row => String(row.local_id ?? '').trim())

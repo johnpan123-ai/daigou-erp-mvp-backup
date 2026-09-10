@@ -119,6 +119,7 @@ import {
 } from './purchaseBatchTransaction';
 import {
   CLOUD_RESTORE_RPC,
+  CLOUD_RESTORE_SNAPSHOT_RPC,
   CLOUD_RESTORE_SCHEMA_VERSION,
   CLOUD_RESTORE_TABLES,
   assertCloudRestoreServerResult,
@@ -1860,23 +1861,25 @@ export class SupabaseProvider implements IDataProvider {
 
   // === 資料庫管理與輔助方法 (完全委託本地 db) ===
   async exportData(): Promise<void> {
-    const [
-      inventory, salesOrders, salesOrderItems, productGroups, productCategories, productVariants,
-      purchaseBatches, purchaseBatchItems, privateOrders, privateOrderItems, bundleComponents,
-      japanPackages, japanPackageItems, outboundShipments, outboundShipmentItems,
-    ] = await Promise.all([
-      this.getInventory(), this.getSalesOrders(), this.getSalesOrderItems(), this.getProductGroups(),
-      this.getProductCategories(), this.getProductVariants(), this.getPurchaseBatches(),
-      this.getPurchaseBatchItems(), this.getPrivateOrders(), this.getPrivateOrderItems(),
-      this.getBundleComponents(), this.getJapanPackages(), this.getJapanPackageItems(),
-      this.getOutboundShipments(), this.getOutboundShipmentItems(),
-    ]);
-    const rawData = {
-      inventory, salesOrders, salesOrderItems, productGroups, productCategories, productVariants,
-      purchaseBatches, purchaseBatchItems, privateOrders, privateOrderItems, bundleComponents,
-      japanPackages, japanPackageItems, outboundShipments, outboundShipmentItems,
-    };
-    const prepared = await buildCloudRestoreManifest(rawData);
+    let rawData: unknown;
+    let error: unknown;
+    try {
+      ({ data: rawData, error } = await supabase.rpc(CLOUD_RESTORE_SNAPSHOT_RPC));
+    } catch (caughtError) {
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (error) {
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+      const invalid = new Error('CLOUD_RESTORE_SNAPSHOT_INVALID');
+      markCloudRequestFailed(invalid);
+      throw invalid;
+    }
+    markCloudReachable();
+    const prepared = await buildCloudRestoreManifest(rawData as Record<string, unknown>, rawData as Record<string, unknown>);
     const fileData = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([collection, table]) => [collection, prepared.data[table]]));
     const snapshot = {
       schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,

@@ -104,7 +104,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
           <div><strong>總筆數：</strong>{candidate.manifest.totalRows}</div>
           <div><strong>Snapshot fingerprint：</strong><code>{candidate.manifest.snapshotFingerprint}</code></div>
           <div><strong>Relationship hash：</strong><code>{candidate.manifest.relationshipHash}</code></div>
-          <div><strong>完整性：</strong>orphan 0；duplicate Variant 0；rollback snapshot 將由 Server 在 transaction 內建立。</div>
+          <div><strong>完整性：</strong>blocking orphan {candidate.manifest.orphanCount}；metadata missing {candidate.manifest.optionalMetadataMissingReferenceCount}；canonical anomalies {candidate.manifest.canonicalIdentityAnomalyCount}；duplicate IDs {candidate.manifest.duplicateCanonicalIdCount}；rollback snapshot 將由 Server 在 transaction 內建立。</div>
           <details style={{ marginTop: 8 }}>
             <summary>各資源筆數</summary>
             <ul>{CLOUD_RESTORE_TABLES.map(([, table]) => <li key={table}>{table}: {candidate.manifest.counts[table]}</li>)}</ul>
