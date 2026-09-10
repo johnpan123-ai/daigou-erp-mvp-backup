@@ -16,6 +16,7 @@ dataProvider.restoreCloudSnapshot = async command => ({
   rollbackSnapshotId: '00000000-0000-4000-8000-000000000098',
   restoreEpoch: 1,
   manifest: command.candidate.manifest,
+  timingsMs: { auth: 1, lockIdempotency: 2, inputValidation: 3, beforeSnapshot: 4, rollbackRow: 1, delete: 2, insert: 8, integrity: 5, epochIdempotency: 1, total: 27 },
 });
 
 const { default: StagingCloudRestoreHarness } = await import('../../src/pages/StagingCloudRestoreHarness');

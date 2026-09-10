@@ -132,7 +132,17 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         </div>
       )}
       <p role={status === 'error' ? 'alert' : 'status'} data-testid="cloud-restore-status" style={{ marginBottom: 0 }}>{message}</p>
-      {result && <div data-testid="cloud-restore-result">replayed={String(result.replayed)}；epoch={result.restoreEpoch}</div>}
+      {result && (
+        <div data-testid="cloud-restore-result">
+          replayed={String(result.replayed)}；epoch={result.restoreEpoch}
+          {result.timingsMs && (
+            <details data-testid="cloud-restore-timings" style={{ marginTop: 8 }}>
+              <summary>Server phase timings（ms）</summary>
+              <pre>{JSON.stringify(result.timingsMs, null, 2)}</pre>
+            </details>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -81,6 +81,7 @@ export interface CloudRestoreResult {
   rollbackSnapshotId: string;
   restoreEpoch: number;
   manifest: CloudRestoreManifest;
+  timingsMs?: Readonly<Record<string, number>>;
 }
 
 export class CloudRestoreValidationError extends Error {

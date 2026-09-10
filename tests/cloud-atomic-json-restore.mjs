@@ -7,6 +7,7 @@ import { createServer } from 'vite';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const SQL = readFileSync(new URL('../supabase/sql/023_cloud_atomic_json_restore.sql', import.meta.url), 'utf8');
+const EXECUTION_SQL = readFileSync(new URL('../supabase/sql/025_cloud_atomic_restore_execution_timeout.sql', import.meta.url), 'utf8');
 const PROVIDER = readFileSync(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url), 'utf8');
 const CONTEXT = readFileSync(new URL('../src/contexts/CloudRealtimeSyncContext.tsx', import.meta.url), 'utf8');
 const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
@@ -52,6 +53,7 @@ class AtomicServer {
       for (const [, table] of candidateTables) {
         index += 1;
         working[table] = clone(candidate.data[table]);
+        if (options.timeoutAt === index) throw new Error('QUERY_CANCELED_57014');
         if (options.failAt === index) throw new Error(`INJECTED_RESOURCE_FAILURE_${index}`);
       }
       if (options.integrityFailure) throw new Error('CLOUD_RESTORE_POST_INTEGRITY_COUNT_MISMATCH');
@@ -206,6 +208,15 @@ try {
     await assert.rejects(() => server.apply(uuid(7000 + round), candidate, { integrityFailure: true }), /POST_INTEGRITY/u);
     assert.deepEqual(server.state, before); assert.equal(server.locked, false);
   }
+  for (let round = 0; round < 30; round += 1) {
+    const server = new AtomicServer(); const before = clone(server.state);
+    await assert.rejects(() => server.apply(uuid(8000 + round), candidate, { timeoutAt: 10 }), /QUERY_CANCELED_57014/u);
+    assert.deepEqual(server.state, before);
+    assert.equal(server.rollbackSnapshots.length, 0);
+    assert.equal(server.requests.size, 0);
+    assert.equal(server.epoch, 0);
+    assert.equal(server.locked, false);
+  }
   assert.deepEqual(metrics, { partial: 0, duplicates: 0, wrongCanonical: 0, stuckLocks: 0, missingRollback: 0 });
 } finally { await vite.close(); }
 
@@ -225,6 +236,26 @@ assert.match(SQL, /alter publication supabase_realtime add table public\.erp_clo
 assert.doesNotMatch(SQL, /service_role|grant\s+.+\s+to\s+(public|anon)/iu);
 assert.match(PROVIDER, /reason: 'reconnect'[\s\S]+resources: \['products', 'purchases'/u);
 assert.match(CONTEXT, /erp_cloud_restore_epoch[\s\S]+reconnect\.request/u);
+
+assert.equal((EXECUTION_SQL.match(/^begin;$/gimu) || []).length, 1);
+assert.equal((EXECUTION_SQL.match(/^commit;$/gimu) || []).length, 1);
+assert.match(EXECUTION_SQL, /create or replace function public\.erp_restore_cloud_snapshot\([\s\S]+set statement_timeout = '30s'/u);
+assert.doesNotMatch(EXECUTION_SQL, /alter\s+(role|database)[\s\S]+statement_timeout/iu);
+assert.equal((EXECUTION_SQL.match(/v_before\s*:=\s*public\.erp_cloud_restore_snapshot\(\)/gu) || []).length, 1);
+const executionRestoreBody = EXECUTION_SQL.slice(EXECUTION_SQL.indexOf('create or replace function public.erp_restore_cloud_snapshot('));
+assert.equal((executionRestoreBody.match(/public\.erp_cloud_restore_snapshot\(\)/gu) || []).length, 1, 'Restore must build one full before snapshot and no full after snapshot');
+assert.match(SQL, /jsonb_populate_recordset\(null::%s, \$1\)/u);
+assert.match(EXECUTION_SQL, /perform public\.erp_cloud_restore_insert_rows\('public\.inventory_items'/u);
+assert.match(EXECUTION_SQL, /erp_cloud_restore_table_profile/u);
+assert.match(EXECUTION_SQL, /erp_cloud_restore_live_relationship_hash/u);
+assert.match(EXECUTION_SQL, /v_before_fingerprint[\s\S]+v_before_manifest[\s\S]+insert into public\.erp_cloud_restore_snapshots/u);
+for (const phase of ['auth', 'lock_idempotency', 'input_validation', 'before_snapshot', 'rollback_row', 'delete', 'insert', 'integrity', 'epoch_idempotency']) {
+  assert.match(EXECUTION_SQL, new RegExp(`CLOUD_RESTORE_TIMING phase=${phase} event=start`, 'u'));
+}
+assert.match(EXECUTION_SQL, /'timingsMs',v_phase_timings/u);
+assert.match(EXECUTION_SQL, /when query_canceled then[\s\S]+classification=statement_timeout[\s\S]+raise;/u);
+assert.match(EXECUTION_SQL, /when others then[\s\S]+classification=error[\s\S]+raise;/u);
+assert.doesNotMatch(EXECUTION_SQL, /service_role|grant\s+.+\s+to\s+(public|anon)|twzpqyesbtnfxdkorluf/iu);
 
 const PORT = process.env.CLOUD_RESTORE_TEST_PORT || '4256';
 const CHROME = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -253,8 +284,10 @@ try {
     await page.getByTestId('cloud-restore-submit').click();
     await page.getByTestId('cloud-restore-result').waitFor();
     assert.match(await page.getByTestId('cloud-restore-result').innerText(), /replayed=false.*epoch=1/u);
+    assert.match(await page.getByTestId('cloud-restore-timings').locator('summary').innerText(), /Server phase timings/u);
+    assert.match(await page.getByTestId('cloud-restore-timings').locator('pre').textContent(), /"total": 27/u);
     assert.equal(cloudRequests.length, 0, 'Injected deterministic Restore execution must not write Cloud');
   } finally { await browser.close(); }
 } finally { processVite.kill(); }
 
-console.log('PASS Cloud Atomic Restore: preflight, SQL contract, 180-round deterministic soak, and real React owner flow');
+console.log('PASS Cloud Atomic Restore: preflight, bounded execution SQL contract, 210-round deterministic soak (including 30 timeout rollbacks), and real React owner flow');

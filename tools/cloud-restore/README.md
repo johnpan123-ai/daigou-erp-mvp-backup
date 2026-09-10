@@ -58,6 +58,35 @@ restore callback. It never displays or copies an auth token.
 
 ## Migration status
 
-`supabase/sql/023_cloud_atomic_json_restore.sql` is an artifact only. It has not
-been applied to Staging or Production and must receive a separate deployment
-authorization and postflight review.
+`023_cloud_atomic_json_restore.sql` and `024_cloud_restore_snapshot_export.sql`
+have separately completed their Staging apply/postflight gates. Production has
+not been touched.
+
+`025_cloud_atomic_restore_execution_timeout.sql` is a review/build artifact. It
+replaces only the Restore RPC implementation and adds private profiling helpers:
+
+- the full pre-restore snapshot is built once and reused as the rollback payload;
+- the post-write check uses per-table count/identity hashes plus required-FK
+  checks and a relationship hash, without constructing another full snapshot;
+- all inserts remain set-based through `jsonb_populate_recordset`;
+- only `erp_restore_cloud_snapshot` receives a bounded 30-second function
+  timeout; global role/database timeout settings are not changed;
+- phase timing logs and the canonical result contain durations only, never the
+  snapshot, credentials, or business payload.
+
+025 has not been applied to Staging or Production. A separately authorized SQL
+gate must verify function configuration and live 16,055-row timing before the
+Restore write gate resumes.
+
+## Request boundary evidence
+
+The browser calls the Database REST RPC directly through `supabase.rpc`; this
+path does not install a shorter client-side `AbortController` deadline. The
+previous 15.5 MB request reached PostgreSQL and returned SQLSTATE `57014`, so the
+active browser/Data API path accepted that request body and the proven blocker
+was the database statement timeout. The 30-second function bound remains below
+the documented 60-second maximum configurable Database Client API timeout.
+
+`test:cloud-restore-execution-cost` uses a generated 15-resource, 16,055-row,
+15,532,358-byte fixture for repeatable local cost-model evidence. It is not a
+substitute for the separately authorized Staging PostgreSQL timing gate.
