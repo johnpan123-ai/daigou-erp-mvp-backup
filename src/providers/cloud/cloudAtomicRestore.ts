@@ -1,8 +1,13 @@
 import type { CloudMutableEntity } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
 import { CLOUD_RESTORE_RELATIONS, cloudRestoreRelationKey, type CloudRestoreRelationSpec } from './cloudRestoreRelations';
+import {
+  LEGACY_CLOUD_RESTORE_IDENTITY_CONTRACT,
+  verifyLegacyCloudRestoreSnapshot,
+} from './cloudRestoreLegacySnapshot';
 
 export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
+export const CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION = 'inventory-id-v2' as const;
 export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot' as const;
 export const CLOUD_RESTORE_SNAPSHOT_RPC = 'erp_export_cloud_restore_snapshot' as const;
 export const CLOUD_RESTORE_TABLES = [
@@ -29,6 +34,7 @@ export type CloudRestoreSnapshotData = Record<CloudRestoreTable, Record<string, 
 
 export interface CloudRestoreManifest {
   schemaVersion: typeof CLOUD_RESTORE_SCHEMA_VERSION;
+  identityContractVersion: typeof CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION;
   resourceCount: number;
   counts: Record<CloudRestoreTable, number>;
   totalRows: number;
@@ -63,6 +69,7 @@ export interface CloudRestoreCandidate {
   schemaVersion: typeof CLOUD_RESTORE_SCHEMA_VERSION;
   data: CloudRestoreSnapshotData;
   manifest: CloudRestoreManifest;
+  sourceIdentityContractVersion: typeof CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION | 'current-unversioned' | typeof LEGACY_CLOUD_RESTORE_IDENTITY_CONTRACT;
   sourceEnvironment: string;
   fileName: string;
 }
@@ -300,6 +307,7 @@ const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestore
   );
   return {
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
+    identityContractVersion: CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION,
     resourceCount: CLOUD_RESTORE_TABLES.length,
     counts,
     totalRows: Object.values(counts).reduce((sum, count) => sum + count, 0),
@@ -315,10 +323,16 @@ const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestore
   };
 };
 
-const assertManifestMatches = (provided: unknown, expected: CloudRestoreManifest): void => {
+const assertManifestMatches = (
+  provided: unknown,
+  expected: CloudRestoreManifest,
+  allowMissingIdentityContractVersion = false,
+): void => {
   if (!isRecord(provided)) throw new CloudRestoreValidationError('RESTORE_MANIFEST_REQUIRED', 'JSON 缺少 manifest。');
   const providedCounts = isRecord(provided.counts) ? provided.counts : null;
   if (provided.schemaVersion !== expected.schemaVersion
+    || (provided.identityContractVersion !== expected.identityContractVersion
+      && !(allowMissingIdentityContractVersion && provided.identityContractVersion === undefined))
     || provided.resourceCount !== expected.resourceCount
     || provided.totalRows !== expected.totalRows
     || provided.snapshotFingerprint !== expected.snapshotFingerprint
@@ -367,27 +381,62 @@ export async function prepareCloudRestoreSnapshot(
   const allowedCollections = new Set<string>(CLOUD_RESTORE_TABLES.map(([collection]) => collection));
   const unexpected = Object.keys(rawData).filter(key => !allowedCollections.has(key));
   if (unexpected.length > 0) throw new CloudRestoreValidationError('UNEXPECTED_RESOURCE', `JSON 含不支援的 resource：${unexpected.join(', ')}`);
-  const data = normalizeRows(rawData);
-  assertInventoryKeyUniqueness(data);
-  for (const [, table] of CLOUD_RESTORE_TABLES) {
-    const ids = data[table].map(row => canonicalId(row, table));
-    if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
+  if (!isRecord(parsed.manifest)) throw new CloudRestoreValidationError('RESTORE_MANIFEST_REQUIRED', 'JSON 缺少 manifest。');
+  const assertCurrentDataContract = (data: CloudRestoreSnapshotData): void => {
+    assertInventoryKeyUniqueness(data);
+    for (const [, table] of CLOUD_RESTORE_TABLES) {
+      const ids = data[table].map(row => canonicalId(row, table));
+      if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
+    }
+    const relationAudit = auditCloudRestoreRelations(data);
+    if (relationAudit.blockingOrphanCount > 0) throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
+    const duplicateVariantLocalIdCount = duplicateCount(data.product_variants
+      .map(row => String(row.local_id ?? '').trim())
+      .filter(Boolean));
+    if (duplicateVariantLocalIdCount > 0) {
+      throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
+    }
+  };
+  const validateCurrentData = async (): Promise<{ data: CloudRestoreSnapshotData; manifest: CloudRestoreManifest }> => {
+    const data = normalizeRows(rawData);
+    assertCurrentDataContract(data);
+    return { data, manifest: await manifestFor(data) };
+  };
+
+  const declaredIdentityContract = parsed.manifest.identityContractVersion;
+  if (declaredIdentityContract !== undefined && declaredIdentityContract !== CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION) {
+    throw new CloudRestoreValidationError(
+      'UNSUPPORTED_IDENTITY_CONTRACT_VERSION',
+      `不支援的 identityContractVersion：${String(declaredIdentityContract)}。`,
+    );
   }
-  const relationAudit = auditCloudRestoreRelations(data);
-  if (relationAudit.blockingOrphanCount > 0) throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
-  const variants = data.product_variants;
-  const duplicateVariantLocalIdCount = duplicateCount(variants
-    .map(row => String(row.local_id ?? '').trim())
-    .filter(Boolean));
-  if (duplicateVariantLocalIdCount > 0) {
-    throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
+
+  let current = await validateCurrentData();
+  let sourceIdentityContractVersion: CloudRestoreCandidate['sourceIdentityContractVersion'];
+  if (declaredIdentityContract === CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION) {
+    assertManifestMatches(parsed.manifest, current.manifest);
+    sourceIdentityContractVersion = CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION;
+  } else {
+    try {
+      assertManifestMatches(parsed.manifest, current.manifest, true);
+      sourceIdentityContractVersion = 'current-unversioned';
+    } catch (error) {
+      if (!(error instanceof CloudRestoreValidationError) || error.code !== 'RESTORE_MANIFEST_MISMATCH') throw error;
+      const legacy = await verifyLegacyCloudRestoreSnapshot(rawData, parsed.manifest);
+      if (!legacy) throw error;
+      // Do not pass the legacy projection to the server. Re-run the complete
+      // current UUID-id closure/sort contract after legacy integrity
+      // verification and use only that freshly constructed candidate for RPC.
+      current = await buildCloudRestoreManifest(rawData, rawData);
+      assertCurrentDataContract(current.data);
+      sourceIdentityContractVersion = legacy.identityContractVersion;
+    }
   }
-  const manifest = await manifestFor(data);
-  assertManifestMatches(parsed.manifest, manifest);
   return {
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
-    data,
-    manifest,
+    data: current.data,
+    manifest: current.manifest,
+    sourceIdentityContractVersion,
     sourceEnvironment: String(parsed.sourceEnvironment ?? options.sourceEnvironment ?? 'unknown'),
     fileName: options.fileName ?? 'cloud-restore.json',
   };

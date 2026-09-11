@@ -34,6 +34,7 @@
     "test:atomic-import-data": "node tests/atomic-import-data.mjs",
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
     "test:cloud-atomic-json-restore": "node tests/cloud-atomic-json-restore.mjs",
+    "test:cloud-restore-legacy-snapshot": "node tests/cloud-restore-legacy-snapshot-compatibility.mjs",
     "test:cloud-restore-execution-cost": "node tests/cloud-restore-execution-cost.mjs",
     "test:cloud-restore-guarded-delete": "node tests/cloud-restore-guarded-full-delete.mjs",
     "test:cloud-restore-safeupdate-delete": "node tests/cloud-restore-schema-aware-safeupdate-delete.mjs",
