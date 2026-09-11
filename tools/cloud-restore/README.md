@@ -9,7 +9,7 @@ resource replacement, integrity readback, and commit/rollback decision.
 
 | JSON collection | PostgreSQL table | Identity | Relationship checks |
 | --- | --- | --- | --- |
-| inventory | inventory_items | inventory_key | N/A |
+| inventory | inventory_items | canonical UUID `id`; `inventory_key` is a UNIQUE importer/domain key only | N/A |
 | productGroups | product_groups | canonical UUID | N/A |
 | productCategories | product_categories | canonical UUID | product_group_id |
 | productVariants | product_variants | canonical UUID; local_id metadata only | group/category |
@@ -62,8 +62,9 @@ restore callback. It never displays or copies an auth token.
 have separately completed their Staging apply/postflight gates. Production has
 not been touched.
 
-`025_cloud_atomic_restore_execution_timeout.sql` is a review/build artifact. It
-replaces only the Restore RPC implementation and adds private profiling helpers:
+`025_cloud_atomic_restore_execution_timeout.sql` has completed its separately
+authorized Staging apply. It replaced only the Restore RPC implementation and
+added private profiling helpers:
 
 - the full pre-restore snapshot is built once and reused as the rollback payload;
 - the post-write check uses per-table count/identity hashes plus required-FK
@@ -74,9 +75,17 @@ replaces only the Restore RPC implementation and adds private profiling helpers:
 - phase timing logs and the canonical result contain durations only, never the
   snapshot, credentials, or business payload.
 
-025 has not been applied to Staging or Production. A separately authorized SQL
-gate must verify function configuration and live 16,055-row timing before the
-Restore write gate resumes.
+`029_cloud_restore_live_schema_alignment.sql` is the next review/build artifact.
+It fail-closes unless the current parity post-state is present: all 15 Restore
+tables have an `id uuid NOT NULL` single-column primary key, while
+`inventory_items.inventory_key` is `text NOT NULL UNIQUE` and not the primary
+key. It updates Restore profiling to hash UUID `id`, and upgrades only the fixed
+15 child-first DELETE statements to `WHERE id IS NOT NULL`; it does not change
+safeupdate settings. 029 has not been applied to Staging or Production.
+
+POST-CLOUD HARDENING TODO: reconcile the Settings `erp_healthcheck` dependency
+separately. Cloud Restore does not depend on that table and this artifact does
+not change it.
 
 ## Request boundary evidence
 

@@ -13,7 +13,7 @@ const empty = () => ({
 
 const rawFixture = () => {
   const data = empty();
-  data.inventory_items.push({ inventory_key: 'closure::fixture::sku', myacg_item_code: 'SKU', product_title: 'Fixture', raw_variant_name: 'A', listing_type: 'normal', final_price: 1, myacg_available_quantity: 0, myacg_sold_quantity: 0, myacg_demand_quantity: 0, myacg_listed_at: '' });
+  data.inventory_items.push({ id: uuid(16), inventory_key: 'closure::fixture::sku', myacg_item_code: 'SKU', product_title: 'Fixture', raw_variant_name: 'A', listing_type: 'normal', final_price: 1, myacg_available_quantity: 0, myacg_sold_quantity: 0, myacg_demand_quantity: 0, myacg_listed_at: '' });
   data.product_groups.push(
     { id: uuid(1), local_id: 'group-1', title: 'Active Group', priority: 'Medium' },
     { id: uuid(2), local_id: 'group-2', title: 'Soft Group', priority: 'Medium', deleted_at: '2026-01-01T00:00:00Z' },

@@ -13,7 +13,7 @@ const CONTEXT = readFileSync(new URL('../src/contexts/CloudRealtimeSyncContext.t
 const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const collections = {
-  inventory: [{ inventory_key: 'restore::SKU::A', myacg_item_code: 'SKU', product_title: 'Restore Product', raw_variant_name: 'A', listing_type: 'normal', final_price: 1, myacg_available_quantity: 0, myacg_sold_quantity: 0, myacg_demand_quantity: 0, myacg_listed_at: '' }],
+  inventory: [{ id: uuid(15), inventory_key: 'restore::SKU::A', myacg_item_code: 'SKU', product_title: 'Restore Product', raw_variant_name: 'A', listing_type: 'normal', final_price: 1, myacg_available_quantity: 0, myacg_sold_quantity: 0, myacg_demand_quantity: 0, myacg_listed_at: '' }],
   productGroups: [{ id: uuid(1), local_id: 'group-1', title: 'Restore Product', priority: 'Medium', purchase_date: '', closing_date: '', release_month: '', has_official_site: false, product_url: '' }],
   productCategories: [{ id: uuid(2), local_id: 'category-1', product_group_id: uuid(1), title: 'Default', sort_order: 0 }],
   productVariants: [{ id: uuid(3), local_id: 'variant-1', product_group_id: uuid(1), product_category_id: uuid(2), myacg_item_code: 'SKU', product_title: 'Restore Product', variant_name: 'A', note: '', sort_order: 0 }],

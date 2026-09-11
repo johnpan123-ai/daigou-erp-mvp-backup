@@ -25,7 +25,7 @@ const TABLE_COUNTS = Object.freeze({
 
 const uuid = number => `10000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
 const digest = value => createHash('sha256').update(value).digest('hex');
-const identityOf = (table, row) => table === 'inventory_items' ? row.inventory_key : row.id;
+const identityOf = (_table, row) => row.id;
 const percentile = (values, proportion) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * proportion) - 1)];
@@ -36,7 +36,7 @@ const data = Object.fromEntries(Object.entries(TABLE_COUNTS).map(([table, count]
   Array.from({ length: count }, (_, index) => {
     const identity = uuid(nextIdentity++);
     return table === 'inventory_items'
-      ? { inventory_key: `PERF::${String(index).padStart(6, '0')}`, marker: 'CLOUD-RESTORE-PERF', performance_padding: '' }
+      ? { id: identity, inventory_key: `PERF::${String(index).padStart(6, '0')}`, marker: 'CLOUD-RESTORE-PERF', performance_padding: '' }
       : { id: identity, local_id: `metadata-${table}-${index}`, marker: 'CLOUD-RESTORE-PERF', performance_padding: '' };
   }),
 ]));
@@ -77,6 +77,8 @@ for (const row of data.outbound_shipment_items) {
 
 assert.equal(Object.values(TABLE_COUNTS).reduce((sum, count) => sum + count, 0), TARGET_ROWS);
 const allRows = Object.values(data).flat();
+assert.equal(allRows.filter(row => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(row.id)).length, 0);
+assert.equal(new Set(data.inventory_items.map(row => row.inventory_key)).size, data.inventory_items.length);
 const initialBytes = Buffer.byteLength(JSON.stringify(data));
 assert(initialBytes < TARGET_BYTES, 'Synthetic fixture metadata unexpectedly exceeds the target payload size');
 const paddingBytes = TARGET_BYTES - initialBytes;

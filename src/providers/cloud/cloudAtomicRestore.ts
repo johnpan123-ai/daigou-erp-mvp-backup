@@ -121,9 +121,11 @@ export async function sha256Hex(value: string): Promise<string> {
 
 const canonicalId = (row: Record<string, unknown>, table: CloudRestoreTable): string => {
   if (table === 'inventory_items') {
-    const inventoryKey = String(row.inventory_key ?? '').trim();
-    if (!inventoryKey) throw new CloudRestoreValidationError('INVENTORY_KEY_REQUIRED', 'Inventory 資料缺少 inventory_key。');
-    return inventoryKey;
+    const id = String(row.id ?? '').trim();
+    if (!UUID_PATTERN.test(id)) {
+      throw new CloudRestoreValidationError('CANONICAL_ID_REQUIRED', 'inventory_items 必須保留 canonical database UUID id。');
+    }
+    return id.toLowerCase();
   }
   const databaseId = String(row.database_id ?? '').trim();
   const id = UUID_PATTERN.test(databaseId) ? databaseId : String(row.id ?? '').trim();
@@ -147,6 +149,10 @@ const normalizeRows = (
     if (!isRecord(value)) {
       throw new CloudRestoreValidationError('RESTORE_ROW_INVALID', `${collection}[${index}] 不是物件。`);
     }
+    const identity = canonicalId(value, table);
+    if (table === 'inventory_items' && !String(value.inventory_key ?? '').trim()) {
+      throw new CloudRestoreValidationError('INVENTORY_KEY_REQUIRED', 'Inventory 資料缺少 inventory_key。');
+    }
     let row: Record<string, unknown>;
     try {
       row = toCloudFieldRow(entity, value);
@@ -156,7 +162,9 @@ const normalizeRows = (
       }
       throw error;
     }
-    if (table !== 'inventory_items') row.id = canonicalId(value, table);
+    // Restore never inherits mutation-time identity synthesis. Every raw Cloud
+    // resource, including inventory_items, must carry its authoritative DB id.
+    row.id = identity;
     if (table === 'sales_order_items') {
       const orderDatabaseId = String(value.order_database_id ?? value.order_id ?? '').trim();
       if (UUID_PATTERN.test(orderDatabaseId)) row.order_id = orderDatabaseId.toLowerCase();
@@ -256,6 +264,13 @@ export const closeCloudRestoreData = (
 
 const duplicateCount = (values: string[]): number => values.length - new Set(values).size;
 
+const assertInventoryKeyUniqueness = (data: CloudRestoreSnapshotData): void => {
+  const inventoryKeys = data.inventory_items.map(row => String(row.inventory_key ?? '').trim());
+  if (duplicateCount(inventoryKeys) > 0) {
+    throw new CloudRestoreValidationError('DUPLICATE_INVENTORY_KEY', 'inventory_items 的 inventory_key 不可重複。');
+  }
+};
+
 const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestoreManifest> => {
   const relationshipProjection = CLOUD_RESTORE_TABLES.flatMap(([, table]) => data[table].map(row => ({
     table,
@@ -276,11 +291,13 @@ const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestore
   );
   const duplicateVariantIdCount = duplicateCount(data.product_variants.map(row => canonicalId(row, 'product_variants')));
   const duplicateVariantLocalIdCount = duplicateCount(data.product_variants.map(row => String(row.local_id ?? '').trim()).filter(Boolean));
-  const canonicalIdentityAnomalyCount = CLOUD_RESTORE_TABLES.reduce((sum, [, table]) => sum + (
-    table === 'inventory_items'
-      ? 0
-      : data[table].reduce((anomalies, row) => anomalies + (UUID_PATTERN.test(String(row.id ?? '').trim()) ? 0 : 1), 0)
-  ), 0);
+  const canonicalIdentityAnomalyCount = CLOUD_RESTORE_TABLES.reduce(
+    (sum, [, table]) => sum + data[table].reduce(
+      (anomalies, row) => anomalies + (UUID_PATTERN.test(String(row.id ?? '').trim()) ? 0 : 1),
+      0,
+    ),
+    0,
+  );
   return {
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
     resourceCount: CLOUD_RESTORE_TABLES.length,
@@ -325,6 +342,8 @@ export async function buildCloudRestoreManifest(source: Record<string, unknown>,
 }> {
   const seed = normalizeRows(source);
   const raw = normalizeRows(rawSource ?? source);
+  assertInventoryKeyUniqueness(seed);
+  assertInventoryKeyUniqueness(raw);
   const data = closeCloudRestoreData(seed, raw);
   return { data, manifest: await manifestFor(data) };
 }
@@ -349,6 +368,7 @@ export async function prepareCloudRestoreSnapshot(
   const unexpected = Object.keys(rawData).filter(key => !allowedCollections.has(key));
   if (unexpected.length > 0) throw new CloudRestoreValidationError('UNEXPECTED_RESOURCE', `JSON 含不支援的 resource：${unexpected.join(', ')}`);
   const data = normalizeRows(rawData);
+  assertInventoryKeyUniqueness(data);
   for (const [, table] of CLOUD_RESTORE_TABLES) {
     const ids = data[table].map(row => canonicalId(row, table));
     if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
