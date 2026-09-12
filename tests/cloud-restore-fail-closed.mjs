@@ -65,8 +65,19 @@ assert.match(inventorySource, /Cloud Mode 暫停還原/);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+  '--mode', 'staging',
   '--host', '127.0.0.1', '--port', TEST_PORT, '--strictPort',
-], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
+], {
+  cwd: ROOT_PATH,
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: {
+    ...process.env,
+    VITE_SUPABASE_URL: 'https://rhfdjsklfrgpoqsaqpkn.supabase.co',
+    VITE_SUPABASE_ANON_KEY: 'isolated-no-network-public-key',
+    VITE_DEPLOYMENT_ENV: 'staging',
+    VITE_CLOUD_REALTIME_PREVIEW: 'true',
+  },
+});
 
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });

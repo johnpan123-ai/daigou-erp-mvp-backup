@@ -10,6 +10,7 @@ const SQL = readFileSync(new URL('../supabase/sql/023_cloud_atomic_json_restore.
 const EXECUTION_SQL = readFileSync(new URL('../supabase/sql/025_cloud_atomic_restore_execution_timeout.sql', import.meta.url), 'utf8');
 const PROVIDER = readFileSync(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url), 'utf8');
 const CONTEXT = readFileSync(new URL('../src/contexts/CloudRealtimeSyncContext.tsx', import.meta.url), 'utf8');
+const SUBMIT = readFileSync(new URL('../src/providers/cloud/cloudRestoreSubmit.ts', import.meta.url), 'utf8');
 const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const collections = {
@@ -75,6 +76,7 @@ let candidateTables;
 let validDocument;
 try {
   const domain = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
+  const submitDomain = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreSubmit.ts');
   const stagingHarness = await vite.ssrLoadModule('/src/lib/stagingCloudRestoreHarness.ts');
   let rejectedCalls = 0;
   for (const environment of [
@@ -109,6 +111,30 @@ try {
   assert.equal(candidate.manifest.orphanCount, 0);
   assert.equal(candidate.manifest.duplicateVariantIdCount, 0);
   assert.equal(candidate.manifest.snapshotFingerprint.length, 64);
+  const serverSuccess = {
+    ok: true, replayed: false, idempotencyKey: uuid(991),
+    snapshotFingerprint: candidate.manifest.snapshotFingerprint,
+    rollbackSnapshotId: uuid(992), restoreEpoch: 1, manifest: candidate.manifest,
+  };
+  submitDomain.resetCloudRestoreSubmitDiagnosticsForTests();
+  const pendingRefreshResult = await submitDomain.preserveCloudRestoreSuccessThroughRefresh(
+    serverSuccess,
+    async () => { throw { code: 'REFRESH_TEST', message: 'Refresh failed safely' }; },
+    { attemptCorrelationId: uuid(993), idempotencyKey: serverSuccess.idempotencyKey },
+  );
+  assert.equal(pendingRefreshResult.ok, true, 'Known Restore success must survive authoritative refresh failure');
+  assert.equal(pendingRefreshResult.authoritativeRefresh.status, 'pending');
+  assert.deepEqual(submitDomain.getCloudRestoreSubmitDiagnostics().map(entry => [entry.event, entry.outcome]), [
+    ['authoritative-refresh', 'sync-pending'],
+  ]);
+  const sanitizedError = submitDomain.normalizeCloudRestoreSubmitError({
+    code: '23505',
+    message: 'Duplicate row for owner@example.invalid',
+    details: 'Key (inventory_key)=(customer-private-sku) already exists.',
+    hint: 'Bearer secret-value',
+  }, 'rpc');
+  assert.doesNotMatch(JSON.stringify(sanitizedError), /owner@example|customer-private-sku|secret-value/u);
+  assert.match(JSON.stringify(sanitizedError), /REDACTED_EMAIL|REDACTED_VALUE|REDACTED/u);
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot('{'), error => error.code === 'MALFORMED_JSON');
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot({ ...documentFor(), schemaVersion: 'old' }), error => error.code === 'UNSUPPORTED_SCHEMA_VERSION');
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot(documentFor()), error => error.code === 'RESTORE_MANIFEST_REQUIRED');
@@ -235,6 +261,8 @@ assert.match(SQL, /erp_cloud_restore_relationship_hash/u);
 assert.match(SQL, /alter publication supabase_realtime add table public\.erp_cloud_restore_epoch/u);
 assert.doesNotMatch(SQL, /service_role|grant\s+.+\s+to\s+(public|anon)/iu);
 assert.match(PROVIDER, /reason: 'reconnect'[\s\S]+resources: \['products', 'purchases'/u);
+assert.match(PROVIDER, /event: 'rpc-response'/u);
+assert.match(SUBMIT, /event: 'authoritative-refresh'[\s\S]+outcome: 'sync-pending'/u);
 assert.match(CONTEXT, /erp_cloud_restore_epoch[\s\S]+reconnect\.request/u);
 
 assert.equal((EXECUTION_SQL.match(/^begin;$/gimu) || []).length, 1);
@@ -269,31 +297,101 @@ try {
   try {
     const page = await browser.newPage(); const cloudRequests = [];
     page.on('request', request => { if (/\.supabase\.co\//u.test(request.url())) cloudRequests.push(request.url()); });
+    const openFixture = async behavior => {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.getByTestId('staging-cloud-restore-harness').waitFor();
+      await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
+      await page.getByTestId('cloud-restore-harness-auth').getByText('true').waitFor();
+      await page.evaluate(next => {
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.setBehavior(next);
+        window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
+      }, behavior);
+      await page.getByTestId('cloud-restore-access').getByText('Owner / authoritative fresh', { exact: false }).waitFor();
+      await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
+      await page.getByTestId('cloud-restore-preflight').waitFor();
+      await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
+      await page.getByTestId('cloud-restore-submit').click();
+      await page.getByTestId('cloud-restore-final-confirmation').waitFor();
+    };
+
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.getByTestId('staging-cloud-restore-harness').waitFor();
-    await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
-    await page.getByTestId('cloud-restore-harness-auth').getByText('true').waitFor();
     await page.evaluate(() => window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.loading());
     await page.getByTestId('cloud-restore-access').getByText('等待重新讀取雲端最新資料，完成後才能還原', { exact: true }).waitFor();
-    const input = page.locator('input[type=file]');
-    await input.setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
+    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
     await page.getByTestId('cloud-restore-preflight').waitFor();
-    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /Preflight/u);
     assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
     assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
-    await page.evaluate(() => window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1));
-    await page.getByTestId('cloud-restore-access').getByText('Owner / authoritative fresh', { exact: false }).waitFor();
-    await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
-    assert.equal(await page.getByTestId('cloud-restore-submit').isEnabled(), true);
-    assert.equal(cloudRequests.length, 0, 'Preflight and confirmation must not write Cloud');
-    page.on('dialog', dialog => void dialog.accept());
-    await page.getByTestId('cloud-restore-submit').click();
+
+    await openFixture('success');
+    await page.getByTestId('cloud-restore-final-submit').click();
     await page.getByTestId('cloud-restore-result').waitFor();
     assert.match(await page.getByTestId('cloud-restore-result').innerText(), /replayed=false.*epoch=1/u);
-    assert.match(await page.getByTestId('cloud-restore-timings').locator('summary').innerText(), /Server phase timings/u);
     assert.match(await page.getByTestId('cloud-restore-timings').locator('pre').textContent(), /"total": 27/u);
-    assert.equal(cloudRequests.length, 0, 'Injected deterministic Restore execution must not write Cloud');
+    let submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.calls, 1, 'Fresh explicit confirmation must dispatch exactly once');
+    assert.deepEqual(submitState.diagnostics.map(entry => entry.event), [
+      'submit-start', 'confirmation-complete', 'readiness-check-pass', 'rpc-invocation', 'submit-finish',
+    ]);
+
+    await openFixture('success');
+    await page.evaluate(() => {
+      window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.loading();
+      window.dispatchEvent(new Event('focus'));
+      document.querySelector('[data-testid="cloud-restore-final-confirmation"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await page.getByTestId('cloud-restore-status').getByText('雲端資料正在更新，本次尚未送出，請待更新完成後重新確認。', { exact: true }).waitFor();
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.calls, 0, 'Freshness loss during confirmation must stay before RPC');
+    assert.ok(submitState.diagnostics.some(entry => entry.event === 'readiness-check-blocked' && entry.outcome === 'not-submitted'));
+
+    await openFixture('deferred-success');
+    await page.evaluate(() => {
+      const form = document.querySelector('[data-testid="cloud-restore-final-confirmation"] form');
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await page.waitForFunction(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().calls === 1);
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseDeferred());
+    await page.getByTestId('cloud-restore-result').waitFor();
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.calls, 1, 'Synchronous in-flight ref must block duplicate submit handlers');
+
+    await openFixture('plain-error');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    const plainError = await page.getByTestId('cloud-restore-status').innerText();
+    assert.match(plainError, /\[PGRST_TEST\].*Restore request was refused.*階段：rpc/u);
+    assert.doesNotMatch(plainError, /\[object Object\]|must-not-render|access_token/u);
+
+    await openFixture('timeout');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    const timeoutError = await page.getByTestId('cloud-restore-status').innerText();
+    assert.match(timeoutError, /結果待查證.*\[ETIMEDOUT\].*Network timed out/u);
+    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true, 'Unknown result must lock repeat submit');
+    const timeoutState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(timeoutState.calls, 1);
+    const timeoutKey = timeoutState.idempotencyKeys[0];
+
+    await openFixture('success');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.idempotencyKeys[0], timeoutKey, 'Remount must retain the same fingerprint idempotency key');
+
+    await openFixture('refresh-pending');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原已完成，畫面同步待完成；請勿再次還原/u);
+    assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 1);
+
+    await openFixture('guard-race');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    const guardError = await page.getByTestId('cloud-restore-status').innerText();
+    assert.equal(guardError, '雲端資料正在更新，本次尚未送出，請待更新完成後重新確認。');
+    assert.doesNotMatch(guardError, /\[object Object\]/u, 'Freshness guard is an Error and is independent from plain-object rendering');
+    assert.equal(cloudRequests.length, 0, 'All deterministic Restore submit cases must make zero Supabase requests');
   } finally { await browser.close(); }
 } finally { processVite.kill(); }
 
-console.log('PASS Cloud Atomic Restore: preflight, bounded execution SQL contract, 210-round deterministic soak (including 30 timeout rollbacks), and real React owner flow');
+console.log('PASS Cloud Atomic Restore: preflight, bounded execution SQL contract, 210-round deterministic soak, and submit readiness/error/idempotency React regressions');

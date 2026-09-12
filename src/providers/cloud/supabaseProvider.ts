@@ -127,6 +127,11 @@ import {
   type CloudRestoreCommand,
   type CloudRestoreResult,
 } from './cloudAtomicRestore';
+import {
+  normalizeCloudRestoreSubmitError,
+  preserveCloudRestoreSuccessThroughRefresh,
+  recordCloudRestoreSubmitDiagnostic,
+} from './cloudRestoreSubmit';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -306,20 +311,68 @@ export class SupabaseProvider implements IDataProvider {
       }));
     } catch (caughtError) {
       markCloudRequestFailed(caughtError);
+      const visible = normalizeCloudRestoreSubmitError(caughtError, 'rpc');
+      recordCloudRestoreSubmitDiagnostic({
+        event: 'rpc-error',
+        phase: 'rpc',
+        outcome: visible.outcome,
+        attemptCorrelationId: command.attemptCorrelationId,
+        idempotencyKey: command.idempotencyKey,
+        code: visible.code,
+        message: visible.message,
+      });
       throw caughtError;
     }
     if (error) {
       markCloudRequestFailed(error);
+      const visible = normalizeCloudRestoreSubmitError(error, 'rpc');
+      recordCloudRestoreSubmitDiagnostic({
+        event: 'rpc-error',
+        phase: 'rpc',
+        outcome: visible.outcome,
+        attemptCorrelationId: command.attemptCorrelationId,
+        idempotencyKey: command.idempotencyKey,
+        code: visible.code,
+        message: visible.message,
+      });
       throw error;
     }
     markCloudReachable();
-    const result = assertCloudRestoreServerResult(data);
-    await this.mutationCache.refresh({
-      reason: 'reconnect',
-      resources: ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'japanPackages', 'outboundShipments', 'salesOrders'],
-      changes: [],
+    let result: CloudRestoreResult;
+    try {
+      result = assertCloudRestoreServerResult(data);
+    } catch (resultError) {
+      const visible = normalizeCloudRestoreSubmitError(resultError, 'rpc');
+      recordCloudRestoreSubmitDiagnostic({
+        event: 'rpc-error',
+        phase: 'rpc',
+        outcome: visible.outcome,
+        attemptCorrelationId: command.attemptCorrelationId,
+        idempotencyKey: command.idempotencyKey,
+        code: visible.code,
+        message: visible.message,
+      });
+      throw resultError;
+    }
+    recordCloudRestoreSubmitDiagnostic({
+      event: 'rpc-response',
+      phase: 'rpc',
+      outcome: 'success',
+      attemptCorrelationId: command.attemptCorrelationId,
+      idempotencyKey: command.idempotencyKey,
     });
-    return result;
+    return preserveCloudRestoreSuccessThroughRefresh(
+      result,
+      () => this.mutationCache.refresh({
+        reason: 'reconnect',
+        resources: ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'japanPackages', 'outboundShipments', 'salesOrders'],
+        changes: [],
+      }),
+      {
+        attemptCorrelationId: command.attemptCorrelationId,
+        idempotencyKey: command.idempotencyKey,
+      },
+    );
   }
 
   private async applyCloudFieldMutations(

@@ -75,6 +75,7 @@ export interface CloudRestoreCandidate {
 }
 
 export interface CloudRestoreCommand {
+  attemptCorrelationId: string;
   idempotencyKey: string;
   candidate: CloudRestoreCandidate;
   confirmation: 'OVERWRITE CLOUD DATA';
@@ -89,6 +90,11 @@ export interface CloudRestoreResult {
   restoreEpoch: number;
   manifest: CloudRestoreManifest;
   timingsMs?: Readonly<Record<string, number>>;
+  authoritativeRefresh?: Readonly<{
+    status: 'complete' | 'pending';
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
 }
 
 export class CloudRestoreValidationError extends Error {
