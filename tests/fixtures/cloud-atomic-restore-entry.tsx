@@ -69,9 +69,9 @@ dataProvider.restoreCloudSnapshot = async command => {
   if (behavior === 'plain-error') {
     throw {
       code: 'PGRST_TEST',
-      message: 'Restore request was refused',
-      details: 'safe fixture detail',
-      hint: 'safe fixture hint',
+      message: 'Restore request was refused at https://fake-project.supabase.co/rest/v1/rpc/restore?apikey=fake-public-key.',
+      details: 'host=fake-db.internal user=fake-user password=fake-password dbname=fake-database',
+      hint: 'postgresql://fake-user:fake-password@fake-db.internal/fake-database?sslmode=require',
       access_token: 'must-not-render',
     };
   }

@@ -135,6 +135,80 @@ try {
   }, 'rpc');
   assert.doesNotMatch(JSON.stringify(sanitizedError), /owner@example|customer-private-sku|secret-value/u);
   assert.match(JSON.stringify(sanitizedError), /REDACTED_EMAIL|REDACTED_VALUE|REDACTED/u);
+
+  const fakeSensitiveValues = [
+    'fake-project.supabase.co',
+    'fake-user',
+    'fake-password',
+    'fake-db.internal',
+    'fake-database',
+    'fake-public-key',
+    'fake-token',
+  ];
+  const connectionError = submitDomain.normalizeCloudRestoreSubmitError({
+    code: 'CONNECTION_FAILED',
+    message: [
+      'Unable to connect to https://fake-project.supabase.co/rest/v1/private_orders?apikey=fake-public-key&token=fake-token.',
+      'Fallback postgresql://fake-user:fake-password@fake-db.internal:5432/fake-database?sslmode=require,',
+      'encoded=https%3A%2F%2Ffake-project.supabase.co%2Frest%2Fv1%3Ftoken%3Dfake-token',
+      'encodedDb=postgresql%3A%2F%2Ffake-user%3Afake-password%40fake-db.internal%2Ffake-database',
+    ].join('\n'),
+    details: 'host=fake-db.internal user=fake-user password=fake-password dbname=fake-database port=5432',
+    hint: 'Retry http://fake-project.supabase.co/auth/v1/token?grant_type=password; then postgres://fake-user:fake-password@fake-db.internal/fake-database.',
+  }, 'rpc');
+  const connectionErrorText = JSON.stringify(connectionError);
+  for (const sensitiveValue of fakeSensitiveValues) assert.doesNotMatch(connectionErrorText, new RegExp(sensitiveValue.replaceAll('.', '\\.'), 'u'));
+  assert.match(connectionErrorText, /REDACTED_(?:URL|CONNECTION)/u);
+
+  submitDomain.resetCloudRestoreSubmitDiagnosticsForTests();
+  submitDomain.recordCloudRestoreSubmitDiagnostic({
+    event: 'rpc-error',
+    phase: 'rpc',
+    outcome: 'failed',
+    attemptCorrelationId: uuid(994),
+    idempotencyKey: uuid(995),
+    code: 'https://fake-project.supabase.co/private-code',
+    message: 'Request failed at https://fake-project.supabase.co/rest/v1/?apikey=fake-public-key',
+  });
+  const diagnosticText = JSON.stringify(submitDomain.getCloudRestoreSubmitDiagnostics());
+  assert.doesNotMatch(diagnosticText, /fake-project|fake-public-key/u);
+  assert.match(diagnosticText, /UNKNOWN_ERROR|REDACTED_URL/u);
+
+  const longBoundaryError = submitDomain.normalizeCloudRestoreSubmitError({
+    code: 'LONG_ERROR',
+    message: `${'safe-prefix '.repeat(18)}https://fake-project.supabase.co/rest/v1/private_orders?token=fake-token followed by safe summary`,
+  }, 'rpc');
+  assert.doesNotMatch(JSON.stringify(longBoundaryError), /fake-project|fake-token/u);
+  assert.ok(longBoundaryError.message.length <= 241, 'Redaction must happen before bounded display truncation');
+
+  const structuredPayloadError = submitDomain.normalizeCloudRestoreSubmitError({
+    code: 'PAYLOAD_ERROR',
+    message: '{"snapshot":{"customer":"private-business-value"}}',
+    details: '[{"product_title":"private-product-title"}]',
+  }, 'rpc');
+  assert.doesNotMatch(JSON.stringify(structuredPayloadError), /private-business-value|private-product-title/u);
+
+  const safeReadableError = submitDomain.normalizeCloudRestoreSubmitError(
+    new Error('Restore request was refused by the server.'),
+    'rpc',
+  );
+  assert.match(safeReadableError.message, /Restore request was refused by the server/u);
+  const nativeUrlError = submitDomain.normalizeCloudRestoreSubmitError(
+    new Error('Fetch failed at https://fake-project.supabase.co/rest/v1/?token=fake-token.'),
+    'rpc',
+  );
+  assert.doesNotMatch(JSON.stringify(nativeUrlError), /fake-project|fake-token/u);
+  const unknownObjectError = submitDomain.normalizeCloudRestoreSubmitError({
+    untrusted: 'postgresql://fake-user:fake-password@fake-db.internal/fake-database',
+  }, 'rpc');
+  assert.equal(unknownObjectError.code, 'UNKNOWN_ERROR');
+  assert.equal(unknownObjectError.message, '發生未識別錯誤。');
+  assert.doesNotMatch(JSON.stringify(unknownObjectError), /fake-user|fake-password|fake-db/u);
+  assert.deepEqual(
+    submitDomain.normalizeCloudRestoreSubmitError(connectionError, 'rpc'),
+    connectionError,
+    'Sanitizer must remain safe and stable when applied repeatedly',
+  );
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot('{'), error => error.code === 'MALFORMED_JSON');
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot({ ...documentFor(), schemaVersion: 'old' }), error => error.code === 'UNSUPPORTED_SCHEMA_VERSION');
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot(documentFor()), error => error.code === 'RESTORE_MANIFEST_REQUIRED');
@@ -264,6 +338,11 @@ assert.match(PROVIDER, /reason: 'reconnect'[\s\S]+resources: \['products', 'purc
 assert.match(PROVIDER, /event: 'rpc-response'/u);
 assert.match(SUBMIT, /event: 'authoritative-refresh'[\s\S]+outcome: 'sync-pending'/u);
 assert.match(CONTEXT, /erp_cloud_restore_epoch[\s\S]+reconnect\.request/u);
+const restoreProviderMethod = PROVIDER.slice(
+  PROVIDER.indexOf('async restoreCloudSnapshot('),
+  PROVIDER.indexOf('private async applyCloudFieldMutations'),
+);
+assert.doesNotMatch(restoreProviderMethod, /console\.(?:error|warn|log)\s*\(/u, 'Restore submit path must not log raw errors');
 
 assert.equal((EXECUTION_SQL.match(/^begin;$/gimu) || []).length, 1);
 assert.equal((EXECUTION_SQL.match(/^commit;$/gimu) || []).length, 1);
@@ -362,7 +441,7 @@ try {
     await page.getByTestId('cloud-restore-final-submit').click();
     const plainError = await page.getByTestId('cloud-restore-status').innerText();
     assert.match(plainError, /\[PGRST_TEST\].*Restore request was refused.*階段：rpc/u);
-    assert.doesNotMatch(plainError, /\[object Object\]|must-not-render|access_token/u);
+    assert.doesNotMatch(plainError, /\[object Object\]|must-not-render|access_token|fake-project|fake-public-key|fake-db|fake-user|fake-password|fake-database/u);
 
     await openFixture('timeout');
     await page.getByTestId('cloud-restore-final-submit').click();

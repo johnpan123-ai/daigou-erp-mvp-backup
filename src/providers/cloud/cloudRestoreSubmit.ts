@@ -55,21 +55,45 @@ const MAX_MESSAGE_LENGTH = 240;
 const MAX_SUPPLEMENT_LENGTH = 160;
 const diagnostics: CloudRestoreSubmitDiagnostic[] = [];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const SENSITIVE_ASSIGNMENT_PATTERN = /\b(access[_-]?token|refresh[_-]?token|password|authorization|api[_-]?key|anon[_-]?key|service[_-]?role)\b\s*[:=]\s*[^\s,;]+/giu;
+const SAFE_ERROR_CODE_PATTERN = /^[a-z0-9_.:-]{1,80}$/iu;
+const REDACTED_URL = '[REDACTED_URL]';
+const REDACTED_CONNECTION_VALUE = '[REDACTED_CONNECTION_VALUE]';
+const REDACTED_SENSITIVE_CONTENT = '[REDACTED_SENSITIVE_CONTENT]';
+const PLAIN_CONNECTION_URL_PATTERN = /\b(?:https?|postgres(?:ql)?|jdbc:postgresql):\/\/[^\s<>"'`]+/giu;
+const ENCODED_CONNECTION_URL_PATTERN = /\b(?:https?|postgres(?:ql)?)%3a(?:%2f){2}[^\s<>"'`]+/giu;
+const SUPABASE_HOST_PATTERN = /\b(?:[a-z0-9-]+\.)*supabase\.(?:co|com|net)(?::\d+)?(?:\/[^\s<>"'`]+)?/giu;
+const ENCODED_CONNECTION_ASSIGNMENT_PATTERN = /\b(?:host|hostaddr|port|user|username|password|dbname|database)%3d[^\s,;]+/giu;
+const CONNECTION_ASSIGNMENT_PATTERN = /\b(host|hostaddr|port|user|username|password|passfile|dbname|database|sslmode|sslcert|sslkey|sslrootcert|options)\s*=\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/giu;
+const SENSITIVE_ASSIGNMENT_PATTERN = /\b(access[_-]?token|refresh[_-]?token|password|authorization|api[_-]?key|anon[_-]?key|service[_-]?role|database[_-]?url|db[_-]?url|connection[_-]?string)\b\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/giu;
 const JWT_PATTERN = /\beyJ[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\b/gu;
 const BEARER_PATTERN = /\bBearer\s+[^\s,;]+/giu;
 const POSTGRES_KEY_VALUE_PATTERN = /(\bKey\s+\([^)]+\)\s*=\s*)\([^)]+\)/giu;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
+const STRUCTURED_PAYLOAD_MARKER_PATTERN = /"(?:snapshot|data|manifest|resources?|customer|product|inventory|orders?)"\s*:/iu;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
+const isSuspiciousStructuredContent = (value: string): boolean => {
+  const trimmed = value.trim();
+  const wrappedStructure = (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  return wrappedStructure || STRUCTURED_PAYLOAD_MARKER_PATTERN.test(trimmed);
+};
+
 const boundedText = (value: unknown, maxLength: number): string => {
   const raw = typeof value === 'string' || typeof value === 'number'
     ? String(value)
     : '';
+  if (!raw) return '';
+  if (isSuspiciousStructuredContent(raw)) return REDACTED_SENSITIVE_CONTENT;
   const redacted = raw
+    .replace(PLAIN_CONNECTION_URL_PATTERN, REDACTED_URL)
+    .replace(ENCODED_CONNECTION_URL_PATTERN, REDACTED_URL)
+    .replace(SUPABASE_HOST_PATTERN, REDACTED_URL)
+    .replace(ENCODED_CONNECTION_ASSIGNMENT_PATTERN, '[REDACTED_CONNECTION_STRING]')
+    .replace(CONNECTION_ASSIGNMENT_PATTERN, (_, key: string) => `${key}=${REDACTED_CONNECTION_VALUE}`)
     .replace(SENSITIVE_ASSIGNMENT_PATTERN, '$1=[REDACTED]')
     .replace(JWT_PATTERN, '[REDACTED_JWT]')
     .replace(BEARER_PATTERN, 'Bearer [REDACTED]')
@@ -80,10 +104,14 @@ const boundedText = (value: unknown, maxLength: number): string => {
   return redacted.length > maxLength ? `${redacted.slice(0, maxLength)}…` : redacted;
 };
 
+const safeErrorCode = (value: unknown): string => {
+  const raw = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  return SAFE_ERROR_CODE_PATTERN.test(raw) ? raw : 'UNKNOWN_ERROR';
+};
+
 const safeSupplement = (value: unknown): string | undefined => {
   const text = boundedText(value, MAX_SUPPLEMENT_LENGTH);
-  if (!text || ['{', '}', '[', ']'].some(character => text.includes(character))) return undefined;
-  return text;
+  return text || undefined;
 };
 
 export const recordCloudRestoreSubmitDiagnostic = (
@@ -92,7 +120,7 @@ export const recordCloudRestoreSubmitDiagnostic = (
   diagnostics.push(Object.freeze({
     ...entry,
     timestamp: new Date().toISOString(),
-    ...(entry.code ? { code: boundedText(entry.code, 80) } : {}),
+    ...(entry.code ? { code: safeErrorCode(entry.code) } : {}),
     ...(entry.message ? { message: boundedText(entry.message, MAX_MESSAGE_LENGTH) } : {}),
   }));
   if (diagnostics.length > MAX_DIAGNOSTICS) diagnostics.splice(0, diagnostics.length - MAX_DIAGNOSTICS);
@@ -130,7 +158,7 @@ export const normalizeCloudRestoreSubmitError = (
   phase: CloudRestoreSubmitPhase,
 ): CloudRestoreVisibleError => {
   const record = isRecord(error) ? error : null;
-  const code = boundedText(record?.code ?? (error instanceof Error ? error.name : ''), 80) || 'UNKNOWN_ERROR';
+  const code = safeErrorCode(record?.code ?? (error instanceof Error ? error.name : ''));
   const message = boundedText(record?.message ?? (error instanceof Error ? error.message : ''), MAX_MESSAGE_LENGTH)
     || '發生未識別錯誤。';
   const details = safeSupplement(record?.details);
