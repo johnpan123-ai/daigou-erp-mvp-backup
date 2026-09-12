@@ -314,6 +314,25 @@ export class CloudReconnectCatchUp {
     this.startIfReady();
   }
 
+  /**
+   * Arm one bounded catch-up generation without requiring resources to have
+   * registered first. A later updateResources() call starts the same
+   * generation, so initial React effect ordering cannot lose the refresh.
+   */
+  ensurePending(trigger: CloudReconnectTrigger): void {
+    if (this.disposed || (this.pending && this.armed)) return;
+    if (!this.pending) {
+      this.generation += 1;
+      this.attempt = 0;
+    }
+    this.pending = true;
+    this.armed = true;
+    this.exhausted = false;
+    this.trigger = trigger;
+    this.emit('trigger');
+    this.startIfReady();
+  }
+
   markNeeded(trigger: CloudReconnectTrigger): void {
     if (this.disposed) return;
     this.generation += 1;

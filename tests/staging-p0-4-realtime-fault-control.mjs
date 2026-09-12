@@ -126,9 +126,15 @@ try {
       throw error;
     }
     await page.getByTestId('realtime-diagnostics').getByText('purchases', { exact: true }).waitFor();
-    assert.deepEqual(await page.evaluate(() => window.__P0_4_REALTIME_FAKE__.snapshot()), {
-      channelsCreated: 1, channelsRemoved: 0, activeChannels: 1, deliveredEvents: 0, queries: [],
-    });
+    await page.getByTestId('realtime-read-status').getByText('fresh-online', { exact: true }).waitFor();
+    await page.waitForFunction(() => Number(document.querySelector('[data-testid="realtime-targeted-refreshes"]')?.textContent) === 1);
+    const initial = await page.evaluate(() => window.__P0_4_REALTIME_FAKE__.snapshot());
+    assert.equal(initial.channelsCreated, 1);
+    assert.equal(initial.channelsRemoved, 0);
+    assert.equal(initial.activeChannels, 1);
+    assert.equal(initial.deliveredEvents, 0);
+    assert.deepEqual(initial.queries.sort(), ['purchase_batch_items', 'purchase_batches']);
+    assert.equal(await page.getByTestId('realtime-full-pulls').textContent(), '0');
 
     await page.getByTestId('realtime-disconnect').click();
     await page.getByTestId('realtime-channel-state').getByText('unsubscribed', { exact: true }).waitFor();
@@ -149,7 +155,7 @@ try {
     await sleep(50);
     const missed = await page.evaluate(() => window.__P0_4_REALTIME_FAKE__.snapshot());
     assert.equal(missed.deliveredEvents, 0, 'Removed channel received the missed INSERT');
-    assert.deepEqual(missed.queries, [], 'Intentional fault was bypassed by focus/visibility catch-up');
+    assert.deepEqual(missed.queries.sort(), ['purchase_batch_items', 'purchase_batches'], 'Intentional fault was bypassed by focus/visibility catch-up');
 
     await page.getByTestId('realtime-reconnect').click();
     await page.getByTestId('realtime-channel-state').getByText('subscribed', { exact: true }).waitFor();

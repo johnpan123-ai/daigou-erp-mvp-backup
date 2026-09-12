@@ -1,12 +1,26 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthContext } from '../../src/auth/authContext';
-import { markCloudReadFresh, markCloudReachable } from '../../src/providers/cloud/cloudConnectivity';
+import { markCloudReadFresh, markCloudReadLoading, markCloudReachable } from '../../src/providers/cloud/cloudConnectivity';
 import { dataProvider } from '../../src/providers/dataProvider';
 
 localStorage.setItem('erp_provider_mode', 'cloud');
 markCloudReachable();
 markCloudReadFresh(1);
+
+declare global {
+  interface Window {
+    __CLOUD_RESTORE_CONNECTIVITY_TEST__: {
+      loading: () => void;
+      fresh: (rowCount?: number) => void;
+    };
+  }
+}
+
+window.__CLOUD_RESTORE_CONNECTIVITY_TEST__ = {
+  loading: markCloudReadLoading,
+  fresh: markCloudReadFresh,
+};
 
 dataProvider.restoreCloudSnapshot = async command => ({
   ok: true,

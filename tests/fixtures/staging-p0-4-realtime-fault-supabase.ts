@@ -57,7 +57,16 @@ const state: FakeRealtimeState = {
   activeChannels: 0,
   deliveredEvents: 0,
   queries: [],
-  rows: { purchase_batches: [], purchase_batch_items: [] },
+  rows: {
+    purchase_batches: [{ id: 'initial-authoritative-batch', name: 'Initial authoritative batch' }],
+    purchase_batch_items: [{
+      id: 'initial-authoritative-item',
+      purchase_batch_id: 'initial-authoritative-batch',
+      product_variant_id: 'initial-authoritative-variant',
+      quantity: 1,
+      cost: 1,
+    }],
+  },
   emit(table, payload) {
     channels.forEach(channel => channel.deliver(table, payload));
   },

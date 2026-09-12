@@ -422,12 +422,28 @@ try {
             return resources.includes('purchases');
           },
         });
-        const pending = emptyRace.request('online', []);
+        emptyRace.ensurePending('subscribed');
+        const pending = emptyRace.waitForCurrentCycle();
         await Promise.resolve();
         const beforeRegistration = emptyRaceCalls;
         emptyRace.updateResources(['purchases']);
+        emptyRace.updateResources(['purchases']);
         const emptyRaceCompleted = await pending;
         emptyRace.dispose();
+
+        let initialRetryCalls = 0;
+        const initialRetry = new CloudReconnectCatchUp({
+          retryDelaysMs: [0],
+          refresh: async () => {
+            initialRetryCalls += 1;
+            if (initialRetryCalls === 1) throw new Error('INITIAL_READ_FAILED');
+            return true;
+          },
+        });
+        initialRetry.ensurePending('subscribed');
+        initialRetry.updateResources(['products']);
+        const initialRetryCompleted = await initialRetry.waitForCurrentCycle();
+        initialRetry.dispose();
 
         let dedupedCalls = 0;
         let release;
@@ -475,7 +491,8 @@ try {
         const supersededResults = await Promise.all([oldGeneration, newGeneration]);
         superseded.dispose();
         return {
-          beforeRegistration, emptyRaceCalls, emptyRaceCompleted, callsWhileBlocked, dedupedCalls, results,
+          beforeRegistration, emptyRaceCalls, emptyRaceCompleted, initialRetryCalls, initialRetryCompleted,
+          callsWhileBlocked, dedupedCalls, results,
           supersedeCalls, supersededSignalAborted, supersededResults,
         };
       });
@@ -483,6 +500,8 @@ try {
         beforeRegistration: 0,
         emptyRaceCalls: 1,
         emptyRaceCompleted: true,
+        initialRetryCalls: 2,
+        initialRetryCompleted: true,
         callsWhileBlocked: 1,
         dedupedCalls: 1,
         results: [true, true, true, true],

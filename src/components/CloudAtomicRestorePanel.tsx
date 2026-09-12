@@ -1,10 +1,15 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import { AlertTriangle, FileCheck2, RotateCcw } from 'lucide-react';
 import { useAuth } from '../auth/authContext';
 import { useRole } from '../auth/useRole';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode } from '../providers/providerMode';
-import { getCloudConnectivitySnapshot } from '../providers/cloud/cloudConnectivity';
+import {
+  getCloudConnectivitySnapshot,
+  subscribeCloudConnectivity,
+} from '../providers/cloud/cloudConnectivity';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import type { CloudResource } from '../providers/cloud/cloudSyncDomain';
 import {
   CLOUD_RESTORE_TABLES,
   prepareCloudRestoreSnapshot,
@@ -13,6 +18,17 @@ import {
 } from '../providers/cloud/cloudAtomicRestore';
 
 const CONFIRMATION_TEXT = 'OVERWRITE CLOUD DATA';
+const CLOUD_RESTORE_READINESS_RESOURCES: CloudResource[] = [
+  'products',
+  'purchases',
+  'privateOrders',
+  'inventory',
+  'bundles',
+  'japanPackages',
+  'outboundShipments',
+  'salesOrders',
+];
+const ignoreCloudResourceRefresh = () => {};
 
 interface CloudAtomicRestorePanelProps {
   executeRestore?: (command: Parameters<typeof dataProvider.restoreCloudSnapshot>[0]) => ReturnType<typeof dataProvider.restoreCloudSnapshot>;
@@ -30,8 +46,22 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
   const [result, setResult] = useState<CloudRestoreResult | null>(null);
   const cloudMode = getProviderMode() === 'cloud';
   const owner = role === 'owner';
-  const online = getCloudConnectivitySnapshot().status === 'online';
-  const allowed = cloudMode && Boolean(user) && owner && online;
+  const connectivity = useSyncExternalStore(
+    subscribeCloudConnectivity,
+    getCloudConnectivitySnapshot,
+    getCloudConnectivitySnapshot,
+  );
+  const browserOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+  const online = browserOnline && connectivity.status === 'online';
+  const fresh = connectivity.readStatus === 'fresh-online' || connectivity.readStatus === 'fresh-empty';
+  const canPreflight = cloudMode && Boolean(user) && owner && online;
+  const allowed = canPreflight && fresh;
+  useCloudResourceSync(
+    'cloud-restore-authoritative-readiness',
+    CLOUD_RESTORE_READINESS_RESOURCES,
+    false,
+    ignoreCloudResourceRefresh,
+  );
 
   const selectFile = async (file: File | undefined) => {
     if (!file) return;
@@ -89,9 +119,19 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         </div>
       </div>
       <p data-testid="cloud-restore-access" style={{ margin: '12px 0' }}>
-        {!cloudMode ? '僅 Cloud Mode 可用。' : !user ? '請先登入。' : !owner ? '僅 owner 可執行。' : !online ? '目前離線；Cloud Restore 已拒絕。' : 'Owner / online：可進行本機 preflight。'}
+        {!cloudMode
+          ? '僅 Cloud Mode 可用。'
+          : !user
+            ? '請先登入。'
+            : !owner
+              ? '僅 owner 可執行。'
+              : !online
+                ? '目前離線；Cloud Restore 已拒絕。'
+                : !fresh
+                  ? '等待重新讀取雲端最新資料，完成後才能還原'
+                  : 'Owner / authoritative fresh：可進行本機 preflight 與還原確認。'}
       </p>
-      <button type="button" className="btn btn-outline" disabled={!allowed || status === 'restoring'} onClick={() => fileRef.current?.click()}>
+      <button type="button" className="btn btn-outline" disabled={!canPreflight || status === 'restoring'} onClick={() => fileRef.current?.click()}>
         <FileCheck2 size={16} /> 選擇 JSON 並 Preflight
       </button>
       <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={event => void selectFile(event.target.files?.[0])} />
@@ -118,6 +158,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
             value={confirmation}
             onChange={event => setConfirmation(event.target.value)}
             autoComplete="off"
+            disabled={!allowed || status === 'restoring'}
           />
           <button
             type="button"

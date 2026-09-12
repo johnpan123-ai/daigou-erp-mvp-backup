@@ -264,14 +264,18 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
           if (status === 'SUBSCRIBED') {
             channelState = 'subscribed';
             markCloudReachable();
-            const needsCatchUp = forceAuthoritativeCatchUp || subscribedOnce || reconnect.isPending();
+            const { readStatus } = getCloudConnectivitySnapshot();
+            const hasFreshAuthority = readStatus === 'fresh-online' || readStatus === 'fresh-empty';
+            const needsCatchUp = forceAuthoritativeCatchUp || subscribedOnce || reconnect.isPending() || !hasFreshAuthority;
             subscribedOnce = true;
             publishFaultSnapshot();
             if (!needsCatchUp) {
               settle(true);
               return;
             }
-            void reconnect.request('subscribed', activeResources()).then(completed => {
+            reconnect.ensurePending('subscribed');
+            reconnect.updateResources(activeResources());
+            void reconnect.waitForCurrentCycle().then(completed => {
               publishFaultSnapshot();
               settle(completed, completed ? undefined : new Error('P0_4_REALTIME_CATCH_UP_INCOMPLETE'));
             });
@@ -304,6 +308,11 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         metrics: () => coordinator.snapshotMetrics(),
       });
       markCloudReachable();
+      const { readStatus } = getCloudConnectivitySnapshot();
+      if (readStatus !== 'fresh-online' && readStatus !== 'fresh-empty') {
+        reconnect.ensurePending('subscribed');
+        reconnect.updateResources(activeResources());
+      }
     } else {
       const environment = {
         projectRef: supabaseEnvironment.projectRef,

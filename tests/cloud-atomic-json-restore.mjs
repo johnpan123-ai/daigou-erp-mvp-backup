@@ -273,10 +273,16 @@ try {
     await page.getByTestId('staging-cloud-restore-harness').waitFor();
     await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
     await page.getByTestId('cloud-restore-harness-auth').getByText('true').waitFor();
+    await page.evaluate(() => window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.loading());
+    await page.getByTestId('cloud-restore-access').getByText('等待重新讀取雲端最新資料，完成後才能還原', { exact: true }).waitFor();
     const input = page.locator('input[type=file]');
     await input.setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
     await page.getByTestId('cloud-restore-preflight').waitFor();
     assert.match(await page.getByTestId('cloud-restore-status').innerText(), /Preflight/u);
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
+    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
+    await page.evaluate(() => window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1));
+    await page.getByTestId('cloud-restore-access').getByText('Owner / authoritative fresh', { exact: false }).waitFor();
     await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
     assert.equal(await page.getByTestId('cloud-restore-submit').isEnabled(), true);
     assert.equal(cloudRequests.length, 0, 'Preflight and confirmation must not write Cloud');
