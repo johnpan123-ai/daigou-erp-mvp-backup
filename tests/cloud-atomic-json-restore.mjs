@@ -150,6 +150,7 @@ try {
     message: [
       'Unable to connect to https://fake-project.supabase.co/rest/v1/private_orders?apikey=fake-public-key&token=fake-token.',
       'Fallback postgresql://fake-user:fake-password@fake-db.internal:5432/fake-database?sslmode=require,',
+      'JDBC jdbc:postgresql://fake-user:fake-password@fake-db.internal:5432/fake-database?sslmode=require;',
       'encoded=https%3A%2F%2Ffake-project.supabase.co%2Frest%2Fv1%3Ftoken%3Dfake-token',
       'encodedDb=postgresql%3A%2F%2Ffake-user%3Afake-password%40fake-db.internal%2Ffake-database',
     ].join('\n'),
