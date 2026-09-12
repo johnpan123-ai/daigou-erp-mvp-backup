@@ -100,7 +100,9 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
       setMessage('Preflight 通過。請核對 15 個資源與 fingerprint，再完成第二次明確確認。');
     } catch (error) {
       setStatus('error');
-      setMessage(formatCloudRestoreSubmitError(normalizeCloudRestoreSubmitError(error, 'submit')));
+      setMessage(formatCloudRestoreSubmitError(normalizeCloudRestoreSubmitError(error, 'submit', {
+        source: 'local',
+      })));
     } finally {
       if (fileRef.current) fileRef.current.value = '';
     }
@@ -170,6 +172,10 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
       owner: role === 'owner',
     });
     if (!readiness.allowed) {
+      const visible = normalizeCloudRestoreSubmitError({ code: readiness.code }, 'readiness', {
+        source: 'pre-dispatch',
+        attemptCorrelationId: pending.correlationId,
+      });
       recordCloudRestoreSubmitDiagnostic({
         event: 'readiness-check-blocked',
         phase: 'readiness',
@@ -177,8 +183,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         attemptCorrelationId: pending.correlationId,
         idempotencyKey: pending.idempotencyKey,
         readStatus: readiness.connectivity.readStatus,
-        code: readiness.code,
-        message: CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE,
+        error: visible,
       });
       recordCloudRestoreSubmitDiagnostic({
         event: 'submit-finish',
@@ -235,7 +240,10 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         idempotencyKey: pending.idempotencyKey,
       });
     } catch (error) {
-      const visible = normalizeCloudRestoreSubmitError(error, 'rpc');
+      const visible = normalizeCloudRestoreSubmitError(error, 'rpc', {
+        source: 'post-dispatch',
+        attemptCorrelationId: pending.correlationId,
+      });
       const unknown = visible.outcome === 'unknown';
       if (visible.outcome === 'not-submitted') {
         recordCloudRestoreSubmitDiagnostic({
@@ -245,8 +253,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
           attemptCorrelationId: pending.correlationId,
           idempotencyKey: pending.idempotencyKey,
           readStatus: getCloudConnectivitySnapshot().readStatus,
-          code: visible.code,
-          message: CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE,
+          error: visible,
         });
       }
       submissionLockedRef.current = unknown;
@@ -258,8 +265,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         outcome: visible.outcome,
         attemptCorrelationId: pending.correlationId,
         idempotencyKey: pending.idempotencyKey,
-        code: visible.code,
-        message: visible.message,
+        error: visible,
       });
     } finally {
       inFlightRef.current = false;

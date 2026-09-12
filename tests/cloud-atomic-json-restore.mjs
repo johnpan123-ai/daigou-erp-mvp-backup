@@ -11,6 +11,7 @@ const EXECUTION_SQL = readFileSync(new URL('../supabase/sql/025_cloud_atomic_res
 const PROVIDER = readFileSync(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url), 'utf8');
 const CONTEXT = readFileSync(new URL('../src/contexts/CloudRealtimeSyncContext.tsx', import.meta.url), 'utf8');
 const SUBMIT = readFileSync(new URL('../src/providers/cloud/cloudRestoreSubmit.ts', import.meta.url), 'utf8');
+const PANEL = readFileSync(new URL('../src/components/CloudAtomicRestorePanel.tsx', import.meta.url), 'utf8');
 const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const collections = {
@@ -127,88 +128,146 @@ try {
   assert.deepEqual(submitDomain.getCloudRestoreSubmitDiagnostics().map(entry => [entry.event, entry.outcome]), [
     ['authoritative-refresh', 'sync-pending'],
   ]);
-  const sanitizedError = submitDomain.normalizeCloudRestoreSubmitError({
+  const correlationId = uuid(994);
+  const rawSecretText = [
+    'https://fake-project.supabase.co/rest/v1/private_orders?apikey=fake-public-key&token=fake-token',
+    'postgres://fake-user:fake-password@fake-db.internal/fake-database?sslmode=require',
+    'postgresql://fake-user:fake-password@fake-db.internal/fake-database?sslmode=require',
+    'jdbc:postgresql://fake-user:fake-password@fake-db.internal/fake-database?sslmode=require',
+    'jdbc%3Apostgresql%3A%2F%2Ffake-user%3Afake-password%40fake-db.internal%2Ffake-database',
+    'jdbc%253Apostgresql%253A%252F%252Ffake-user%253Afake-password%2540fake-db.internal%252Ffake-database',
+    'https%3A%2F%2Ffake-project.supabase.co%2Frest%2Fv1%3Ftoken%3Dfake-token',
+    'host=fake-db.internal user=fake-user password=fake-password dbname=fake-database',
+    'Bearer fake-token owner@example.invalid {"snapshot":{"customer":"private-business-value"}}',
+    `${'安全前綴'.repeat(200)}\n${'https://fake-project.supabase.co/private?token=fake-token '.repeat(20)}`,
+  ].join('\n');
+  const circular = { code: '23505', message: rawSecretText };
+  circular.cause = circular;
+  const errorWithCause = Object.assign(new Error(rawSecretText), {
     code: '23505',
-    message: 'Duplicate row for owner@example.invalid',
-    details: 'Key (inventory_key)=(customer-private-sku) already exists.',
-    hint: 'Bearer secret-value',
-  }, 'rpc');
-  assert.doesNotMatch(JSON.stringify(sanitizedError), /owner@example|customer-private-sku|secret-value/u);
-  assert.match(JSON.stringify(sanitizedError), /REDACTED_EMAIL|REDACTED_VALUE|REDACTED/u);
-
-  const fakeSensitiveValues = [
-    'fake-project.supabase.co',
-    'fake-user',
-    'fake-password',
-    'fake-db.internal',
-    'fake-database',
-    'fake-public-key',
-    'fake-token',
+    cause: { message: rawSecretText, stack: rawSecretText },
+  });
+  const codedArray = [rawSecretText, { cause: rawSecretText }];
+  codedArray.code = '23505';
+  const knownWithThrowingAuxiliaryFields = { code: '23505' };
+  for (const property of ['message', 'details', 'hint', 'stack', 'cause']) {
+    Object.defineProperty(knownWithThrowingAuxiliaryFields, property, { get() { throw new Error(`getter:${property}`); } });
+  }
+  const knownVariants = [
+    { code: '23505', message: rawSecretText, details: rawSecretText, hint: rawSecretText, stack: rawSecretText, cause: rawSecretText },
+    { code: '23505', message: 'completely different raw text', phase: 'attacker-phase', attemptCorrelationId: 'attacker-id' },
+    errorWithCause,
+    codedArray,
+    circular,
+    knownWithThrowingAuxiliaryFields,
   ];
-  const connectionError = submitDomain.normalizeCloudRestoreSubmitError({
-    code: 'CONNECTION_FAILED',
-    message: [
-      'Unable to connect to https://fake-project.supabase.co/rest/v1/private_orders?apikey=fake-public-key&token=fake-token.',
-      'Fallback postgresql://fake-user:fake-password@fake-db.internal:5432/fake-database?sslmode=require,',
-      'JDBC jdbc:postgresql://fake-user:fake-password@fake-db.internal:5432/fake-database?sslmode=require;',
-      'encoded=https%3A%2F%2Ffake-project.supabase.co%2Frest%2Fv1%3Ftoken%3Dfake-token',
-      'encodedDb=postgresql%3A%2F%2Ffake-user%3Afake-password%40fake-db.internal%2Ffake-database',
-    ].join('\n'),
-    details: 'host=fake-db.internal user=fake-user password=fake-password dbname=fake-database port=5432',
-    hint: 'Retry http://fake-project.supabase.co/auth/v1/token?grant_type=password; then postgres://fake-user:fake-password@fake-db.internal/fake-database.',
-  }, 'rpc');
-  const connectionErrorText = JSON.stringify(connectionError);
-  for (const sensitiveValue of fakeSensitiveValues) assert.doesNotMatch(connectionErrorText, new RegExp(sensitiveValue.replaceAll('.', '\\.'), 'u'));
-  assert.match(connectionErrorText, /REDACTED_(?:URL|CONNECTION)/u);
+  const knownBaseline = submitDomain.normalizeCloudRestoreSubmitError(
+    { code: '23505' },
+    'rpc',
+    { source: 'server-response', attemptCorrelationId: correlationId },
+  );
+  assert.deepEqual(Object.keys(knownBaseline).sort(), [
+    'attemptCorrelationId', 'classification', 'code', 'message', 'outcome', 'phase',
+  ]);
+  assert.equal(knownBaseline.code, '23505');
+  assert.equal(knownBaseline.classification, 'server');
+  assert.equal(knownBaseline.phase, 'rpc');
+  assert.equal(knownBaseline.attemptCorrelationId, correlationId);
+  assert.equal(
+    submitDomain.formatCloudRestoreSubmitError({ ...knownBaseline, message: rawSecretText }),
+    submitDomain.formatCloudRestoreSubmitError(knownBaseline),
+    'UI formatter must derive its message from the approved code map, not the supplied DTO text',
+  );
+  for (const variant of knownVariants) {
+    assert.deepEqual(
+      submitDomain.normalizeCloudRestoreSubmitError(
+        variant,
+        'rpc',
+        { source: 'server-response', attemptCorrelationId: correlationId },
+      ),
+      knownBaseline,
+      'Known-code safe output must be independent from every raw free-text field',
+    );
+  }
+
+  const hostileGetter = {};
+  for (const property of ['code', 'message', 'details', 'hint', 'stack', 'cause']) {
+    Object.defineProperty(hostileGetter, property, { get() { throw new Error(`getter:${property}`); } });
+  }
+  const hostileProxy = new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('proxy-descriptor'); } });
+  const unknownInputs = [
+    null,
+    undefined,
+    [rawSecretText],
+    new Error(rawSecretText),
+    { code: 'PGRST_TEST', message: rawSecretText, details: rawSecretText, cause: { stack: rawSecretText } },
+    { message: rawSecretText },
+    hostileGetter,
+    hostileProxy,
+  ];
+  const unknownBaseline = submitDomain.normalizeCloudRestoreSubmitError(
+    null,
+    'rpc',
+    { source: 'post-dispatch', attemptCorrelationId: correlationId },
+  );
+  assert.equal(unknownBaseline.code, 'UNKNOWN');
+  assert.equal(unknownBaseline.classification, 'transport');
+  assert.equal(unknownBaseline.outcome, 'unknown');
+  for (const value of unknownInputs) {
+    assert.deepEqual(
+      submitDomain.normalizeCloudRestoreSubmitError(
+        value,
+        'rpc',
+        { source: 'post-dispatch', attemptCorrelationId: correlationId },
+      ),
+      unknownBaseline,
+      'Unknown post-dispatch errors must use one invariant safe output',
+    );
+  }
+  const unknownLocal = submitDomain.normalizeCloudRestoreSubmitError(
+    { code: 'VALID_LOOKING_BUT_NOT_APPROVED', message: rawSecretText },
+    'submit',
+    { source: 'local' },
+  );
+  assert.equal(unknownLocal.code, 'UNKNOWN');
+  assert.equal(unknownLocal.classification, 'unknown');
+  const serverValidation = submitDomain.normalizeCloudRestoreSubmitError(
+    { code: 'RESTORE_MANIFEST_MISMATCH', message: rawSecretText },
+    'rpc',
+    { source: 'server-response', attemptCorrelationId: correlationId },
+  );
+  assert.equal(serverValidation.classification, 'server');
+  assert.equal(serverValidation.outcome, 'failed');
+  assert.doesNotMatch(serverValidation.message, /本次尚未送出/u, 'A server response must not be mislabeled as a pre-dispatch abort');
+  assert.doesNotMatch(JSON.stringify([knownBaseline, unknownBaseline, unknownLocal]), /fake-|owner@example|private-business/u);
+
+  const wrapped = submitDomain.createCloudRestoreSafeSubmitError(
+    { code: '23505', message: rawSecretText, cause: circular },
+    'server-response',
+  );
+  assert.equal(wrapped.cause, undefined);
+  assert.doesNotMatch(`${wrapped.name} ${wrapped.message} ${wrapped.safeCode} ${wrapped.safeClassification}`, /fake-|owner@example|private-business/u);
 
   submitDomain.resetCloudRestoreSubmitDiagnosticsForTests();
   submitDomain.recordCloudRestoreSubmitDiagnostic({
     event: 'rpc-error',
     phase: 'rpc',
     outcome: 'failed',
-    attemptCorrelationId: uuid(994),
+    attemptCorrelationId: correlationId,
     idempotencyKey: uuid(995),
-    code: 'https://fake-project.supabase.co/private-code',
-    message: 'Request failed at https://fake-project.supabase.co/rest/v1/?apikey=fake-public-key',
+    error: { ...knownBaseline, message: rawSecretText },
   });
   const diagnosticText = JSON.stringify(submitDomain.getCloudRestoreSubmitDiagnostics());
-  assert.doesNotMatch(diagnosticText, /fake-project|fake-public-key/u);
-  assert.match(diagnosticText, /UNKNOWN_ERROR|REDACTED_URL/u);
-
-  const longBoundaryError = submitDomain.normalizeCloudRestoreSubmitError({
-    code: 'LONG_ERROR',
-    message: `${'safe-prefix '.repeat(18)}https://fake-project.supabase.co/rest/v1/private_orders?token=fake-token followed by safe summary`,
-  }, 'rpc');
-  assert.doesNotMatch(JSON.stringify(longBoundaryError), /fake-project|fake-token/u);
-  assert.ok(longBoundaryError.message.length <= 241, 'Redaction must happen before bounded display truncation');
-
-  const structuredPayloadError = submitDomain.normalizeCloudRestoreSubmitError({
-    code: 'PAYLOAD_ERROR',
-    message: '{"snapshot":{"customer":"private-business-value"}}',
-    details: '[{"product_title":"private-product-title"}]',
-  }, 'rpc');
-  assert.doesNotMatch(JSON.stringify(structuredPayloadError), /private-business-value|private-product-title/u);
-
-  const safeReadableError = submitDomain.normalizeCloudRestoreSubmitError(
-    new Error('Restore request was refused by the server.'),
-    'rpc',
-  );
-  assert.match(safeReadableError.message, /Restore request was refused by the server/u);
-  const nativeUrlError = submitDomain.normalizeCloudRestoreSubmitError(
-    new Error('Fetch failed at https://fake-project.supabase.co/rest/v1/?token=fake-token.'),
-    'rpc',
-  );
-  assert.doesNotMatch(JSON.stringify(nativeUrlError), /fake-project|fake-token/u);
-  const unknownObjectError = submitDomain.normalizeCloudRestoreSubmitError({
-    untrusted: 'postgresql://fake-user:fake-password@fake-db.internal/fake-database',
-  }, 'rpc');
-  assert.equal(unknownObjectError.code, 'UNKNOWN_ERROR');
-  assert.equal(unknownObjectError.message, '發生未識別錯誤。');
-  assert.doesNotMatch(JSON.stringify(unknownObjectError), /fake-user|fake-password|fake-db/u);
+  assert.doesNotMatch(diagnosticText, /fake-|owner@example|private-business/u);
+  assert.match(diagnosticText, /"classification":"server".*"code":"23505"/u);
   assert.deepEqual(
-    submitDomain.normalizeCloudRestoreSubmitError(connectionError, 'rpc'),
-    connectionError,
-    'Sanitizer must remain safe and stable when applied repeatedly',
+    submitDomain.normalizeCloudRestoreSubmitError(
+      wrapped,
+      'rpc',
+      { source: 'post-dispatch', attemptCorrelationId: correlationId },
+    ),
+    knownBaseline,
+    'A safe wrapper remains stable without retaining the original error',
   );
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot('{'), error => error.code === 'MALFORMED_JSON');
   await assert.rejects(() => domain.prepareCloudRestoreSnapshot({ ...documentFor(), schemaVersion: 'old' }), error => error.code === 'UNSUPPORTED_SCHEMA_VERSION');
@@ -344,6 +403,11 @@ const restoreProviderMethod = PROVIDER.slice(
   PROVIDER.indexOf('private async applyCloudFieldMutations'),
 );
 assert.doesNotMatch(restoreProviderMethod, /console\.(?:error|warn|log)\s*\(/u, 'Restore submit path must not log raw errors');
+assert.doesNotMatch(restoreProviderMethod, /throw\s+(?:caughtError|error|resultError)\b/u, 'Restore submit path must not rethrow raw errors');
+assert.doesNotMatch(restoreProviderMethod, /JSON\.stringify\s*\(\s*(?:caughtError|error|resultError)/u, 'Restore submit path must not serialize raw errors');
+assert.match(restoreProviderMethod, /createCloudRestoreSafeSubmitError/u, 'Provider must replace raw failures with the safe local error representation');
+assert.doesNotMatch(SUBMIT, /\.(?:details|hint|stack|cause)\b/u, 'Safe submit helper must not forward raw auxiliary fields');
+assert.doesNotMatch(PANEL, /console\.(?:error|warn|log)\s*\(|JSON\.stringify\s*\(\s*error|String\s*\(\s*error|\.\.\.\s*error/u, 'Restore Panel must not log, serialize, stringify, or spread raw errors');
 
 assert.equal((EXECUTION_SQL.match(/^begin;$/gimu) || []).length, 1);
 assert.equal((EXECUTION_SQL.match(/^commit;$/gimu) || []).length, 1);
@@ -375,8 +439,9 @@ try {
   for (let attempt = 0; attempt < 80; attempt += 1) { try { if ((await fetch(url)).ok) break; } catch {} await sleep(250); if (attempt === 79) throw new Error(output); }
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   try {
-    const page = await browser.newPage(); const cloudRequests = [];
+    const page = await browser.newPage(); const cloudRequests = []; const applicationLogs = [];
     page.on('request', request => { if (/\.supabase\.co\//u.test(request.url())) cloudRequests.push(request.url()); });
+    page.on('console', message => { applicationLogs.push(message.text()); });
     const openFixture = async behavior => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.getByTestId('staging-cloud-restore-harness').waitFor();
@@ -421,7 +486,7 @@ try {
       window.dispatchEvent(new Event('focus'));
       document.querySelector('[data-testid="cloud-restore-final-confirmation"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
-    await page.getByTestId('cloud-restore-status').getByText('雲端資料正在更新，本次尚未送出，請待更新完成後重新確認。', { exact: true }).waitFor();
+    await page.getByTestId('cloud-restore-status').getByText('雲端資料正在更新，本次尚未送出。', { exact: true }).waitFor();
     submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(submitState.calls, 0, 'Freshness loss during confirmation must stay before RPC');
     assert.ok(submitState.diagnostics.some(entry => entry.event === 'readiness-check-blocked' && entry.outcome === 'not-submitted'));
@@ -441,13 +506,25 @@ try {
     await openFixture('plain-error');
     await page.getByTestId('cloud-restore-final-submit').click();
     const plainError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(plainError, /\[PGRST_TEST\].*Restore request was refused.*階段：rpc/u);
+    assert.match(plainError, /\[23505\].*伺服器已回覆還原錯誤.*階段：rpc.*追蹤/u);
     assert.doesNotMatch(plainError, /\[object Object\]|must-not-render|access_token|fake-project|fake-public-key|fake-db|fake-user|fake-password|fake-database/u);
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.doesNotMatch(JSON.stringify(submitState.diagnostics), /must-not-render|fake-|owner@example|private-business/u);
+    assert.doesNotMatch(applicationLogs.join('\n'), /must-not-render|fake-|owner@example|private-business/u);
+
+    await openFixture('plain-error-variant');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    const plainErrorVariant = await page.getByTestId('cloud-restore-status').innerText();
+    assert.match(plainErrorVariant, /\[23505\].*伺服器已回覆還原錯誤.*階段：rpc.*追蹤/u);
+    assert.doesNotMatch(plainErrorVariant, /other-user|other-password|other-db|other-database|外部錯誤/u);
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.doesNotMatch(JSON.stringify(submitState.diagnostics), /other-user|other-password|other-db|other-database|外部錯誤/u);
+    assert.doesNotMatch(applicationLogs.join('\n'), /other-user|other-password|other-db|other-database|外部錯誤/u);
 
     await openFixture('timeout');
     await page.getByTestId('cloud-restore-final-submit').click();
     const timeoutError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(timeoutError, /結果待查證.*\[ETIMEDOUT\].*Network timed out/u);
+    assert.match(timeoutError, /\[ETIMEDOUT\].*還原結果待查證.*階段：rpc.*追蹤/u);
     assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true, 'Unknown result must lock repeat submit');
     const timeoutState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(timeoutState.calls, 1);
@@ -468,8 +545,9 @@ try {
     await openFixture('guard-race');
     await page.getByTestId('cloud-restore-final-submit').click();
     const guardError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.equal(guardError, '雲端資料正在更新，本次尚未送出，請待更新完成後重新確認。');
+    assert.match(guardError, /^雲端資料正在更新，本次尚未送出。 追蹤：[0-9a-f-]+$/u);
     assert.doesNotMatch(guardError, /\[object Object\]/u, 'Freshness guard is an Error and is independent from plain-object rendering');
+    assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 0);
     assert.equal(cloudRequests.length, 0, 'All deterministic Restore submit cases must make zero Supabase requests');
   } finally { await browser.close(); }
 } finally { processVite.kill(); }

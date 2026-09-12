@@ -36,7 +36,7 @@ declare global {
   }
 }
 
-type RestoreFixtureBehavior = 'success' | 'plain-error' | 'timeout' | 'refresh-pending' | 'deferred-success' | 'guard-race';
+type RestoreFixtureBehavior = 'success' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'refresh-pending' | 'deferred-success' | 'guard-race';
 
 let behavior: RestoreFixtureBehavior = 'success';
 let calls = 0;
@@ -66,13 +66,18 @@ dataProvider.restoreCloudSnapshot = async command => {
   assertCloudWriteAllowed();
   calls += 1;
   idempotencyKeys.push(command.idempotencyKey);
-  if (behavior === 'plain-error') {
+  if (behavior === 'plain-error' || behavior === 'plain-error-variant') {
     throw {
-      code: 'PGRST_TEST',
-      message: 'Restore request was refused at https://fake-project.supabase.co/rest/v1/rpc/restore?apikey=fake-public-key.',
-      details: 'host=fake-db.internal user=fake-user password=fake-password dbname=fake-database',
-      hint: 'postgresql://fake-user:fake-password@fake-db.internal/fake-database?sslmode=require',
+      code: '23505',
+      message: behavior === 'plain-error'
+        ? 'Restore request was refused at https://fake-project.supabase.co/rest/v1/rpc/restore?apikey=fake-public-key.'
+        : 'Entirely different 外部錯誤 jdbc%253Apostgresql%253A%252F%252Fother-user%253Aother-password%2540other-db.internal%252Fother-database',
+      details: behavior === 'plain-error'
+        ? 'host=fake-db.internal user=fake-user password=fake-password dbname=fake-database'
+        : 'host=other-db.internal user=other-user password=other-password dbname=other-database',
+      hint: 'jdbc%3Apostgresql%3A%2F%2Ffake-user%3Afake-password%40fake-db.internal%2Ffake-database',
       access_token: 'must-not-render',
+      cause: { stack: 'Bearer fake-token owner@example.invalid {"snapshot":{"customer":"private-business-value"}}' },
     };
   }
   if (behavior === 'timeout') {

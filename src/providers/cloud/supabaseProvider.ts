@@ -128,6 +128,7 @@ import {
   type CloudRestoreResult,
 } from './cloudAtomicRestore';
 import {
+  createCloudRestoreSafeSubmitError,
   normalizeCloudRestoreSubmitError,
   preserveCloudRestoreSuccessThroughRefresh,
   recordCloudRestoreSubmitDiagnostic,
@@ -297,7 +298,10 @@ export class SupabaseProvider implements IDataProvider {
   async restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
     assertCloudWriteAllowed();
     if (command.confirmation !== 'OVERWRITE CLOUD DATA') {
-      throw new Error('CLOUD_RESTORE_EXPLICIT_CONFIRMATION_REQUIRED');
+      throw createCloudRestoreSafeSubmitError(
+        { code: 'CLOUD_RESTORE_EXPLICIT_CONFIRMATION_REQUIRED' },
+        'pre-dispatch',
+      );
     }
     let data: unknown;
     let error: unknown;
@@ -310,49 +314,58 @@ export class SupabaseProvider implements IDataProvider {
         p_source_environment: command.candidate.sourceEnvironment,
       }));
     } catch (caughtError) {
-      markCloudRequestFailed(caughtError);
-      const visible = normalizeCloudRestoreSubmitError(caughtError, 'rpc');
+      try { markCloudRequestFailed(caughtError); } catch { /* Raw error inspection must not replace the safe failure. */ }
+      const safeError = createCloudRestoreSafeSubmitError(caughtError, 'transport');
+      const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
+        source: 'transport',
+        attemptCorrelationId: command.attemptCorrelationId,
+      });
       recordCloudRestoreSubmitDiagnostic({
         event: 'rpc-error',
         phase: 'rpc',
         outcome: visible.outcome,
         attemptCorrelationId: command.attemptCorrelationId,
         idempotencyKey: command.idempotencyKey,
-        code: visible.code,
-        message: visible.message,
+        error: visible,
       });
-      throw caughtError;
+      throw safeError;
     }
     if (error) {
-      markCloudRequestFailed(error);
-      const visible = normalizeCloudRestoreSubmitError(error, 'rpc');
+      try { markCloudRequestFailed(error); } catch { /* Raw error inspection must not replace the safe failure. */ }
+      const safeError = createCloudRestoreSafeSubmitError(error, 'server-response');
+      const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
+        source: 'server-response',
+        attemptCorrelationId: command.attemptCorrelationId,
+      });
       recordCloudRestoreSubmitDiagnostic({
         event: 'rpc-error',
         phase: 'rpc',
         outcome: visible.outcome,
         attemptCorrelationId: command.attemptCorrelationId,
         idempotencyKey: command.idempotencyKey,
-        code: visible.code,
-        message: visible.message,
+        error: visible,
       });
-      throw error;
+      throw safeError;
     }
     markCloudReachable();
     let result: CloudRestoreResult;
     try {
       result = assertCloudRestoreServerResult(data);
     } catch (resultError) {
-      const visible = normalizeCloudRestoreSubmitError(resultError, 'rpc');
+      const safeError = createCloudRestoreSafeSubmitError(resultError, 'server-response');
+      const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
+        source: 'server-response',
+        attemptCorrelationId: command.attemptCorrelationId,
+      });
       recordCloudRestoreSubmitDiagnostic({
         event: 'rpc-error',
         phase: 'rpc',
         outcome: visible.outcome,
         attemptCorrelationId: command.attemptCorrelationId,
         idempotencyKey: command.idempotencyKey,
-        code: visible.code,
-        message: visible.message,
+        error: visible,
       });
-      throw resultError;
+      throw safeError;
     }
     recordCloudRestoreSubmitDiagnostic({
       event: 'rpc-response',
