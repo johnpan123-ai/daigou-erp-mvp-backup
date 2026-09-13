@@ -32,6 +32,16 @@ export type CloudRestoreCollection = typeof CLOUD_RESTORE_TABLES[number][0];
 export type CloudRestoreTable = typeof CLOUD_RESTORE_TABLES[number][1];
 export type CloudRestoreSnapshotData = Record<CloudRestoreTable, Record<string, unknown>[]>;
 
+export interface CloudRestorePortabilityManifest {
+  policyVersion: 'cross-environment-audit-null-v1';
+  mode: 'cross-environment';
+  targetProjectRef: string;
+  sourceFileSha256: string;
+  sourceSnapshotFingerprint: string;
+  transformedCounts: Record<CloudRestoreTable, number>;
+  totalTransformedRows: number;
+}
+
 export interface CloudRestoreManifest {
   schemaVersion: typeof CLOUD_RESTORE_SCHEMA_VERSION;
   identityContractVersion: typeof CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION;
@@ -47,6 +57,7 @@ export interface CloudRestoreManifest {
   optionalMetadataMissingReferenceCount: number;
   canonicalIdentityAnomalyCount: number;
   relationshipHash: string;
+  portability?: CloudRestorePortabilityManifest;
 }
 
 export interface CloudRestoreRelationAuditEntry {
@@ -72,6 +83,9 @@ export interface CloudRestoreCandidate {
   sourceIdentityContractVersion: typeof CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION | 'current-unversioned' | typeof LEGACY_CLOUD_RESTORE_IDENTITY_CONTRACT;
   sourceEnvironment: string;
   fileName: string;
+  sourceFileSha256: string;
+  executionFingerprint: string;
+  portability?: CloudRestorePortabilityManifest;
 }
 
 export interface CloudRestoreCommand {
@@ -129,6 +143,11 @@ export const stableCloudRestoreJson = (value: unknown): string => JSON.stringify
 export async function sha256Hex(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function sha256BytesHex(value: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', value);
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -284,6 +303,24 @@ const assertInventoryKeyUniqueness = (data: CloudRestoreSnapshotData): void => {
   }
 };
 
+export const assertCurrentCloudRestoreDataContract = (data: CloudRestoreSnapshotData): void => {
+  assertInventoryKeyUniqueness(data);
+  for (const [, table] of CLOUD_RESTORE_TABLES) {
+    const ids = data[table].map(row => canonicalId(row, table));
+    if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
+  }
+  const relationAudit = auditCloudRestoreRelations(data);
+  if (relationAudit.blockingOrphanCount > 0) {
+    throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
+  }
+  const duplicateVariantLocalIdCount = duplicateCount(data.product_variants
+    .map(row => String(row.local_id ?? '').trim())
+    .filter(Boolean));
+  if (duplicateVariantLocalIdCount > 0) {
+    throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
+  }
+};
+
 const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestoreManifest> => {
   const relationshipProjection = CLOUD_RESTORE_TABLES.flatMap(([, table]) => data[table].map(row => ({
     table,
@@ -368,9 +405,20 @@ export async function buildCloudRestoreManifest(source: Record<string, unknown>,
   return { data, manifest: await manifestFor(data) };
 }
 
+export async function rebuildCurrentCloudRestoreCandidate(
+  source: CloudRestoreSnapshotData,
+): Promise<{ data: CloudRestoreSnapshotData; manifest: CloudRestoreManifest }> {
+  const data = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [
+    table,
+    source[table].map(row => ({ ...row })),
+  ])) as CloudRestoreSnapshotData;
+  assertCurrentCloudRestoreDataContract(data);
+  return { data, manifest: await manifestFor(data) };
+}
+
 export async function prepareCloudRestoreSnapshot(
   input: string | unknown,
-  options: { fileName?: string; sourceEnvironment?: string } = {},
+  options: { fileName?: string; sourceEnvironment?: string; sourceFileSha256?: string } = {},
 ): Promise<CloudRestoreCandidate> {
   let parsed: unknown;
   try {
@@ -388,24 +436,15 @@ export async function prepareCloudRestoreSnapshot(
   const unexpected = Object.keys(rawData).filter(key => !allowedCollections.has(key));
   if (unexpected.length > 0) throw new CloudRestoreValidationError('UNEXPECTED_RESOURCE', `JSON 含不支援的 resource：${unexpected.join(', ')}`);
   if (!isRecord(parsed.manifest)) throw new CloudRestoreValidationError('RESTORE_MANIFEST_REQUIRED', 'JSON 缺少 manifest。');
-  const assertCurrentDataContract = (data: CloudRestoreSnapshotData): void => {
-    assertInventoryKeyUniqueness(data);
-    for (const [, table] of CLOUD_RESTORE_TABLES) {
-      const ids = data[table].map(row => canonicalId(row, table));
-      if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
-    }
-    const relationAudit = auditCloudRestoreRelations(data);
-    if (relationAudit.blockingOrphanCount > 0) throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
-    const duplicateVariantLocalIdCount = duplicateCount(data.product_variants
-      .map(row => String(row.local_id ?? '').trim())
-      .filter(Boolean));
-    if (duplicateVariantLocalIdCount > 0) {
-      throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
-    }
-  };
+  if ('portability' in parsed.manifest) {
+    throw new CloudRestoreValidationError(
+      'RESTORE_PORTABLE_CANDIDATE_NOT_IMPORTABLE',
+      '跨環境 candidate 必須由已驗證原始 JSON 在記憶體中建立，不接受再次匯入。',
+    );
+  }
   const validateCurrentData = async (): Promise<{ data: CloudRestoreSnapshotData; manifest: CloudRestoreManifest }> => {
     const data = normalizeRows(rawData);
-    assertCurrentDataContract(data);
+    assertCurrentCloudRestoreDataContract(data);
     return { data, manifest: await manifestFor(data) };
   };
 
@@ -434,9 +473,14 @@ export async function prepareCloudRestoreSnapshot(
       // current UUID-id closure/sort contract after legacy integrity
       // verification and use only that freshly constructed candidate for RPC.
       current = await buildCloudRestoreManifest(rawData, rawData);
-      assertCurrentDataContract(current.data);
+      assertCurrentCloudRestoreDataContract(current.data);
       sourceIdentityContractVersion = legacy.identityContractVersion;
     }
+  }
+  const serializedInput = typeof input === 'string' ? input : stableCloudRestoreJson(input);
+  const sourceFileSha256 = (options.sourceFileSha256 ?? await sha256Hex(serializedInput)).toLowerCase();
+  if (!/^[0-9a-f]{64}$/u.test(sourceFileSha256)) {
+    throw new CloudRestoreValidationError('RESTORE_SOURCE_SHA256_INVALID', '原始 JSON SHA-256 無效。');
   }
   return {
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
@@ -445,6 +489,8 @@ export async function prepareCloudRestoreSnapshot(
     sourceIdentityContractVersion,
     sourceEnvironment: String(parsed.sourceEnvironment ?? options.sourceEnvironment ?? 'unknown'),
     fileName: options.fileName ?? 'cloud-restore.json',
+    sourceFileSha256,
+    executionFingerprint: current.manifest.snapshotFingerprint,
   };
 }
 

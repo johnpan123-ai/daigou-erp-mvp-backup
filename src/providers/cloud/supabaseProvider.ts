@@ -128,6 +128,11 @@ import {
   type CloudRestoreResult,
 } from './cloudAtomicRestore';
 import {
+  CLOUD_RESTORE_PORTABILITY_PREFLIGHT_RPC,
+  assertCloudRestoreTargetCompatibilityResult,
+  type CloudRestoreTargetCompatibilityResult,
+} from './cloudRestorePortability';
+import {
   createCloudRestoreSafeSubmitError,
   normalizeCloudRestoreSubmitError,
   preserveCloudRestoreSuccessThroughRefresh,
@@ -294,6 +299,40 @@ const fetchAll = async <T>(
 
 export class SupabaseProvider implements IDataProvider {
   private readonly mutationCache = new CloudTargetedCache();
+
+  async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
+    assertCloudWriteAllowed();
+    if (!command.candidate.portability) {
+      throw createCloudRestoreSafeSubmitError(
+        { code: 'CLOUD_RESTORE_PORTABILITY_POLICY_INVALID' },
+        'pre-dispatch',
+      );
+    }
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_PORTABILITY_PREFLIGHT_RPC, {
+        p_snapshot: command.candidate.data,
+        p_manifest: command.candidate.manifest,
+        p_target_project_ref: command.candidate.portability.targetProjectRef,
+      }));
+    } catch (caughtError) {
+      try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(
+        { code: 'CLOUD_RESTORE_TARGET_COMPATIBILITY_BLOCKED' },
+        'pre-dispatch',
+      );
+    }
+    if (error) {
+      try { markCloudRequestFailed(error); } catch { /* Keep the safe error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(
+        { code: 'CLOUD_RESTORE_TARGET_COMPATIBILITY_BLOCKED' },
+        'pre-dispatch',
+      );
+    }
+    markCloudReachable();
+    return assertCloudRestoreTargetCompatibilityResult(data, command.candidate);
+  }
 
   async restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
     assertCloudWriteAllowed();

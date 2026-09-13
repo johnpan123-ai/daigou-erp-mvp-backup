@@ -13,9 +13,16 @@ import type { CloudResource } from '../providers/cloud/cloudSyncDomain';
 import {
   CLOUD_RESTORE_TABLES,
   prepareCloudRestoreSnapshot,
+  sha256BytesHex,
   type CloudRestoreCandidate,
   type CloudRestoreResult,
 } from '../providers/cloud/cloudAtomicRestore';
+import {
+  CLOUD_RESTORE_PORTABILITY_POLICY_VERSION,
+  prepareCrossEnvironmentCloudRestoreCandidate,
+  type CloudRestoreTargetCompatibilityResult,
+} from '../providers/cloud/cloudRestorePortability';
+import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import {
   CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE,
   formatCloudRestoreSubmitError,
@@ -40,6 +47,7 @@ const ignoreCloudResourceRefresh = () => {};
 
 interface CloudAtomicRestorePanelProps {
   executeRestore?: (command: Parameters<typeof dataProvider.restoreCloudSnapshot>[0]) => ReturnType<typeof dataProvider.restoreCloudSnapshot>;
+  validateRestoreTarget?: (command: Parameters<typeof dataProvider.validateCloudRestoreTarget>[0]) => Promise<CloudRestoreTargetCompatibilityResult>;
 }
 
 interface PendingRestoreAttempt {
@@ -48,7 +56,9 @@ interface PendingRestoreAttempt {
   fingerprint: string;
 }
 
-export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicRestorePanelProps = {}) {
+type RestorePortabilityMode = 'strict' | 'cross-environment';
+
+export default function CloudAtomicRestorePanel({ executeRestore, validateRestoreTarget }: CloudAtomicRestorePanelProps = {}) {
   const { user } = useAuth();
   const { role } = useRole();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -56,7 +66,10 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
   const pendingAttemptRef = useRef<PendingRestoreAttempt | null>(null);
   const inFlightRef = useRef(false);
   const submissionLockedRef = useRef(false);
+  const candidateGenerationRef = useRef(0);
+  const [sourceCandidate, setSourceCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [candidate, setCandidate] = useState<CloudRestoreCandidate | null>(null);
+  const [portabilityMode, setPortabilityMode] = useState<RestorePortabilityMode>('strict');
   const [confirmation, setConfirmation] = useState('');
   const [status, setStatus] = useState<'idle' | 'preflighting' | 'ready' | 'confirming' | 'restoring' | 'success' | 'error' | 'unknown'>('idle');
   const [message, setMessage] = useState('');
@@ -83,22 +96,32 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
 
   const selectFile = async (file: File | undefined) => {
     if (!file) return;
+    const generation = candidateGenerationRef.current + 1;
+    candidateGenerationRef.current = generation;
     setStatus('preflighting');
     setMessage('正在本機解析並檢查 JSON；尚未寫入雲端。');
     setCandidate(null);
+    setSourceCandidate(null);
+    setPortabilityMode('strict');
     setResult(null);
     submissionLockedRef.current = false;
     pendingAttemptRef.current = null;
     setConfirmationOpen(false);
     try {
-      const prepared = await prepareCloudRestoreSnapshot(await file.text(), {
+      const rawBytes = await file.arrayBuffer();
+      const sourceFileSha256 = await sha256BytesHex(rawBytes);
+      const prepared = await prepareCloudRestoreSnapshot(new TextDecoder().decode(rawBytes), {
         fileName: file.name,
         sourceEnvironment: window.location.origin,
+        sourceFileSha256,
       });
+      if (candidateGenerationRef.current !== generation) return;
+      setSourceCandidate(prepared);
       setCandidate(prepared);
       setStatus('ready');
       setMessage('Preflight 通過。請核對 15 個資源與 fingerprint，再完成第二次明確確認。');
     } catch (error) {
+      if (candidateGenerationRef.current !== generation) return;
       setStatus('error');
       setMessage(formatCloudRestoreSubmitError(normalizeCloudRestoreSubmitError(error, 'submit', {
         source: 'local',
@@ -108,10 +131,42 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
     }
   };
 
+  const selectPortabilityMode = async (mode: RestorePortabilityMode) => {
+    if (!sourceCandidate || status === 'restoring' || status === 'unknown') return;
+    const generation = candidateGenerationRef.current + 1;
+    candidateGenerationRef.current = generation;
+    setPortabilityMode(mode);
+    setCandidate(null);
+    setResult(null);
+    setConfirmation('');
+    setConfirmationOpen(false);
+    pendingAttemptRef.current = null;
+    submissionLockedRef.current = false;
+    setStatus('preflighting');
+    setMessage(mode === 'strict'
+      ? '正在恢復嚴格 Restore candidate。'
+      : '正在建立獨立的跨環境 candidate；原始 JSON 不會被修改。');
+    try {
+      const prepared = mode === 'strict'
+        ? sourceCandidate
+        : await prepareCrossEnvironmentCloudRestoreCandidate(sourceCandidate, supabaseEnvironment.projectRef);
+      if (candidateGenerationRef.current !== generation) return;
+      setCandidate(prepared);
+      setStatus('ready');
+      setMessage(mode === 'strict'
+        ? '嚴格模式：不轉換任何欄位。'
+        : '跨環境 candidate 已建立；Server 會在任何 business DELETE 前重驗目標 schema／外部參照。');
+    } catch (error) {
+      if (candidateGenerationRef.current !== generation) return;
+      setStatus('error');
+      setMessage(formatCloudRestoreSubmitError(normalizeCloudRestoreSubmitError(error, 'submit', { source: 'local' })));
+    }
+  };
+
   const beginConfirmation = () => {
     if (!candidate || !allowed || confirmation !== CONFIRMATION_TEXT) return;
     if (inFlightRef.current || pendingAttemptRef.current || submissionLockedRef.current) return;
-    const fingerprint = candidate.manifest.snapshotFingerprint;
+    const fingerprint = candidate.executionFingerprint;
     const pending = {
       correlationId: crypto.randomUUID(),
       idempotencyKey: readOrCreateCloudRestoreIdempotencyKey(fingerprint, retryKeys.current),
@@ -157,7 +212,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
   const execute = async () => {
     const pending = pendingAttemptRef.current;
     if (!candidate || !pending || inFlightRef.current || submissionLockedRef.current) return;
-    if (pending.fingerprint !== candidate.manifest.snapshotFingerprint || confirmation !== CONFIRMATION_TEXT) return;
+    if (pending.fingerprint !== candidate.executionFingerprint || confirmation !== CONFIRMATION_TEXT) return;
     recordCloudRestoreSubmitDiagnostic({
       event: 'confirmation-complete',
       phase: 'confirmation',
@@ -210,7 +265,45 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
     setConfirmationOpen(false);
     setStatus('restoring');
     setMessage('Server 正在鎖定寫入、建立 rollback snapshot、驗證並執行原子還原…');
+    let restoreDispatched = false;
     try {
+      if (candidate.portability) {
+        const targetResult = await (validateRestoreTarget ?? (command => dataProvider.validateCloudRestoreTarget(command)))({
+          attemptCorrelationId: pending.correlationId,
+          idempotencyKey: pending.idempotencyKey,
+          candidate,
+          confirmation: CONFIRMATION_TEXT,
+        });
+        recordCloudRestoreSubmitDiagnostic({
+          event: 'target-compatibility',
+          phase: 'readiness',
+          outcome: targetResult.ok ? 'success' : 'failed',
+          attemptCorrelationId: pending.correlationId,
+          idempotencyKey: pending.idempotencyKey,
+          readStatus: getCloudConnectivitySnapshot().readStatus,
+        });
+        const postValidationReadiness = inspectCurrentCloudRestoreReadiness({
+          cloudMode: getProviderMode() === 'cloud',
+          authenticated: Boolean(user),
+          owner: role === 'owner',
+        });
+        if (!postValidationReadiness.allowed) {
+          pendingAttemptRef.current = null;
+          setConfirmation('');
+          setStatus('error');
+          setMessage(CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE);
+          recordCloudRestoreSubmitDiagnostic({
+            event: 'readiness-check-blocked', phase: 'readiness', outcome: 'not-submitted',
+            attemptCorrelationId: pending.correlationId, idempotencyKey: pending.idempotencyKey,
+            readStatus: postValidationReadiness.connectivity.readStatus,
+          });
+          recordCloudRestoreSubmitDiagnostic({
+            event: 'submit-finish', phase: 'submit', outcome: 'not-submitted',
+            attemptCorrelationId: pending.correlationId, idempotencyKey: pending.idempotencyKey,
+          });
+          return;
+        }
+      }
       recordCloudRestoreSubmitDiagnostic({
         event: 'rpc-invocation',
         phase: 'rpc',
@@ -218,6 +311,7 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         idempotencyKey: pending.idempotencyKey,
         readStatus: readiness.connectivity.readStatus,
       });
+      restoreDispatched = true;
       const restored = await (executeRestore ?? (command => dataProvider.restoreCloudSnapshot(command)))({
         attemptCorrelationId: pending.correlationId,
         idempotencyKey: pending.idempotencyKey,
@@ -240,11 +334,22 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
         idempotencyKey: pending.idempotencyKey,
       });
     } catch (error) {
-      const visible = normalizeCloudRestoreSubmitError(error, 'rpc', {
-        source: 'post-dispatch',
+      const visible = normalizeCloudRestoreSubmitError(error, restoreDispatched ? 'rpc' : 'readiness', {
+        source: restoreDispatched ? 'post-dispatch' : 'pre-dispatch',
         attemptCorrelationId: pending.correlationId,
       });
       const unknown = visible.outcome === 'unknown';
+      if (!restoreDispatched && candidate.portability) {
+        recordCloudRestoreSubmitDiagnostic({
+          event: 'target-compatibility',
+          phase: 'readiness',
+          outcome: visible.outcome,
+          attemptCorrelationId: pending.correlationId,
+          idempotencyKey: pending.idempotencyKey,
+          readStatus: getCloudConnectivitySnapshot().readStatus,
+          error: visible,
+        });
+      }
       if (visible.outcome === 'not-submitted') {
         recordCloudRestoreSubmitDiagnostic({
           event: 'readiness-check-blocked',
@@ -309,6 +414,27 @@ export default function CloudAtomicRestorePanel({ executeRestore }: CloudAtomicR
           <div><strong>Snapshot fingerprint：</strong><code>{candidate.manifest.snapshotFingerprint}</code></div>
           <div><strong>Relationship hash：</strong><code>{candidate.manifest.relationshipHash}</code></div>
           <div><strong>完整性：</strong>blocking orphan {candidate.manifest.orphanCount}；metadata missing {candidate.manifest.optionalMetadataMissingReferenceCount}；canonical anomalies {candidate.manifest.canonicalIdentityAnomalyCount}；duplicate IDs {candidate.manifest.duplicateCanonicalIdCount}；rollback snapshot 將由 Server 在 transaction 內建立。</div>
+          <div data-testid="cloud-restore-source-integrity"><strong>原始快照：</strong>SHA-256 <code>{candidate.sourceFileSha256}</code>；source fingerprint <code>{sourceCandidate?.manifest.snapshotFingerprint}</code></div>
+          <label htmlFor="cloud-restore-portability-mode" style={{ display: 'block', marginTop: 10 }}><strong>Restore 模式：</strong></label>
+          <select
+            id="cloud-restore-portability-mode"
+            data-testid="cloud-restore-portability-mode"
+            value={portabilityMode}
+            onChange={event => void selectPortabilityMode(event.target.value as RestorePortabilityMode)}
+            disabled={status === 'restoring' || status === 'success' || status === 'unknown'}
+          >
+            <option value="strict">嚴格模式（不轉換）</option>
+            <option value="cross-environment">跨環境搬移（僅清除白名單 updated_by）</option>
+          </select>
+          {candidate.portability && (
+            <div data-testid="cloud-restore-portability-summary" style={{ marginTop: 8 }}>
+              <div><strong>跨環境政策：</strong>{CLOUD_RESTORE_PORTABILITY_POLICY_VERSION}</div>
+              <div><strong>明確 Target：</strong>{candidate.portability.targetProjectRef}</div>
+              <div><strong>轉換：</strong>僅 15 表 nullable audit updated_by；共 {candidate.portability.totalTransformedRows} rows。</div>
+              <div><strong>Effective candidate fingerprint：</strong><code>{candidate.manifest.snapshotFingerprint}</code></div>
+              <div><strong>目標相容性：</strong>送出前由 read-only RPC 檢查，並由 Restore transaction 在 DELETE 前再次驗證。</div>
+            </div>
+          )}
           <details style={{ marginTop: 8 }}>
             <summary>各資源筆數</summary>
             <ul>{CLOUD_RESTORE_TABLES.map(([, table]) => <li key={table}>{table}: {candidate.manifest.counts[table]}</li>)}</ul>

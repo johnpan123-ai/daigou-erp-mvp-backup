@@ -19,6 +19,7 @@ import type {
 } from '../lib/db';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
+import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
 export interface IDataProvider {
   getInventory(): Promise<InventoryItem[]>;
@@ -82,6 +83,7 @@ export interface IDataProvider {
   getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
   saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
   restoreBackup(backupData: any): Promise<boolean>;
+  validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult>;
   restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult>;
 }
 

@@ -25,7 +25,11 @@ export default function StagingCloudRestoreHarness() {
   }
   const controller = useMemo(() => {
     try {
-      return new StagingCloudRestoreHarnessController(environment, command => dataProvider.restoreCloudSnapshot(command));
+      return new StagingCloudRestoreHarnessController(
+        environment,
+        command => dataProvider.restoreCloudSnapshot(command),
+        command => dataProvider.validateCloudRestoreTarget(command),
+      );
     } catch {
       return null;
     }
@@ -42,7 +46,10 @@ export default function StagingCloudRestoreHarness() {
         <dt>Role</dt><dd data-testid="cloud-restore-harness-role">{profile?.role ?? 'none'}</dd>
         <dt>Credentials</dt><dd>Normal App session；token exposure = 0</dd>
       </dl>
-      <CloudAtomicRestorePanel executeRestore={command => controller.execute(command)} />
+      <CloudAtomicRestorePanel
+        executeRestore={command => controller.execute(command)}
+        validateRestoreTarget={command => controller.validateTarget(command)}
+      />
     </main>
   );
 }

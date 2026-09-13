@@ -442,7 +442,7 @@ try {
     const page = await browser.newPage(); const cloudRequests = []; const applicationLogs = [];
     page.on('request', request => { if (/\.supabase\.co\//u.test(request.url())) cloudRequests.push(request.url()); });
     page.on('console', message => { applicationLogs.push(message.text()); });
-    const openFixture = async behavior => {
+    const openFixture = async (behavior, portabilityMode = 'strict') => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.getByTestId('staging-cloud-restore-harness').waitFor();
       await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
@@ -455,6 +455,10 @@ try {
       await page.getByTestId('cloud-restore-access').getByText('Owner / authoritative fresh', { exact: false }).waitFor();
       await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
       await page.getByTestId('cloud-restore-preflight').waitFor();
+      if (portabilityMode !== 'strict') {
+        await page.getByTestId('cloud-restore-portability-mode').selectOption(portabilityMode);
+        await page.getByTestId('cloud-restore-portability-summary').waitFor();
+      }
       await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
       await page.getByTestId('cloud-restore-submit').click();
       await page.getByTestId('cloud-restore-final-confirmation').waitFor();
@@ -479,6 +483,31 @@ try {
     assert.deepEqual(submitState.diagnostics.map(entry => entry.event), [
       'submit-start', 'confirmation-complete', 'readiness-check-pass', 'rpc-invocation', 'submit-finish',
     ]);
+    assert.equal(submitState.targetValidationCalls, 0, 'Strict Restore must not call portability validation');
+
+    await openFixture('success', 'cross-environment');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.targetValidationCalls, 1, 'Portable Restore must validate the target exactly once');
+    assert.equal(submitState.calls, 1, 'Portable Restore must dispatch exactly once after target validation');
+    assert.equal(submitState.candidates[0].portability.policyVersion, 'cross-environment-audit-null-v1');
+    assert.equal(submitState.candidates[0].portability.targetProjectRef, 'rhfdjsklfrgpoqsaqpkn');
+    assert.equal(submitState.candidates[0].allUpdatedByNull, true);
+    assert.notEqual(submitState.candidates[0].executionFingerprint, submitState.candidates[0].fingerprint, 'Execution identity must bind portability semantics');
+    assert.deepEqual(submitState.diagnostics.map(entry => entry.event), [
+      'submit-start', 'confirmation-complete', 'readiness-check-pass', 'target-compatibility', 'rpc-invocation', 'submit-finish',
+    ]);
+
+    await openFixture('target-fail', 'cross-environment');
+    await page.getByTestId('cloud-restore-final-submit').click();
+    await page.getByTestId('cloud-restore-status').getByText('目標環境不符合跨環境還原政策，本次尚未送出', { exact: false }).waitFor();
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.targetValidationCalls, 1);
+    assert.equal(submitState.calls, 0, 'Target incompatibility must fail before the Restore RPC');
+    assert.equal(submitState.diagnostics.some(entry => entry.event === 'rpc-invocation'), false);
+    assert.ok(submitState.diagnostics.some(entry => entry.event === 'target-compatibility' && entry.outcome === 'not-submitted'));
+    assert.doesNotMatch(JSON.stringify(submitState.diagnostics), /must-not-render raw target detail/u);
 
     await openFixture('success');
     await page.evaluate(() => {

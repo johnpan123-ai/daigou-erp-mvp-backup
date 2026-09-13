@@ -1,6 +1,7 @@
 import type { IDataProvider } from './types';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
+import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { 
   InventoryItem, 
@@ -242,6 +243,10 @@ export class LocalProvider implements IDataProvider {
   }
   async restoreBackup(backupData: any): Promise<boolean> {
     return db.importData(JSON.stringify(backupData));
+  }
+  async validateCloudRestoreTarget(_command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
+    void _command;
+    throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
   }
   async restoreCloudSnapshot(_command: CloudRestoreCommand): Promise<CloudRestoreResult> {
     void _command;

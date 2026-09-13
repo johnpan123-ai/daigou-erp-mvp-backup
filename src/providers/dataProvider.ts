@@ -27,6 +27,7 @@ import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
+import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -310,6 +311,10 @@ class DynamicDataProvider implements IDataProvider {
   }
   async restoreBackup(backupData: any): Promise<boolean> {
     return this.guardedWrite(() => this.getActiveProvider().restoreBackup(backupData));
+  }
+  async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.supabaseProvider.validateCloudRestoreTarget(command);
   }
   async restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');

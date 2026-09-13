@@ -29,18 +29,22 @@ declare global {
       releaseDeferred: () => void;
       snapshot: () => {
         calls: number;
+        targetValidationCalls: number;
         idempotencyKeys: string[];
+        candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }>;
         diagnostics: ReturnType<typeof getCloudRestoreSubmitDiagnostics>;
       };
     };
   }
 }
 
-type RestoreFixtureBehavior = 'success' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'refresh-pending' | 'deferred-success' | 'guard-race';
+type RestoreFixtureBehavior = 'success' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
 
 let behavior: RestoreFixtureBehavior = 'success';
 let calls = 0;
+let targetValidationCalls = 0;
 let idempotencyKeys: string[] = [];
+let candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }> = [];
 let deferredRelease: (() => void) | null = null;
 
 window.__CLOUD_RESTORE_CONNECTIVITY_TEST__ = {
@@ -53,12 +57,34 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
   reset: () => {
     behavior = 'success';
     calls = 0;
+    targetValidationCalls = 0;
     idempotencyKeys = [];
+    candidates = [];
     deferredRelease = null;
     resetCloudRestoreSubmitDiagnosticsForTests();
   },
   releaseDeferred: () => deferredRelease?.(),
-  snapshot: () => ({ calls, idempotencyKeys: [...idempotencyKeys], diagnostics: getCloudRestoreSubmitDiagnostics() }),
+  snapshot: () => ({
+    calls,
+    targetValidationCalls,
+    idempotencyKeys: [...idempotencyKeys],
+    candidates: structuredClone(candidates),
+    diagnostics: getCloudRestoreSubmitDiagnostics(),
+  }),
+};
+
+dataProvider.validateCloudRestoreTarget = async command => {
+  targetValidationCalls += 1;
+  if (behavior === 'target-fail') {
+    throw { code: 'CLOUD_RESTORE_TARGET_COMPATIBILITY_BLOCKED', message: 'must-not-render raw target detail' };
+  }
+  return {
+    ok: true,
+    policyVersion: 'cross-environment-audit-null-v1',
+    targetProjectRef: command.candidate.portability?.targetProjectRef ?? '',
+    policyFingerprint: 'a'.repeat(64),
+    externalReferenceCount: 15,
+  };
 };
 
 dataProvider.restoreCloudSnapshot = async command => {
@@ -66,6 +92,12 @@ dataProvider.restoreCloudSnapshot = async command => {
   assertCloudWriteAllowed();
   calls += 1;
   idempotencyKeys.push(command.idempotencyKey);
+  candidates.push({
+    portability: command.candidate.portability,
+    fingerprint: command.candidate.manifest.snapshotFingerprint,
+    executionFingerprint: command.candidate.executionFingerprint,
+    allUpdatedByNull: Object.values(command.candidate.data).every(rows => rows.every(row => row.updated_by === null)),
+  });
   if (behavior === 'plain-error' || behavior === 'plain-error-variant') {
     throw {
       code: '23505',
