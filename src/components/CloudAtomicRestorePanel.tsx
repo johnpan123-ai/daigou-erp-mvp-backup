@@ -48,6 +48,7 @@ const ignoreCloudResourceRefresh = () => {};
 interface CloudAtomicRestorePanelProps {
   executeRestore?: (command: Parameters<typeof dataProvider.restoreCloudSnapshot>[0]) => ReturnType<typeof dataProvider.restoreCloudSnapshot>;
   validateRestoreTarget?: (command: Parameters<typeof dataProvider.validateCloudRestoreTarget>[0]) => Promise<CloudRestoreTargetCompatibilityResult>;
+  onAuthoritativeRefreshComplete?: (restoreEpoch: number) => void | Promise<void>;
 }
 
 interface PendingRestoreAttempt {
@@ -58,7 +59,11 @@ interface PendingRestoreAttempt {
 
 type RestorePortabilityMode = 'strict' | 'cross-environment';
 
-export default function CloudAtomicRestorePanel({ executeRestore, validateRestoreTarget }: CloudAtomicRestorePanelProps = {}) {
+export default function CloudAtomicRestorePanel({
+  executeRestore,
+  validateRestoreTarget,
+  onAuthoritativeRefreshComplete,
+}: CloudAtomicRestorePanelProps = {}) {
   const { user } = useAuth();
   const { role } = useRole();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -318,14 +323,39 @@ export default function CloudAtomicRestorePanel({ executeRestore, validateRestor
         candidate,
         confirmation: CONFIRMATION_TEXT,
       });
-      setResult(restored);
+      let displayedResult = restored;
+      let syncPending = restored.authoritativeRefresh?.status === 'pending';
+      if (!syncPending && onAuthoritativeRefreshComplete) {
+        try {
+          await onAuthoritativeRefreshComplete(restored.restoreEpoch);
+        } catch {
+          syncPending = true;
+          displayedResult = {
+            ...restored,
+            authoritativeRefresh: {
+              status: 'pending',
+              errorCode: 'UI_CONVERGENCE_PENDING',
+              errorMessage: 'Authoritative cache is current, but this view has not converged yet.',
+            },
+          };
+          recordCloudRestoreSubmitDiagnostic({
+            event: 'authoritative-refresh',
+            phase: 'authoritative-refresh',
+            outcome: 'sync-pending',
+            attemptCorrelationId: pending.correlationId,
+            idempotencyKey: pending.idempotencyKey,
+          });
+        }
+      }
+      setResult(displayedResult);
       setStatus('success');
       submissionLockedRef.current = true;
-      const syncPending = restored.authoritativeRefresh?.status === 'pending';
       setMessage(syncPending
         ? `還原已完成，畫面同步待完成；請勿再次還原。Rollback snapshot：${restored.rollbackSnapshotId}`
         : `Cloud Restore 完成；authoritative refresh 已完成。Rollback snapshot：${restored.rollbackSnapshotId}`);
-      window.dispatchEvent(new CustomEvent('cloud-restore-completed', { detail: { restoreEpoch: restored.restoreEpoch } }));
+      if (!syncPending) {
+        window.dispatchEvent(new CustomEvent('cloud-restore-completed', { detail: { restoreEpoch: restored.restoreEpoch } }));
+      }
       recordCloudRestoreSubmitDiagnostic({
         event: 'submit-finish',
         phase: 'submit',

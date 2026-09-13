@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
 import {
@@ -20,6 +20,7 @@ import {
   type TestSnapshotMetadata,
 } from '../lib/testSnapshotImport';
 import CloudAtomicRestorePanel from '../components/CloudAtomicRestorePanel';
+import { SettingsCountLoadGate } from './settingsCountLoadGate';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
   { field: 'productGroups', label: '商品群組' },
@@ -102,6 +103,7 @@ export default function Settings() {
     productCategories: 0,
     productVariants: 0
   });
+  const [countLoadGate] = useState(() => new SettingsCountLoadGate());
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const testSnapshotInputRef = useRef<HTMLInputElement>(null);
@@ -132,35 +134,39 @@ export default function Settings() {
     }
   };
 
+  const loadCounts = useCallback(async (): Promise<void> => {
+    await countLoadGate.run(async () => {
+      const [inv, so, soi, pg, pc, pv] = await Promise.all([
+        dataProvider.getInventory(),
+        dataProvider.getSalesOrders(),
+        dataProvider.getSalesOrderItems(),
+        dataProvider.getProductGroups(),
+        dataProvider.getProductCategories(),
+        dataProvider.getProductVariants()
+      ]);
+      return {
+        inventory: inv.length,
+        salesOrders: so.length,
+        salesOrderItems: soi.length,
+        productGroups: pg.length,
+        productCategories: pc.length,
+        productVariants: pv.length
+      };
+    }, setCounts);
+  }, [countLoadGate]);
+
   useEffect(() => {
-    (window as any).dataProvider = dataProvider;
-    loadCounts();
+    (window as Window & { dataProvider?: typeof dataProvider }).dataProvider = dataProvider;
+    void loadCounts();
     if (isSandbox) {
       getTestSnapshotMetadata()
         .then(setTestSnapshotMetadata)
         .catch(error => setTestSnapshotError(error instanceof Error ? error.message : String(error)));
     }
-  }, []);
-
-  const loadCounts = async () => {
-    const [inv, so, soi, pg, pc, pv] = await Promise.all([
-      dataProvider.getInventory(),
-      dataProvider.getSalesOrders(),
-      dataProvider.getSalesOrderItems(),
-      dataProvider.getProductGroups(),
-      dataProvider.getProductCategories(),
-      dataProvider.getProductVariants()
-    ]);
-    
-    setCounts({
-      inventory: inv.length,
-      salesOrders: so.length,
-      salesOrderItems: soi.length,
-      productGroups: pg.length,
-      productCategories: pc.length,
-      productVariants: pv.length
-    });
-  };
+    return () => {
+      countLoadGate.invalidate();
+    };
+  }, [countLoadGate, isSandbox, loadCounts]);
 
   const handleExport = async () => {
     await dataProvider.exportData();
@@ -416,7 +422,7 @@ export default function Settings() {
                 disabled={isCloudRestoreDisabledMode(currentMode)}
                 style={{ display: 'none' }} 
               />
-            </div> : <CloudAtomicRestorePanel />}
+            </div> : <CloudAtomicRestorePanel onAuthoritativeRefreshComplete={loadCounts} />}
 
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
