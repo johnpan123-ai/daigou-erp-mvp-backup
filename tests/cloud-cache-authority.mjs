@@ -78,6 +78,60 @@ try {
   assert.equal(freshRows.cached[0].title, 'Server fresh row');
   assert.equal(freshRows.state.readStatus, 'fresh-online');
 
+  const slowBootstrapFixture = await openFixturePage();
+  const slowBootstrap = await slowBootstrapFixture.page.evaluate(async () => {
+    const { cloudCacheDb } = await import('/src/lib/db.ts');
+    const { supabaseProvider } = await import('/src/providers/cloud/supabaseProvider.ts');
+    const { supabase } = await import('/src/providers/cloud/supabaseClient.ts');
+    const { getCloudConnectivitySnapshot } = await import('/src/providers/cloud/cloudConnectivity.ts');
+    const staleInventory = [{
+      id: '87000000-0000-4000-8000-000000000001',
+      inventory_key: 'stale-key', myacg_item_code: 'STALE-SKU', product_title: 'Stale catalog',
+      normalized_product_title: 'Stale catalog', raw_variant_name: '', listing_type: '', final_price: 0,
+      myacg_available_quantity: 0, myacg_sold_quantity: 0, myacg_listed_at: '',
+    }];
+    const staleGroups = [{ id: '87000000-0000-4000-8000-000000000002', title: 'Stale group', priority: 'Medium' }];
+    const serverInventory = [{
+      id: '88000000-0000-4000-8000-000000000001',
+      inventory_key: 'server-key', myacg_item_code: 'SERVER-SKU', product_title: 'Server catalog',
+      normalized_product_title: 'Server catalog', raw_variant_name: '', listing_type: '', final_price: 10,
+      myacg_available_quantity: 2, myacg_sold_quantity: 0, myacg_listed_at: '',
+    }];
+    const serverGroups = [{ id: '88000000-0000-4000-8000-000000000002', title: 'Server group', priority: 'Medium' }];
+    await cloudCacheDb.replaceAuthoritativeCloudCollections([
+      { storageKey: 'erp_inventory', value: staleInventory },
+      { storageKey: 'erp_product_groups', value: staleGroups },
+    ]);
+    localStorage.setItem('erp_cloud_cache_sync_version', 'v2_pagination');
+    supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-user', email: 'fixture@example.test' } } }, error: null });
+    supabase.from = table => {
+      const builder = {
+        select() { return builder; }, is() { return builder; }, order() { return builder; }, range() { return builder; },
+        eq() { return builder; }, limit() { return builder; },
+        single: async () => table === 'profiles' ? ({ data: { role: 'owner' }, error: null }) : ({ data: null, error: null }),
+        then(resolve, reject) {
+          const data = table === 'product_groups' ? serverGroups : table === 'inventory_items' ? serverInventory : [];
+          const delay = table === 'inventory_items' ? 4_200 : 0;
+          return new Promise(done => setTimeout(() => done({ data, error: null }), delay)).then(resolve, reject);
+        },
+      };
+      return builder;
+    };
+    const convergence = supabaseProvider.waitForCloudBootstrapConvergence();
+    await supabaseProvider.getProductGroups();
+    const duringTimeout = await supabaseProvider.getInventoryCatalogSnapshot();
+    const converged = await convergence;
+    const afterCompletion = await supabaseProvider.getInventoryCatalogSnapshot();
+    return { duringTimeout, converged, afterCompletion, state: getCloudConnectivitySnapshot() };
+  });
+  await slowBootstrapFixture.context.close();
+  assert.equal(slowBootstrap.duringTimeout.inventory[0].myacg_item_code, 'STALE-SKU');
+  assert.equal(slowBootstrap.duringTimeout.productGroups[0].title, 'Stale group');
+  assert.equal(slowBootstrap.converged, true, 'The detached pull completion must be observable after the four-second boundary');
+  assert.equal(slowBootstrap.afterCompletion.inventory[0].myacg_item_code, 'SERVER-SKU');
+  assert.equal(slowBootstrap.afterCompletion.productGroups[0].title, 'Server group');
+  assert.equal(slowBootstrap.state.readStatus, 'fresh-online');
+
   const emptyFixture = await openFixturePage();
   const freshEmpty = await emptyFixture.page.evaluate(async () => {
     const { cloudCacheDb } = await import('/src/lib/db.ts');
@@ -254,6 +308,7 @@ try {
   assert.equal(supabaseRequests.length, 0, 'Cloud cache authority regression contacted Supabase');
 
   console.log('PASS server rows replace Cloud cache and are marked fresh-online');
+  console.log('PASS four-second stale fallback observes the eventual atomic authoritative replacement');
   console.log('PASS authoritative server zero clears stale Cloud cache and is marked fresh-empty');
   console.log('PASS partial server read failure leaves the complete Cloud cache transaction unchanged');
   console.log('PASS timeout with cache is stale-cache; timeout without cache is read-error');

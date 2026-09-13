@@ -5,7 +5,7 @@ import { markCloudReadFresh, markCloudReachable } from '../../src/providers/clou
 import { dataProvider } from '../../src/providers/dataProvider';
 import Settings from '../../src/pages/Settings';
 
-type Behavior = 'success' | 'count-read-failure';
+type Behavior = 'success' | 'count-read-failure' | 'bootstrap-convergence';
 type Dataset = 'old' | 'new' | 'failure';
 
 const lengths = {
@@ -20,6 +20,9 @@ let restoreCalls = 0;
 let countGetterCalls = 0;
 let completionEvents = 0;
 let root: Root | null = null;
+let bootstrapPending = false;
+let resolveBootstrap: ((converged: boolean) => void) | null = null;
+let bootstrapPromise: Promise<boolean> = Promise.resolve(false);
 
 const read = async (key: keyof typeof lengths.old) => {
   countGetterCalls += 1;
@@ -33,6 +36,9 @@ dataProvider.getSalesOrderItems = () => read('salesOrderItems') as never;
 dataProvider.getProductGroups = () => read('productGroups') as never;
 dataProvider.getProductCategories = () => read('productCategories') as never;
 dataProvider.getProductVariants = () => read('productVariants') as never;
+dataProvider.waitForCloudBootstrapConvergence = () => (
+  bootstrapPending ? bootstrapPromise : Promise.resolve(false)
+);
 dataProvider.restoreCloudSnapshot = async command => {
   restoreCalls += 1;
   dataset = behavior === 'count-read-failure' ? 'failure' : 'new';
@@ -77,6 +83,8 @@ declare global {
   interface Window {
     __POST_RESTORE_SETTINGS_TEST__: {
       reset: (next: Behavior) => void;
+      completeBootstrap: () => void;
+      remount: () => void;
       snapshot: () => { restoreCalls: number; countGetterCalls: number; completionEvents: number; dataset: Dataset };
       unmount: () => void;
     };
@@ -90,6 +98,20 @@ window.__POST_RESTORE_SETTINGS_TEST__ = {
     restoreCalls = 0;
     countGetterCalls = 0;
     completionEvents = 0;
+    bootstrapPending = next === 'bootstrap-convergence';
+    bootstrapPromise = bootstrapPending
+      ? new Promise(resolve => { resolveBootstrap = resolve; })
+      : Promise.resolve(false);
+  },
+  completeBootstrap: () => {
+    if (!bootstrapPending) return;
+    bootstrapPending = false;
+    dataset = 'new';
+    resolveBootstrap?.(true);
+  },
+  remount: () => {
+    root?.unmount();
+    render();
   },
   snapshot: () => ({ restoreCalls, countGetterCalls, completionEvents, dataset }),
   unmount: () => { root?.unmount(); root = null; },

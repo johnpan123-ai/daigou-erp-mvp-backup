@@ -106,6 +106,15 @@ try {
       restoreCalls: 1, countGetterCalls: 6, completionEvents: 3, dataset: 'new',
     }, 'Repeated same-epoch notifications must not cause Settings rereads or another Restore');
 
+    await open('bootstrap-convergence');
+    await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.remount());
+    await page.waitForFunction(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot().countGetterCalls === 6);
+    await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.completeBootstrap());
+    await page.waitForFunction(selector => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === '7 筆|8 筆|9 筆|10 筆|1 筆|2 筆', COUNT_SELECTOR);
+    assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
+      restoreCalls: 0, countGetterCalls: 12, completionEvents: 0, dataset: 'new',
+    }, 'Settings must reread counts after the timed-out bootstrap eventually becomes authoritative');
+
     await open('count-read-failure');
     await submit();
     assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原已完成，畫面同步待完成；請勿再次還原/u);

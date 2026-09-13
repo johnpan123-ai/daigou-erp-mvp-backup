@@ -39,18 +39,23 @@ try {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
     await page.waitForFunction(() => Boolean(window.__INVENTORY_CLOUD_IMPORT_TEST__));
     const productCount = page.getByText('商品總數', { exact: true }).locator('..').locator('.kpi-card-value');
+    const joinedCount = page.getByText('已加入訂購', { exact: true }).locator('..').locator('.kpi-card-value');
+    const unjoinedCount = page.getByText('未加入訂購', { exact: true }).locator('..').locator('.kpi-card-value');
     await page.waitForFunction(() => document.body.innerText.includes('商品總數'));
-    assert.equal(await productCount.innerText(), '500', 'Initial UI must use the post-authoritative inventory cache');
-    assert.deepEqual((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).callOrder.slice(0, 2), ['groups', 'inventory']);
+    assert.equal(await productCount.innerText(), '501', 'The bounded bootstrap may expose the incomplete pre-authoritative cache');
+    assert.deepEqual((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).callOrder.slice(0, 2), ['groups', 'catalog-snapshot']);
 
-    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.prepareLateStaleRead());
-    const refreshButton = page.getByRole('button', { name: '重新整理' });
-    await refreshButton.click();
-    await page.waitForTimeout(20);
-    await refreshButton.click();
-    await page.waitForFunction(() => document.body.innerText.includes('600'));
-    await page.waitForTimeout(200);
-    assert.equal(await productCount.innerText(), '600', 'A late stale read must not overwrite the newest refresh');
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.completeBootstrap());
+    await page.waitForFunction(() => document.body.innerText.includes('1469'));
+    assert.equal(await productCount.innerText(), '1469', 'Incomplete cache 501 must converge to the mounted authoritative KPI 1469');
+    assert.equal(await joinedCount.innerText(), '684', 'Joined KPI must be derived from the authoritative Inventory title set');
+    assert.equal(await unjoinedCount.innerText(), '785', 'Unjoined KPI must be the authoritative complement');
+
+    await page.evaluate(() => {
+      window.__INVENTORY_CLOUD_IMPORT_TEST__.resetToServer500();
+      window.__INVENTORY_CLOUD_IMPORT_TEST__.remount();
+    });
+    await page.waitForFunction(() => document.body.innerText.includes('500'));
 
     const importFile = async (name, sku, title) => {
       const expectedUpserts = (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls + 1;
@@ -62,13 +67,26 @@ try {
     };
 
     await importFile('new-unjoined.xls', 'NEW-UNJOINED-SKU', 'New Unjoined Product');
-    await page.waitForFunction(() => document.body.innerText.includes('601'));
+    await page.waitForFunction(() => document.body.innerText.includes('501'));
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 0);
     assert.equal(dialogs.some(message => message.includes('維持「未加入」')), true, 'New unjoined catalog row must report the intentional no-sync outcome');
 
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.remount());
+    await page.waitForFunction(() => document.body.innerText.includes('501'));
+    assert.equal(await productCount.innerText(), '501', 'When the server truth is 501, the F5/remount equivalent must remain 501');
+
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.prepareLateStaleRead());
+    const refreshButton = page.getByRole('button', { name: '重新整理' });
+    await refreshButton.click();
+    await page.waitForTimeout(20);
+    await refreshButton.click();
+    await page.waitForFunction(() => document.body.innerText.includes('600'));
+    await page.waitForTimeout(200);
+    assert.equal(await productCount.innerText(), '600', 'A late stale read must not overwrite the newest refresh');
+
     await importFile('existing-group.xls', 'EXISTING-SKU', 'Existing Product');
-    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 602);
-    await page.waitForFunction(() => document.body.innerText.includes('602'));
+    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 601);
+    await page.waitForFunction(() => document.body.innerText.includes('601'));
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 1);
     const partial = dialogs.find(message => message.includes('Catalog 主檔已寫入雲端'));
     assert.ok(partial, 'Committed inventory plus blocked follow-up must be reported as partial success');
@@ -77,13 +95,13 @@ try {
 
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.failNextPostCommitGroupRead());
     await importFile('readback-failure.xls', 'READBACK-FAILURE-SKU', 'Readback Failure Product');
-    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 603);
+    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 602);
     const readbackPartial = dialogs.find(message => message.includes('同步資格的雲端查驗未完成'));
     assert.ok(readbackPartial, 'A post-commit authoritative-read failure must not be reported as a wholly failed import');
     assert.doesNotMatch(readbackPartial, /匯入失敗/u);
     assert.deepEqual(await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot()), {
       callOrder: (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).callOrder,
-      inventoryCount: 603,
+      inventoryCount: 602,
       syncCalls: 1,
       upsertCalls: 3,
     });

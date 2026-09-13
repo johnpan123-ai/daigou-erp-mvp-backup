@@ -562,6 +562,8 @@ export class SupabaseProvider implements IDataProvider {
 
   private isPulled = false;
   private pullPromise: Promise<void> | null = null;
+  private corePullCompletionPromise: Promise<void> | null = null;
+  private authoritativeCacheGeneration = 0;
   private cachedRole: 'owner' | 'staff' | 'viewer' | 'helper' | null = null;
   private cachedRoleUserId: string | null = null;
 
@@ -923,6 +925,7 @@ export class SupabaseProvider implements IDataProvider {
             importBatches: [],
           }));
           if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
+          this.authoritativeCacheGeneration += 1;
 
           // Dashboard images are cache-only and are replaced only after the complete
           // server read and IndexedDB transaction have succeeded.
@@ -975,6 +978,8 @@ export class SupabaseProvider implements IDataProvider {
       }
     })();
 
+    this.corePullCompletionPromise = syncPromise;
+
     const syncTimeout = new Promise<void>((_, reject) => {
       setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
     });
@@ -995,6 +1000,26 @@ export class SupabaseProvider implements IDataProvider {
     });
 
     return this.pullPromise;
+  }
+
+  async waitForCloudBootstrapConvergence(): Promise<boolean> {
+    const startingGeneration = this.authoritativeCacheGeneration;
+    void this.pullCoreProductData().catch(() => undefined);
+    const completion = this.corePullCompletionPromise;
+    if (!completion) return false;
+    try {
+      await completion;
+    } catch {
+      return false;
+    }
+    return this.authoritativeCacheGeneration > startingGeneration;
+  }
+
+  async getInventoryCatalogSnapshot(): Promise<{
+    inventory: InventoryItem[];
+    productGroups: ProductGroup[];
+  }> {
+    return db.getCloudInventoryCatalogSnapshot();
   }
 
   // === 3 張 Synced 表讀取 (Pull 後從本地快取讀取) ===

@@ -1,5 +1,5 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, type Root } from 'react-dom/client';
 import { dataProvider } from '../../src/providers/dataProvider';
 import type { InventoryItem, ProductGroup } from '../../src/lib/db';
 import Inventory from '../../src/pages/Inventory';
@@ -18,9 +18,21 @@ const inventoryRow = (index: number, title = `Authoritative ${index}`): Inventor
   myacg_listed_at: '2026-09-13',
 });
 
-let inventory = Array.from({ length: 1_468 }, (_, index) => inventoryRow(index, `Stale ${index}`));
-const authoritative = Array.from({ length: 500 }, (_, index) => inventoryRow(index));
-const groups: ProductGroup[] = [{
+let inventory = Array.from({ length: 501 }, (_, index) => inventoryRow(index, `Incomplete cache ${index}`));
+const authoritative = Array.from({ length: 1_469 }, (_, index) => inventoryRow(index));
+const groups: ProductGroup[] = [
+  ...authoritative.slice(0, 684).map((item, index) => ({
+    id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    title: item.product_title,
+    normalized_title: item.normalized_product_title,
+    priority: 'Low' as const,
+    purchase_date: '',
+    closing_date: '',
+    release_month: '',
+    has_official_site: false,
+    product_url: '',
+  })),
+  {
   id: '00000000-0000-4000-8000-000000009001',
   title: 'Existing Product',
   normalized_title: 'Existing Product',
@@ -30,8 +42,8 @@ const groups: ProductGroup[] = [{
   release_month: '',
   has_official_site: false,
   product_url: '',
-}];
-let firstGroupRead = true;
+  },
+];
 let syncCalls = 0;
 let upsertCalls = 0;
 const callOrder: string[] = [];
@@ -39,16 +51,16 @@ let delayedOldRead = false;
 let returnOldInventoryOnce = false;
 let failNextGroupRead = false;
 let armPostCommitGroupReadFailure = false;
+let bootstrapPending = true;
+let resolveBootstrap: ((converged: boolean) => void) | null = null;
+const bootstrapConvergence = new Promise<boolean>(resolve => { resolveBootstrap = resolve; });
+let root: Root | null = null;
 
 dataProvider.getProductGroups = async () => {
   callOrder.push('groups');
   if (failNextGroupRead) {
     failNextGroupRead = false;
     throw new Error('ISOLATED_AUTHORITATIVE_READ_FAILURE');
-  }
-  if (firstGroupRead) {
-    firstGroupRead = false;
-    inventory = authoritative.map(row => ({ ...row }));
   }
   if (delayedOldRead) {
     delayedOldRead = false;
@@ -65,6 +77,16 @@ dataProvider.getInventory = async () => {
   }
   return inventory.map(row => ({ ...row }));
 };
+dataProvider.getInventoryCatalogSnapshot = async () => {
+  callOrder.push('catalog-snapshot');
+  return {
+    inventory: inventory.map(row => ({ ...row })),
+    productGroups: groups.map(group => ({ ...group })),
+  };
+};
+dataProvider.waitForCloudBootstrapConvergence = async () => (
+  bootstrapPending ? bootstrapConvergence : false
+);
 dataProvider.upsertInventory = async rows => {
   upsertCalls += 1;
   for (const row of rows) {
@@ -109,7 +131,10 @@ declare global {
   interface Window {
     __INVENTORY_CLOUD_IMPORT_TEST__: {
       failNextPostCommitGroupRead: () => void;
+      completeBootstrap: () => void;
       prepareLateStaleRead: () => void;
+      remount: () => void;
+      resetToServer500: () => void;
       snapshot: () => { callOrder: string[]; inventoryCount: number; syncCalls: number; upsertCalls: number };
     };
   }
@@ -117,11 +142,26 @@ declare global {
 
 window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
   failNextPostCommitGroupRead: () => { armPostCommitGroupReadFailure = true; },
+  completeBootstrap: () => {
+    if (!bootstrapPending) return;
+    bootstrapPending = false;
+    inventory = authoritative.map(row => ({ ...row }));
+    resolveBootstrap?.(true);
+  },
   prepareLateStaleRead: () => {
     inventory = Array.from({ length: 600 }, (_, index) => inventoryRow(index, `Latest ${index}`));
     delayedOldRead = true;
   },
+  remount: () => {
+    root?.unmount();
+    root = createRoot(document.getElementById('root')!);
+    root.render(<Inventory />);
+  },
+  resetToServer500: () => {
+    inventory = authoritative.slice(0, 500).map(row => ({ ...row }));
+  },
   snapshot: () => ({ callOrder: [...callOrder], inventoryCount: inventory.length, syncCalls, upsertCalls }),
 };
 
-createRoot(document.getElementById('root')!).render(<Inventory />);
+root = createRoot(document.getElementById('root')!);
+root.render(<Inventory />);

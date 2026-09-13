@@ -159,6 +159,25 @@ class DynamicDataProvider implements IDataProvider {
   async getInventory(): Promise<InventoryItem[]> {
     return this.getActiveProvider().getInventory();
   }
+  async getInventoryCatalogSnapshot(): Promise<{
+    inventory: InventoryItem[];
+    productGroups: ProductGroup[];
+  }> {
+    const mode = getProviderMode();
+    if (mode === 'cloud' || mode === 'fallback') {
+      return this.supabaseProvider.getInventoryCatalogSnapshot();
+    }
+    const [inventory, productGroups] = await Promise.all([
+      this.getActiveProvider().getInventory(),
+      this.getActiveProvider().getProductGroups(),
+    ]);
+    return { inventory, productGroups };
+  }
+  async waitForCloudBootstrapConvergence(): Promise<boolean> {
+    const mode = getProviderMode();
+    if (mode !== 'cloud' && mode !== 'fallback') return false;
+    return this.supabaseProvider.waitForCloudBootstrapConvergence();
+  }
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     return this.guardedWrite(() => this.getActiveProvider().upsertInventory(items));
   }

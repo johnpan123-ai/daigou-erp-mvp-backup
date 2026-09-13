@@ -2508,6 +2508,28 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
   }
 
+  async getCloudInventoryCatalogSnapshot(): Promise<{
+    inventory: InventoryItem[];
+    productGroups: ProductGroup[];
+  }> {
+    if (this.databaseName !== CLOUD_CACHE_INDEXED_DB_NAME) {
+      throw new Error('CLOUD_INVENTORY_CATALOG_SNAPSHOT_WRONG_NAMESPACE');
+    }
+    const database = await this.dbPromise;
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readonly');
+      const store = transaction.objectStore('kv');
+      const inventoryRequest = store.get('erp_inventory');
+      const groupsRequest = store.get('erp_product_groups');
+      transaction.oncomplete = () => resolve({
+        inventory: (inventoryRequest.result as InventoryItem[] | undefined) ?? [],
+        productGroups: (groupsRequest.result as ProductGroup[] | undefined) ?? [],
+      });
+      transaction.onerror = () => reject(transaction.error ?? new Error('Cloud inventory catalog snapshot failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Cloud inventory catalog snapshot aborted'));
+    });
+  }
+
   async replaceAuthoritativeCloudCollections(entries: ReadonlyArray<{ storageKey: string; value: unknown[] }>): Promise<void> {
     if (this.databaseName !== CLOUD_CACHE_INDEXED_DB_NAME) {
       throw new Error('CLOUD_CACHE_ATOMIC_REPLACE_WRONG_NAMESPACE');

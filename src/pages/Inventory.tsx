@@ -98,14 +98,22 @@ export default function Inventory() {
 
   const loadItems = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
-    // getProductGroups() may complete the initial authoritative core pull, which
-    // also replaces the inventory cache. Read inventory after that boundary so
-    // a pre-pull cache snapshot cannot overwrite the authoritative result.
-    const groups = await dataProvider.getProductGroups();
-    const data = await dataProvider.getInventory();
+    const convergence = dataProvider.waitForCloudBootstrapConvergence();
+    await dataProvider.getProductGroups();
+    let snapshot = await dataProvider.getInventoryCatalogSnapshot();
     if (generation !== loadGenerationRef.current) return;
-    setProductGroups(groups);
-    setItems(data);
+    setProductGroups(snapshot.productGroups);
+    setItems(snapshot.inventory);
+
+    // The four-second freshness boundary may intentionally expose the previous
+    // cache while the same Cloud pull continues. Once that pull atomically
+    // replaces the cache, re-read the paired collections for this generation.
+    if (await convergence) {
+      snapshot = await dataProvider.getInventoryCatalogSnapshot();
+      if (generation !== loadGenerationRef.current) return;
+      setProductGroups(snapshot.productGroups);
+      setItems(snapshot.inventory);
+    }
     
     try {
       const backup = await dataProvider.getLastImportBackup();
@@ -121,7 +129,10 @@ export default function Inventory() {
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadItems(), 0);
-    return () => window.clearTimeout(initialLoad);
+    return () => {
+      window.clearTimeout(initialLoad);
+      loadGenerationRef.current += 1;
+    };
   }, [loadItems]);
 
   useCloudResourceSync(

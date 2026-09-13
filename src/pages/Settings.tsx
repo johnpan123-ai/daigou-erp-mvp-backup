@@ -135,7 +135,7 @@ export default function Settings() {
   };
 
   const loadCounts = useCallback(async (): Promise<void> => {
-    await countLoadGate.run(async () => {
+    const readCounts = async () => {
       const [inv, so, soi, pg, pc, pv] = await Promise.all([
         dataProvider.getInventory(),
         dataProvider.getSalesOrders(),
@@ -152,7 +152,10 @@ export default function Settings() {
         productCategories: pc.length,
         productVariants: pv.length
       };
-    }, setCounts);
+    };
+    const convergence = dataProvider.waitForCloudBootstrapConvergence();
+    await countLoadGate.run(readCounts, setCounts);
+    if (await convergence) await countLoadGate.run(readCounts, setCounts);
   }, [countLoadGate]);
 
   useEffect(() => {
