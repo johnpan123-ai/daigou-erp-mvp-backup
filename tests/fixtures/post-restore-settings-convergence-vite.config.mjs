@@ -10,6 +10,5 @@ export default defineConfig({
     'import.meta.env.VITE_SANDBOX_ENV': JSON.stringify(''),
     'import.meta.env.VITE_CLOUD_REALTIME_PREVIEW': JSON.stringify('true'),
   },
-  optimizeDeps: { noDiscovery: true },
   server: { host: '127.0.0.1' },
 });

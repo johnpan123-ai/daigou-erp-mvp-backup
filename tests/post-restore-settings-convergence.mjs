@@ -97,6 +97,14 @@ try {
     assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
       restoreCalls: 1, countGetterCalls: 6, completionEvents: 1, dataset: 'new',
     });
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('cloud-restore-completed', { detail: { restoreEpoch: 2 } }));
+      window.dispatchEvent(new CustomEvent('cloud-restore-completed', { detail: { restoreEpoch: 2 } }));
+    });
+    await sleep(100);
+    assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
+      restoreCalls: 1, countGetterCalls: 6, completionEvents: 3, dataset: 'new',
+    }, 'Repeated same-epoch notifications must not cause Settings rereads or another Restore');
 
     await open('count-read-failure');
     await submit();
