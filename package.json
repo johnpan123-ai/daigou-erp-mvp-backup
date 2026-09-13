@@ -64,6 +64,7 @@
     "test:recent-purchases": "node tests/recent-purchases.mjs",
     "test:bootstrap-error": "node tests/bootstrap-error-boundary.mjs",
     "test:inventory-backup-gate": "node tests/inventory-backup-gate.mjs",
+    "test:inventory-cloud-import-flow": "node tests/inventory-cloud-import-flow.mjs",
     "test:outbound-purchase-cost-export": "node tests/outbound-purchase-cost-export.mjs",
     "test:outbound-receiving-race": "node tests/outbound-receiving-save-race.mjs",
     "test:outbound-shipment-search": "node tests/outbound-shipment-search.mjs",

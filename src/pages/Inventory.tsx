@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import {
   isVariantDestructiveSyncGuardError,
   isVariantSyncGuardAcceptanceUiEnabled,
   isVariantSyncReadFailureInjectionEnabled,
   VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE,
+  normalizeProductTitle,
 } from '../lib/db';
 import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
@@ -53,6 +54,16 @@ const DEFAULT_COL_WIDTHS = {
   sales: 100
 };
 
+const shouldSyncImportedInventoryWithExistingGroups = (
+  importedItems: InventoryItem[],
+  groups: ProductGroup[],
+): boolean => {
+  const importedTitles = new Set(importedItems.map(item => (
+    item.normalized_product_title || normalizeProductTitle(item.product_title)
+  )).filter(Boolean));
+  return groups.some(group => importedTitles.has(group.normalized_title || normalizeProductTitle(group.title)));
+};
+
 export default function Inventory() {
   const currentMode = getProviderMode();
   const isCloudRestoreDisabled = isCloudRestoreDisabledMode(currentMode);
@@ -68,6 +79,7 @@ export default function Inventory() {
   // selectedSkus contains myacg_item_code
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadGenerationRef = useRef(0);
 
   const { colWidths, handleMouseDown, resetWidths } = useResizableColumns(
     'erp_inventory_col_widths',
@@ -84,15 +96,16 @@ export default function Inventory() {
   const showVariantGuardAcceptanceUi = isVariantSyncGuardAcceptanceUiEnabled();
   const injectVariantReadFailure = isVariantSyncReadFailureInjectionEnabled();
 
-  useEffect(() => {
-    loadItems();
-  }, []);
-
-  const loadItems = async () => {
-    const data = await dataProvider.getInventory();
-    setItems(data);
+  const loadItems = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
+    // getProductGroups() may complete the initial authoritative core pull, which
+    // also replaces the inventory cache. Read inventory after that boundary so
+    // a pre-pull cache snapshot cannot overwrite the authoritative result.
     const groups = await dataProvider.getProductGroups();
+    const data = await dataProvider.getInventory();
+    if (generation !== loadGenerationRef.current) return;
     setProductGroups(groups);
+    setItems(data);
     
     try {
       const backup = await dataProvider.getLastImportBackup();
@@ -104,7 +117,12 @@ export default function Inventory() {
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
-  };
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void loadItems(), 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [loadItems]);
 
   useCloudResourceSync(
     'inventory-catalog',
@@ -176,10 +194,44 @@ export default function Inventory() {
         catalog_last_seen_at: currentTimestamp
       }));
       const stats = await dataProvider.upsertInventory(itemsWithBatchMeta);
-      
-      // Sync ProductGroups with new inventory
-      const syncStats = await dataProvider.syncProductGroupsWithInventory();
-      await loadItems();
+
+      const cloudMode = currentMode === 'cloud' || currentMode === 'fallback';
+      let shouldSync = !cloudMode;
+      let syncStats: Awaited<ReturnType<typeof dataProvider.syncProductGroupsWithInventory>> = {
+        filledVariantsCount: 0,
+        affectedGroupsCount: 0,
+        upgradedSkusCount: 0,
+      };
+      let postCommitIssue: 'catalog-readback' | 'group-sync' | 'ui-readback' | null = null;
+      try {
+        const authoritativeGroups = await dataProvider.getProductGroups();
+        shouldSync = !cloudMode
+          || shouldSyncImportedInventoryWithExistingGroups(itemsWithBatchMeta, authoritativeGroups);
+      } catch {
+        postCommitIssue = 'catalog-readback';
+      }
+      if (!postCommitIssue && shouldSync) {
+        try {
+          syncStats = await dataProvider.syncProductGroupsWithInventory();
+        } catch {
+          postCommitIssue = 'group-sync';
+        }
+      }
+      try {
+        await loadItems();
+      } catch {
+        postCommitIssue ||= 'ui-readback';
+      }
+
+      if (postCommitIssue) {
+        const followUp = postCommitIssue === 'group-sync'
+          ? '訂購紀錄表的商品群組／規格同步未完成'
+          : postCommitIssue === 'catalog-readback'
+            ? '訂購紀錄表同步資格的雲端查驗未完成'
+            : '匯入後的雲端資料重新讀取未完成';
+        alert(`Catalog 主檔已寫入雲端（新增 ${stats.newCount}、更新 ${stats.updatedCount}）。\n\n${followUp}，本次不會自動重試。請勿重複匯入同一檔案；請先重新讀取雲端資料並查證現況。`);
+        return;
+      }
       
       const report = `📊【買動漫 Catalog 匯入結果】
 
@@ -195,6 +247,7 @@ export default function Inventory() {
 * 受影響商品群組：${syncStats.affectedGroupsCount} 組
 * 實際新增規格：${syncStats.filledVariantsCount} 筆
 * 舊 SKU 自動升級為新子編號：${syncStats.upgradedSkusCount || 0} 筆
+${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組；維持「未加入」，未執行跨表規格同步。' : ''}
 
 三、檢查提醒
 
