@@ -14,6 +14,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
+    "test:core-port-isolation": "node tests/core-test-port-isolation.mjs",
     "test:sandbox-guard": "node tests/sandbox-guard.mjs",
     "test:sandbox-architecture": "node tests/sandbox-architecture.mjs",
     "test:dual-sandbox": "node tests/dual-sandbox-isolation.mjs",

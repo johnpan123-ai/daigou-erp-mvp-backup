@@ -1,15 +1,24 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import {
+  buildCoreTestUrls,
+  createCoreTestRunId,
+  resolveCoreTestPort,
+  spawnOwnedCoreTestServer,
+  stopOwnedCoreTestServer,
+  waitForOwnedCoreTestServer,
+} from './helpers/core-test-server.mjs';
 
 const ROOT = new URL('../', import.meta.url);
 const ROOT_PATH = fileURLToPath(ROOT);
 const FIXTURE_URL = new URL('./fixtures/core-regression.json', import.meta.url);
 const EXPECTED_URL = new URL('./fixtures/core-regression.expected.json', import.meta.url);
-const BASE_URL = 'http://127.0.0.1:4187';
+const CORE_TEST_PORT = resolveCoreTestPort();
+const { baseUrl: BASE_URL, identityUrl: CORE_TEST_IDENTITY_URL } = buildCoreTestUrls(CORE_TEST_PORT);
+const CORE_TEST_RUN_ID = createCoreTestRunId();
 const FIXED_NOW = new Date('2026-08-12T12:00:00+08:00');
 const META_GROUP_ID = '00000000-0000-4000-a000-000000000000';
 const CHROME_PATH = process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -39,30 +48,34 @@ const storageKeys = {
   importBatches: 'erp_import_batches',
 };
 
-const vite = spawn(process.execPath, [
-  fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--host', '127.0.0.1', '--port', '4187', '--strictPort',
-], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
+const vite = spawnOwnedCoreTestServer({
+  rootPath: ROOT_PATH,
+  vitePath: fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+  configPath: fileURLToPath(new URL('./fixtures/core-regression-vite.config.mjs', import.meta.url)),
+  port: CORE_TEST_PORT,
+  runId: CORE_TEST_RUN_ID,
+});
 
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });
 vite.stderr.on('data', chunk => { viteOutput += String(chunk); });
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-async function waitForServer() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    if (vite.exitCode !== null) throw new Error(`Vite 提前結束：\n${viteOutput}`);
-    try {
-      const response = await fetch(BASE_URL);
-      if (response.ok) return;
-    } catch {
-      // Server is still starting.
-    }
-    await sleep(250);
-  }
-  throw new Error(`Vite 啟動逾時：\n${viteOutput}`);
-}
+const stopOwnedViteOnExit = () => {
+  if (vite.exitCode === null && vite.signalCode === null) vite.kill();
+};
+let signalCleanupStarted = false;
+const stopOwnedViteOnSignal = signal => {
+  if (signalCleanupStarted) return;
+  signalCleanupStarted = true;
+  void stopOwnedCoreTestServer(vite)
+    .catch(error => { console.error(error instanceof Error ? error.message : 'Core Test child cleanup failed.'); })
+    .finally(() => process.exit(signal === 'SIGINT' ? 130 : 143));
+};
+const handleSigint = () => stopOwnedViteOnSignal('SIGINT');
+const handleSigterm = () => stopOwnedViteOnSignal('SIGTERM');
+process.once('exit', stopOwnedViteOnExit);
+process.once('SIGINT', handleSigint);
+process.once('SIGTERM', handleSigterm);
 
 async function putFixture(page, fixtureData = fixture) {
   await page.evaluate(async ({ data, keys }) => {
@@ -398,7 +411,13 @@ async function verifyProxyMigration(page) {
 
 let browser;
 try {
-  await waitForServer();
+  const serverIdentity = await waitForOwnedCoreTestServer({
+    child: vite,
+    identityUrl: CORE_TEST_IDENTITY_URL,
+    runId: CORE_TEST_RUN_ID,
+    output: () => viteOutput,
+  });
+  console.log(`PASS Core Test owned server identity runId=${serverIdentity.runId} port=${CORE_TEST_PORT}`);
   browser = await chromium.launch({ headless: true, executablePath: CHROME_PATH });
   const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
   const page = await context.newPage();
@@ -439,5 +458,8 @@ try {
   await context.close();
 } finally {
   if (browser) await browser.close();
-  vite.kill();
+  process.removeListener('exit', stopOwnedViteOnExit);
+  process.removeListener('SIGINT', handleSigint);
+  process.removeListener('SIGTERM', handleSigterm);
+  await stopOwnedCoreTestServer(vite);
 }
