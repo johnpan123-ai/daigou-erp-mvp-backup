@@ -32,6 +32,35 @@ export interface PurchaseBatchTransactionSuccess {
   items: Array<Record<string, unknown>>;
 }
 
+export type PurchaseBatchSubmitFailureKind =
+  | 'precondition-blocked'
+  | 'server-rejected'
+  | 'result-unknown'
+  | 'committed-sync-pending';
+
+const PURCHASE_BATCH_SUBMIT_MESSAGES: Record<PurchaseBatchSubmitFailureKind, string> = {
+  'precondition-blocked': '目前帳號或雲端狀態不允許儲存，本次尚未送出；草稿已保留。',
+  'server-rejected': '伺服器已拒絕這次採購儲存，草稿仍保留，請重新確認後再試。',
+  'result-unknown': '採購儲存結果待查證，請勿重複操作。',
+  'committed-sync-pending': '採購已提交，畫面同步尚未完成，請勿重複操作。',
+};
+
+/** A fixed-output boundary error. Raw transport/database errors must never reach the UI. */
+export class PurchaseBatchSubmitBoundaryError extends Error {
+  readonly code = 'PURCHASE_BATCH_SUBMIT_BOUNDARY';
+  readonly kind: PurchaseBatchSubmitFailureKind;
+
+  constructor(kind: PurchaseBatchSubmitFailureKind) {
+    super(PURCHASE_BATCH_SUBMIT_MESSAGES[kind]);
+    this.name = 'PurchaseBatchSubmitBoundaryError';
+    this.kind = kind;
+  }
+}
+
+export const isPurchaseBatchSubmitBoundaryError = (
+  value: unknown,
+): value is PurchaseBatchSubmitBoundaryError => value instanceof PurchaseBatchSubmitBoundaryError;
+
 export type PurchaseBatchTransactionResult = PurchaseBatchTransactionSuccess | CloudFieldMutationFailure | {
   ok: false;
   code: 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH' | 'TRANSACTION_CONSTRAINT_FAILED' | 'INVALID_TRANSACTION';

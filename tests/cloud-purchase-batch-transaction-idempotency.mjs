@@ -312,7 +312,7 @@ try {
   assert.match(sql, /REVOKE ALL ON FUNCTION public\.erp_apply_purchase_batch_transaction\(uuid, jsonb\) FROM anon/u);
   assert.match(sql, /SECURITY DEFINER[\s\S]+SET search_path = ''/u);
   assert.doesNotMatch(sql, /twzpqyesbtnfxdkorluf|service_role|DROP TABLE\s+public\.(?:purchase_batches|purchase_batch_items)/u);
-  assert.match(provider, /Server mutation commits before the two cache collections/u);
+  assert.match(provider, /Server mutation has succeeded before this local cache transaction starts/u);
   assert.match(provider, /savePurchaseBatchTransaction\(nextBatches, nextItems\)/u);
   assert.match(modal, /existing\?\.id \|\| crypto\.randomUUID\(\)/u, 'Existing item UUIDs must be retained');
   assert.doesNotMatch(modal, /savePurchaseBatches\([\s\S]{0,160}savePurchaseBatchItems/u, 'Modal must not retain split Batch/Items writes');

@@ -111,6 +111,7 @@ import { CloudTargetedCache } from './cloudTargetedCache';
 import { CLOUD_TABLE_RESOURCE } from './cloudSyncDomain';
 import {
   PURCHASE_BATCH_TRANSACTION_RPC,
+  PurchaseBatchSubmitBoundaryError,
   assertPurchaseBatchTransactionSucceeded,
   buildPurchaseBatchTransactionRequest,
   clearPendingRpcRequest,
@@ -1629,7 +1630,11 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
-    await this.requireCloudWritePermission();
+    try {
+      await this.requireCloudWritePermission();
+    } catch {
+      throw new PurchaseBatchSubmitBoundaryError('precondition-blocked');
+    }
     assertCloudWriteAllowed();
     const [currentBatches, currentItems] = await Promise.all([
       db.getPurchaseBatches(),
@@ -1657,49 +1662,56 @@ export class SupabaseProvider implements IDataProvider {
       clearLocalCloudWrites('purchase_batches', batchIds);
       clearLocalCloudWrites('purchase_batch_items', itemIds);
       markCloudRequestFailed(caughtError);
-      throw caughtError;
+      throw new PurchaseBatchSubmitBoundaryError('result-unknown');
     }
     if (error) {
       clearLocalCloudWrites('purchase_batches', batchIds);
       clearLocalCloudWrites('purchase_batch_items', itemIds);
       markCloudRequestFailed(error);
-      throw error;
+      throw new PurchaseBatchSubmitBoundaryError('server-rejected');
     }
     markCloudReachable();
 
+    let result;
     try {
-      const result = assertPurchaseBatchTransactionSucceeded(data);
-      const canonicalBatch = {
-        ...result.batch,
-        id: String(result.batch.id),
-        database_id: String(result.batch.id),
-        note: String(result.batch.note || ''),
-        date: String(result.batch.date || ''),
-      } as unknown as PurchaseBatch;
-      const canonicalItems = result.items.map(row => ({
-        ...row,
-        id: String(row.id),
-        database_id: String(row.id),
-        purchase_batch_id: String(row.purchase_batch_id),
-        product_variant_id: String(row.product_variant_id),
-        quantity: Number(row.quantity ?? 0),
-        cost: Number(row.cost ?? 0),
-        note: String(row.note || ''),
-      } as PurchaseBatchItem));
-      const nextBatches = [...currentBatches.filter(batch => batch.id !== canonicalBatch.id), canonicalBatch];
-      const nextItems = [
-        ...currentItems.filter(item => item.purchase_batch_id !== canonicalBatch.id),
-        ...canonicalItems,
-      ];
-      // The Server mutation commits before the two cache collections are replaced
-      // together; a failed/unknown RPC never reaches this cache transaction.
-      await db.savePurchaseBatchTransaction(nextBatches, nextItems);
-      clearPendingRpcRequest(command.idempotencyKey);
+      result = assertPurchaseBatchTransactionSucceeded(data);
     } catch (transactionError) {
       clearLocalCloudWrites('purchase_batches', batchIds);
       clearLocalCloudWrites('purchase_batch_items', itemIds);
       if (isCloudFieldMutationError(transactionError)) notifyCloudFieldMutationConflict(transactionError);
       throw transactionError;
+    }
+
+    const canonicalBatch = {
+      ...result.batch,
+      id: String(result.batch.id),
+      database_id: String(result.batch.id),
+      note: String(result.batch.note || ''),
+      date: String(result.batch.date || ''),
+    } as unknown as PurchaseBatch;
+    const canonicalItems = result.items.map(row => ({
+      ...row,
+      id: String(row.id),
+      database_id: String(row.id),
+      purchase_batch_id: String(row.purchase_batch_id),
+      product_variant_id: String(row.product_variant_id),
+      quantity: Number(row.quantity ?? 0),
+      cost: Number(row.cost ?? 0),
+      note: String(row.note || ''),
+    } as PurchaseBatchItem));
+    const nextBatches = [...currentBatches.filter(batch => batch.id !== canonicalBatch.id), canonicalBatch];
+    const nextItems = [
+      ...currentItems.filter(item => item.purchase_batch_id !== canonicalBatch.id),
+      ...canonicalItems,
+    ];
+    try {
+      // The Server mutation has succeeded before this local cache transaction starts.
+      await db.savePurchaseBatchTransaction(nextBatches, nextItems);
+      clearPendingRpcRequest(command.idempotencyKey);
+    } catch {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      throw new PurchaseBatchSubmitBoundaryError('committed-sync-pending');
     }
   }
 

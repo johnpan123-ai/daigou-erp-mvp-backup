@@ -89,6 +89,32 @@ try {
         items: await cloudCacheDb.getPurchaseBatchItems(),
       });
 
+      const captureBoundary = async (nextCommand, rpc) => {
+        let calls = 0;
+        supabase.rpc = async (...args) => { calls += 1; return rpc(...args); };
+        try {
+          await supabaseProvider.savePurchaseBatchTransaction(nextCommand);
+          return { calls, name: '', kind: '', message: '' };
+        } catch (error) {
+          return { calls, name: error.name, kind: error.kind, message: error.message };
+        }
+      };
+      const transportUnknown = await captureBoundary(
+        { ...edit, idempotencyKey: uuid(8) },
+        async () => { throw new Error('postgresql://fake-user:fake-password@fake-db.internal/private'); },
+      );
+      const serverRejected = await captureBoundary(
+        { ...edit, idempotencyKey: uuid(9) },
+        async () => ({ data: null, error: { code: '23503', message: 'UNSAFE RAW DATABASE DETAIL' } }),
+      );
+      const originalCacheCommit = cloudCacheDb.savePurchaseBatchTransaction.bind(cloudCacheDb);
+      cloudCacheDb.savePurchaseBatchTransaction = async () => { throw new Error('UNSAFE LOCAL CACHE DETAIL'); };
+      const committedSyncPending = await captureBoundary(
+        { ...edit, idempotencyKey: uuid(10) },
+        async () => ({ data: { ...canonical, idempotencyKey: uuid(10), operationType: 'edit' }, error: null }),
+      );
+      cloudCacheDb.savePurchaseBatchTransaction = originalCacheCommit;
+
       return {
         rpcName: calls[0].name,
         rpcKey: calls[0].args.p_idempotency_key,
@@ -100,6 +126,9 @@ try {
         cacheCollectionsCommittedTogether: afterSuccess.batches.length === 1 && afterSuccess.items.length === 1,
         failureName,
         failureCacheUnchanged: beforeFailure === afterFailure,
+        transportUnknown,
+        serverRejected,
+        committedSyncPending,
       };
     });
     assert.deepEqual(result, {
@@ -113,10 +142,29 @@ try {
       cacheCollectionsCommittedTogether: true,
       failureName: 'PurchaseBatchTransactionError',
       failureCacheUnchanged: true,
+      transportUnknown: {
+        calls: 1,
+        name: 'PurchaseBatchSubmitBoundaryError',
+        kind: 'result-unknown',
+        message: '採購儲存結果待查證，請勿重複操作。',
+      },
+      serverRejected: {
+        calls: 1,
+        name: 'PurchaseBatchSubmitBoundaryError',
+        kind: 'server-rejected',
+        message: '伺服器已拒絕這次採購儲存，草稿仍保留，請重新確認後再試。',
+      },
+      committedSyncPending: {
+        calls: 1,
+        name: 'PurchaseBatchSubmitBoundaryError',
+        kind: 'committed-sync-pending',
+        message: '採購已提交，畫面同步尚未完成，請勿重複操作。',
+      },
     });
     console.log('PASS actual Cloud Provider sends one idempotent Batch+Items RPC command');
     console.log('PASS canonical server result atomically updates both Cloud cache collections');
     console.log('PASS structured server conflict leaves both Cloud cache collections unchanged');
+    console.log('PASS real Provider emits fixed safe unknown, rejected, and committed-sync-pending boundaries');
   } finally {
     await context.close();
     await browser.close();
