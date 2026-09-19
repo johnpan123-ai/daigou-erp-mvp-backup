@@ -307,6 +307,12 @@ GRANT EXECUTE ON FUNCTION public.erp_apply_japan_package_transaction(uuid, jsonb
 DO $$
 DECLARE
   v_function_oid oid := pg_catalog.to_regprocedure('public.erp_apply_japan_package_transaction(uuid,jsonb)');
+  v_schema_name name;
+  v_function_name name;
+  v_argument_count smallint;
+  v_argument_types oidvector;
+  v_argument_names text[];
+  v_overload_count bigint;
   v_security_definer boolean;
   v_config text[];
   v_return_type oid;
@@ -317,11 +323,28 @@ BEGIN
   IF v_function_oid IS NULL THEN
     RAISE EXCEPTION 'F3_FUNCTION_SIGNATURE_MISSING' USING ERRCODE = '55000';
   END IF;
-  SELECT procedure.prosecdef, procedure.proconfig, procedure.prorettype, procedure.proowner, procedure.prokind
-    INTO v_security_definer, v_config, v_return_type, v_owner, v_kind
+  SELECT namespace.nspname, procedure.proname, procedure.pronargs,
+         procedure.proargtypes, procedure.proargnames, procedure.prosecdef,
+         procedure.proconfig, procedure.prorettype, procedure.proowner, procedure.prokind
+    INTO v_schema_name, v_function_name, v_argument_count,
+         v_argument_types, v_argument_names, v_security_definer,
+         v_config, v_return_type, v_owner, v_kind
     FROM pg_catalog.pg_proc procedure
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace
    WHERE procedure.oid = v_function_oid;
-  IF pg_catalog.pg_get_function_identity_arguments(v_function_oid) IS DISTINCT FROM 'uuid, jsonb'
+  SELECT count(*)
+    INTO v_overload_count
+    FROM pg_catalog.pg_proc procedure
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace
+   WHERE namespace.nspname = 'public'
+     AND procedure.proname = 'erp_apply_japan_package_transaction';
+  IF v_schema_name IS DISTINCT FROM 'public'
+     OR v_function_name IS DISTINCT FROM 'erp_apply_japan_package_transaction'
+     OR v_overload_count IS DISTINCT FROM 1
+     OR v_argument_count IS DISTINCT FROM 2
+     OR v_argument_types[0] IS DISTINCT FROM 'uuid'::pg_catalog.regtype::oid
+     OR v_argument_types[1] IS DISTINCT FROM 'jsonb'::pg_catalog.regtype::oid
+     OR v_argument_names IS DISTINCT FROM ARRAY['p_idempotency_key', 'p_request']::text[]
      OR v_return_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype
      OR v_kind IS DISTINCT FROM 'f'
      OR v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user)

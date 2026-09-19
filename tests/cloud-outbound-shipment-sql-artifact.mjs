@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import {
+  assertPostgresFunctionContractMatrix,
+  POSTGRES_TYPE_OIDS,
+} from './helpers/postgres-function-contract-fixture.mjs';
 
 const SQL = await readFile(new URL('../supabase/sql/032_outbound_shipment_atomic_delete.sql', import.meta.url), 'utf8');
 assert.match(SQL, /BEGIN;[\s\S]+COMMIT;\s*$/u);
@@ -19,10 +23,46 @@ assert.match(SQL, /request_payload IS DISTINCT FROM p_request/u);
 assert.match(SQL, /canonical_result/u);
 assert.match(SQL, /REVOKE ALL ON FUNCTION public\.erp_apply_outbound_shipment_transaction\(uuid, jsonb\) FROM PUBLIC/u);
 assert.match(SQL, /GRANT EXECUTE ON FUNCTION public\.erp_apply_outbound_shipment_transaction\(uuid, jsonb\) TO authenticated/u);
-assert.match(SQL, /pg_get_function_identity_arguments\(v_function_oid\)/u);
-assert.match(SQL, /v_identity_args IS DISTINCT FROM 'uuid, jsonb'/u);
+assert.doesNotMatch(SQL, /pg_get_function_(?:identity_)?arguments/u);
+assert.match(SQL, /function_record\.pronargs/u);
+assert.match(SQL, /function_record\.proargtypes/u);
+assert.match(SQL, /function_record\.proargnames/u);
+assert.match(SQL, /v_overload_count IS DISTINCT FROM 1/u);
+assert.match(SQL, /v_argument_types\[0\] IS DISTINCT FROM 'uuid'::pg_catalog\.regtype::oid/u);
+assert.match(SQL, /v_argument_types\[1\] IS DISTINCT FROM 'jsonb'::pg_catalog\.regtype::oid/u);
+assert.match(SQL, /v_argument_names IS DISTINCT FROM ARRAY\['p_idempotency_key', 'p_request'\]::text\[\]/u);
 assert.match(SQL, /v_security_definer IS DISTINCT FROM true/u);
 assert.match(SQL, /v_public_execute/u);
 assert.doesNotMatch(SQL, /ALTER TABLE public\.(?:outbound_shipments|outbound_shipment_items)|DISABLE TRIGGER|DROP POLICY/u);
+
+const expectedContract = {
+  schemaName: 'public',
+  functionName: 'erp_apply_outbound_shipment_transaction',
+  argumentTypes: [POSTGRES_TYPE_OIDS.uuid, POSTGRES_TYPE_OIDS.jsonb],
+  argumentNames: ['p_idempotency_key', 'p_request'],
+  returnType: POSTGRES_TYPE_OIDS.jsonb,
+  requiredConfig: ['search_path=', 'statement_timeout=15s'],
+};
+const liveNamedArgumentCatalogFixture = {
+  resolved: true,
+  schemaName: 'public',
+  functionName: 'erp_apply_outbound_shipment_transaction',
+  overloadCount: 1,
+  argumentCount: 2,
+  argumentTypes: [POSTGRES_TYPE_OIDS.uuid, POSTGRES_TYPE_OIDS.jsonb],
+  argumentNames: ['p_idempotency_key', 'p_request'],
+  identityArguments: 'p_idempotency_key uuid, p_request jsonb',
+  returnType: POSTGRES_TYPE_OIDS.jsonb,
+  kind: 'f',
+  securityDefiner: true,
+  ownerMatchesCurrentUser: true,
+  config: ['search_path=', 'statement_timeout=15s'],
+  publicExecute: false,
+  anonExecute: false,
+  authenticatedExecute: true,
+};
+assertPostgresFunctionContractMatrix(assert, liveNamedArgumentCatalogFixture, expectedContract);
+
 console.log('PASS 032 transaction, owner, target, exact-child-scope, CAS/idempotency and ACL artifact contract');
+console.log('PASS 032 live-shaped named-argument catalog fixture and fail-closed mismatch matrix');
 console.log('NOTE static SQL validation only; PostgreSQL apply remains pending');

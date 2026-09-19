@@ -201,7 +201,12 @@ GRANT EXECUTE ON FUNCTION public.erp_apply_outbound_shipment_transaction(uuid, j
 DO $$
 DECLARE
   v_function_oid oid := pg_catalog.to_regprocedure('public.erp_apply_outbound_shipment_transaction(uuid,jsonb)');
-  v_identity_args text;
+  v_schema_name name;
+  v_function_name name;
+  v_argument_count smallint;
+  v_argument_types oidvector;
+  v_argument_names text[];
+  v_overload_count bigint;
   v_result_type oid;
   v_config text[];
   v_security_definer boolean;
@@ -210,18 +215,35 @@ DECLARE
   v_public_execute boolean;
 BEGIN
   IF v_function_oid IS NULL THEN RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_FUNCTION_MISSING' USING ERRCODE = '55000'; END IF;
-  SELECT pg_catalog.pg_get_function_identity_arguments(v_function_oid),
+  SELECT namespace.nspname, function_record.proname, function_record.pronargs,
+         function_record.proargtypes, function_record.proargnames,
          function_record.prorettype, function_record.proconfig, function_record.prosecdef,
          function_record.proowner, function_record.prokind
-    INTO v_identity_args, v_result_type, v_config, v_security_definer, v_owner, v_kind
-    FROM pg_catalog.pg_proc function_record WHERE function_record.oid = v_function_oid;
-  IF v_identity_args IS DISTINCT FROM 'uuid, jsonb'
+    INTO v_schema_name, v_function_name, v_argument_count,
+         v_argument_types, v_argument_names, v_result_type, v_config,
+         v_security_definer, v_owner, v_kind
+    FROM pg_catalog.pg_proc function_record
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function_record.pronamespace
+   WHERE function_record.oid = v_function_oid;
+  SELECT count(*)
+    INTO v_overload_count
+    FROM pg_catalog.pg_proc function_record
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function_record.pronamespace
+   WHERE namespace.nspname = 'public'
+     AND function_record.proname = 'erp_apply_outbound_shipment_transaction';
+  IF v_schema_name IS DISTINCT FROM 'public'
+     OR v_function_name IS DISTINCT FROM 'erp_apply_outbound_shipment_transaction'
+     OR v_overload_count IS DISTINCT FROM 1
+     OR v_argument_count IS DISTINCT FROM 2
+     OR v_argument_types[0] IS DISTINCT FROM 'uuid'::pg_catalog.regtype::oid
+     OR v_argument_types[1] IS DISTINCT FROM 'jsonb'::pg_catalog.regtype::oid
+     OR v_argument_names IS DISTINCT FROM ARRAY['p_idempotency_key', 'p_request']::text[]
      OR v_result_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype
      OR v_kind IS DISTINCT FROM 'f'
      OR v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user)
      OR v_security_definer IS DISTINCT FROM true
-     OR NOT ('search_path=' = ANY(v_config))
-     OR NOT ('statement_timeout=15s' = ANY(v_config)) THEN
+     OR NOT COALESCE('search_path=' = ANY(v_config), false)
+     OR NOT COALESCE('statement_timeout=15s' = ANY(v_config), false) THEN
     RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_FUNCTION_CONTRACT_MISMATCH' USING ERRCODE = '55000';
   END IF;
   SELECT EXISTS (
