@@ -23,6 +23,11 @@ class AtomicJapanPackageServer {
   items = new Map();
   requests = new Map();
   commits = 0;
+  projectRef;
+
+  constructor(projectRef = 'rhfdjsklfrgpoqsaqpkn') {
+    this.projectRef = projectRef;
+  }
 
   execute(actor, key, request, options = {}) {
     if (!actor) return { ok: false, code: 'FORBIDDEN' };
@@ -33,7 +38,7 @@ class AtomicJapanPackageServer {
       if (previous.fingerprint !== fingerprint) return { ok: false, code: 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH' };
       return { ...clone(previous.result), replayed: true };
     }
-    if (request.targetProjectRef !== 'rhfdjsklfrgpoqsaqpkn') return { ok: false, code: 'TARGET_PROJECT_FORBIDDEN' };
+    if (request.targetProjectRef !== this.projectRef) return { ok: false, code: 'TARGET_PROJECT_FORBIDDEN' };
     const stagedPackages = new Map([...this.packages].map(([id, row]) => [id, clone(row)]));
     const stagedItems = new Map([...this.items].map(([id, row]) => [id, clone(row)]));
     const currentPackage = stagedPackages.get(request.packageId);
@@ -99,9 +104,13 @@ try {
   const module = await vite.ssrLoadModule('/src/providers/cloud/japanPackageTransaction.ts');
   const {
     JapanPackageIntentCoordinator,
-    buildJapanPackageTransactionRequest,
+    buildJapanPackageTransactionRequest: buildJapanPackageTransactionRequestForProject,
     stableJapanPackagePayload,
   } = module;
+  const targetProjectRef = 'rhfdjsklfrgpoqsaqpkn';
+  const buildJapanPackageTransactionRequest = (currentPackage, currentItems, command) => (
+    buildJapanPackageTransactionRequestForProject(currentPackage, currentItems, command, targetProjectRef)
+  );
   const packageId = uuid(1);
   const itemId = uuid(2);
   const purchaseBatchId = uuid(3);
@@ -135,7 +144,14 @@ try {
   const createRequest = buildJapanPackageTransactionRequest(undefined, [], createCommand);
   assert.equal(createRequest.transactionType, 'create-package');
   assert.equal(createRequest.packageOperation.kind, 'create');
-  assert.equal(createRequest.targetProjectRef, 'rhfdjsklfrgpoqsaqpkn');
+  assert.equal(createRequest.targetProjectRef, targetProjectRef);
+  const portableRequest = buildJapanPackageTransactionRequestForProject(undefined, [], createCommand, 'abcdefghijklmnopqrst');
+  assert.equal(portableRequest.targetProjectRef, 'abcdefghijklmnopqrst');
+  assert.equal(new AtomicJapanPackageServer('abcdefghijklmnopqrst').execute(uuid(99), createCommand.idempotencyKey, portableRequest).ok, true);
+  assert.throws(
+    () => buildJapanPackageTransactionRequestForProject(undefined, [], createCommand, ''),
+    /JAPAN_PACKAGE_TARGET_PROJECT_REF_REQUIRED/u,
+  );
 
   const server = new AtomicJapanPackageServer();
   const actor = uuid(20);
@@ -282,7 +298,9 @@ try {
   ]);
   assert.match(sql, /BEGIN;[\s\S]+COMMIT;\s*$/u);
   assert.match(sql, /SECURITY DEFINER[\s\S]+SET search_path = ''/u);
-  assert.match(sql, /p_request->>'targetProjectRef' IS DISTINCT FROM 'rhfdjsklfrgpoqsaqpkn'/u);
+  assert.match(sql, /current_setting\('request\.headers', true\)/u);
+  assert.match(sql, /v_request_host IS DISTINCT FROM \(p_request->>'targetProjectRef'\) \|\| '\.supabase\.co'/u);
+  assert.doesNotMatch(sql, /rhfdjsklfrgpoqsaqpkn/u);
   assert.match(sql, /NOT public\.is_editor\(v_actor\)/u);
   assert.match(sql, /ON CONFLICT \(actor_id, idempotency_key\) DO NOTHING/u);
   assert.match(sql, /request_payload IS DISTINCT FROM p_request/u);
@@ -297,6 +315,7 @@ try {
   assert.doesNotMatch(sql, /twzpqyesbtnfxdkorluf|service_role|ALTER TABLE public\.(?:japan_packages|japan_package_items)/u);
 
   assert.match(provider, /supabase\.rpc\(JAPAN_PACKAGE_TRANSACTION_RPC/u);
+  assert.match(provider, /supabaseEnvironment\.projectRef/u);
   assert.match(provider, /saveJapanPackageTransaction\(nextPackages, nextItems\)/u);
   assert.match(provider, /JapanPackageSubmitBoundaryError\('result-unknown'\)/u);
   assert.match(provider, /syncPending: true/u);
@@ -311,7 +330,7 @@ try {
   console.log('PASS rollback, CAS conflict, exact replay, payload mismatch, and problem-status preservation');
   console.log('PASS invalid Package/Purchase Item, duplicate relation, partial/final receiving, uncheck, and concurrent stale CAS');
   console.log('PASS stable intent across remount, single provider RPC, and atomic two-store cache commit');
-  console.log('PASS 031 owner/target/ACL/search_path/lock/field-CAS contract; PostgreSQL apply remains pending');
+  console.log('PASS 031 owner/portable-host-target/ACL/search_path/lock/field-CAS contract; PostgreSQL apply remains pending');
 } finally {
   await vite.close();
 }

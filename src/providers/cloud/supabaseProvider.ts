@@ -82,7 +82,7 @@
   }
 })();
 
-import { supabase } from './supabaseClient';
+import { supabase, supabaseEnvironment } from './supabaseClient';
 import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
@@ -1952,7 +1952,7 @@ export class SupabaseProvider implements IDataProvider {
     const scopedItems = currentItems.filter(item => item.japan_package_id === packageId);
     const request = readOrCreatePendingJapanPackageRequest(
       command,
-      () => buildJapanPackageTransactionRequest(currentPackage, scopedItems, command),
+      () => buildJapanPackageTransactionRequest(currentPackage, scopedItems, command, supabaseEnvironment.projectRef),
     );
     const packageIds = [request.packageId];
     const itemIds = request.itemOperations.map(operation => operation.id);

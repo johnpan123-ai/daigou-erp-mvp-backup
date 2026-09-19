@@ -137,7 +137,7 @@ try {
       },
       pending: { syncPending: true, packageStatus: 'confirmed', itemChecked: true },
     });
-    console.log('PASS actual Cloud Provider sends one fixed-target idempotent Japan Package RPC');
+    console.log('PASS actual Cloud Provider sends one active-environment-targeted idempotent Japan Package RPC');
     console.log('PASS canonical result atomically updates Package/Items cache and rejection leaves cache unchanged');
     console.log('PASS unknown transport is fixed-safe; Server success survives local cache failure as syncPending');
   } finally {

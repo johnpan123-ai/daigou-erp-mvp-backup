@@ -3,7 +3,6 @@ import { buildCloudCollectionMutationPlan, type CloudFieldMutationOperation } fr
 import { toCloudFieldRow } from './cloudEntityPayload';
 
 export const JAPAN_PACKAGE_TRANSACTION_RPC = 'erp_apply_japan_package_transaction';
-export const JAPAN_PACKAGE_TARGET_PROJECT_REF = 'rhfdjsklfrgpoqsaqpkn';
 const PENDING_INTENT_PREFIX = 'erp_japan_package_pending_intent_v1:';
 const PENDING_RPC_PREFIX = 'erp_japan_package_pending_rpc_v1:';
 
@@ -114,7 +113,9 @@ export const buildJapanPackageTransactionRequest = (
   currentPackage: JapanPackage | undefined,
   currentItems: JapanPackageItem[],
   command: JapanPackageTransactionCommand,
+  targetProjectRef: string,
 ): JapanPackageTransactionRpcRequest => {
+  if (!/^[a-z0-9]{20}$/u.test(targetProjectRef)) throw new Error('JAPAN_PACKAGE_TARGET_PROJECT_REF_REQUIRED');
   if (command.transactionType === 'create-package') {
     const operation = buildCloudCollectionMutationPlan(
       'japan_packages', [], [toCloudFieldRow('japan_packages', command.package)], { deleteMissing: false },
@@ -122,7 +123,7 @@ export const buildJapanPackageTransactionRequest = (
     if (!operation || operation.kind !== 'create') throw new Error('JAPAN_PACKAGE_CREATE_OPERATION_REQUIRED');
     return {
       transactionType: command.transactionType,
-      targetProjectRef: JAPAN_PACKAGE_TARGET_PROJECT_REF,
+      targetProjectRef,
       packageId: command.package.id,
       packageOperation: operation,
       itemOperations: [],
@@ -141,7 +142,7 @@ export const buildJapanPackageTransactionRequest = (
     }
     return {
       transactionType: command.transactionType,
-      targetProjectRef: JAPAN_PACKAGE_TARGET_PROJECT_REF,
+      targetProjectRef,
       packageId: command.packageId,
       packageOperation: null,
       itemOperations: operations,
@@ -166,7 +167,7 @@ export const buildJapanPackageTransactionRequest = (
   }
   return {
     transactionType: command.transactionType,
-    targetProjectRef: JAPAN_PACKAGE_TARGET_PROJECT_REF,
+    targetProjectRef,
     packageId: command.packageId,
     packageOperation: null,
     itemOperations: operations,

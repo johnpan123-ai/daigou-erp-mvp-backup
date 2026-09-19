@@ -1,7 +1,18 @@
 -- Experimental Cloud F3: idempotent Japan Package create/attach/receiving transactions.
--- Staging review artifact only. Do not apply to Production.
+-- Portable migration artifact. Apply only through an environment-verified SQL gate;
+-- this review round does not authorize applying it to any environment.
 
 BEGIN;
+
+-- This candidate has never been applied. Refuse to replace an unrelated or
+-- previously installed function with the same signature.
+DO $$
+BEGIN
+  IF pg_catalog.to_regprocedure('public.erp_apply_japan_package_transaction(uuid,jsonb)') IS NOT NULL THEN
+    RAISE EXCEPTION 'F3_FUNCTION_COLLISION' USING ERRCODE = '55000';
+  END IF;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION public.erp_apply_japan_package_transaction(
   p_idempotency_key uuid,
@@ -38,6 +49,8 @@ DECLARE
   v_top_level_keys text[];
   v_change_keys text[];
   v_expected_keys text[];
+  v_request_headers jsonb;
+  v_request_host text;
 BEGIN
   IF v_actor IS NULL OR NOT public.is_editor(v_actor) THEN
     RAISE EXCEPTION 'F3_JAPAN_PACKAGE_TRANSACTION_FORBIDDEN' USING ERRCODE = '42501';
@@ -56,7 +69,16 @@ BEGIN
   ]::text[] THEN
     RAISE EXCEPTION 'F3_REQUEST_FIELDS_INVALID' USING ERRCODE = '22023';
   END IF;
-  IF p_request->>'targetProjectRef' IS DISTINCT FROM 'rhfdjsklfrgpoqsaqpkn' THEN
+  IF COALESCE(p_request->>'targetProjectRef', '') !~ '^[a-z0-9]{20}$' THEN
+    RAISE EXCEPTION 'F3_TARGET_PROJECT_FORBIDDEN' USING ERRCODE = '42501';
+  END IF;
+  BEGIN
+    v_request_headers := NULLIF(pg_catalog.current_setting('request.headers', true), '')::jsonb;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'F3_TARGET_PROJECT_FORBIDDEN' USING ERRCODE = '42501';
+  END;
+  v_request_host := pg_catalog.lower(pg_catalog.split_part(COALESCE(v_request_headers->>'host', ''), ':', 1));
+  IF v_request_host IS DISTINCT FROM (p_request->>'targetProjectRef') || '.supabase.co' THEN
     RAISE EXCEPTION 'F3_TARGET_PROJECT_FORBIDDEN' USING ERRCODE = '42501';
   END IF;
 
@@ -284,17 +306,27 @@ GRANT EXECUTE ON FUNCTION public.erp_apply_japan_package_transaction(uuid, jsonb
 -- Postflight checks prove the immutable function/ACL contract without executing it.
 DO $$
 DECLARE
+  v_function_oid oid := pg_catalog.to_regprocedure('public.erp_apply_japan_package_transaction(uuid,jsonb)');
   v_security_definer boolean;
   v_config text[];
+  v_return_type oid;
+  v_owner oid;
+  v_kind "char";
   v_public_execute boolean;
 BEGIN
-  SELECT procedure.prosecdef, procedure.proconfig INTO v_security_definer, v_config
+  IF v_function_oid IS NULL THEN
+    RAISE EXCEPTION 'F3_FUNCTION_SIGNATURE_MISSING' USING ERRCODE = '55000';
+  END IF;
+  SELECT procedure.prosecdef, procedure.proconfig, procedure.prorettype, procedure.proowner, procedure.prokind
+    INTO v_security_definer, v_config, v_return_type, v_owner, v_kind
     FROM pg_catalog.pg_proc procedure
-    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace
-   WHERE namespace.nspname = 'public'
-     AND procedure.proname = 'erp_apply_japan_package_transaction'
-     AND pg_catalog.pg_get_function_identity_arguments(procedure.oid) = 'p_idempotency_key uuid, p_request jsonb';
-  IF v_security_definer IS DISTINCT FROM true OR NOT ('search_path=' = ANY(v_config)) THEN
+   WHERE procedure.oid = v_function_oid;
+  IF pg_catalog.pg_get_function_identity_arguments(v_function_oid) IS DISTINCT FROM 'uuid, jsonb'
+     OR v_return_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype
+     OR v_kind IS DISTINCT FROM 'f'
+     OR v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user)
+     OR v_security_definer IS DISTINCT FROM true
+     OR NOT COALESCE('search_path=' = ANY(v_config), false) THEN
     RAISE EXCEPTION 'F3_FUNCTION_SECURITY_CONTRACT_MISMATCH' USING ERRCODE = '55000';
   END IF;
   SELECT EXISTS (
@@ -304,15 +336,13 @@ BEGIN
       CROSS JOIN LATERAL pg_catalog.aclexplode(
         COALESCE(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))
       ) privilege
-     WHERE namespace.nspname = 'public'
-       AND procedure.proname = 'erp_apply_japan_package_transaction'
-       AND pg_catalog.pg_get_function_identity_arguments(procedure.oid) = 'p_idempotency_key uuid, p_request jsonb'
+     WHERE procedure.oid = v_function_oid
        AND privilege.grantee = 0
        AND privilege.privilege_type = 'EXECUTE'
   ) INTO v_public_execute;
-  IF has_function_privilege('anon', 'public.erp_apply_japan_package_transaction(uuid,jsonb)', 'EXECUTE')
+  IF pg_catalog.has_function_privilege('anon', v_function_oid, 'EXECUTE')
      OR v_public_execute
-     OR NOT has_function_privilege('authenticated', 'public.erp_apply_japan_package_transaction(uuid,jsonb)', 'EXECUTE') THEN
+     OR NOT pg_catalog.has_function_privilege('authenticated', v_function_oid, 'EXECUTE') THEN
     RAISE EXCEPTION 'F3_FUNCTION_ACL_MISMATCH' USING ERRCODE = '55000';
   END IF;
 END;
