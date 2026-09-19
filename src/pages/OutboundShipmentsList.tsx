@@ -128,8 +128,8 @@ export default function OutboundShipmentsList() {
       updated_at: new Date().toISOString(),
     };
     const updated = [newShipment, ...shipments];
-    setShipments(updated);
     await dataProvider.saveOutboundShipments(updated);
+    setShipments(updated);
     setShowCreateForm(false);
     setNewTitle('');
     navigate(`/outbound-shipments/${newShipment.id}`);

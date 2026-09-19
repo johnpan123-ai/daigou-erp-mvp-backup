@@ -1,6 +1,6 @@
 # P0-E 出庫單＋明細刪除原子性 Design Gate
 
-狀態：**Design Gate / Blocked（未實作、未 Accepted）**  
+狀態：**Implementation Candidate / Staging SQL Apply Pending（032 尚未套用）**
 分析時間：2026-08-16 23:15（Asia/Taipei）  
 分析前回復點：`checkpoint-20260816-2315-before-p0-e-outbound-delete-atomicity`
 
@@ -52,7 +52,15 @@ await retrySupabase(...).catch(error => console.error(error));
 - 失敗時保留原畫面並顯示明確錯誤；重新讀取後仍應看到原單頭與全部明細。
 - 專用 failure injection 分別模擬單頭與第 N 筆明細失敗。
 
-## 本階段結論
+## RC 實作更新（2026-09-19）
+
+- 新增 `032_outbound_shipment_atomic_delete.sql`，以單一 owner/editor-only RPC 對 header 與 exact active child set 做 CAS soft delete。
+- request 綁定實際 Supabase host、固定 target、payload 與 idempotency key；replay 回 canonical result，payload mismatch fail closed。
+- Cloud 成功後才以單一 IndexedDB transaction 移除兩個 cache collection；cache failure 保留 Server 成功並標 sync pending。
+- UI 使用同步 in-flight latch 與 mounted intent；unknown result 禁止重送。
+- 032 未套用前，Cloud 刪除仍不可人工驗收或使用。
+
+## 原 Design Gate 結論
 
 - 沒有修改 OutboundShipmentDetail、Provider、db.ts、Schema 或資料。
 - 沒有刪除任何 Test／Production 出庫資料。

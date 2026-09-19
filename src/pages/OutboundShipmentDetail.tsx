@@ -25,6 +25,10 @@ import {
   copyOutboundGroupNameToClipboard,
   copyOutboundGroupNameAndOpenMyacg,
 } from '../lib/outboundGroupQuickActions';
+import {
+  OutboundShipmentDeleteBoundaryError,
+  outboundShipmentDeleteIntentCoordinator,
+} from '../providers/cloud/outboundShipmentTransaction';
 
 const cleanProductTitle = (title: string) =>
   title
@@ -141,6 +145,8 @@ export default function OutboundShipmentDetail() {
   const [pendingItemSaveCount, setPendingItemSaveCount] = useState(0);
   const [itemSaveError, setItemSaveError] = useState<string | null>(null);
   const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
+  const [deleteStatus, setDeleteStatus] = useState<'idle' | 'submitting' | 'unknown' | 'sync-pending'>('idle');
+  const deleteInFlightRef = useRef(false);
   const selectedItemsRef = useRef<OutboundShipmentItem[]>([]);
   const allShipmentItemsRef = useRef<OutboundShipmentItem[]>([]);
   const itemSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -889,16 +895,34 @@ export default function OutboundShipmentDetail() {
   }, [navigate]);
 
   const deleteShipment = async () => {
+    if (!shipment || deleteInFlightRef.current || deleteStatus !== 'idle') return;
     if (pendingItemSaveCountRef.current > 0) {
       alert('出庫項目仍在儲存中，請稍候完成後再刪除出庫單。');
       return;
     }
-    if (!confirm(`確認刪除出庫單「${shipment?.title}」？此操作無法復原。`)) return;
-    const updated = allShipments.filter(s => s.id !== id);
-    await dataProvider.saveOutboundShipments(updated);
-    const updatedItems = allShipmentItems.filter(i => i.outbound_shipment_id !== id);
-    await dataProvider.saveOutboundShipmentItems(updatedItems);
-    navigate('/outbound-shipments');
+    if (!confirm(`確認刪除出庫單「${shipment.title}」？此操作無法復原。`)) return;
+    const command = outboundShipmentDeleteIntentCoordinator.resolve(shipment.id);
+    deleteInFlightRef.current = true;
+    setDeleteStatus('submitting');
+    try {
+      const result = await dataProvider.deleteOutboundShipmentTransaction(command);
+      outboundShipmentDeleteIntentCoordinator.complete(command);
+      if (result.syncPending) {
+        setDeleteStatus('sync-pending');
+        return;
+      }
+      navigate('/outbound-shipments');
+    } catch (error) {
+      if (error instanceof OutboundShipmentDeleteBoundaryError && error.kind === 'result-unknown') {
+        setDeleteStatus('unknown');
+      } else {
+        setDeleteStatus('idle');
+      }
+      if (error instanceof Error) alert(error.message);
+      else alert('刪除出庫單失敗，畫面資料未標記為成功。');
+    } finally {
+      deleteInFlightRef.current = false;
+    }
   };
 
   const inventoryBySku = useMemo(() => {
@@ -988,10 +1012,10 @@ export default function OutboundShipmentDetail() {
       note: formNote || undefined,
       updated_at: new Date().toISOString(),
     };
-    setShipment(updated);
     const all = allShipments.map(s => s.id === id ? updated : s);
-    setAllShipments(all);
     await dataProvider.saveOutboundShipments(all);
+    setShipment(updated);
+    setAllShipments(all);
     setShowHeaderEdit(false);
   };
 
@@ -1004,10 +1028,10 @@ export default function OutboundShipmentDetail() {
       received_at: newStatus === 'received' ? new Date().toISOString().slice(0, 10) : shipment.received_at,
       updated_at: new Date().toISOString(),
     };
-    setShipment(updated);
     const all = allShipments.map(s => s.id === id ? updated : s);
-    setAllShipments(all);
     await dataProvider.saveOutboundShipments(all);
+    setShipment(updated);
+    setAllShipments(all);
   };
 
   const manualEditModal = editingManualItemId ? (
@@ -1406,12 +1430,18 @@ export default function OutboundShipmentDetail() {
               whiteSpace: 'nowrap', flexShrink: 0,
             }}>清空全部</button>
           )}
-          <button onClick={deleteShipment} style={{
+          <button onClick={deleteShipment} disabled={deleteStatus !== 'idle'} style={{
             padding: '8px 12px', background: '#fff', color: '#dc2626',
             border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer',
             whiteSpace: 'nowrap', flexShrink: 0,
             marginLeft: isMobile ? 0 : 'auto',
-          }}>刪除出庫單</button>
+          }}>{deleteStatus === 'submitting' ? '刪除中…' : '刪除出庫單'}</button>
+          {deleteStatus === 'unknown' && (
+            <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>
+          )}
+          {deleteStatus === 'sync-pending' && (
+            <span role="status" style={{ color: '#b45309', fontWeight: 700 }}>出庫單已刪除，畫面同步尚未完成，請勿重複操作。</span>
+          )}
         </div>
       </div>
 

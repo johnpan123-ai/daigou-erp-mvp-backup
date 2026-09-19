@@ -1,6 +1,7 @@
 import type { IDataProvider } from './types';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
+import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
@@ -184,6 +185,24 @@ export class LocalProvider implements IDataProvider {
   }
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     return db.saveOutboundShipmentItems(items);
+  }
+  async deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess> {
+    const [shipments, items] = await Promise.all([db.getOutboundShipments(), db.getOutboundShipmentItems()]);
+    const shipment = shipments.find(entry => entry.id === command.shipmentId);
+    if (!shipment) throw new Error('OUTBOUND_LOCAL_SHIPMENT_MISSING');
+    const itemIds = items.filter(item => item.outbound_shipment_id === command.shipmentId).map(item => item.id).sort();
+    await db.saveOutboundShipmentTransaction(
+      shipments.filter(entry => entry.id !== command.shipmentId),
+      items.filter(item => item.outbound_shipment_id !== command.shipmentId),
+    );
+    return {
+      ok: true,
+      transactionType: 'delete-shipment',
+      idempotencyKey: command.idempotencyKey,
+      replayed: false,
+      shipmentId: command.shipmentId,
+      itemIds,
+    };
   }
   async getBundleComponents(): Promise<BundleComponent[]> {
     return db.getBundleComponents();

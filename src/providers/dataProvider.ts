@@ -27,6 +27,7 @@ import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
+import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
@@ -277,6 +278,9 @@ class DynamicDataProvider implements IDataProvider {
   }
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     await this.guardedWrite(() => this.getActiveProvider().saveOutboundShipmentItems(items));
+  }
+  async deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess> {
+    return this.guardedWrite(() => this.getActiveProvider().deleteOutboundShipmentTransaction(command));
   }
   async getBundleComponents(): Promise<BundleComponent[]> {
     return this.getActiveProvider().getBundleComponents();

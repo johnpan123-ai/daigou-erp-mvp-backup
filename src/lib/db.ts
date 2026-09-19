@@ -559,6 +559,7 @@ export interface DatabaseAdapter {
   saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;
   getOutboundShipmentItems(): Promise<OutboundShipmentItem[]>;
   saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void>;
+  saveOutboundShipmentTransaction(shipments: OutboundShipment[], items: OutboundShipmentItem[]): Promise<void>;
 
   getBundleComponents(): Promise<BundleComponent[]>;
   saveBundleComponents(components: BundleComponent[]): Promise<void>;
@@ -1908,6 +1909,21 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     saveData('erp_outbound_shipment_items', items);
+  }
+
+  async saveOutboundShipmentTransaction(shipments: OutboundShipment[], items: OutboundShipmentItem[]): Promise<void> {
+    const beforeShipments = localStorage.getItem('erp_outbound_shipments');
+    const beforeItems = localStorage.getItem('erp_outbound_shipment_items');
+    try {
+      saveData('erp_outbound_shipments', shipments);
+      saveData('erp_outbound_shipment_items', items);
+    } catch (error) {
+      if (beforeShipments === null) localStorage.removeItem('erp_outbound_shipments');
+      else localStorage.setItem('erp_outbound_shipments', beforeShipments);
+      if (beforeItems === null) localStorage.removeItem('erp_outbound_shipment_items');
+      else localStorage.setItem('erp_outbound_shipment_items', beforeItems);
+      throw error;
+    }
   }
 
   async getBundleComponents(): Promise<BundleComponent[]> {
@@ -3964,6 +3980,19 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     await this.set('erp_outbound_shipment_items', items);
+  }
+
+  async saveOutboundShipmentTransaction(shipments: OutboundShipment[], items: OutboundShipmentItem[]): Promise<void> {
+    const database = await this.dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      store.put(shipments, 'erp_outbound_shipments');
+      store.put(items, 'erp_outbound_shipment_items');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Outbound shipment cache transaction failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Outbound shipment cache transaction aborted'));
+    });
   }
 
   async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {

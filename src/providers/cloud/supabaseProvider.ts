@@ -129,6 +129,16 @@ import {
   type JapanPackageTransactionSuccess,
 } from './japanPackageTransaction';
 import {
+  OUTBOUND_SHIPMENT_TRANSACTION_RPC,
+  OutboundShipmentDeleteBoundaryError,
+  assertOutboundShipmentDeleteSucceeded,
+  buildOutboundShipmentDeleteRequest,
+  clearPendingOutboundDeleteRequest,
+  readOrCreatePendingOutboundDeleteRequest,
+  type OutboundShipmentDeleteCommand,
+  type OutboundShipmentDeleteSuccess,
+} from './outboundShipmentTransaction';
+import {
   CLOUD_RESTORE_RPC,
   CLOUD_RESTORE_SNAPSHOT_RPC,
   CLOUD_RESTORE_SCHEMA_VERSION,
@@ -2097,6 +2107,65 @@ export class SupabaseProvider implements IDataProvider {
       if (!isCloudFieldMutationError(err)) alert(`雲端同步出庫明細失敗：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
+  }
+
+  async deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess> {
+    await this.requireCloudWritePermission();
+    const [currentShipments, currentItems] = await Promise.all([
+      db.getOutboundShipments(),
+      db.getOutboundShipmentItems(),
+    ]);
+    const shipment = currentShipments.find(entry => entry.id === command.shipmentId);
+    if (!shipment) throw new OutboundShipmentDeleteBoundaryError('server-rejected');
+    const scopedItems = currentItems.filter(item => item.outbound_shipment_id === command.shipmentId);
+    const request = readOrCreatePendingOutboundDeleteRequest(
+      command,
+      () => buildOutboundShipmentDeleteRequest(shipment, scopedItems, supabaseEnvironment.projectRef),
+    );
+    const shipmentIds = [command.shipmentId];
+    const itemIds = request.itemOperations.map(operation => operation.id);
+    markLocalCloudWrite('outbound_shipments', shipmentIds);
+    markLocalCloudWrite('outbound_shipment_items', itemIds);
+
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(OUTBOUND_SHIPMENT_TRANSACTION_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_request: request,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      markCloudRequestFailed(caughtError);
+      throw new OutboundShipmentDeleteBoundaryError('result-unknown');
+    }
+    if (error) {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      markCloudRequestFailed(error);
+      throw new OutboundShipmentDeleteBoundaryError('server-rejected');
+    }
+    markCloudReachable();
+    let result: OutboundShipmentDeleteSuccess;
+    try {
+      result = assertOutboundShipmentDeleteSucceeded(data);
+    } catch {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      throw new OutboundShipmentDeleteBoundaryError('server-rejected');
+    }
+    const nextShipments = currentShipments.filter(entry => entry.id !== command.shipmentId);
+    const nextItems = currentItems.filter(item => item.outbound_shipment_id !== command.shipmentId);
+    try {
+      await db.saveOutboundShipmentTransaction(nextShipments, nextItems);
+      clearPendingOutboundDeleteRequest(command.idempotencyKey);
+    } catch {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      return { ...result, syncPending: true };
+    }
+    return result;
   }
 
   async getImportBatches(): Promise<ImportBatch[]> {
