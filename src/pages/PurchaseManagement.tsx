@@ -15,6 +15,7 @@ import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
+import { writeTextToClipboard } from '../lib/safeClipboard';
 import { getProviderMode } from '../providers/providerMode';
 
 
@@ -237,10 +238,9 @@ function MobilePurchaseBatchTab({
     });
 
     try {
-      await navigator.clipboard.writeText(tsvString);
+      await writeTextToClipboard(tsvString);
       alert('已複製本批次帳目（TSV 格式）至剪貼簿！');
-    } catch (err) {
-      console.error('Failed to copy ledger:', err);
+    } catch {
       alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
     }
   };
@@ -1271,10 +1271,9 @@ export default function PurchaseManagement() {
     const tsvString = tsvRows.join('\n');
 
     try {
-      await navigator.clipboard.writeText(tsvString);
+      await writeTextToClipboard(tsvString);
       alert('已複製本商品全部已採購帳目（TSV 格式）至剪貼簿！');
-    } catch (err) {
-      console.error('Failed to copy ledger:', err);
+    } catch {
       alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
     }
   };

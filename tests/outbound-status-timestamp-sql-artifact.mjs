@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const sql = readFileSync(fileURLToPath(new URL('../supabase/sql/033_outbound_status_transition_timestamp.sql', import.meta.url)), 'utf8');
+assert.match(sql, /^BEGIN;/u);
+assert.match(sql, /ADD COLUMN IF NOT EXISTS status_changed_at timestamptz/u);
+assert.match(sql, /OUTBOUND_STATUS_TIMESTAMP_FUNCTION_COLLISION/u);
+assert.match(sql, /ELSIF NEW\.status IS DISTINCT FROM OLD\.status THEN\s+NEW\.status_changed_at := clock_timestamp\(\)/u);
+assert.match(sql, /IF TG_OP = 'INSERT' THEN\s+NEW\.status_changed_at := clock_timestamp\(\)/u);
+assert.match(sql, /ELSE\s+NEW\.status_changed_at := OLD\.status_changed_at/u);
+assert.match(sql, /BEFORE INSERT OR UPDATE OF status/u);
+assert.match(sql, /SECURITY INVOKER/u);
+assert.match(sql, /REVOKE ALL ON FUNCTION public\.erp_set_outbound_status_changed_at\(\) FROM PUBLIC/u);
+assert.match(sql, /OUTBOUND_STATUS_TIMESTAMP_COLUMN_MISMATCH/u);
+assert.match(sql, /OUTBOUND_STATUS_TIMESTAMP_TRIGGER_MISMATCH/u);
+assert.match(sql, /OUTBOUND_STATUS_TIMESTAMP_FUNCTION_MISMATCH/u);
+assert.match(sql, /OUTBOUND_STATUS_TIMESTAMP_FUNCTION_OVERLOAD_MISMATCH/u);
+assert.match(sql, /OUTBOUND_STATUS_TIMESTAMP_INDEX_MISMATCH/u);
+assert.match(sql, /COMMIT;\s*$/u);
+assert.doesNotMatch(sql, /UPDATE public\.outbound_shipments/u, 'Historical rows must not be backfilled from an unrelated update timestamp');
+assert.doesNotMatch(sql, /031_|032_|erp_apply_japan_package|erp_apply_outbound_shipment_transaction/u);
+console.log('PASS 033 records only real status transitions, fails closed in postflight, and does not modify 031/032 business transactions');

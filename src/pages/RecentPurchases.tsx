@@ -5,6 +5,7 @@ import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, Purc
 import { dataProvider } from '../providers/dataProvider';
 import { formatMultiplePurchaseBatchLedgers } from '../lib/purchaseBatchLedger';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { writeTextToClipboard } from '../lib/safeClipboard';
 
 type DateFilter = 'today' | 'yesterday' | '7d' | '30d';
 type CopyFeedback = 'success' | 'error';
@@ -247,12 +248,11 @@ export default function RecentPurchases() {
     }
 
     try {
-      await navigator.clipboard.writeText(ledgerText);
+      await writeTextToClipboard(ledgerText);
       if (isLatestCopyRequest(requestKey, requestId)) {
         showCopyFeedback(dateKey, 'success', setDailyCopyFeedback, dailyCopyTimersRef.current);
       }
-    } catch (error) {
-      console.error('[RecentPurchases] Failed to copy daily ledger:', error);
+    } catch {
       if (isLatestCopyRequest(requestKey, requestId)) {
         showCopyFeedback(dateKey, 'error', setDailyCopyFeedback, dailyCopyTimersRef.current);
       }
@@ -272,12 +272,11 @@ export default function RecentPurchases() {
     }
 
     try {
-      await navigator.clipboard.writeText(ledgerText);
+      await writeTextToClipboard(ledgerText);
       if (isLatestCopyRequest(requestKey, requestId)) {
         showCopyFeedback(rowKey, 'success', setRowCopyFeedback, rowCopyTimersRef.current);
       }
-    } catch (error) {
-      console.error('[RecentPurchases] Failed to copy row ledger:', error);
+    } catch {
       if (isLatestCopyRequest(requestKey, requestId)) {
         showCopyFeedback(rowKey, 'error', setRowCopyFeedback, rowCopyTimersRef.current);
       }

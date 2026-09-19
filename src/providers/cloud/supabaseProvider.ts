@@ -860,6 +860,7 @@ export class SupabaseProvider implements IDataProvider {
             weight_kg: r.weight_kg ? Number(r.weight_kg) : undefined,
             shipping_cost: r.shipping_cost ? Number(r.shipping_cost) : undefined,
             shipped_at: r.shipped_at || '', received_at: r.received_at || '',
+            status_changed_at: r.status_changed_at || undefined,
             note: r.note || '', created_at: r.created_at, updated_at: r.updated_at, version: r.version
           }));
           const mappedShipmentItems: OutboundShipmentItem[] = osiData.map(r => ({

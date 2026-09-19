@@ -138,7 +138,8 @@ const TABLES: Readonly<Record<string, TableCacheAdapter<any>>> = {
       id: canonicalId('outbound_shipments', row), title: String(row.title || ''), status: String(row.status || 'draft'), carrier: String(row.carrier || ''),
       tracking_number: String(row.tracking_number || ''), weight_kg: row.weight_kg == null ? undefined : Number(row.weight_kg),
       shipping_cost: row.shipping_cost == null ? undefined : Number(row.shipping_cost), shipped_at: String(row.shipped_at || ''),
-      received_at: String(row.received_at || ''), note: String(row.note || ''), created_at: row.created_at, ...commonMeta(row),
+      received_at: String(row.received_at || ''), status_changed_at: typeof row.status_changed_at === 'string' ? row.status_changed_at : undefined,
+      note: String(row.note || ''), created_at: row.created_at, ...commonMeta(row),
     } as OutboundShipment), supportsIncremental: true,
   },
   outbound_shipment_items: {

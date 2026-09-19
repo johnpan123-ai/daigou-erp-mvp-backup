@@ -5,6 +5,7 @@ import { ChevronRight, ChevronDown, Trash2, Edit2, Copy } from 'lucide-react';
 import { useViewport } from '../contexts/ViewportContext';
 import { Package } from 'lucide-react';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
+import { writeTextToClipboard } from '../lib/safeClipboard';
 
 function getStatusPriority(status: string): number {
   switch (status) {
@@ -132,10 +133,9 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
     });
 
     try {
-      await navigator.clipboard.writeText(tsvString);
+      await writeTextToClipboard(tsvString);
       alert('已複製本批次帳目（TSV 格式）至剪貼簿！');
-    } catch (err) {
-      console.error('Failed to copy ledger:', err);
+    } catch {
       alert('複製失敗，瀏覽器可能不支援或無剪貼簿寫入權限。');
     }
   };

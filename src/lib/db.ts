@@ -128,6 +128,7 @@ export interface OutboundShipment {
   shipping_cost?: number;
   shipped_at?: string;
   received_at?: string;
+  status_changed_at?: string;
   note?: string;
   created_at?: string;
   updated_at?: string;

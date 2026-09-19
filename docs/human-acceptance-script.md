@@ -56,6 +56,15 @@
 - 禁止：清 cache、F5 補救、共用 session 模擬兩 client、直接 SQL、操作真實資料。
 - 截圖/回貼：兩端操作前/後、衝突提示與最終值；兩個 session 標識（不含 token）、record ID、before/after version、RPC 次數。
 
+## F. Pre-go-live 使用者問題批次
+
+- 近期採購：分別複製單筆商品及整日帳目，貼入試算表；確認每列僅為「商品、數量、單價」三欄，quantity > 1 仍顯示單價而非小計，不同單價不被合併。再於拒絕 Clipboard API 的瀏覽器情境確認 fallback 或明確失敗提示。
+- 部分點收：同一 Japan Package 放入兩筆測試 Item；只勾 A 時，Outbound 商品池只出現 A，B 不出現；勾完 B 後 Package confirmed；取消 A 後 A 退出商品池且 Package 回 arrived。確認可用數量沒有重複。
+- 出庫列表 context：在每個狀態 tab 設定搜尋字及三種排序，進 Detail 再返回；確認 status/search/sort 均保留，重新整理列表也能由 URL 還原。
+- 出庫排序：031/032 不需重套；033 完成 Staging apply/postflight 後，確認「最近狀態變更」依實際狀態時間排序，並分別驗「出庫日期 新→舊／舊→新」。缺少狀態時間的舊資料應穩定排在精確時間資料之後。
+- 出庫摘要：確認「運送中」摘要卡已移除，但全部、草稿、打包中、已出貨、已到台灣 tabs、筆數、搜尋、排序及列表內容不變。
+- 停止：任一複製內容錯誤、unchecked Item 進池、checked Item 未進池、可用量重複、返回 context 遺失、排序使用 updated_at 偽裝狀態時間，或出現任何非預期 business write。
+
 ## 簽核欄位
 
 每項只能填 PASS / FAIL / NOT RUN。FAIL 或 NOT RUN 不得改寫為自動化 PASS；附日期、執行人、Deployment ID、HEAD、Staging ref、證據截圖及 authoritative readback。
