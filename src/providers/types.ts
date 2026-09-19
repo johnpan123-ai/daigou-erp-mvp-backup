@@ -18,6 +18,7 @@ import type {
   OutboundShipmentItem
 } from '../lib/db';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
@@ -56,6 +57,7 @@ export interface IDataProvider {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+  applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess>;
 
   getOutboundShipments(): Promise<OutboundShipment[]>;
   saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;

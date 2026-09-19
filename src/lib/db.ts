@@ -553,6 +553,7 @@ export interface DatabaseAdapter {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+  saveJapanPackageTransaction(packages: JapanPackage[], items: JapanPackageItem[]): Promise<void>;
 
   getOutboundShipments(): Promise<OutboundShipment[]>;
   saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;
@@ -1876,6 +1877,21 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     saveData('erp_japan_package_items', items);
+  }
+
+  async saveJapanPackageTransaction(packages: JapanPackage[], items: JapanPackageItem[]): Promise<void> {
+    const beforePackages = localStorage.getItem('erp_japan_packages');
+    const beforeItems = localStorage.getItem('erp_japan_package_items');
+    try {
+      saveData('erp_japan_packages', packages);
+      saveData('erp_japan_package_items', items);
+    } catch (error) {
+      if (beforePackages === null) localStorage.removeItem('erp_japan_packages');
+      else localStorage.setItem('erp_japan_packages', beforePackages);
+      if (beforeItems === null) localStorage.removeItem('erp_japan_package_items');
+      else localStorage.setItem('erp_japan_package_items', beforeItems);
+      throw error;
+    }
   }
 
   async getOutboundShipments(): Promise<OutboundShipment[]> {
@@ -3919,6 +3935,19 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     await this.set('erp_japan_package_items', items);
+  }
+
+  async saveJapanPackageTransaction(packages: JapanPackage[], items: JapanPackageItem[]): Promise<void> {
+    const database = await this.dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      store.put(packages, 'erp_japan_packages');
+      store.put(items, 'erp_japan_package_items');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Japan Package cache transaction failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Japan Package cache transaction aborted'));
+    });
   }
 
   async getOutboundShipments(): Promise<OutboundShipment[]> {

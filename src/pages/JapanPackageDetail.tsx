@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3, Copy } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
@@ -13,6 +13,11 @@ import {
   sortJapanPackageReceivingItemsByBatchThenSku
 } from '../lib/japanPackageReceivingDisplay';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import {
+  isJapanPackageSubmitBoundaryError,
+  japanPackageIntentCoordinator,
+  type JapanPackageTransactionSuccess,
+} from '../providers/cloud/japanPackageTransaction';
 
 const cleanDisplayProductTitle = (title: string): string => {
   if (!title) return '';
@@ -108,6 +113,25 @@ export default function JapanPackageDetail() {
   
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const transactionInFlightRef = useRef(new Set<string>());
+  const transactionOutcomeUnknownRef = useRef(new Set<string>());
+
+  const commitTransactionResult = (result: JapanPackageTransactionSuccess) => {
+    const canonicalPackage = result.package as unknown as JapanPackage;
+    const canonicalItems = result.items as unknown as JapanPackageItem[];
+    setPkg(canonicalPackage);
+    setPkgForm(prev => ({
+      ...prev,
+      status: canonicalPackage.status,
+      arrived_at: canonicalPackage.arrived_at || '',
+    }));
+    setPackageItems(canonicalItems);
+    setAllPackages(prev => [...prev.filter(item => item.id !== canonicalPackage.id), canonicalPackage]);
+    setAllPackageItems(prev => [
+      ...prev.filter(item => item.japan_package_id !== canonicalPackage.id),
+      ...canonicalItems,
+    ]);
+  };
 
   // Edit Package Form State
   const [pkgForm, setPkgForm] = useState({
@@ -356,34 +380,37 @@ export default function JapanPackageDetail() {
 
   // Bulk operation updates restricted to checked, checked_at, and updated_at fields
   const handleBulkToggleCheck = async (itemIds: string[], checkedVal: boolean) => {
+    if (!id || !pkg || itemIds.length === 0) return;
     const itemIdsSet = new Set(itemIds);
-    const allItems = await dataProvider.getJapanPackageItems();
     const now = new Date().toISOString();
-    
-    const updatedAllItems = allItems.map(item => {
-      if (itemIdsSet.has(item.id)) {
-        return {
-          ...item,
-          checked: checkedVal,
-          checked_at: checkedVal ? now : (null as any),
-          updated_at: now
-        };
-      }
-      return item;
-    });
-
+    const scope = `japan-package-receiving:${id}:${[...itemIdsSet].sort().join(',')}`;
+    if (transactionInFlightRef.current.has(scope)) return;
+    if (transactionOutcomeUnknownRef.current.has(scope)) {
+      alert('日本包裹操作結果待查證，請勿重複操作。');
+      return;
+    }
+    const draft = { packageId: id, itemIds: [...itemIdsSet].sort(), checked: checkedVal };
+    const command = japanPackageIntentCoordinator.resolve(scope, draft, idempotencyKey => ({
+      idempotencyKey,
+      transactionType: 'set-receiving',
+      packageId: id,
+      updates: [...itemIdsSet].map(itemId => ({ itemId, checked: checkedVal, checkedAt: checkedVal ? now : undefined })),
+    }));
+    transactionInFlightRef.current.add(scope);
     try {
-      await dataProvider.saveJapanPackageItems(updatedAllItems);
-      const updatedPackageItems = packageItems.map(item => itemIdsSet.has(item.id) ? {
-        ...item,
-        checked: checkedVal,
-        checked_at: checkedVal ? now : undefined
-      } : item);
-      setPackageItems(updatedPackageItems);
-      await checkAndAutoUpdateStatus(updatedPackageItems);
-    } catch (e) {
-      console.error(e);
-      alert('批量修改點收狀態失敗！');
+      const result = await dataProvider.applyJapanPackageTransaction(command);
+      commitTransactionResult(result);
+      japanPackageIntentCoordinator.complete(scope, command.idempotencyKey);
+      if (result.syncPending) alert('日本包裹操作已提交，畫面同步尚未完成，請勿重複操作。');
+    } catch (error) {
+      if (error instanceof StaleDataError) alert(error.message);
+      else if (isJapanPackageSubmitBoundaryError(error)) {
+        if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(scope);
+        alert(error.message);
+      }
+      else alert('批量修改點收狀態失敗，請重新讀取資料後再確認。');
+    } finally {
+      transactionInFlightRef.current.delete(scope);
     }
   };
 
@@ -744,33 +771,7 @@ export default function JapanPackageDetail() {
 
   // Checkbox confirmation toggling
   const handleToggleCheck = async (itemId: string, checkedVal: boolean) => {
-    const allItems = await dataProvider.getJapanPackageItems();
-    const now = new Date().toISOString();
-    const updatedAllItems = allItems.map(item => {
-      if (item.id === itemId) {
-        return {
-          ...item,
-          checked: checkedVal,
-          checked_at: checkedVal ? now : (null as any),
-          updated_at: now
-        };
-      }
-      return item;
-    });
-
-    try {
-      await dataProvider.saveJapanPackageItems(updatedAllItems);
-      const updatedPackageItems = packageItems.map(item => item.id === itemId ? {
-        ...item,
-        checked: checkedVal,
-        checked_at: checkedVal ? now : undefined
-      } : item);
-      setPackageItems(updatedPackageItems);
-      await checkAndAutoUpdateStatus(updatedPackageItems);
-    } catch (e) {
-      console.error(e);
-      alert('同步勾選狀態失敗！');
-    }
+    await handleBulkToggleCheck([itemId], checkedVal);
   };
 
   const handleDeleteItem = async (itemId: string) => {
@@ -922,24 +923,48 @@ export default function JapanPackageDetail() {
         newItems.push(newItem);
       });
 
-      const updatedAllItems = [...allItems, ...newItems];
-      await dataProvider.saveJapanPackageItems(updatedAllItems);
-      setAllPackages(latestPackages || []);
-      setAllPackageItems(updatedAllItems);
-
-      // Reload package items
-      const updatedPackageItems = [...packageItems, ...newItems];
-      setPackageItems(updatedPackageItems);
-      await checkAndAutoUpdateStatus(updatedPackageItems);
+      const intentScope = `japan-package-attach-batch:${id}`;
+      const intentDraft = selectedLines.map(line => ({
+        purchaseBatchId: line.purchase_batch_id,
+        purchaseBatchItemId: line.purchase_batch_item_id,
+        productVariantId: line.product_variant_id,
+        quantity: line.quantity,
+      })).sort((left, right) => left.purchaseBatchItemId.localeCompare(right.purchaseBatchItemId));
+      if (transactionInFlightRef.current.has(intentScope)) return;
+      if (transactionOutcomeUnknownRef.current.has(intentScope)) {
+        alert('日本包裹操作結果待查證，請勿重複操作。');
+        return;
+      }
+      const command = japanPackageIntentCoordinator.resolve(intentScope, intentDraft, idempotencyKey => ({
+        idempotencyKey,
+        transactionType: 'attach-items',
+        packageId: id,
+        items: newItems,
+      }));
+      transactionInFlightRef.current.add(intentScope);
+      let syncPending = false;
+      try {
+        const result = await dataProvider.applyJapanPackageTransaction(command);
+        commitTransactionResult(result);
+        japanPackageIntentCoordinator.complete(intentScope, command.idempotencyKey);
+        syncPending = Boolean(result.syncPending);
+        if (syncPending) alert('日本包裹操作已提交，畫面同步尚未完成，請勿重複操作。');
+      } finally {
+        transactionInFlightRef.current.delete(intentScope);
+      }
       
       // Reset state
       setImportGroupId('');
       setBatchImportLines([]);
       setExpandedBatchIds(new Set());
-      alert(`成功將 ${newItems.length} 項商品從採購批次加入包裹！`);
-    } catch (e) {
-      console.error(e);
-      alert('匯入失敗！');
+      if (!syncPending) alert(`成功將 ${newItems.length} 項商品從採購批次加入包裹！`);
+    } catch (error) {
+      if (error instanceof StaleDataError) alert(error.message);
+      else if (isJapanPackageSubmitBoundaryError(error)) {
+        if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(`japan-package-attach-batch:${id}`);
+        alert(error.message);
+      }
+      else alert('匯入失敗，請重新讀取資料後再確認。');
     }
   };
 
@@ -992,17 +1017,33 @@ export default function JapanPackageDetail() {
       updated_at: new Date().toISOString()
     };
 
+    const intentScope = `japan-package-attach-variant:${id}:${variantId}`;
+    if (transactionInFlightRef.current.has(intentScope)) return;
+    if (transactionOutcomeUnknownRef.current.has(intentScope)) {
+      alert('日本包裹操作結果待查證，請勿重複操作。');
+      return;
+    }
+    const command = japanPackageIntentCoordinator.resolve(intentScope, { packageId: id, variantId, quantity }, idempotencyKey => ({
+      idempotencyKey,
+      transactionType: 'attach-items',
+      packageId: id,
+      items: [newItem],
+    }));
+    transactionInFlightRef.current.add(intentScope);
     try {
-      const allItems = await dataProvider.getJapanPackageItems();
-      const updatedAllItems = [...allItems, newItem];
-      await dataProvider.saveJapanPackageItems(updatedAllItems);
-
-      const updatedPackageItems = [...packageItems, newItem];
-      setPackageItems(updatedPackageItems);
-      await checkAndAutoUpdateStatus(updatedPackageItems);
-      alert('加入商品成功！');
-    } catch (err) {
-      alert('加入商品失敗！');
+      const result = await dataProvider.applyJapanPackageTransaction(command);
+      commitTransactionResult(result);
+      japanPackageIntentCoordinator.complete(intentScope, command.idempotencyKey);
+      alert(result.syncPending ? '日本包裹操作已提交，畫面同步尚未完成，請勿重複操作。' : '加入商品成功！');
+    } catch (error) {
+      if (error instanceof StaleDataError) alert(error.message);
+      else if (isJapanPackageSubmitBoundaryError(error)) {
+        if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(intentScope);
+        alert(error.message);
+      }
+      else alert('加入商品失敗，請重新讀取資料後再確認。');
+    } finally {
+      transactionInFlightRef.current.delete(intentScope);
     }
   };
 
@@ -1044,20 +1085,43 @@ export default function JapanPackageDetail() {
       updated_at: new Date().toISOString()
     };
 
+    const intentScope = `japan-package-attach-manual:${id}`;
+    if (transactionInFlightRef.current.has(intentScope)) return;
+    if (transactionOutcomeUnknownRef.current.has(intentScope)) {
+      alert('日本包裹操作結果待查證，請勿重複操作。');
+      return;
+    }
+    const intentDraft = {
+      packageId: id,
+      sku: newItem.sku,
+      productTitle: newItem.product_title,
+      variantName: newItem.variant_name,
+      quantity: newItem.quantity,
+      note: newItem.note,
+    };
+    const command = japanPackageIntentCoordinator.resolve(intentScope, intentDraft, idempotencyKey => ({
+      idempotencyKey,
+      transactionType: 'attach-items',
+      packageId: id,
+      items: [newItem],
+    }));
+    transactionInFlightRef.current.add(intentScope);
     setIsAddingManualItem(true);
     try {
-      const allItems = await dataProvider.getJapanPackageItems();
-      await dataProvider.saveJapanPackageItems([...allItems, newItem]);
-
-      const updatedPackageItems = [...packageItems, newItem];
-      setPackageItems(updatedPackageItems);
-      await checkAndAutoUpdateStatus(updatedPackageItems);
+      const result = await dataProvider.applyJapanPackageTransaction(command);
+      commitTransactionResult(result);
+      japanPackageIntentCoordinator.complete(intentScope, command.idempotencyKey);
       setManualItemForm({ sku: '', productTitle: '', variantName: '', twdPrice: '', quantity: '1', note: '' });
-      alert('手動商品已加入包裹！');
-    } catch (e) {
-      console.error(e);
-      alert('手動新增商品失敗！');
+      alert(result.syncPending ? '日本包裹操作已提交，畫面同步尚未完成，請勿重複操作。' : '手動商品已加入包裹！');
+    } catch (error) {
+      if (error instanceof StaleDataError) alert(error.message);
+      else if (isJapanPackageSubmitBoundaryError(error)) {
+        if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(intentScope);
+        alert(error.message);
+      }
+      else alert('手動新增商品失敗，請重新讀取資料後再確認。');
     } finally {
+      transactionInFlightRef.current.delete(intentScope);
       setIsAddingManualItem(false);
     }
   };
@@ -3557,33 +3621,12 @@ export default function JapanPackageDetail() {
                 className="btn btn-primary"
                 style={{ backgroundColor: '#2563eb', padding: '8px 16px', borderRadius: '6px' }}
                 onClick={async () => {
-                  const today = new Date();
-                  const yyyy = today.getFullYear();
-                  const mm = String(today.getMonth() + 1).padStart(2, '0');
-                  const dd = String(today.getDate()).padStart(2, '0');
-                  const arrivedAtVal = pkgForm.arrived_at || `${yyyy}-${mm}-${dd}`;
-                  
-                  const updatedPkg: JapanPackage = {
-                    ...pkg,
-                    status: 'confirmed',
-                    arrived_at: arrivedAtVal,
-                    updated_at: new Date().toISOString()
-                  };
-                  
-                  try {
-                    const allPkgs = await dataProvider.getJapanPackages();
-                    const updatedList = allPkgs.map(p => p.id === id ? updatedPkg : p);
-                    await dataProvider.saveJapanPackages(updatedList);
-                    setPkg(updatedPkg);
-                    setPkgForm(prev => ({
-                      ...prev,
-                      status: 'confirmed',
-                      arrived_at: arrivedAtVal
-                    }));
-                    alert('已成功將包裹標記為【已確認】並自動填寫點收抵達日期！');
-                  } catch (e) {
-                    alert('點收失敗！');
+                  const uncheckedIds = packageItems.filter(item => !item.checked).map(item => item.id);
+                  if (uncheckedIds.length === 0) {
+                    alert('商品已全部點收；請重新讀取包裹狀態後再確認。');
+                    return;
                   }
+                  await handleBulkToggleCheck(uncheckedIds, true);
                 }}
               >
                 確認點收包裹

@@ -119,6 +119,16 @@ import {
   type PurchaseBatchTransactionCommand,
 } from './purchaseBatchTransaction';
 import {
+  JAPAN_PACKAGE_TRANSACTION_RPC,
+  JapanPackageSubmitBoundaryError,
+  assertJapanPackageTransactionSucceeded,
+  buildJapanPackageTransactionRequest,
+  clearPendingJapanPackageRequest,
+  readOrCreatePendingJapanPackageRequest,
+  type JapanPackageTransactionCommand,
+  type JapanPackageTransactionSuccess,
+} from './japanPackageTransaction';
+import {
   CLOUD_RESTORE_RPC,
   CLOUD_RESTORE_SNAPSHOT_RPC,
   CLOUD_RESTORE_SCHEMA_VERSION,
@@ -1929,6 +1939,97 @@ export class SupabaseProvider implements IDataProvider {
 
   async getJapanPackageItems(): Promise<JapanPackageItem[]> {
     return db.getJapanPackageItems();
+  }
+
+  async applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess> {
+    await this.requireCloudWritePermission();
+    const [currentPackages, currentItems] = await Promise.all([
+      db.getJapanPackages(),
+      db.getJapanPackageItems(),
+    ]);
+    const packageId = command.transactionType === 'create-package' ? command.package.id : command.packageId;
+    const currentPackage = currentPackages.find(pkg => pkg.id === packageId);
+    const scopedItems = currentItems.filter(item => item.japan_package_id === packageId);
+    const request = readOrCreatePendingJapanPackageRequest(
+      command,
+      () => buildJapanPackageTransactionRequest(currentPackage, scopedItems, command),
+    );
+    const packageIds = [request.packageId];
+    const itemIds = request.itemOperations.map(operation => operation.id);
+    markLocalCloudWrite('japan_packages', packageIds);
+    markLocalCloudWrite('japan_package_items', itemIds);
+
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(JAPAN_PACKAGE_TRANSACTION_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_request: request,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      markCloudRequestFailed(caughtError);
+      throw new JapanPackageSubmitBoundaryError('result-unknown');
+    }
+    if (error) {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      markCloudRequestFailed(error);
+      throw new JapanPackageSubmitBoundaryError('server-rejected');
+    }
+    markCloudReachable();
+
+    let result: JapanPackageTransactionSuccess;
+    try {
+      result = assertJapanPackageTransactionSucceeded(data);
+    } catch {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      throw new JapanPackageSubmitBoundaryError('server-rejected');
+    }
+
+    const canonicalPackage = {
+      ...result.package,
+      id: String(result.package.id),
+      database_id: String(result.package.id),
+      title: String(result.package.title || ''),
+      status: String(result.package.status || 'registered'),
+      note: String(result.package.note || ''),
+      version: Number(result.package.version ?? 1),
+    } as unknown as JapanPackage;
+    const canonicalItems = result.items.map(row => ({
+      ...row,
+      id: String(row.id),
+      database_id: String(row.id),
+      japan_package_id: String(row.japan_package_id),
+      quantity: Number(row.quantity ?? 0),
+      checked: Boolean(row.checked),
+      version: Number(row.version ?? 1),
+    } as JapanPackageItem));
+    const nextPackages = [...currentPackages.filter(pkg => pkg.id !== canonicalPackage.id), canonicalPackage];
+    const nextItems = [
+      ...currentItems.filter(item => item.japan_package_id !== canonicalPackage.id),
+      ...canonicalItems,
+    ];
+    try {
+      await db.saveJapanPackageTransaction(nextPackages, nextItems);
+      clearPendingJapanPackageRequest(command.idempotencyKey);
+    } catch {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      return {
+        ...result,
+        package: canonicalPackage as unknown as Record<string, unknown>,
+        items: canonicalItems as unknown as Array<Record<string, unknown>>,
+        syncPending: true,
+      };
+    }
+    return {
+      ...result,
+      package: canonicalPackage as unknown as Record<string, unknown>,
+      items: canonicalItems as unknown as Array<Record<string, unknown>>,
+    };
   }
 
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {

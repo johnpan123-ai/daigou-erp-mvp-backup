@@ -26,6 +26,7 @@ import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
@@ -261,6 +262,9 @@ class DynamicDataProvider implements IDataProvider {
   }
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     await this.guardedWrite(() => this.getActiveProvider().saveJapanPackageItems(items));
+  }
+  async applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess> {
+    return this.guardedWrite(() => this.getActiveProvider().applyJapanPackageTransaction(command));
   }
   async getOutboundShipments(): Promise<OutboundShipment[]> {
     return this.getActiveProvider().getOutboundShipments();
