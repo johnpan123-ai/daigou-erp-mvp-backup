@@ -8,6 +8,7 @@ import { AlertTriangle, ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, 
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { getCloudConnectivitySnapshot } from '../providers/cloud/cloudConnectivity';
 
 interface VariantDetail {
   id: string;
@@ -298,18 +299,20 @@ export default function Purchasing() {
 
   const loadAllData = async () => {
     const requestId = ++loadSequenceRef.current;
+    const convergence = dataProvider.waitForCloudBootstrapConvergence();
     setLoading(true);
-    try {
+
+    const readSnapshot = async () => {
       const [
-        fetchedGroups,
-        fetchedVars,
-        fetchedCats,
-        fetchedPrivateOrders,
-        fetchedPrivateItems,
-        fetchedInventory,
-        fetchedBatchItems,
-        fetchedSalesOrderItems,
-        fetchedBatches
+        productGroups,
+        productVariants,
+        productCategories,
+        privateOrderRows,
+        privateOrderItemRows,
+        inventoryRows,
+        batchItemRows,
+        salesOrderItemRows,
+        batchRows,
       ] = await Promise.all([
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
@@ -319,23 +322,59 @@ export default function Purchasing() {
         dataProvider.getInventory(),
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getSalesOrderItems(),
-        dataProvider.getPurchaseBatches()
+        dataProvider.getPurchaseBatches(),
       ]);
+      return {
+        productGroups,
+        productVariants,
+        productCategories,
+        privateOrderRows,
+        privateOrderItemRows,
+        inventoryRows,
+        batchItemRows,
+        salesOrderItemRows,
+        batchRows,
+      };
+    };
 
-      if (requestId !== loadSequenceRef.current) return;
-
-      setGroups(fetchedGroups);
-      setVariants(fetchedVars);
-      setCategories(fetchedCats);
-      setPrivateOrders(fetchedPrivateOrders);
-      setPrivateOrderItems(fetchedPrivateItems);
-      setInventory(fetchedInventory);
-      setPurchaseBatchItems(fetchedBatchItems);
-      setSalesOrderItems(fetchedSalesOrderItems);
-      setPurchaseBatches(fetchedBatches);
+    const applySnapshot = (snapshot: Awaited<ReturnType<typeof readSnapshot>>) => {
+      setGroups(snapshot.productGroups);
+      setVariants(snapshot.productVariants);
+      setCategories(snapshot.productCategories);
+      setPrivateOrders(snapshot.privateOrderRows);
+      setPrivateOrderItems(snapshot.privateOrderItemRows);
+      setInventory(snapshot.inventoryRows);
+      setPurchaseBatchItems(snapshot.batchItemRows);
+      setSalesOrderItems(snapshot.salesOrderItemRows);
+      setPurchaseBatches(snapshot.batchRows);
       setLoadError(null);
       setHasCompletedLoad(true);
-      dataProvider.registerFreshLoad();
+    };
+
+    const registerFreshLoadIfAuthoritative = () => {
+      const { readStatus } = getCloudConnectivitySnapshot();
+      if (readStatus === 'fresh-online' || readStatus === 'fresh-empty') {
+        dataProvider.registerFreshLoad();
+      }
+    };
+
+    try {
+      const initialSnapshot = await readSnapshot();
+
+      if (requestId !== loadSequenceRef.current) return;
+      applySnapshot(initialSnapshot);
+      setLoading(false);
+      registerFreshLoadIfAuthoritative();
+
+      // The timeout boundary may intentionally expose the previous cache while the
+      // detached Cloud pull continues. Re-read this mounted page after that pull has
+      // atomically replaced the cache; the request generation rejects late results.
+      if (await convergence) {
+        const authoritativeSnapshot = await readSnapshot();
+        if (requestId !== loadSequenceRef.current) return;
+        applySnapshot(authoritativeSnapshot);
+        registerFreshLoadIfAuthoritative();
+      }
     } catch (err) {
       console.error("Failed to load data for mobile purchase summary:", err);
       if (requestId === loadSequenceRef.current) {
@@ -348,6 +387,9 @@ export default function Purchasing() {
 
   useEffect(() => {
     loadAllData();
+    return () => {
+      loadSequenceRef.current += 1;
+    };
   }, []);
 
   useCloudResourceSync(

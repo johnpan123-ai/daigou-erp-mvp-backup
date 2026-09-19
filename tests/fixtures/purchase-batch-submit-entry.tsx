@@ -9,7 +9,7 @@ import { PurchaseBatchSubmitBoundaryError } from '../../src/providers/cloud/purc
 import { CloudOfflineWriteError } from '../../src/providers/cloud/cloudConnectivity';
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../../src/lib/db';
 
-type Scenario = 'success' | 'stale' | 'readiness' | 'conflict' | 'server-rejected' | 'unknown' | 'postcommit' | 'pending';
+type Scenario = 'success' | 'stale' | 'readiness' | 'conflict' | 'server-rejected' | 'unknown' | 'postcommit' | 'pending' | 'convergence';
 
 const groupId = '60000000-0000-4000-8000-000000000001';
 const variantId = '60000000-0000-4000-8000-000000000002';
@@ -23,6 +23,8 @@ const group = {
   deleted_at: null,
   version: 1,
 } as unknown as ProductGroup;
+const staleGroup = { ...group, title: 'F2 Stale Cache Group', normalized_title: 'F2 Stale Cache Group' } as ProductGroup;
+const authoritativeGroup = { ...group, title: 'F2 Authoritative Group', normalized_title: 'F2 Authoritative Group', version: 2 } as ProductGroup;
 const variant = {
   id: variantId,
   local_id: variantId,
@@ -49,6 +51,9 @@ let variantWriteCalls = 0;
 let capturedCommand: PurchaseBatchTransactionCommand | null = null;
 const idempotencyKeys: string[] = [];
 let releasePending: (() => void) | null = null;
+let authoritativeCacheReady = false;
+let groupReadCalls = 0;
+const convergenceResolvers: Array<(value: boolean) => void> = [];
 
 const commit = (command: PurchaseBatchTransactionCommand) => {
   batches = [command.batch];
@@ -56,7 +61,11 @@ const commit = (command: PurchaseBatchTransactionCommand) => {
 };
 
 Object.assign(dataProvider, {
-  getProductGroups: async () => [group],
+  getProductGroups: async () => {
+    groupReadCalls += 1;
+    if (scenario === 'convergence') return [authoritativeCacheReady ? authoritativeGroup : staleGroup];
+    return [group];
+  },
   getProductVariants: async () => [variant],
   getProductCategories: async () => [],
   getPrivateOrders: async () => [],
@@ -65,6 +74,10 @@ Object.assign(dataProvider, {
   getPurchaseBatchItems: async () => items,
   getSalesOrderItems: async () => [],
   getPurchaseBatches: async () => batches,
+  waitForCloudBootstrapConvergence: async () => {
+    if (scenario !== 'convergence') return false;
+    return new Promise<boolean>(resolve => convergenceResolvers.push(resolve));
+  },
   registerFreshLoad: () => {},
   checkIsStaleLive: () => false,
   onStaleChange: () => () => {},
@@ -105,8 +118,14 @@ window.__PURCHASE_BATCH_SUBMIT_TEST__ = {
     items: structuredClone(items),
     command: capturedCommand ? structuredClone(capturedCommand) : null,
     idempotencyKeys: [...idempotencyKeys],
+    groupReadCalls,
+    authoritativeCacheReady,
   }),
   releasePending: () => releasePending?.(),
+  releaseConvergence: () => {
+    authoritativeCacheReady = true;
+    convergenceResolvers.splice(0).forEach(resolve => resolve(true));
+  },
 };
 
 createRoot(document.getElementById('root')!).render(
@@ -122,6 +141,7 @@ declare global {
     __PURCHASE_BATCH_SUBMIT_TEST__: {
       snapshot: () => Record<string, unknown>;
       releasePending: () => void;
+      releaseConvergence: () => void;
     };
   }
 }

@@ -132,6 +132,64 @@ try {
   assert.equal(slowBootstrap.afterCompletion.productGroups[0].title, 'Server group');
   assert.equal(slowBootstrap.state.readStatus, 'fresh-online');
 
+  const timeoutRaceFixture = await openFixturePage();
+  const timeoutRace = await timeoutRaceFixture.page.evaluate(async () => {
+    const { cloudCacheDb } = await import('/src/lib/db.ts');
+    const { supabaseProvider } = await import('/src/providers/cloud/supabaseProvider.ts');
+    const { supabase } = await import('/src/providers/cloud/supabaseClient.ts');
+    const { getCloudConnectivitySnapshot } = await import('/src/providers/cloud/cloudConnectivity.ts');
+    const staleGroup = { id: '89000000-0000-4000-8000-000000000001', title: 'Timeout race stale group', priority: 'Medium' };
+    const serverGroup = { id: '89000000-0000-4000-8000-000000000002', title: 'Timeout race server group', priority: 'Medium', version: 2 };
+    const serverInventory = [{
+      id: '89000000-0000-4000-8000-000000000003', inventory_key: 'timeout-race-key',
+      myacg_item_code: 'TIMEOUT-RACE-SKU', product_title: 'Timeout race server catalog',
+      normalized_product_title: 'Timeout race server catalog', raw_variant_name: '', listing_type: '',
+      final_price: 10, myacg_available_quantity: 2, myacg_sold_quantity: 0, myacg_listed_at: '',
+    }];
+    await cloudCacheDb.saveProductGroups([staleGroup]);
+    localStorage.setItem('erp_cloud_cache_sync_version', 'v2_pagination');
+    const originalGetProductGroups = cloudCacheDb.getProductGroups.bind(cloudCacheDb);
+    let cacheReadCalls = 0;
+    const queryCalls = {};
+    cloudCacheDb.getProductGroups = async (...args) => {
+      cacheReadCalls += 1;
+      if (cacheReadCalls === 1) await new Promise(resolve => setTimeout(resolve, 500));
+      return originalGetProductGroups(...args);
+    };
+    supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-user', email: 'fixture@example.test' } } }, error: null });
+    supabase.from = table => {
+      queryCalls[table] = (queryCalls[table] || 0) + 1;
+      const builder = {
+        select() { return builder; }, is() { return builder; }, order() { return builder; }, range() { return builder; },
+        eq() { return builder; }, limit() { return builder; },
+        single: async () => table === 'profiles' ? ({ data: { role: 'owner' }, error: null }) : ({ data: null, error: null }),
+        then(resolve, reject) {
+          const data = table === 'product_groups' ? [serverGroup] : table === 'inventory_items' ? serverInventory : [];
+          const delay = table === 'inventory_items' ? 4_200 : 0;
+          return new Promise(done => setTimeout(() => done({ data, error: null }), delay)).then(resolve, reject);
+        },
+      };
+      return builder;
+    };
+    const convergence = supabaseProvider.waitForCloudBootstrapConvergence();
+    await supabaseProvider.pullCoreProductData();
+    const converged = await convergence;
+    await supabaseProvider.getProductGroups();
+    return {
+      converged,
+      cacheReadCalls,
+      productGroupQueryCalls: queryCalls.product_groups || 0,
+      state: getCloudConnectivitySnapshot(),
+      groups: await originalGetProductGroups(),
+    };
+  });
+  await timeoutRaceFixture.context.close();
+  assert.equal(timeoutRace.converged, true);
+  assert.ok(timeoutRace.cacheReadCalls >= 2, 'Fixture must overlap timeout fallback cache reads with authoritative completion');
+  assert.equal(timeoutRace.productGroupQueryCalls, 1, 'A late timeout fallback must not make the completed pull eligible for a duplicate full pull');
+  assert.equal(timeoutRace.groups[0].title, 'Timeout race server group');
+  assert.equal(timeoutRace.state.readStatus, 'fresh-online', 'A late timeout fallback must not downgrade a newer authoritative commit');
+
   const emptyFixture = await openFixturePage();
   const freshEmpty = await emptyFixture.page.evaluate(async () => {
     const { cloudCacheDb } = await import('/src/lib/db.ts');

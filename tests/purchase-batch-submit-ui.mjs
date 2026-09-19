@@ -45,6 +45,22 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   try {
     {
+      const page = await context.newPage();
+      await page.goto(`${BASE_URL}?scenario=convergence`, { waitUntil: 'networkidle' });
+      await page.getByText('F2 Stale Cache Group', { exact: true }).waitFor();
+      const before = await page.evaluate(() => window.__PURCHASE_BATCH_SUBMIT_TEST__.snapshot());
+      await page.evaluate(() => window.__PURCHASE_BATCH_SUBMIT_TEST__.releaseConvergence());
+      await page.getByText('F2 Authoritative Group', { exact: true }).waitFor();
+      assert.equal(await page.getByText('F2 Stale Cache Group', { exact: true }).count(), 0);
+      const after = await page.evaluate(() => window.__PURCHASE_BATCH_SUBMIT_TEST__.snapshot());
+      assert.ok(after.groupReadCalls > before.groupReadCalls, 'Mounted Purchasing must re-read after authoritative cache convergence');
+      assert.equal(after.saveCalls, 0);
+      assert.equal(after.rpcCalls, 0);
+      assert.equal(page.url().includes('/purchase-records/'), false);
+      await page.close();
+    }
+
+    {
       const { page, modal } = await openModal(context, 'success');
       await modal.getByRole('button', { name: '儲存', exact: true }).click();
       await page.waitForFunction(() => window.__PURCHASE_BATCH_SUBMIT_TEST__.snapshot().rpcCalls === 1);
@@ -160,6 +176,7 @@ try {
     }
 
     console.log('PASS real Purchasing parent and PurchaseBatchModal dispatch one valid atomic command');
+    console.log('PASS mounted Purchasing replaces stale cache after authoritative convergence without remount or write');
     console.log('PASS pre-RPC stale rejection and invalid lines preserve the draft with explicit status');
     console.log('PASS readiness rejection, double-click, unknown-result, server rejection, and post-commit sync-pending boundaries');
   } finally {

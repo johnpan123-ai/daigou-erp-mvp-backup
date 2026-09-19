@@ -655,6 +655,7 @@ export class SupabaseProvider implements IDataProvider {
     }
     if (this.isPulled) return;
     if (this.pullPromise) return this.pullPromise;
+    const startingAuthoritativeGeneration = this.authoritativeCacheGeneration;
 
     const syncPromise = (async () => {
       try {
@@ -987,6 +988,10 @@ export class SupabaseProvider implements IDataProvider {
 
     this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(async err => {
       console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
+      // The detached authoritative pull continues after the four-second UI boundary.
+      // If it committed while this fallback was being scheduled, it is newer than the
+      // timeout and must not be downgraded back to stale or made eligible for a second pull.
+      if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
       const cachedRows = await Promise.all([
         db.getProductGroups(),
         db.getProductCategories(),
@@ -996,6 +1001,7 @@ export class SupabaseProvider implements IDataProvider {
         db.getPrivateOrders(),
         db.getPrivateOrderItems(),
       ]);
+      if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
       markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
       this.isPulled = false;
     });
