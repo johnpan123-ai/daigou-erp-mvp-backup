@@ -319,6 +319,7 @@ DECLARE
   v_owner oid;
   v_kind "char";
   v_public_execute boolean;
+  v_search_path_values text[];
 BEGIN
   IF v_function_oid IS NULL THEN
     RAISE EXCEPTION 'F3_FUNCTION_SIGNATURE_MISSING' USING ERRCODE = '55000';
@@ -339,18 +340,40 @@ BEGIN
    WHERE namespace.nspname = 'public'
      AND procedure.proname = 'erp_apply_japan_package_transaction';
   IF v_schema_name IS DISTINCT FROM 'public'
-     OR v_function_name IS DISTINCT FROM 'erp_apply_japan_package_transaction'
-     OR v_overload_count IS DISTINCT FROM 1
-     OR v_argument_count IS DISTINCT FROM 2
-     OR v_argument_types[0] IS DISTINCT FROM 'uuid'::pg_catalog.regtype::oid
-     OR v_argument_types[1] IS DISTINCT FROM 'jsonb'::pg_catalog.regtype::oid
-     OR v_argument_names IS DISTINCT FROM ARRAY['p_idempotency_key', 'p_request']::text[]
-     OR v_return_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype
-     OR v_kind IS DISTINCT FROM 'f'
-     OR v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user)
-     OR v_security_definer IS DISTINCT FROM true
-     OR NOT COALESCE('search_path=' = ANY(v_config), false) THEN
-    RAISE EXCEPTION 'F3_FUNCTION_SECURITY_CONTRACT_MISMATCH' USING ERRCODE = '55000';
+     OR v_function_name IS DISTINCT FROM 'erp_apply_japan_package_transaction' THEN
+    RAISE EXCEPTION 'F3_FUNCTION_SIGNATURE_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_overload_count IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'F3_FUNCTION_OVERLOAD_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_argument_count IS DISTINCT FROM 2 THEN
+    RAISE EXCEPTION 'F3_FUNCTION_ARG_COUNT_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_argument_types[0] IS DISTINCT FROM 'uuid'::pg_catalog.regtype::oid
+     OR v_argument_types[1] IS DISTINCT FROM 'jsonb'::pg_catalog.regtype::oid THEN
+    RAISE EXCEPTION 'F3_FUNCTION_ARG_TYPES_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_argument_names IS DISTINCT FROM ARRAY['p_idempotency_key', 'p_request']::text[] THEN
+    RAISE EXCEPTION 'F3_FUNCTION_ARG_NAMES_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_return_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype THEN
+    RAISE EXCEPTION 'F3_FUNCTION_RETURN_TYPE_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_kind IS DISTINCT FROM 'f' THEN
+    RAISE EXCEPTION 'F3_FUNCTION_KIND_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user) THEN
+    RAISE EXCEPTION 'F3_FUNCTION_OWNER_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_security_definer IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'F3_FUNCTION_SECURITY_DEFINER_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  SELECT pg_catalog.array_agg(pg_catalog.split_part(config_entry, '=', 2) ORDER BY config_entry)
+    INTO v_search_path_values
+    FROM pg_catalog.unnest(COALESCE(v_config, ARRAY[]::text[])) config_entry
+   WHERE pg_catalog.split_part(config_entry, '=', 1) = 'search_path';
+  IF v_search_path_values IS DISTINCT FROM ARRAY['""']::text[] THEN
+    RAISE EXCEPTION 'F3_FUNCTION_SEARCH_PATH_MISMATCH' USING ERRCODE = '55000';
   END IF;
   SELECT EXISTS (
     SELECT 1
@@ -363,10 +386,14 @@ BEGIN
        AND privilege.grantee = 0
        AND privilege.privilege_type = 'EXECUTE'
   ) INTO v_public_execute;
-  IF pg_catalog.has_function_privilege('anon', v_function_oid, 'EXECUTE')
-     OR v_public_execute
-     OR NOT pg_catalog.has_function_privilege('authenticated', v_function_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION 'F3_FUNCTION_ACL_MISMATCH' USING ERRCODE = '55000';
+  IF v_public_execute THEN
+    RAISE EXCEPTION 'F3_FUNCTION_PUBLIC_ACL_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF pg_catalog.has_function_privilege('anon', v_function_oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'F3_FUNCTION_ANON_ACL_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF NOT pg_catalog.has_function_privilege('authenticated', v_function_oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'F3_FUNCTION_AUTHENTICATED_ACL_MISMATCH' USING ERRCODE = '55000';
   END IF;
 END;
 $$;

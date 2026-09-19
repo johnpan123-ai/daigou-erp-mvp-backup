@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  assertPostgresFunctionContractMatrix,
+  assertPostgresFunctionDiagnosticMatrix,
+  LIVE_STAGING_CATALOG_REFERENCES,
   POSTGRES_TYPE_OIDS,
+  retargetLiveCatalog,
 } from './helpers/postgres-function-contract-fixture.mjs';
 
 const SQL = await readFile(new URL('../supabase/sql/032_outbound_shipment_atomic_delete.sql', import.meta.url), 'utf8');
@@ -33,6 +35,25 @@ assert.match(SQL, /v_argument_types\[1\] IS DISTINCT FROM 'jsonb'::pg_catalog\.r
 assert.match(SQL, /v_argument_names IS DISTINCT FROM ARRAY\['p_idempotency_key', 'p_request'\]::text\[\]/u);
 assert.match(SQL, /v_security_definer IS DISTINCT FROM true/u);
 assert.match(SQL, /v_public_execute/u);
+assert.match(SQL, /v_search_path_values IS DISTINCT FROM ARRAY\['""'\]::text\[\]/u);
+assert.match(SQL, /v_statement_timeout_values IS DISTINCT FROM ARRAY\['15s'\]::text\[\]/u);
+assert.doesNotMatch(SQL, /F4_OUTBOUND_POSTFLIGHT_FUNCTION_CONTRACT_MISMATCH|F4_OUTBOUND_POSTFLIGHT_ACL_MISMATCH/u);
+for (const diagnosticCode of [
+  'F4_OUTBOUND_POSTFLIGHT_SIGNATURE_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_OVERLOAD_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_ARG_COUNT_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_ARG_TYPES_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_ARG_NAMES_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_RETURN_TYPE_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_KIND_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_OWNER_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_SECURITY_DEFINER_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_SEARCH_PATH_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_TIMEOUT_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_PUBLIC_ACL_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_ANON_ACL_MISMATCH',
+  'F4_OUTBOUND_POSTFLIGHT_AUTHENTICATED_ACL_MISMATCH',
+]) assert.match(SQL, new RegExp(diagnosticCode, 'u'));
 assert.doesNotMatch(SQL, /ALTER TABLE public\.(?:outbound_shipments|outbound_shipment_items)|DISABLE TRIGGER|DROP POLICY/u);
 
 const expectedContract = {
@@ -41,28 +62,38 @@ const expectedContract = {
   argumentTypes: [POSTGRES_TYPE_OIDS.uuid, POSTGRES_TYPE_OIDS.jsonb],
   argumentNames: ['p_idempotency_key', 'p_request'],
   returnType: POSTGRES_TYPE_OIDS.jsonb,
-  requiredConfig: ['search_path=', 'statement_timeout=15s'],
+  configValues: { search_path: '""', statement_timeout: '15s' },
 };
-const liveNamedArgumentCatalogFixture = {
-  resolved: true,
-  schemaName: 'public',
-  functionName: 'erp_apply_outbound_shipment_transaction',
-  overloadCount: 1,
-  argumentCount: 2,
-  argumentTypes: [POSTGRES_TYPE_OIDS.uuid, POSTGRES_TYPE_OIDS.jsonb],
-  argumentNames: ['p_idempotency_key', 'p_request'],
-  identityArguments: 'p_idempotency_key uuid, p_request jsonb',
-  returnType: POSTGRES_TYPE_OIDS.jsonb,
-  kind: 'f',
-  securityDefiner: true,
-  ownerMatchesCurrentUser: true,
-  config: ['search_path=', 'statement_timeout=15s'],
-  publicExecute: false,
-  anonExecute: false,
-  authenticatedExecute: true,
+const diagnosticCodes = {
+  signatureMissing: 'F4_OUTBOUND_POSTFLIGHT_FUNCTION_MISSING',
+  signature: 'F4_OUTBOUND_POSTFLIGHT_SIGNATURE_MISMATCH',
+  overload: 'F4_OUTBOUND_POSTFLIGHT_OVERLOAD_MISMATCH',
+  argumentCount: 'F4_OUTBOUND_POSTFLIGHT_ARG_COUNT_MISMATCH',
+  argumentTypes: 'F4_OUTBOUND_POSTFLIGHT_ARG_TYPES_MISMATCH',
+  argumentNames: 'F4_OUTBOUND_POSTFLIGHT_ARG_NAMES_MISMATCH',
+  returnType: 'F4_OUTBOUND_POSTFLIGHT_RETURN_TYPE_MISMATCH',
+  kind: 'F4_OUTBOUND_POSTFLIGHT_KIND_MISMATCH',
+  owner: 'F4_OUTBOUND_POSTFLIGHT_OWNER_MISMATCH',
+  securityDefiner: 'F4_OUTBOUND_POSTFLIGHT_SECURITY_DEFINER_MISMATCH',
+  config: {
+    search_path: 'F4_OUTBOUND_POSTFLIGHT_SEARCH_PATH_MISMATCH',
+    statement_timeout: 'F4_OUTBOUND_POSTFLIGHT_TIMEOUT_MISMATCH',
+  },
+  publicAcl: 'F4_OUTBOUND_POSTFLIGHT_PUBLIC_ACL_MISMATCH',
+  anonAcl: 'F4_OUTBOUND_POSTFLIGHT_ANON_ACL_MISMATCH',
+  authenticatedAcl: 'F4_OUTBOUND_POSTFLIGHT_AUTHENTICATED_ACL_MISMATCH',
 };
-assertPostgresFunctionContractMatrix(assert, liveNamedArgumentCatalogFixture, expectedContract);
+const liveShapedCatalogFixture = retargetLiveCatalog(
+  LIVE_STAGING_CATALOG_REFERENCES.purchaseBatch,
+  expectedContract,
+);
+assertPostgresFunctionDiagnosticMatrix(
+  assert,
+  liveShapedCatalogFixture,
+  expectedContract,
+  diagnosticCodes,
+);
 
 console.log('PASS 032 transaction, owner, target, exact-child-scope, CAS/idempotency and ACL artifact contract');
-console.log('PASS 032 live-shaped named-argument catalog fixture and fail-closed mismatch matrix');
+console.log('PASS 032 calibrated Live-shaped catalog fixture and per-predicate diagnostic matrix');
 console.log('NOTE static SQL validation only; PostgreSQL apply remains pending');
