@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { createServer } from 'vite';
 
 const SQL = readFileSync(new URL('../supabase/sql/036_cloud_restore_final_closure.sql', import.meta.url), 'utf8');
+const SQL_028 = readFileSync(new URL('../supabase/sql/028_cloud_restore_schema_aware_safeupdate_delete.sql', import.meta.url), 'utf8');
 const SQL_030 = readFileSync(new URL('../supabase/sql/030_cloud_restore_cross_environment_audit_identity_portability.sql', import.meta.url), 'utf8');
 const SQL_035 = readFileSync(new URL('../supabase/sql/035_cloud_restore_cross_environment_effective_path.sql', import.meta.url), 'utf8');
 const SUBMIT = readFileSync(new URL('../src/providers/cloud/cloudRestoreSubmit.ts', import.meta.url), 'utf8');
@@ -15,6 +16,46 @@ const TABLES = [
   'japan_packages','japan_package_items','outbound_shipments','outbound_shipment_items',
 ];
 
+const compactDefinition = value => value.toLowerCase().replace(/\s+/gu, '');
+const countOccurrences = (value, needle) => value.split(needle).length - 1;
+const VALIDATOR_CALL = 'performpublic.erp_cloud_restore_validate_portability(';
+const LEGACY_WIRING = 'v_server_fingerprint:=public.erp_cloud_restore_idempotency_fingerprint(p_snapshot,p_manifest);';
+const LEGACY_WIRING_SOURCE = 'v_server_fingerprint := public.erp_cloud_restore_idempotency_fingerprint(p_snapshot, p_manifest);';
+const FIRST_DELETE = 'deletefrompublic.';
+const assertValidationPath = ({ builderDefinition, fingerprintDefinition, legacyDefinition, expectedBuilderCalls }) => {
+  const compactBuilder = compactDefinition(builderDefinition);
+  const compactFingerprint = compactDefinition(fingerprintDefinition);
+  const compactLegacy = compactDefinition(legacyDefinition);
+  assert.equal(countOccurrences(compactBuilder, VALIDATOR_CALL), expectedBuilderCalls);
+  assert.equal(countOccurrences(compactFingerprint, VALIDATOR_CALL), 1);
+  assert.equal(countOccurrences(compactLegacy, LEGACY_WIRING), 1);
+  assert.equal(countOccurrences(compactBuilder, "jsonb_build_object('updated_by',null)"), 1);
+  assert.equal(countOccurrences(compactBuilder, 'cross-environment-audit-null-v1'), 1);
+  assert.notEqual(compactLegacy.indexOf(FIRST_DELETE), -1);
+  assert(compactLegacy.indexOf(LEGACY_WIRING) < compactLegacy.indexOf(FIRST_DELETE));
+};
+
+const oldBuilder = SQL_035.slice(
+  SQL_035.indexOf('create function public.erp_cloud_restore_build_effective_snapshot('),
+  SQL_035.indexOf('revoke all on function public.erp_cloud_restore_build_effective_snapshot('),
+);
+const newBuilder = SQL.slice(
+  SQL.indexOf('create or replace function public.erp_cloud_restore_build_effective_snapshot('),
+  SQL.indexOf('revoke all on function public.erp_cloud_restore_build_effective_snapshot('),
+);
+const fingerprintDefinition = SQL_030.slice(
+  SQL_030.indexOf('create or replace function public.erp_cloud_restore_idempotency_fingerprint('),
+  SQL_030.indexOf('revoke all on function public.erp_cloud_restore_idempotency_fingerprint('),
+);
+const legacy028 = SQL_028.slice(
+  SQL_028.indexOf('create or replace function public.erp_restore_cloud_snapshot('),
+  SQL_028.indexOf('revoke all on function public.erp_restore_cloud_snapshot('),
+);
+const legacy035 = legacy028.replace(
+  "v_server_fingerprint := encode(digest(convert_to(p_snapshot::text, 'UTF8'), 'sha256'), 'hex');",
+  LEGACY_WIRING_SOURCE,
+);
+
 assert.equal((SQL.match(/^begin;$/gimu) || []).length, 1);
 assert.equal((SQL.match(/^commit;$/gimu) || []).length, 1);
 assert.match(SQL, /CLOUD_RESTORE_FINAL_CLOSURE_TIMEOUT_BASE_MISMATCH/u);
@@ -23,11 +64,22 @@ assert.doesNotMatch(SQL, /statement_timeout\s*=\s*'(?:0|0ms)'/u);
 assert.doesNotMatch(SQL, /alter\s+(?:role|database)/iu);
 assert.doesNotMatch(SQL, /has_table_privilege\([^\n]+['"]ALTER['"]/iu);
 assert.match(SQL, /count\(\*\) filter[\s\S]+jsonb_agg[\s\S]+jsonb_array_elements\(p_source_snapshot->v_table\)/iu);
-const builder = SQL.slice(SQL.indexOf('create or replace function public.erp_cloud_restore_build_effective_snapshot('), SQL.indexOf('alter function public.erp_cloud_restore_validate_portability'));
-assert.equal((builder.match(/jsonb_array_elements\(p_source_snapshot->v_table\)/gu) || []).length, 1, 'Each table is transformed and counted in one traversal');
-assert.doesNotMatch(builder, /perform public\.erp_cloud_restore_validate_portability/u, 'Final validation must not be duplicated in the builder');
+assert.equal((newBuilder.match(/jsonb_array_elements\(p_source_snapshot->v_table\)/gu) || []).length, 1, 'Each table is transformed and counted in one traversal');
+assert.doesNotMatch(newBuilder, /perform public\.erp_cloud_restore_validate_portability/u, 'Final validation must not be duplicated in the replacement builder');
 assert.match(SQL_030, /v_server_fingerprint := public\.erp_cloud_restore_idempotency_fingerprint\(p_snapshot, p_manifest\);/u);
 assert.match(SQL_030, /perform public\.erp_cloud_restore_validate_portability\([\s\S]+p_snapshot/iu, 'Final validation remains before the legacy destructive path');
+assert.match(SQL, /regexp_count\(v_builder_definition, 'performpublic\\\.erp_cloud_restore_validate_portability\\\('\) <> 1/u, 'Preflight must pin the live 035 builder base');
+assert.match(SQL, /regexp_count\(v_fingerprint_definition, 'performpublic\\\.erp_cloud_restore_validate_portability\\\('\) <> 1/u);
+assert.match(SQL, /regexp_count\(v_legacy_definition, 'v_server_fingerprint:=public\\\.erp_cloud_restore_idempotency_fingerprint/u);
+assertValidationPath({ builderDefinition: oldBuilder, fingerprintDefinition, legacyDefinition: legacy035, expectedBuilderCalls: 1 });
+assertValidationPath({ builderDefinition: newBuilder, fingerprintDefinition, legacyDefinition: legacy035, expectedBuilderCalls: 0 });
+assert.throws(() => assertValidationPath({ builderDefinition: `${newBuilder}\nperform public.erp_cloud_restore_validate_portability(null,null,null);`, fingerprintDefinition, legacyDefinition: legacy035, expectedBuilderCalls: 0 }));
+assert.throws(() => assertValidationPath({ builderDefinition: newBuilder, fingerprintDefinition: fingerprintDefinition.replace(/perform public\.erp_cloud_restore_validate_portability\([\s\S]*?\);/u, ''), legacyDefinition: legacy035, expectedBuilderCalls: 0 }));
+assert.throws(() => assertValidationPath({ builderDefinition: newBuilder, fingerprintDefinition: `${fingerprintDefinition}\nperform public.erp_cloud_restore_validate_portability(null,null,null);`, legacyDefinition: legacy035, expectedBuilderCalls: 0 }));
+assert.throws(() => assertValidationPath({ builderDefinition: newBuilder, fingerprintDefinition, legacyDefinition: legacy035.replace(LEGACY_WIRING_SOURCE, ''), expectedBuilderCalls: 0 }));
+assert.throws(() => assertValidationPath({ builderDefinition: newBuilder, fingerprintDefinition, legacyDefinition: legacy035.replace(LEGACY_WIRING_SOURCE, `delete from public.preflight_probe;\n  ${LEGACY_WIRING_SOURCE}`), expectedBuilderCalls: 0 }));
+assert.throws(() => assertValidationPath({ builderDefinition: newBuilder, fingerprintDefinition, legacyDefinition: legacy035.replace(LEGACY_WIRING_SOURCE, `${LEGACY_WIRING_SOURCE}\n  ${LEGACY_WIRING_SOURCE}`), expectedBuilderCalls: 0 }));
+assert.throws(() => assertValidationPath({ builderDefinition: newBuilder.replace("jsonb_build_object('updated_by', null)", "jsonb_build_object('updated_by', 'drift')"), fingerprintDefinition, legacyDefinition: legacy035, expectedBuilderCalls: 0 }));
 assert.match(SQL, /CLOUD_RESTORE_EFFECTIVE_FAILURE[\s\S]+timeout_source=postgresql_statement_timeout/u);
 for (const safeField of ['attempt=%', 'sqlstate=%', 'elapsed_ms=%', 'policy=%', 'target=%', 'source_fingerprint=%', 'effective_fingerprint=%']) {
   assert.match(SQL, new RegExp(safeField.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));

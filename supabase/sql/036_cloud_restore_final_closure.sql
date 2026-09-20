@@ -7,16 +7,20 @@ do $restore_final_closure_preflight$
 declare
   v_legacy_oid oid := to_regprocedure('public.erp_restore_cloud_snapshot(uuid,text,jsonb,jsonb,text)');
   v_validator_oid oid := to_regprocedure('public.erp_cloud_restore_validate_portability(jsonb,jsonb,text)');
+  v_fingerprint_oid oid := to_regprocedure('public.erp_cloud_restore_idempotency_fingerprint(jsonb,jsonb)');
   v_builder_oid oid := to_regprocedure('public.erp_cloud_restore_build_effective_snapshot(jsonb,jsonb,text)');
   v_effective_oid oid := to_regprocedure('public.erp_restore_cloud_snapshot_effective(uuid,text,jsonb,jsonb,text,text)');
   v_legacy record;
   v_validator record;
   v_builder record;
   v_effective record;
+  v_legacy_definition text;
+  v_fingerprint_definition text;
   v_builder_definition text;
   v_effective_definition text;
 begin
-  if v_legacy_oid is null or v_validator_oid is null or v_builder_oid is null or v_effective_oid is null then
+  if v_legacy_oid is null or v_validator_oid is null or v_fingerprint_oid is null
+     or v_builder_oid is null or v_effective_oid is null then
     raise exception using errcode = '55000', message = 'CLOUD_RESTORE_FINAL_CLOSURE_BASE_CONTRACT_MISSING';
   end if;
   if to_regprocedure('public.erp_cloud_restore_reject_invalid_portable_row(text)') is not null then
@@ -59,9 +63,18 @@ begin
     raise exception using errcode = '55000', message = 'CLOUD_RESTORE_FINAL_CLOSURE_OVERLOAD_COLLISION';
   end if;
 
+  v_legacy_definition := regexp_replace(lower(pg_get_functiondef(v_legacy_oid)), '[[:space:]]+', '', 'g');
+  v_fingerprint_definition := regexp_replace(lower(pg_get_functiondef(v_fingerprint_oid)), '[[:space:]]+', '', 'g');
   v_builder_definition := regexp_replace(lower(pg_get_functiondef(v_builder_oid)), '[[:space:]]+', '', 'g');
   v_effective_definition := regexp_replace(lower(pg_get_functiondef(v_effective_oid)), '[[:space:]]+', '', 'g');
+  -- The live 035 builder is the expected old base and still performs one
+  -- redundant validation. The replacement below removes it; the authoritative
+  -- validation remains in the fingerprint path before the first DELETE.
   if regexp_count(v_builder_definition, 'performpublic\.erp_cloud_restore_validate_portability\(') <> 1
+     or regexp_count(v_fingerprint_definition, 'performpublic\.erp_cloud_restore_validate_portability\(') <> 1
+     or regexp_count(v_legacy_definition, 'v_server_fingerprint:=public\.erp_cloud_restore_idempotency_fingerprint\(p_snapshot,p_manifest\);') <> 1
+     or strpos(v_legacy_definition, 'v_server_fingerprint:=public.erp_cloud_restore_idempotency_fingerprint(p_snapshot,p_manifest);')
+        >= strpos(v_legacy_definition, 'deletefrompublic.')
      or strpos(v_builder_definition, 'jsonb_build_object(''updated_by'',null)') = 0
      or strpos(v_builder_definition, 'cross-environment-audit-null-v1') = 0
      or strpos(v_effective_definition, 'returnpublic.erp_restore_cloud_snapshot(') = 0 then
@@ -263,6 +276,7 @@ declare
   v_builder record;
   v_effective record;
   v_legacy_definition text;
+  v_fingerprint_definition text;
   v_builder_definition text;
   v_effective_definition text;
 begin
@@ -326,11 +340,13 @@ begin
   end if;
 
   v_legacy_definition := regexp_replace(lower(pg_get_functiondef(v_legacy_oid)), '[[:space:]]+', '', 'g');
+  v_fingerprint_definition := regexp_replace(lower(pg_get_functiondef('public.erp_cloud_restore_idempotency_fingerprint(jsonb,jsonb)'::regprocedure)), '[[:space:]]+', '', 'g');
   v_builder_definition := regexp_replace(lower(pg_get_functiondef(v_builder_oid)), '[[:space:]]+', '', 'g');
   v_effective_definition := regexp_replace(lower(pg_get_functiondef(v_effective_oid)), '[[:space:]]+', '', 'g');
   if regexp_count(v_builder_definition, 'jsonb_array_elements\(p_source_snapshot->v_table\)') <> 1
      or strpos(v_builder_definition, 'erp_cloud_restore_reject_invalid_portable_row') = 0
      or strpos(v_builder_definition, 'performpublic.erp_cloud_restore_validate_portability') > 0
+     or regexp_count(v_fingerprint_definition, 'performpublic\.erp_cloud_restore_validate_portability\(') <> 1
      or regexp_count(v_legacy_definition, 'v_server_fingerprint:=public\.erp_cloud_restore_idempotency_fingerprint\(p_snapshot,p_manifest\);') <> 1
      or strpos(v_legacy_definition, 'v_server_fingerprint:=public.erp_cloud_restore_idempotency_fingerprint(p_snapshot,p_manifest);')
         >= strpos(v_legacy_definition, 'deletefrompublic.')
