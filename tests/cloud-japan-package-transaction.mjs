@@ -72,7 +72,7 @@ class AtomicJapanPackageServer {
       let status = currentPackage.status;
       if (status !== 'problem') {
         if (active.length > 0 && active.every(item => item.checked)) status = 'confirmed';
-        else if (status === 'confirmed') status = 'arrived';
+        else if (active.some(item => item.checked) || status === 'arrived' || status === 'confirmed') status = 'arrived';
       }
       const packageChanged = request.transactionType === 'attach-items' || status !== currentPackage.status;
       stagedPackages.set(request.packageId, {
@@ -237,7 +237,7 @@ try {
   };
   const firstChecked = partialServer.execute(actor, checkFirst.idempotencyKey,
     buildJapanPackageTransactionRequest(partialServer.packages.get(packageId), [...partialServer.items.values()], checkFirst));
-  assert.equal(firstChecked.package.status, 'registered', 'Partial receiving does not prematurely confirm the Package');
+  assert.equal(firstChecked.package.status, 'arrived', 'The first received item advances a registered Package to arrived');
   const checkSecond = {
     idempotencyKey: uuid(24), transactionType: 'set-receiving', packageId,
     updates: [{ itemId: secondItem.id, checked: true, checkedAt: '2026-09-19T03:01:00.000Z' }],
@@ -253,6 +253,42 @@ try {
     buildJapanPackageTransactionRequest(allChecked.package, allChecked.items, uncheck));
   assert.equal(unchecked.package.status, 'arrived');
   assert.equal(unchecked.items.find(item => item.id === itemId).checked_at, null);
+
+  const arrivedPartialServer = new AtomicJapanPackageServer();
+  arrivedPartialServer.packages.set(packageId, { ...attached.package, status: 'arrived' });
+  arrivedPartialServer.items.set(itemId, { ...attached.items[0] });
+  arrivedPartialServer.items.set(secondItem.id, { ...secondItem });
+  const arrivedPartial = arrivedPartialServer.execute(actor, uuid(28),
+    buildJapanPackageTransactionRequest(
+      arrivedPartialServer.packages.get(packageId),
+      [...arrivedPartialServer.items.values()],
+      { ...checkFirst, idempotencyKey: uuid(28) },
+    ));
+  assert.equal(arrivedPartial.package.status, 'arrived');
+
+  const registeredZeroServer = new AtomicJapanPackageServer();
+  registeredZeroServer.packages.set(packageId, { ...attached.package, status: 'registered' });
+  registeredZeroServer.items.set(itemId, { ...attached.items[0], checked: true, checked_at: '2026-09-19T04:00:00.000Z' });
+  registeredZeroServer.items.set(secondItem.id, { ...secondItem });
+  const registeredZero = registeredZeroServer.execute(actor, uuid(29),
+    buildJapanPackageTransactionRequest(
+      registeredZeroServer.packages.get(packageId),
+      [...registeredZeroServer.items.values()],
+      { idempotencyKey: uuid(29), transactionType: 'set-receiving', packageId, updates: [{ itemId, checked: false }] },
+    ));
+  assert.equal(registeredZero.package.status, 'registered', 'A registered Package with zero checked items stays registered');
+
+  const arrivedZeroServer = new AtomicJapanPackageServer();
+  arrivedZeroServer.packages.set(packageId, { ...attached.package, status: 'arrived' });
+  arrivedZeroServer.items.set(itemId, { ...attached.items[0], checked: true, checked_at: '2026-09-19T04:01:00.000Z' });
+  arrivedZeroServer.items.set(secondItem.id, { ...secondItem });
+  const arrivedZero = arrivedZeroServer.execute(actor, uuid(31),
+    buildJapanPackageTransactionRequest(
+      arrivedZeroServer.packages.get(packageId),
+      [...arrivedZeroServer.items.values()],
+      { idempotencyKey: uuid(31), transactionType: 'set-receiving', packageId, updates: [{ itemId, checked: false }] },
+    ));
+  assert.equal(arrivedZero.package.status, 'arrived', 'Arrival history is not erased when the last checked item is cancelled');
 
   const concurrentServer = new AtomicJapanPackageServer();
   concurrentServer.packages.set(packageId, { ...attached.package });
@@ -330,7 +366,7 @@ try {
   console.log('PASS rollback, CAS conflict, exact replay, payload mismatch, and problem-status preservation');
   console.log('PASS invalid Package/Purchase Item, duplicate relation, partial/final receiving, uncheck, and concurrent stale CAS');
   console.log('PASS stable intent across remount, single provider RPC, and atomic two-store cache commit');
-  console.log('PASS 031 owner/portable-host-target/ACL/search_path/lock/field-CAS contract; PostgreSQL apply remains pending');
+  console.log('PASS 031 baseline security contract with the 034 partial-receiving state model; 034 PostgreSQL apply remains pending');
 } finally {
   await vite.close();
 }

@@ -72,6 +72,8 @@
     "test:japan-package-receiving-display": "node tests/japan-package-receiving-display.mjs",
     "test:cloud-japan-package-transaction": "node tests/cloud-japan-package-transaction.mjs",
     "test:cloud-japan-package-sql-artifact": "node tests/cloud-japan-package-sql-artifact.mjs",
+    "test:cloud-japan-package-partial-receiving-sql-artifact": "node tests/cloud-japan-package-partial-receiving-sql-artifact.mjs",
+    "test:partial-receiving-outbound-route": "node tests/partial-receiving-outbound-route.mjs",
     "test:cloud-japan-package-ui": "node tests/japan-package-transaction-ui.mjs",
     "test:cloud-japan-package-provider": "node tests/cloud-japan-package-provider-integration.mjs",
     "test:cloud-outbound-transaction": "node tests/cloud-outbound-shipment-transaction.mjs",
