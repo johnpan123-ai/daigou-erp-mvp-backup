@@ -69,6 +69,7 @@ const READINESS_MESSAGE = CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE;
 const VALIDATION_MESSAGE = '備份內容未通過安全檢查，本次尚未送出。';
 const TARGET_COMPATIBILITY_MESSAGE = '目標環境不符合跨環境還原政策，本次尚未送出。';
 const SERVER_MESSAGE = '伺服器已回覆還原錯誤，請使用追蹤編號查證。';
+const SERVER_TIMEOUT_MESSAGE = '伺服器已取消逾時的還原交易；結果未視為完成，請使用追蹤編號查證。';
 const UNKNOWN_MESSAGE = '還原發生未分類錯誤；原始錯誤內容已隱藏。';
 
 const definition = (
@@ -165,10 +166,14 @@ addDefinitions([
   '42501',
   '55000',
   '55006',
-  '57014',
   'PGRST202',
   'PGRST301',
 ], 'server', SERVER_MESSAGE, 'failed');
+
+safeDefinitions.set(
+  '57014',
+  definition('57014', 'server', SERVER_TIMEOUT_MESSAGE, 'failed'),
+);
 
 addDefinitions([
   'NETWORK_ERROR',
@@ -238,7 +243,11 @@ const definitionFor = (error: unknown, source: CloudRestoreErrorSource): SafeErr
     }
     const approved = safeCode ? safeDefinitions.get(safeCode) : undefined;
     if (!approved) return UNKNOWN_LOCAL_DEFINITION;
-    if (safeClassification === 'server') return definition(approved.code, 'server', SERVER_MESSAGE, 'failed');
+    if (safeClassification === 'server') {
+      return approved.classification === 'server'
+        ? approved
+        : definition(approved.code, 'server', SERVER_MESSAGE, 'failed');
+    }
     if (safeClassification === 'transport') return definition(approved.code, 'transport', CLOUD_RESTORE_UNKNOWN_RESULT_MESSAGE, 'unknown');
     return approved.classification === safeClassification ? approved : UNKNOWN_LOCAL_DEFINITION;
   }
@@ -287,7 +296,11 @@ const definitionForVisible = (error: CloudRestoreVisibleError): SafeErrorDefinit
   }
   const exactKnown = code ? safeDefinitions.get(code) : undefined;
   if (!exactKnown) return UNKNOWN_LOCAL_DEFINITION;
-  if (classification === 'server') return definition(exactKnown.code, 'server', SERVER_MESSAGE, 'failed');
+  if (classification === 'server') {
+    return exactKnown.classification === 'server'
+      ? exactKnown
+      : definition(exactKnown.code, 'server', SERVER_MESSAGE, 'failed');
+  }
   if (classification === 'transport') return definition(exactKnown.code, 'transport', CLOUD_RESTORE_UNKNOWN_RESULT_MESSAGE, 'unknown');
   return exactKnown.classification === classification ? exactKnown : UNKNOWN_LOCAL_DEFINITION;
 };

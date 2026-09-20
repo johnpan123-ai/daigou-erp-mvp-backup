@@ -322,6 +322,22 @@ const fetchAll = async <T>(
 export class SupabaseProvider implements IDataProvider {
   private readonly mutationCache = new CloudTargetedCache();
 
+  private async readCompletedCloudRestoreAfterTransportUncertainty(
+    idempotencyKey: string,
+  ): Promise<CloudRestoreResult | null> {
+    try {
+      const { data, error } = await supabase
+        .from('erp_cloud_restore_requests')
+        .select('status,canonical_result')
+        .eq('idempotency_key', idempotencyKey)
+        .maybeSingle();
+      if (error || data?.status !== 'completed' || data.canonical_result === null) return null;
+      return assertCloudRestoreServerResult(data.canonical_result);
+    } catch {
+      return null;
+    }
+  }
+
   async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
     assertCloudWriteAllowed();
     if (!command.candidate.portability) {
@@ -385,20 +401,26 @@ export class SupabaseProvider implements IDataProvider {
       }));
     } catch (caughtError) {
       try { markCloudRequestFailed(caughtError); } catch { /* Raw error inspection must not replace the safe failure. */ }
-      const safeError = createCloudRestoreSafeSubmitError(caughtError, 'transport');
-      const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
-        source: 'transport',
-        attemptCorrelationId: command.attemptCorrelationId,
-      });
-      recordCloudRestoreSubmitDiagnostic({
-        event: 'rpc-error',
-        phase: 'rpc',
-        outcome: visible.outcome,
-        attemptCorrelationId: command.attemptCorrelationId,
-        idempotencyKey: command.idempotencyKey,
-        error: visible,
-      });
-      throw safeError;
+      const completed = await this.readCompletedCloudRestoreAfterTransportUncertainty(command.idempotencyKey);
+      if (completed) {
+        data = completed;
+        error = null;
+      } else {
+        const safeError = createCloudRestoreSafeSubmitError(caughtError, 'transport');
+        const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
+          source: 'transport',
+          attemptCorrelationId: command.attemptCorrelationId,
+        });
+        recordCloudRestoreSubmitDiagnostic({
+          event: 'rpc-error',
+          phase: 'rpc',
+          outcome: visible.outcome,
+          attemptCorrelationId: command.attemptCorrelationId,
+          idempotencyKey: command.idempotencyKey,
+          error: visible,
+        });
+        throw safeError;
+      }
     }
     if (error) {
       try { markCloudRequestFailed(error); } catch { /* Raw error inspection must not replace the safe failure. */ }

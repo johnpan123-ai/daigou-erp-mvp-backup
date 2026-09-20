@@ -90,12 +90,26 @@ not change it.
 ## Request boundary evidence
 
 The browser calls the Database REST RPC directly through `supabase.rpc`; this
-path does not install a shorter client-side `AbortController` deadline. The
-previous 15.5 MB request reached PostgreSQL and returned SQLSTATE `57014`, so the
-active browser/Data API path accepted that request body and the proven blocker
-was the database statement timeout. The 30-second function bound remains below
-the documented 60-second maximum configurable Database Client API timeout.
+path does not install the four-second read-fallback `AbortController` deadline
+and never automatically retries a Restore. Trace
+`6e9acdcc-7f23-44c5-a890-2f8f4271069c` reached PostgreSQL and failed with
+SQLSTATE `57014` in the `integrity` phase after 46,664 ms. The database function
+stack still carried the historical 30-second function setting, so the proven
+blocker was the Server statement-timeout contract, not the browser fallback.
 
-`test:cloud-restore-execution-cost` uses a generated 15-resource, 16,055-row,
-15,532,358-byte fixture for repeatable local cost-model evidence. It is not a
-substitute for the separately authorized Staging PostgreSQL timing gate.
+`036_cloud_restore_final_closure.sql` is the unapplied candidate that requires
+the exact 035 post-state. It gives the validator, effective builder, legacy
+atomic writer, and effective wrapper one explicit bounded 120-second Restore
+budget; combines each table's audit count and NULL materialization into one
+JSON traversal; retains the final portability validator before the first
+DELETE; keeps legacy authenticated execution revoked; and emits safe structured
+failure metadata without snapshot rows, Auth identities, or credentials.
+Transport-uncertain clients perform one RLS-protected request-status read and
+do not resubmit the Restore.
+
+`test:cloud-restore-final-closure` additionally uses the actual 15-resource,
+17,658-row snapshot when it is present at the explicitly supplied fixture path.
+It verifies the 15,395 audit transformations, effective fingerprint, source
+immutability, rollback matrix, replay semantics, safe 57014 output, and bounded
+candidate preparation. This is not a substitute for applying 036 and timing a
+real PostgreSQL Restore in a separately authorized gate.
