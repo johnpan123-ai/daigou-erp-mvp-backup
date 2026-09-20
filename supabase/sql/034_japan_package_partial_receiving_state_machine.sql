@@ -20,8 +20,13 @@ DECLARE
   v_public_execute boolean;
   v_source text;
   v_definition text;
+  v_normalized_source text;
+  v_normalized_definition text;
   v_next_definition text;
+  v_updated_source text;
   v_updated_definition text;
+  v_normalized_updated_source text;
+  v_normalized_updated_definition text;
   v_old_declaration text := E'  v_all_checked boolean;\n';
   v_new_declaration text := E'  v_all_checked boolean;\n  v_any_checked boolean;\n';
   v_old_state_fragment text := $old$
@@ -53,6 +58,18 @@ $old$;
         END IF;
       END IF;
 $new$;
+  v_normalized_old_declaration text;
+  v_normalized_new_declaration text;
+  v_normalized_old_state_fragment text;
+  v_normalized_new_state_fragment text;
+  v_source_old_declaration_count integer;
+  v_source_old_state_count integer;
+  v_definition_old_declaration_count integer;
+  v_definition_old_state_count integer;
+  v_updated_source_new_declaration_count integer;
+  v_updated_source_new_state_count integer;
+  v_updated_definition_new_declaration_count integer;
+  v_updated_definition_new_state_count integer;
 BEGIN
   IF v_function_oid IS NULL THEN
     RAISE EXCEPTION 'F3_PARTIAL_RECEIVING_BASE_FUNCTION_MISSING' USING ERRCODE = '55000';
@@ -83,6 +100,44 @@ BEGIN
          v_config_before, v_source, v_definition
     FROM pg_catalog.pg_proc procedure
    WHERE procedure.oid = v_function_oid;
+
+  -- PostgreSQL preserves the submitted function body line endings in pg_proc.prosrc.
+  -- Normalize only CRLF/CR to LF; indentation and every other byte remain contractual.
+  v_normalized_source := pg_catalog.replace(
+    pg_catalog.replace(v_source, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_normalized_definition := pg_catalog.replace(
+    pg_catalog.replace(v_definition, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_normalized_old_declaration := pg_catalog.replace(
+    pg_catalog.replace(v_old_declaration, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_normalized_new_declaration := pg_catalog.replace(
+    pg_catalog.replace(v_new_declaration, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_normalized_old_state_fragment := pg_catalog.replace(
+    pg_catalog.replace(v_old_state_fragment, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_normalized_new_state_fragment := pg_catalog.replace(
+    pg_catalog.replace(v_new_state_fragment, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+
+  v_source_old_declaration_count :=
+    (pg_catalog.length(v_normalized_source)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_source, v_normalized_old_declaration, '')))
+    / pg_catalog.length(v_normalized_old_declaration);
+  v_source_old_state_count :=
+    (pg_catalog.length(v_normalized_source)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_source, v_normalized_old_state_fragment, '')))
+    / pg_catalog.length(v_normalized_old_state_fragment);
+  v_definition_old_declaration_count :=
+    (pg_catalog.length(v_normalized_definition)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_definition, v_normalized_old_declaration, '')))
+    / pg_catalog.length(v_normalized_old_declaration);
+  v_definition_old_state_count :=
+    (pg_catalog.length(v_normalized_definition)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_definition, v_normalized_old_state_fragment, '')))
+    / pg_catalog.length(v_normalized_old_state_fragment);
 
   IF v_argument_count IS DISTINCT FROM 2
      OR v_argument_types[0] IS DISTINCT FROM 'uuid'::pg_catalog.regtype::oid
@@ -127,35 +182,59 @@ BEGIN
     RAISE EXCEPTION 'F3_PARTIAL_RECEIVING_BASE_TRANSACTION_CONTRACT_MISMATCH' USING ERRCODE = '55000';
   END IF;
 
-  IF pg_catalog.strpos(v_definition, v_old_declaration) = 0
-     OR pg_catalog.strpos(
-          pg_catalog.substr(v_definition, pg_catalog.strpos(v_definition, v_old_declaration) + pg_catalog.length(v_old_declaration)),
-          v_old_declaration
-        ) > 0
-     OR pg_catalog.strpos(v_definition, v_old_state_fragment) = 0
-     OR pg_catalog.strpos(
-          pg_catalog.substr(v_definition, pg_catalog.strpos(v_definition, v_old_state_fragment) + pg_catalog.length(v_old_state_fragment)),
-          v_old_state_fragment
-        ) > 0
-     OR pg_catalog.strpos(v_definition, 'v_any_checked') > 0 THEN
+  IF v_source_old_declaration_count IS DISTINCT FROM 1
+     OR v_source_old_state_count IS DISTINCT FROM 1
+     OR v_definition_old_declaration_count IS DISTINCT FROM 1
+     OR v_definition_old_state_count IS DISTINCT FROM 1
+     OR pg_catalog.strpos(v_normalized_source, v_normalized_new_state_fragment) > 0
+     OR pg_catalog.strpos(v_normalized_source, 'v_any_checked') > 0 THEN
     RAISE EXCEPTION 'F3_PARTIAL_RECEIVING_BASE_STATE_MACHINE_MISMATCH' USING ERRCODE = '55000';
   END IF;
 
-  v_next_definition := pg_catalog.replace(v_definition, v_old_declaration, v_new_declaration);
-  v_next_definition := pg_catalog.replace(v_next_definition, v_old_state_fragment, v_new_state_fragment);
-  IF v_next_definition IS NOT DISTINCT FROM v_definition THEN
+  v_next_definition := pg_catalog.replace(
+    v_normalized_definition, v_normalized_old_declaration, v_normalized_new_declaration
+  );
+  v_next_definition := pg_catalog.replace(
+    v_next_definition, v_normalized_old_state_fragment, v_normalized_new_state_fragment
+  );
+  IF v_next_definition IS NOT DISTINCT FROM v_normalized_definition THEN
     RAISE EXCEPTION 'F3_PARTIAL_RECEIVING_REPLACEMENT_MISSING' USING ERRCODE = '55000';
   END IF;
   EXECUTE v_next_definition;
 
-  SELECT procedure.proconfig, pg_catalog.pg_get_functiondef(procedure.oid)
-    INTO v_config_after, v_updated_definition
+  SELECT procedure.proconfig, procedure.prosrc, pg_catalog.pg_get_functiondef(procedure.oid)
+    INTO v_config_after, v_updated_source, v_updated_definition
     FROM pg_catalog.pg_proc procedure
    WHERE procedure.oid = pg_catalog.to_regprocedure('public.erp_apply_japan_package_transaction(uuid,jsonb)');
+  v_normalized_updated_source := pg_catalog.replace(
+    pg_catalog.replace(v_updated_source, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_normalized_updated_definition := pg_catalog.replace(
+    pg_catalog.replace(v_updated_definition, E'\r\n', E'\n'), E'\r', E'\n'
+  );
+  v_updated_source_new_declaration_count :=
+    (pg_catalog.length(v_normalized_updated_source)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_updated_source, v_normalized_new_declaration, '')))
+    / pg_catalog.length(v_normalized_new_declaration);
+  v_updated_source_new_state_count :=
+    (pg_catalog.length(v_normalized_updated_source)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_updated_source, v_normalized_new_state_fragment, '')))
+    / pg_catalog.length(v_normalized_new_state_fragment);
+  v_updated_definition_new_declaration_count :=
+    (pg_catalog.length(v_normalized_updated_definition)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_updated_definition, v_normalized_new_declaration, '')))
+    / pg_catalog.length(v_normalized_new_declaration);
+  v_updated_definition_new_state_count :=
+    (pg_catalog.length(v_normalized_updated_definition)
+      - pg_catalog.length(pg_catalog.replace(v_normalized_updated_definition, v_normalized_new_state_fragment, '')))
+    / pg_catalog.length(v_normalized_new_state_fragment);
   IF v_config_after IS DISTINCT FROM v_config_before
-     OR pg_catalog.strpos(v_updated_definition, v_new_declaration) = 0
-     OR pg_catalog.strpos(v_updated_definition, v_new_state_fragment) = 0
-     OR pg_catalog.strpos(v_updated_definition, v_old_state_fragment) > 0 THEN
+     OR v_updated_source_new_declaration_count IS DISTINCT FROM 1
+     OR v_updated_source_new_state_count IS DISTINCT FROM 1
+     OR v_updated_definition_new_declaration_count IS DISTINCT FROM 1
+     OR v_updated_definition_new_state_count IS DISTINCT FROM 1
+     OR pg_catalog.strpos(v_normalized_updated_source, v_normalized_old_state_fragment) > 0
+     OR pg_catalog.strpos(v_normalized_updated_definition, v_normalized_old_state_fragment) > 0 THEN
     RAISE EXCEPTION 'F3_PARTIAL_RECEIVING_REPLACEMENT_POSTCHECK_FAILED' USING ERRCODE = '55000';
   END IF;
 END;
