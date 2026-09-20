@@ -19,6 +19,7 @@ import {
 } from '../providers/cloud/cloudAtomicRestore';
 import {
   CLOUD_RESTORE_PORTABILITY_POLICY_VERSION,
+  assertCloudRestoreEffectiveCandidate,
   prepareCrossEnvironmentCloudRestoreCandidate,
   type CloudRestoreTargetCompatibilityResult,
 } from '../providers/cloud/cloudRestorePortability';
@@ -309,6 +310,7 @@ export default function CloudAtomicRestorePanel({
           return;
         }
       }
+      await assertCloudRestoreEffectiveCandidate(candidate);
       recordCloudRestoreSubmitDiagnostic({
         event: 'rpc-invocation',
         phase: 'rpc',

@@ -8,7 +8,8 @@ import {
 
 export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
 export const CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION = 'inventory-id-v2' as const;
-export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot' as const;
+export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_effective' as const;
+export const CLOUD_RESTORE_LEGACY_RPC = 'erp_restore_cloud_snapshot' as const;
 export const CLOUD_RESTORE_SNAPSHOT_RPC = 'erp_export_cloud_restore_snapshot' as const;
 export const CLOUD_RESTORE_TABLES = [
   ['inventory', 'inventory_items'],
@@ -86,6 +87,8 @@ export interface CloudRestoreCandidate {
   sourceFileSha256: string;
   executionFingerprint: string;
   portability?: CloudRestorePortabilityManifest;
+  /** Verified immutable source copy used only by the Server effective-path RPC. */
+  sourceData?: CloudRestoreSnapshotData;
 }
 
 export interface CloudRestoreCommand {

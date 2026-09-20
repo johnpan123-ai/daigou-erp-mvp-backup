@@ -150,6 +150,7 @@ import {
 } from './cloudAtomicRestore';
 import {
   CLOUD_RESTORE_PORTABILITY_PREFLIGHT_RPC,
+  assertCloudRestoreEffectiveCandidate,
   assertCloudRestoreTargetCompatibilityResult,
   type CloudRestoreTargetCompatibilityResult,
 } from './cloudRestorePortability';
@@ -329,11 +330,18 @@ export class SupabaseProvider implements IDataProvider {
         'pre-dispatch',
       );
     }
+    const effective = await assertCloudRestoreEffectiveCandidate(command.candidate);
+    if (effective.mode !== 'cross-environment') {
+      throw createCloudRestoreSafeSubmitError(
+        { code: 'CLOUD_RESTORE_PORTABILITY_POLICY_INVALID' },
+        'pre-dispatch',
+      );
+    }
     let data: unknown;
     let error: unknown;
     try {
       ({ data, error } = await supabase.rpc(CLOUD_RESTORE_PORTABILITY_PREFLIGHT_RPC, {
-        p_snapshot: command.candidate.data,
+        p_snapshot: effective.effectiveData,
         p_manifest: command.candidate.manifest,
         p_target_project_ref: command.candidate.portability.targetProjectRef,
       }));
@@ -363,15 +371,17 @@ export class SupabaseProvider implements IDataProvider {
         'pre-dispatch',
       );
     }
+    const effective = await assertCloudRestoreEffectiveCandidate(command.candidate);
     let data: unknown;
     let error: unknown;
     try {
       ({ data, error } = await supabase.rpc(CLOUD_RESTORE_RPC, {
         p_idempotency_key: command.idempotencyKey,
         p_snapshot_fingerprint: command.candidate.manifest.snapshotFingerprint,
-        p_snapshot: command.candidate.data,
+        p_source_snapshot: effective.sourceData,
         p_manifest: command.candidate.manifest,
         p_source_environment: command.candidate.sourceEnvironment,
+        p_restore_mode: effective.mode,
       }));
     } catch (caughtError) {
       try { markCloudRequestFailed(caughtError); } catch { /* Raw error inspection must not replace the safe failure. */ }

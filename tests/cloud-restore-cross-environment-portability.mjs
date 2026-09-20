@@ -57,6 +57,7 @@ try {
   assert.equal(portable.portability.sourceFileSha256, sourceSha);
   assert.equal(portable.portability.sourceSnapshotFingerprint, strict.manifest.snapshotFingerprint);
   assert.equal(portable.portability.totalTransformedRows, 15);
+  assert.ok(portable.sourceData, 'Portable candidate must retain a verified immutable source copy for the Server transform');
   assert.notEqual(portable.manifest.snapshotFingerprint, strict.manifest.snapshotFingerprint);
   assert.notEqual(portable.executionFingerprint, portable.manifest.snapshotFingerprint);
   assert.equal(portable.manifest.relationshipHash, strict.manifest.relationshipHash);
@@ -70,7 +71,41 @@ try {
     delete sourceBusiness.updated_by;
     delete portableBusiness.updated_by;
     assert.deepEqual(portableBusiness, sourceBusiness, `${table} business values must be unchanged`);
+    assert.equal(portable.sourceData[table][0].updated_by, actor, `${table} source audit identity must remain unchanged`);
   }
+  const effective = await portability.assertCloudRestoreEffectiveCandidate(portable);
+  assert.equal(effective.mode, 'cross-environment');
+  assert.equal(effective.transformedValueCount, 15);
+  assert.deepEqual(effective.sourceData, strict.data);
+  assert.deepEqual(effective.effectiveData, portable.data);
+  const strictEffective = await portability.assertCloudRestoreEffectiveCandidate(strict);
+  assert.equal(strictEffective.mode, 'strict');
+  assert.equal(strictEffective.transformedValueCount, 0);
+  assert.equal(strictEffective.effectiveData.inventory_items[0].updated_by, actor, 'Strict mode preserves same-environment audit identity');
+
+  const missingEffectiveSource = { ...portable, sourceData: undefined };
+  await assert.rejects(
+    () => portability.assertCloudRestoreEffectiveCandidate(missingEffectiveSource),
+    error => error.code === 'RESTORE_PORTABILITY_EFFECTIVE_SOURCE_REQUIRED',
+  );
+  const tamperedEffective = { ...portable, data: clone(portable.data) };
+  tamperedEffective.data.inventory_items[0].updated_by = actor;
+  await assert.rejects(
+    () => portability.assertCloudRestoreEffectiveCandidate(tamperedEffective),
+    error => error.code === 'RESTORE_EFFECTIVE_CANDIDATE_MISMATCH',
+  );
+  const incompleteCoverage = clone(portable);
+  delete incompleteCoverage.portability.transformedCounts.inventory_items;
+  await assert.rejects(
+    () => portability.assertCloudRestoreEffectiveCandidate(incompleteCoverage),
+    error => error.code === 'RESTORE_EFFECTIVE_CANDIDATE_MISMATCH',
+  );
+  const unknownPolicy = clone(portable);
+  unknownPolicy.portability.policyVersion = 'unknown-policy';
+  await assert.rejects(
+    () => portability.assertCloudRestoreEffectiveCandidate(unknownPolicy),
+    error => error.code === 'RESTORE_PORTABILITY_POLICY_INVALID',
+  );
 
   const nullSource = clone(document);
   for (const rows of Object.values(nullSource.data)) rows.forEach(row => { row.updated_by = null; });
@@ -145,6 +180,48 @@ try {
     Object.assign(target, before);
   }
   assert.deepEqual(target, before, 'Any later INSERT failure must roll back the isolated transaction model');
+
+  const failedTraceSourcePath = 'C:/Users/小河馬/Downloads/cloud-erp-snapshot-2026-09-20-114903.json';
+  if (existsSync(failedTraceSourcePath)) {
+    const bytes = readFileSync(failedTraceSourcePath);
+    const hashBefore = createHash('sha256').update(bytes).digest('hex');
+    const failedTraceSource = await domain.prepareCloudRestoreSnapshot(bytes.toString('utf8'), {
+      fileName: 'cloud-erp-snapshot-2026-09-20-114903.json',
+      sourceFileSha256: hashBefore,
+    });
+    const effectiveTraceCandidate = await portability.prepareCrossEnvironmentCloudRestoreCandidate(
+      failedTraceSource,
+      'rhfdjsklfrgpoqsaqpkn',
+    );
+    assert.equal(hashBefore, '0dd929252940f4077b4636ab20673970e8debb2edfaf817abbde16a7282d3948');
+    assert.equal(createHash('sha256').update(readFileSync(failedTraceSourcePath)).digest('hex'), hashBefore);
+    assert.equal(failedTraceSource.manifest.totalRows, 17658);
+    assert.equal(failedTraceSource.manifest.snapshotFingerprint, '068c83250fe07116f53538a290427f6148aa858a4e37041f4b6f4aa1d2603341');
+    assert.equal(failedTraceSource.manifest.relationshipHash, 'b0a6a7441ee4dfbcef62a4f2f18bc6f6146d924ae382cceb6bf770a3946e059d');
+    assert.equal(effectiveTraceCandidate.portability.totalTransformedRows, 15395);
+    assert.deepEqual(effectiveTraceCandidate.portability.transformedCounts, {
+      inventory_items: 5517,
+      product_groups: 847,
+      product_categories: 663,
+      product_variants: 4939,
+      bundle_components: 0,
+      purchase_batches: 648,
+      purchase_batch_items: 2541,
+      private_orders: 109,
+      private_order_items: 131,
+      sales_orders: 0,
+      sales_order_items: 0,
+      japan_packages: 0,
+      japan_package_items: 0,
+      outbound_shipments: 0,
+      outbound_shipment_items: 0,
+    });
+    assert.equal(effectiveTraceCandidate.manifest.relationshipHash, failedTraceSource.manifest.relationshipHash);
+    assert.equal(effectiveTraceCandidate.manifest.totalRows, failedTraceSource.manifest.totalRows);
+    console.log(`PASS failed-trace 17,658-row source regression; 15,395 audit values transformed; effective candidate fingerprint=${effectiveTraceCandidate.manifest.snapshotFingerprint}`);
+  } else {
+    console.log('PENDING failed-trace 17,658-row source regression: source file unavailable');
+  }
 
   const currentSourcePath = 'C:/Users/小河馬/Downloads/cloud-erp-snapshot-2026-09-13-060717.json';
   if (existsSync(currentSourcePath)) {

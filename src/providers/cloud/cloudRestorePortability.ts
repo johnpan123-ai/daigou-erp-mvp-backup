@@ -67,6 +67,27 @@ const assertOnlyAuditIdentityChanged = (
   }
 };
 
+const transformAuditIdentity = async (
+  source: CloudRestoreCandidate['data'],
+): Promise<{
+  data: CloudRestoreCandidate['data'];
+  manifest: CloudRestoreCandidate['manifest'];
+  transformedCounts: Record<CloudRestoreTable, number>;
+}> => {
+  assertSourceAuditIdentityContract(source);
+  const transformedCounts = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [
+    table,
+    changedCount(source[table]),
+  ])) as Record<CloudRestoreTable, number>;
+  const transformedData = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [
+    table,
+    source[table].map(row => ({ ...row, updated_by: null })),
+  ])) as unknown as CloudRestoreCandidate['data'];
+  const rebuilt = await rebuildCurrentCloudRestoreCandidate(transformedData);
+  assertOnlyAuditIdentityChanged(source, rebuilt.data);
+  return { ...rebuilt, transformedCounts };
+};
+
 export async function prepareCrossEnvironmentCloudRestoreCandidate(
   source: CloudRestoreCandidate,
   targetProjectRef: string,
@@ -81,18 +102,8 @@ export async function prepareCrossEnvironmentCloudRestoreCandidate(
   if (stableCloudRestoreJson(verifiedSource.manifest) !== stableCloudRestoreJson(source.manifest)) {
     throw new CloudRestoreValidationError('RESTORE_PORTABILITY_SOURCE_CHANGED', '原始快照驗證後已變更，必須重新 Preflight。');
   }
-  assertSourceAuditIdentityContract(verifiedSource.data);
-
-  const transformedCounts = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [
-    table,
-    changedCount(verifiedSource.data[table]),
-  ])) as Record<CloudRestoreTable, number>;
-  const transformedData = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, table]) => [
-    table,
-    verifiedSource.data[table].map(row => ({ ...row, updated_by: null })),
-  ])) as unknown as CloudRestoreCandidate['data'];
-  const rebuilt = await rebuildCurrentCloudRestoreCandidate(transformedData);
-  assertOnlyAuditIdentityChanged(verifiedSource.data, rebuilt.data);
+  const rebuilt = await transformAuditIdentity(verifiedSource.data);
+  const transformedCounts = rebuilt.transformedCounts;
 
   const portability: CloudRestorePortabilityManifest = Object.freeze({
     policyVersion: CLOUD_RESTORE_PORTABILITY_POLICY_VERSION,
@@ -115,7 +126,94 @@ export async function prepareCrossEnvironmentCloudRestoreCandidate(
     manifest,
     portability,
     executionFingerprint,
+    sourceData: verifiedSource.data,
   });
+}
+
+export interface CloudRestoreEffectivePayload {
+  mode: 'strict' | 'cross-environment';
+  sourceData: CloudRestoreCandidate['data'];
+  effectiveData: CloudRestoreCandidate['data'];
+  transformedValueCount: number;
+}
+
+export async function assertCloudRestoreEffectiveCandidate(
+  candidate: CloudRestoreCandidate,
+): Promise<CloudRestoreEffectivePayload> {
+  if (!candidate.portability) {
+    if (candidate.manifest.portability || candidate.sourceData) {
+      throw new CloudRestoreValidationError(
+        'RESTORE_PORTABILITY_POLICY_INVALID',
+        '嚴格 Restore candidate 不可夾帶跨環境資料。',
+      );
+    }
+    const rebuilt = await rebuildCurrentCloudRestoreCandidate(candidate.data);
+    if (stableCloudRestoreJson(rebuilt.manifest) !== stableCloudRestoreJson(candidate.manifest)
+      || candidate.executionFingerprint !== candidate.manifest.snapshotFingerprint) {
+      throw new CloudRestoreValidationError(
+        'RESTORE_EFFECTIVE_CANDIDATE_MISMATCH',
+        'Restore candidate 已在 Preflight 後變更。',
+      );
+    }
+    return {
+      mode: 'strict',
+      sourceData: candidate.data,
+      effectiveData: candidate.data,
+      transformedValueCount: 0,
+    };
+  }
+
+  if (!candidate.sourceData
+    || !candidate.manifest.portability
+    || stableCloudRestoreJson(candidate.manifest.portability)
+      !== stableCloudRestoreJson(candidate.portability)) {
+    throw new CloudRestoreValidationError(
+      'RESTORE_PORTABILITY_EFFECTIVE_SOURCE_REQUIRED',
+      '跨環境 Restore 缺少已驗證來源資料。',
+    );
+  }
+  const source = await rebuildCurrentCloudRestoreCandidate(candidate.sourceData);
+  const policy = candidate.portability;
+  if (source.manifest.snapshotFingerprint !== policy.sourceSnapshotFingerprint
+    || candidate.sourceFileSha256 !== policy.sourceFileSha256
+    || policy.policyVersion !== CLOUD_RESTORE_PORTABILITY_POLICY_VERSION
+    || policy.mode !== 'cross-environment'
+    || policy.targetProjectRef !== STAGING_SUPABASE_PROJECT_REF) {
+    throw new CloudRestoreValidationError(
+      'RESTORE_PORTABILITY_POLICY_INVALID',
+      '跨環境 Restore 政策與來源不一致。',
+    );
+  }
+  const rebuilt = await transformAuditIdentity(source.data);
+  const expectedPortability: CloudRestorePortabilityManifest = {
+    policyVersion: CLOUD_RESTORE_PORTABILITY_POLICY_VERSION,
+    mode: 'cross-environment',
+    targetProjectRef: STAGING_SUPABASE_PROJECT_REF,
+    sourceFileSha256: candidate.sourceFileSha256,
+    sourceSnapshotFingerprint: source.manifest.snapshotFingerprint,
+    transformedCounts: rebuilt.transformedCounts,
+    totalTransformedRows: Object.values(rebuilt.transformedCounts).reduce((sum, count) => sum + count, 0),
+  };
+  const expectedManifest = { ...rebuilt.manifest, portability: expectedPortability };
+  const expectedExecutionFingerprint = await sha256Hex(stableCloudRestoreJson({
+    snapshotFingerprint: expectedManifest.snapshotFingerprint,
+    portability: expectedPortability,
+  }));
+  if (stableCloudRestoreJson(candidate.data) !== stableCloudRestoreJson(rebuilt.data)
+    || stableCloudRestoreJson(candidate.portability) !== stableCloudRestoreJson(expectedPortability)
+    || stableCloudRestoreJson(candidate.manifest) !== stableCloudRestoreJson(expectedManifest)
+    || candidate.executionFingerprint !== expectedExecutionFingerprint) {
+    throw new CloudRestoreValidationError(
+      'RESTORE_EFFECTIVE_CANDIDATE_MISMATCH',
+      '跨環境 effective candidate 與已驗證來源不一致。',
+    );
+  }
+  return {
+    mode: 'cross-environment',
+    sourceData: source.data,
+    effectiveData: rebuilt.data,
+    transformedValueCount: expectedPortability.totalTransformedRows,
+  };
 }
 
 export interface CloudRestoreTargetCompatibilityResult {
