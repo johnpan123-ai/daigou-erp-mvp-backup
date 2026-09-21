@@ -74,12 +74,12 @@ begin
 
   if regexp_count(v_builder_definition, 'jsonb_array_elements\(p_source_snapshot->v_table\)') <> 1
      or regexp_count(v_builder_definition, 'public\.erp_cloud_restore_reject_invalid_portable_row\(v_table\)') <> 1
-     or strpos(v_builder_definition, "whenjsonb_typeof(row_value)='object'thentrue") = 0
+     or strpos(v_builder_definition, $needle$whenjsonb_typeof(row_value)='object'thentrue$needle$) = 0
      or strpos(v_builder_definition, 'jsonb_array_elements_text(') > 0
      or strpos(v_builder_definition, 'jsonb_each_text(') > 0
      or strpos(v_builder_definition, 'row_value::text') > 0
      or strpos(v_builder_definition, 'row_value->>') > 0
-     or strpos(v_builder_definition, "jsonb_build_object('updated_by',null)") = 0
+     or strpos(v_builder_definition, $needle$jsonb_build_object('updated_by',null)$needle$) = 0
      or strpos(v_builder_definition, 'cross-environment-audit-null-v1') = 0
      or regexp_count(v_legacy_definition, 'v_server_fingerprint:=public\.erp_cloud_restore_idempotency_fingerprint\(p_snapshot,p_manifest\);') <> 1
      or strpos(v_legacy_definition, 'v_server_fingerprint:=public.erp_cloud_restore_idempotency_fingerprint(p_snapshot,p_manifest);')
@@ -151,7 +151,7 @@ begin
   v_legacy_definition := regexp_replace(lower(pg_get_functiondef(v_legacy_oid)), '[[:space:]]+', '', 'g');
   if regexp_count(v_builder_definition, 'jsonb_array_elements\(p_source_snapshot->v_table\)') <> 1
      or regexp_count(v_builder_definition, 'public\.erp_cloud_restore_reject_invalid_portable_row\(v_table\)') <> 1
-     or strpos(v_builder_definition, "whenjsonb_typeof(row_value)='object'thentrue") = 0
+     or strpos(v_builder_definition, $needle$whenjsonb_typeof(row_value)='object'thentrue$needle$) = 0
      or strpos(v_builder_definition, 'jsonb_array_elements_text(') > 0
      or strpos(v_builder_definition, 'jsonb_each_text(') > 0
      or strpos(v_builder_definition, 'row_value::text') > 0

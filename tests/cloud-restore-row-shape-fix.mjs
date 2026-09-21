@@ -39,11 +39,29 @@ const serverRowShapeModel = rows => rows.map((row, index) => {
   return { ...row, updated_by: null };
 });
 
+const hasIdentifierQuotedStrposNeedle = sql => /strpos\([^,]+,\s*"/u.test(sql);
+const broken037Predicate = `strpos(v_builder_definition, "whenjsonb_typeof(row_value)='object'thentrue") = 0`;
+const assert037FailClosedGuards = sql => {
+  assert.match(sql, /v_helper\.pronargs <> 1/u, 'signature drift must remain fail closed');
+  assert.match(sql, /CLOUD_RESTORE_ROW_SHAPE_DEFINITION_BASE_MISMATCH/u, 'definition drift must remain fail closed');
+  assert.match(sql, /has_function_privilege\('authenticated', v_helper_oid, 'EXECUTE'\)/u, 'ACL drift must remain fail closed');
+  assert.match(sql, /CLOUD_RESTORE_ROW_SHAPE_OVERLOAD_COLLISION/u, 'overload drift must remain fail closed');
+  assert.match(sql, /v_helper\.provolatile <> 'v'/u, 'postflight must require VOLATILE');
+};
+
 assert.equal((SQL_037.match(/^begin;$/gimu) || []).length, 1);
 assert.equal((SQL_037.match(/^commit;$/gimu) || []).length, 1);
 assert.equal((SQL_037.match(/alter function public\.erp_cloud_restore_reject_invalid_portable_row\(text\) volatile;/gu) || []).length, 1);
 assert.match(SQL_037, /v_helper\.provolatile <> 'i'/u, 'Preflight must pin the failing 036 IMMUTABLE state');
 assert.match(SQL_037, /v_helper\.provolatile <> 'v'/u, 'Postflight must prove VOLATILE');
+assert.equal(hasIdentifierQuotedStrposNeedle(broken037Predicate), true, 'Regression detector must catch the failed 037 syntax');
+assert.equal(hasIdentifierQuotedStrposNeedle(SQL_037), false, 'strpos needles must be PostgreSQL string literals, not identifiers');
+assert.equal((SQL_037.match(/\$needle\$whenjsonb_typeof\(row_value\)='object'thentrue\$needle\$/gu) || []).length, 2);
+assert.equal((SQL_037.match(/\$needle\$jsonb_build_object\('updated_by',null\)\$needle\$/gu) || []).length, 1);
+assert.doesNotThrow(() => assert037FailClosedGuards(SQL_037));
+assert.throws(() => assert037FailClosedGuards(SQL_037.replaceAll('v_helper.pronargs <> 1', 'false')), /signature drift/u);
+assert.throws(() => assert037FailClosedGuards(SQL_037.replace('CLOUD_RESTORE_ROW_SHAPE_DEFINITION_BASE_MISMATCH', 'REMOVED')), /definition drift/u);
+assert.throws(() => assert037FailClosedGuards(SQL_037.replaceAll("has_function_privilege('authenticated', v_helper_oid, 'EXECUTE')", 'false')), /ACL drift/u);
 assert.doesNotMatch(SQL_037, /create or replace function public\.erp_cloud_restore_build_effective_snapshot/iu);
 assert.doesNotMatch(SQL_037, /create or replace function public\.erp_restore_cloud_snapshot/iu);
 assert.match(SQL_037, /regexp_count\(v_builder_definition, 'jsonb_array_elements\\\(p_source_snapshot->v_table\\\)'\) <> 1/u);
