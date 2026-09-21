@@ -143,9 +143,18 @@ import {
   CLOUD_RESTORE_SNAPSHOT_RPC,
   CLOUD_RESTORE_SCHEMA_VERSION,
   CLOUD_RESTORE_TABLES,
+  CLOUD_RESTORE_ATTEMPT_BEGIN_RPC,
+  CLOUD_RESTORE_ATTEMPT_PREPARE_RPC,
+  CLOUD_RESTORE_ATTEMPT_RECONCILE_RPC,
+  CLOUD_RESTORE_TIMEOUT_BUDGET_MS,
+  CLOUD_RESTORE_TIMEOUT_CONTRACT_VERSION,
+  assertCloudRestoreAttemptOutcome,
   assertCloudRestoreServerResult,
   buildCloudRestoreManifest,
+  type CloudRestoreAttemptCommand,
+  type CloudRestoreAttemptOutcome,
   type CloudRestoreCommand,
+  type CloudRestoreExecutionCommand,
   type CloudRestoreResult,
 } from './cloudAtomicRestore';
 import {
@@ -322,20 +331,77 @@ const fetchAll = async <T>(
 export class SupabaseProvider implements IDataProvider {
   private readonly mutationCache = new CloudTargetedCache();
 
-  private async readCompletedCloudRestoreAfterTransportUncertainty(
-    idempotencyKey: string,
-  ): Promise<CloudRestoreResult | null> {
-    try {
-      const { data, error } = await supabase
-        .from('erp_cloud_restore_requests')
-        .select('status,canonical_result')
-        .eq('idempotency_key', idempotencyKey)
-        .maybeSingle();
-      if (error || data?.status !== 'completed' || data.canonical_result === null) return null;
-      return assertCloudRestoreServerResult(data.canonical_result);
-    } catch {
-      return null;
+  private assertAttemptIdentity(
+    outcome: CloudRestoreAttemptOutcome,
+    command: CloudRestoreAttemptCommand,
+    effectiveFingerprint?: string,
+  ): CloudRestoreAttemptOutcome {
+    if (outcome.attemptId !== command.attemptId || outcome.traceId !== command.traceId
+      || (effectiveFingerprint !== undefined && outcome.effectiveFingerprint !== effectiveFingerprint)) {
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_RESULT_MISMATCH' }, 'server-response');
     }
+    return outcome;
+  }
+
+  private async preserveCompletedAttempt(
+    outcome: CloudRestoreAttemptOutcome,
+    diagnostic: { attemptCorrelationId: string; idempotencyKey: string },
+  ): Promise<CloudRestoreAttemptOutcome> {
+    if (outcome.status !== 'completed' || !outcome.restoreResult) return outcome;
+    const restoreResult = await preserveCloudRestoreSuccessThroughRefresh(
+      outcome.restoreResult,
+      () => this.mutationCache.refresh({
+        reason: 'reconnect',
+        resources: ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'japanPackages', 'outboundShipments', 'salesOrders'],
+        changes: [],
+        authoritativeEpoch: outcome.restoreResult?.restoreEpoch,
+      }),
+      diagnostic,
+    );
+    return { ...outcome, restoreResult };
+  }
+
+  private async reconcileAttemptBoundaryUncertainty(
+    command: CloudRestoreAttemptCommand,
+  ): Promise<CloudRestoreAttemptOutcome> {
+    try {
+      const outcome = await this.reconcileCloudRestoreAttempt(command);
+      if (outcome.status === 'completed') return outcome;
+      if (outcome.status === 'not_committed') {
+        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+      }
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'transport');
+    } catch (error) {
+      const visible = normalizeCloudRestoreSubmitError(error, 'rpc', {
+        source: 'post-dispatch', attemptCorrelationId: command.traceId,
+      });
+      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_FOUND') {
+        // A destructive call cannot start without a committed envelope row.
+        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+      }
+      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') throw error;
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'transport');
+    }
+  }
+
+  private async reconcileDestructiveUncertainty(
+    command: CloudRestoreAttemptCommand,
+  ): Promise<CloudRestoreResult> {
+    try {
+      const outcome = await this.reconcileCloudRestoreAttempt(command);
+      if (outcome.status === 'completed' && outcome.restoreResult) return outcome.restoreResult;
+      if (outcome.status === 'not_committed') {
+        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+      }
+    } catch (error) {
+      const visible = normalizeCloudRestoreSubmitError(error, 'rpc', {
+        source: 'post-dispatch', attemptCorrelationId: command.traceId,
+      });
+      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') throw error;
+    }
+    // Once the destructive RPC may have started, missing/failed reconciliation
+    // is never evidence of rollback. Keep the attempt locked as UNKNOWN.
+    throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'transport');
   }
 
   async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
@@ -379,7 +445,7 @@ export class SupabaseProvider implements IDataProvider {
     return assertCloudRestoreTargetCompatibilityResult(data, command.candidate);
   }
 
-  async restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
+  async prepareCloudRestoreAttempt(command: CloudRestoreCommand): Promise<CloudRestoreAttemptOutcome> {
     assertCloudWriteAllowed();
     if (command.confirmation !== 'OVERWRITE CLOUD DATA') {
       throw createCloudRestoreSafeSubmitError(
@@ -387,12 +453,119 @@ export class SupabaseProvider implements IDataProvider {
         'pre-dispatch',
       );
     }
+    await assertCloudRestoreEffectiveCandidate(command.candidate);
+    const sourceFingerprint = command.candidate.portability?.sourceSnapshotFingerprint
+      ?? command.candidate.manifest.snapshotFingerprint;
+    const restorePolicy = command.candidate.portability?.policyVersion ?? 'strict';
+    const targetEnvironment = command.candidate.portability?.targetProjectRef ?? supabaseEnvironment.projectRef;
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_ATTEMPT_PREPARE_RPC, {
+        p_attempt_id: command.idempotencyKey,
+        p_trace_id: command.attemptCorrelationId,
+        p_source_fingerprint: sourceFingerprint,
+        p_effective_fingerprint: command.candidate.manifest.snapshotFingerprint,
+        p_restore_policy: restorePolicy,
+        p_target_environment: targetEnvironment,
+        p_timeout_budget_ms: CLOUD_RESTORE_TIMEOUT_BUDGET_MS,
+        p_timeout_contract_version: CLOUD_RESTORE_TIMEOUT_CONTRACT_VERSION,
+      }));
+    } catch (caughtError) {
+      try { markCloudRequestFailed(caughtError); } catch { /* Raw error inspection must not replace the safe failure. */ }
+      return this.reconcileAttemptBoundaryUncertainty({
+        attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId,
+      });
+    }
+    if (error) {
+      try { markCloudRequestFailed(error); } catch { /* Raw error inspection must not replace the safe failure. */ }
+      throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    }
+    markCloudReachable();
+    let outcome = this.assertAttemptIdentity(
+      assertCloudRestoreAttemptOutcome(data),
+      { attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId },
+      command.candidate.manifest.snapshotFingerprint,
+    );
+    if (outcome.status === 'completed') {
+      return this.preserveCompletedAttempt(outcome, {
+        attemptCorrelationId: command.attemptCorrelationId,
+        idempotencyKey: command.idempotencyKey,
+      });
+    }
+    if (outcome.status !== 'prepared') {
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'server-response');
+    }
+    try {
+      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_ATTEMPT_BEGIN_RPC, {
+        p_attempt_id: command.idempotencyKey,
+        p_trace_id: command.attemptCorrelationId,
+      }));
+    } catch (caughtError) {
+      try { markCloudRequestFailed(caughtError); } catch { /* Keep safe error authoritative. */ }
+      return this.reconcileAttemptBoundaryUncertainty({
+        attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId,
+      });
+    }
+    if (error) {
+      try { markCloudRequestFailed(error); } catch { /* Keep safe error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    }
+    markCloudReachable();
+    outcome = this.assertAttemptIdentity(
+      assertCloudRestoreAttemptOutcome(data),
+      { attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId },
+      command.candidate.manifest.snapshotFingerprint,
+    );
+    if (outcome.status === 'completed') {
+      return this.preserveCompletedAttempt(outcome, {
+        attemptCorrelationId: command.attemptCorrelationId,
+        idempotencyKey: command.idempotencyKey,
+      });
+    }
+    if (outcome.status !== 'executing' || !outcome.executionId) {
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_RESULT_INVALID' }, 'server-response');
+    }
+    return outcome;
+  }
+
+  async reconcileCloudRestoreAttempt(command: CloudRestoreAttemptCommand): Promise<CloudRestoreAttemptOutcome> {
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_ATTEMPT_RECONCILE_RPC, {
+        p_attempt_id: command.attemptId,
+        p_trace_id: command.traceId,
+      }));
+    } catch (caughtError) {
+      try { markCloudRequestFailed(caughtError); } catch { /* Keep safe error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
+    }
+    if (error) {
+      try { markCloudRequestFailed(error); } catch { /* Keep safe error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    }
+    markCloudReachable();
+    const outcome = this.assertAttemptIdentity(assertCloudRestoreAttemptOutcome(data), command);
+    return this.preserveCompletedAttempt(outcome, {
+      attemptCorrelationId: command.traceId,
+      idempotencyKey: command.attemptId,
+    });
+  }
+
+  async restoreCloudSnapshot(command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult> {
+    assertCloudWriteAllowed();
+    if (command.confirmation !== 'OVERWRITE CLOUD DATA') {
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_EXPLICIT_CONFIRMATION_REQUIRED' }, 'pre-dispatch');
+    }
     const effective = await assertCloudRestoreEffectiveCandidate(command.candidate);
     let data: unknown;
     let error: unknown;
     try {
       ({ data, error } = await supabase.rpc(CLOUD_RESTORE_RPC, {
-        p_idempotency_key: command.idempotencyKey,
+        p_attempt_id: command.attempt.attemptId,
+        p_trace_id: command.attempt.traceId,
+        p_execution_id: command.attempt.executionId,
         p_snapshot_fingerprint: command.candidate.manifest.snapshotFingerprint,
         p_source_snapshot: effective.sourceData,
         p_manifest: command.candidate.manifest,
@@ -400,84 +573,41 @@ export class SupabaseProvider implements IDataProvider {
         p_restore_mode: effective.mode,
       }));
     } catch (caughtError) {
-      try { markCloudRequestFailed(caughtError); } catch { /* Raw error inspection must not replace the safe failure. */ }
-      const completed = await this.readCompletedCloudRestoreAfterTransportUncertainty(command.idempotencyKey);
-      if (completed) {
-        data = completed;
-        error = null;
-      } else {
-        const safeError = createCloudRestoreSafeSubmitError(caughtError, 'transport');
-        const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
-          source: 'transport',
-          attemptCorrelationId: command.attemptCorrelationId,
-        });
-        recordCloudRestoreSubmitDiagnostic({
-          event: 'rpc-error',
-          phase: 'rpc',
-          outcome: visible.outcome,
-          attemptCorrelationId: command.attemptCorrelationId,
-          idempotencyKey: command.idempotencyKey,
-          error: visible,
-        });
-        throw safeError;
-      }
+      try { markCloudRequestFailed(caughtError); } catch { /* Keep safe error authoritative. */ }
+      return this.reconcileDestructiveUncertainty(command.attempt);
     }
     if (error) {
-      try { markCloudRequestFailed(error); } catch { /* Raw error inspection must not replace the safe failure. */ }
-      const safeError = createCloudRestoreSafeSubmitError(error, 'server-response');
-      const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
-        source: 'server-response',
-        attemptCorrelationId: command.attemptCorrelationId,
-      });
-      recordCloudRestoreSubmitDiagnostic({
-        event: 'rpc-error',
-        phase: 'rpc',
-        outcome: visible.outcome,
-        attemptCorrelationId: command.attemptCorrelationId,
-        idempotencyKey: command.idempotencyKey,
-        error: visible,
-      });
-      throw safeError;
+      try { markCloudRequestFailed(error); } catch { /* Keep safe error authoritative. */ }
+      try {
+        const outcome = await this.reconcileCloudRestoreAttempt(command.attempt);
+        if (outcome.status === 'completed' && outcome.restoreResult) return outcome.restoreResult;
+        if (outcome.status === 'not_committed') {
+          throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+        }
+      } catch (reconcileError) {
+        const visible = normalizeCloudRestoreSubmitError(reconcileError, 'rpc', {
+          source: 'post-dispatch', attemptCorrelationId: command.attempt.traceId,
+        });
+        if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') throw reconcileError;
+      }
+      // Preserve a known PostgreSQL/PostgREST category while the durable
+      // envelope remains locked for explicit reconciliation after grace.
+      throw createCloudRestoreSafeSubmitError(error, 'server-response');
     }
     markCloudReachable();
-    let result: CloudRestoreResult;
-    try {
-      result = assertCloudRestoreServerResult(data);
-    } catch (resultError) {
-      const safeError = createCloudRestoreSafeSubmitError(resultError, 'server-response');
-      const visible = normalizeCloudRestoreSubmitError(safeError, 'rpc', {
-        source: 'server-response',
-        attemptCorrelationId: command.attemptCorrelationId,
-      });
-      recordCloudRestoreSubmitDiagnostic({
-        event: 'rpc-error',
-        phase: 'rpc',
-        outcome: visible.outcome,
-        attemptCorrelationId: command.attemptCorrelationId,
-        idempotencyKey: command.idempotencyKey,
-        error: visible,
-      });
-      throw safeError;
-    }
+    const result = assertCloudRestoreServerResult(data);
     recordCloudRestoreSubmitDiagnostic({
-      event: 'rpc-response',
-      phase: 'rpc',
-      outcome: 'success',
-      attemptCorrelationId: command.attemptCorrelationId,
-      idempotencyKey: command.idempotencyKey,
+      event: 'rpc-response', phase: 'rpc', outcome: 'success',
+      attemptCorrelationId: command.attemptCorrelationId, idempotencyKey: command.idempotencyKey,
     });
     return preserveCloudRestoreSuccessThroughRefresh(
       result,
       () => this.mutationCache.refresh({
         reason: 'reconnect',
         resources: ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'japanPackages', 'outboundShipments', 'salesOrders'],
-        changes: [],
-        authoritativeEpoch: result.restoreEpoch,
+        changes: [], authoritativeEpoch: result.restoreEpoch,
       }),
-      {
-        attemptCorrelationId: command.attemptCorrelationId,
-        idempotencyKey: command.idempotencyKey,
-      },
+      { attemptCorrelationId: command.attemptCorrelationId, idempotencyKey: command.idempotencyKey },
     );
   }
 

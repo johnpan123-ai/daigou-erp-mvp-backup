@@ -2,7 +2,10 @@ import type { IDataProvider } from './types';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
-import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
+import type {
+  CloudRestoreAttemptCommand, CloudRestoreAttemptOutcome, CloudRestoreCommand,
+  CloudRestoreExecutionCommand, CloudRestoreResult,
+} from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { 
@@ -315,7 +318,15 @@ export class LocalProvider implements IDataProvider {
     void _command;
     throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
   }
-  async restoreCloudSnapshot(_command: CloudRestoreCommand): Promise<CloudRestoreResult> {
+  async prepareCloudRestoreAttempt(_command: CloudRestoreCommand): Promise<CloudRestoreAttemptOutcome> {
+    void _command;
+    throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+  }
+  async reconcileCloudRestoreAttempt(_command: CloudRestoreAttemptCommand): Promise<CloudRestoreAttemptOutcome> {
+    void _command;
+    throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+  }
+  async restoreCloudSnapshot(_command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult> {
     void _command;
     throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
   }

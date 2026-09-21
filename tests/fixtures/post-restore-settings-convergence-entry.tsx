@@ -56,6 +56,15 @@ dataProvider.getProductVariants = options => {
 dataProvider.waitForCloudBootstrapConvergence = () => (
   bootstrapPending ? bootstrapPromise : Promise.resolve(false)
 );
+dataProvider.prepareCloudRestoreAttempt = async command => ({
+  status: 'executing',
+  attemptId: command.idempotencyKey,
+  traceId: command.attemptCorrelationId,
+  executionId: '00000000-0000-4000-8000-000000000097',
+  expectedEpoch: 1,
+  effectiveFingerprint: command.candidate.manifest.snapshotFingerprint,
+  reconcileAfter: '2026-09-21T00:02:15.000Z',
+});
 dataProvider.restoreCloudSnapshot = async command => {
   restoreCalls += 1;
   dataset = behavior === 'count-read-failure' ? 'failure' : 'restored';

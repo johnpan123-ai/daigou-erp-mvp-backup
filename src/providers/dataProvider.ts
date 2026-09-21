@@ -28,7 +28,10 @@ import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
-import type { CloudRestoreCommand, CloudRestoreResult } from './cloud/cloudAtomicRestore';
+import type {
+  CloudRestoreAttemptCommand, CloudRestoreAttemptOutcome, CloudRestoreCommand,
+  CloudRestoreExecutionCommand, CloudRestoreResult,
+} from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
 export class StaleDataError extends Error {
@@ -343,7 +346,15 @@ class DynamicDataProvider implements IDataProvider {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
     return this.supabaseProvider.validateCloudRestoreTarget(command);
   }
-  async restoreCloudSnapshot(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
+  async prepareCloudRestoreAttempt(command: CloudRestoreCommand): Promise<CloudRestoreAttemptOutcome> {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.guardedWrite(() => this.supabaseProvider.prepareCloudRestoreAttempt(command));
+  }
+  async reconcileCloudRestoreAttempt(command: CloudRestoreAttemptCommand): Promise<CloudRestoreAttemptOutcome> {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.supabaseProvider.reconcileCloudRestoreAttempt(command);
+  }
+  async restoreCloudSnapshot(command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
     return this.guardedWrite(() => this.supabaseProvider.restoreCloudSnapshot(command));
   }

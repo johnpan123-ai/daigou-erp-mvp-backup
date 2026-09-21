@@ -29,6 +29,8 @@ declare global {
       releaseDeferred: () => void;
       snapshot: () => {
         calls: number;
+        prepareCalls: number;
+        reconcileCalls: number;
         targetValidationCalls: number;
         idempotencyKeys: string[];
         candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }>;
@@ -38,10 +40,12 @@ declare global {
   }
 }
 
-type RestoreFixtureBehavior = 'success' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
+type RestoreFixtureBehavior = 'success' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
 
 let behavior: RestoreFixtureBehavior = 'success';
 let calls = 0;
+let prepareCalls = 0;
+let reconcileCalls = 0;
 let targetValidationCalls = 0;
 let idempotencyKeys: string[] = [];
 let candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }> = [];
@@ -57,20 +61,67 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
   reset: () => {
     behavior = 'success';
     calls = 0;
+    prepareCalls = 0;
+    reconcileCalls = 0;
     targetValidationCalls = 0;
     idempotencyKeys = [];
     candidates = [];
+    latestCommand = null;
     deferredRelease = null;
     resetCloudRestoreSubmitDiagnosticsForTests();
   },
   releaseDeferred: () => deferredRelease?.(),
   snapshot: () => ({
     calls,
+    prepareCalls,
+    reconcileCalls,
     targetValidationCalls,
     idempotencyKeys: [...idempotencyKeys],
     candidates: structuredClone(candidates),
     diagnostics: getCloudRestoreSubmitDiagnostics(),
   }),
+};
+
+const restoreResult = (command: Parameters<typeof dataProvider.restoreCloudSnapshot>[0]) => ({
+  ok: true as const,
+  replayed: false,
+  idempotencyKey: command.idempotencyKey,
+  snapshotFingerprint: command.candidate.manifest.snapshotFingerprint,
+  rollbackSnapshotId: '00000000-0000-4000-8000-000000000098',
+  restoreEpoch: 1,
+  manifest: command.candidate.manifest,
+  timingsMs: { auth: 1, lockIdempotency: 2, inputValidation: 3, beforeSnapshot: 4, rollbackRow: 1, delete: 2, insert: 8, integrity: 5, epochIdempotency: 1, total: 27 },
+});
+
+let latestCommand: Parameters<typeof dataProvider.restoreCloudSnapshot>[0] | null = null;
+
+dataProvider.prepareCloudRestoreAttempt = async command => {
+  prepareCalls += 1;
+  return {
+    status: 'executing',
+    attemptId: command.idempotencyKey,
+    traceId: command.attemptCorrelationId,
+    executionId: '00000000-0000-4000-8000-000000000097',
+    expectedEpoch: 0,
+    effectiveFingerprint: command.candidate.manifest.snapshotFingerprint,
+    reconcileAfter: '2026-09-21T00:02:15.000Z',
+  };
+};
+
+dataProvider.reconcileCloudRestoreAttempt = async command => {
+  reconcileCalls += 1;
+  const fingerprint = latestCommand?.candidate.manifest.snapshotFingerprint ?? 'a'.repeat(64);
+  if (behavior === 'lost-response-success' && latestCommand) {
+    return {
+      status: 'completed', attemptId: command.attemptId, traceId: command.traceId,
+      expectedEpoch: 0, effectiveFingerprint: fingerprint, resultEpoch: 1,
+      restoreResult: restoreResult(latestCommand),
+    };
+  }
+  return {
+    status: 'not_committed', attemptId: command.attemptId, traceId: command.traceId,
+    expectedEpoch: 0, effectiveFingerprint: fingerprint,
+  };
 };
 
 dataProvider.validateCloudRestoreTarget = async command => {
@@ -88,6 +139,7 @@ dataProvider.validateCloudRestoreTarget = async command => {
 };
 
 dataProvider.restoreCloudSnapshot = async command => {
+  latestCommand = command;
   if (behavior === 'guard-race') markCloudReadLoading();
   assertCloudWriteAllowed();
   calls += 1;
@@ -112,22 +164,13 @@ dataProvider.restoreCloudSnapshot = async command => {
       cause: { stack: 'Bearer fake-token owner@example.invalid {"snapshot":{"customer":"private-business-value"}}' },
     };
   }
-  if (behavior === 'timeout') {
+  if (behavior === 'timeout' || behavior === 'lost-response-success' || behavior === 'lost-response-failure') {
     throw { code: 'ETIMEDOUT', message: 'Network timed out', details: 'access_token=must-not-render' };
   }
   if (behavior === 'deferred-success') {
     await new Promise<void>(resolve => { deferredRelease = resolve; });
   }
-  const result = {
-    ok: true as const,
-    replayed: false,
-    idempotencyKey: command.idempotencyKey,
-    snapshotFingerprint: command.candidate.manifest.snapshotFingerprint,
-    rollbackSnapshotId: '00000000-0000-4000-8000-000000000098',
-    restoreEpoch: 1,
-    manifest: command.candidate.manifest,
-    timingsMs: { auth: 1, lockIdempotency: 2, inputValidation: 3, beforeSnapshot: 4, rollbackRow: 1, delete: 2, insert: 8, integrity: 5, epochIdempotency: 1, total: 27 },
-  };
+  const result = restoreResult(command);
   return behavior === 'refresh-pending'
     ? { ...result, authoritativeRefresh: { status: 'pending' as const, errorCode: 'REFRESH_TEST', errorMessage: 'Refresh pending' } }
     : { ...result, authoritativeRefresh: { status: 'complete' as const } };

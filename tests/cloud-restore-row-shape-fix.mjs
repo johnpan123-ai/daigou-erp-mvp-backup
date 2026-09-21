@@ -90,7 +90,7 @@ const restoreMethod = PROVIDER.slice(PROVIDER.indexOf('async restoreCloudSnapsho
 assert.match(restoreMethod, /p_source_snapshot: effective\.sourceData/u);
 assert.doesNotMatch(restoreMethod, /JSON\.stringify\s*\(/u, 'RPC jsonb must receive a JS object, not a second JSON string');
 assert.equal((restoreMethod.match(/supabase\.rpc\(CLOUD_RESTORE_RPC/gu) || []).length, 1);
-assert.doesNotMatch(restoreMethod, /\b(?:retry|while|for\s*\()/iu);
+assert.doesNotMatch(restoreMethod, /\bretry\b|\bwhile\s*\(|\bfor\s*\(/iu);
 
 assert.throws(() => serverRowShapeModel([{ id: 'valid' }, 'bad-string']), /PORTABILITY_ROW_INVALID/u);
 assert.throws(() => serverRowShapeModel([null]), /PORTABILITY_ROW_INVALID/u);

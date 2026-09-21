@@ -8,9 +8,14 @@ import {
 
 export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
 export const CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION = 'inventory-id-v2' as const;
-export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_effective' as const;
+export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_attempt' as const;
 export const CLOUD_RESTORE_LEGACY_RPC = 'erp_restore_cloud_snapshot' as const;
 export const CLOUD_RESTORE_SNAPSHOT_RPC = 'erp_export_cloud_restore_snapshot' as const;
+export const CLOUD_RESTORE_ATTEMPT_PREPARE_RPC = 'erp_prepare_cloud_restore_attempt' as const;
+export const CLOUD_RESTORE_ATTEMPT_BEGIN_RPC = 'erp_begin_cloud_restore_attempt' as const;
+export const CLOUD_RESTORE_ATTEMPT_RECONCILE_RPC = 'erp_reconcile_cloud_restore_attempt' as const;
+export const CLOUD_RESTORE_TIMEOUT_BUDGET_MS = 120_000 as const;
+export const CLOUD_RESTORE_TIMEOUT_CONTRACT_VERSION = 'postgresql-statement-timeout-v1' as const;
 export const CLOUD_RESTORE_TABLES = [
   ['inventory', 'inventory_items'],
   ['productGroups', 'product_groups'],
@@ -96,6 +101,36 @@ export interface CloudRestoreCommand {
   idempotencyKey: string;
   candidate: CloudRestoreCandidate;
   confirmation: 'OVERWRITE CLOUD DATA';
+}
+
+export interface CloudRestoreAttemptCommand {
+  attemptId: string;
+  traceId: string;
+}
+
+export interface CloudRestoreAttemptExecution extends CloudRestoreAttemptCommand {
+  status: 'executing';
+  executionId: string;
+  expectedEpoch: number;
+  effectiveFingerprint: string;
+  reconcileAfter: string;
+}
+
+export interface CloudRestoreExecutionCommand extends CloudRestoreCommand {
+  attempt: CloudRestoreAttemptExecution;
+}
+
+export type CloudRestoreAttemptOutcomeStatus = 'prepared' | 'executing' | 'pending' | 'completed' | 'not_committed';
+
+export interface CloudRestoreAttemptOutcome extends CloudRestoreAttemptCommand {
+  status: CloudRestoreAttemptOutcomeStatus;
+  expectedEpoch: number;
+  effectiveFingerprint: string;
+  reconcileAfter?: string;
+  executionId?: string;
+  resultEpoch?: number;
+  restoreResult?: CloudRestoreResult;
+  reason?: string;
 }
 
 export interface CloudRestoreResult {
@@ -504,4 +539,43 @@ export function assertCloudRestoreServerResult(value: unknown): CloudRestoreResu
     throw new CloudRestoreServerError(code, message);
   }
   return value as unknown as CloudRestoreResult;
+}
+
+export function assertCloudRestoreAttemptOutcome(value: unknown): CloudRestoreAttemptOutcome {
+  if (!isRecord(value)) {
+    throw new CloudRestoreServerError('CLOUD_RESTORE_ATTEMPT_RESULT_INVALID', 'Restore attempt 結果格式無效。');
+  }
+  const status = value.status;
+  const validStatus = status === 'prepared' || status === 'executing' || status === 'pending'
+    || status === 'completed' || status === 'not_committed';
+  if (!validStatus
+    || typeof value.attemptId !== 'string' || !UUID_PATTERN.test(value.attemptId)
+    || typeof value.traceId !== 'string' || !UUID_PATTERN.test(value.traceId)
+    || typeof value.expectedEpoch !== 'number' || !Number.isSafeInteger(value.expectedEpoch) || value.expectedEpoch < 0
+    || typeof value.effectiveFingerprint !== 'string' || !/^[0-9a-f]{64}$/u.test(value.effectiveFingerprint)) {
+    throw new CloudRestoreServerError('CLOUD_RESTORE_ATTEMPT_RESULT_INVALID', 'Restore attempt 結果格式無效。');
+  }
+  if (status === 'executing' && (typeof value.executionId !== 'string' || !UUID_PATTERN.test(value.executionId))) {
+    throw new CloudRestoreServerError('CLOUD_RESTORE_ATTEMPT_RESULT_INVALID', 'Restore attempt execution 格式無效。');
+  }
+  let restoreResult: CloudRestoreResult | undefined;
+  if (status === 'completed') {
+    restoreResult = assertCloudRestoreServerResult(value.restoreResult);
+    if (typeof value.resultEpoch !== 'number' || !Number.isSafeInteger(value.resultEpoch)
+      || value.resultEpoch !== restoreResult.restoreEpoch) {
+      throw new CloudRestoreServerError('CLOUD_RESTORE_ATTEMPT_RESULT_INVALID', 'Restore attempt epoch 格式無效。');
+    }
+  }
+  return {
+    status,
+    attemptId: value.attemptId,
+    traceId: value.traceId,
+    expectedEpoch: value.expectedEpoch,
+    effectiveFingerprint: value.effectiveFingerprint,
+    ...(typeof value.reconcileAfter === 'string' ? { reconcileAfter: value.reconcileAfter } : {}),
+    ...(typeof value.executionId === 'string' ? { executionId: value.executionId } : {}),
+    ...(typeof value.resultEpoch === 'number' ? { resultEpoch: value.resultEpoch } : {}),
+    ...(restoreResult ? { restoreResult } : {}),
+    ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
+  };
 }

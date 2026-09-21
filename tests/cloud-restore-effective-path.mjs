@@ -121,7 +121,9 @@ const wrapper = SQL.slice(wrapperStart, SQL.indexOf('do $effective_path_postflig
 assert.doesNotMatch(builder, /\b(?:delete|insert|update|truncate)\s+(?:from|into|public\.)/iu, 'Builder must be read/transform only');
 assert.ok(wrapper.indexOf('erp_cloud_restore_build_effective_snapshot') < wrapper.indexOf('return public.erp_restore_cloud_snapshot'));
 
-assert.match(DOMAIN, /CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_effective'/u);
+assert.match(DOMAIN, /CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_attempt'/u);
+assert.match(DOMAIN, /CLOUD_RESTORE_ATTEMPT_PREPARE_RPC = 'erp_prepare_cloud_restore_attempt'/u);
+assert.match(DOMAIN, /CLOUD_RESTORE_ATTEMPT_RECONCILE_RPC = 'erp_reconcile_cloud_restore_attempt'/u);
 assert.match(PORTABILITY, /assertCloudRestoreEffectiveCandidate/u);
 assert.match(PORTABILITY, /sourceData: verifiedSource\.data/u);
 assert.match(PROVIDER, /p_source_snapshot: effective\.sourceData/u);

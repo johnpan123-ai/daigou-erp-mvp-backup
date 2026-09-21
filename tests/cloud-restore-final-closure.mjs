@@ -96,9 +96,10 @@ assert.match(SQL_035, /revoke all on function public\.erp_restore_cloud_snapshot
 const restoreMethod = PROVIDER.slice(PROVIDER.indexOf('async restoreCloudSnapshot('), PROVIDER.indexOf('private async applyCloudFieldMutations'));
 assert.doesNotMatch(restoreMethod, /AbortController|Promise\.race|setTimeout/u, 'Restore write must not reuse the 4-second read fallback');
 assert.equal((restoreMethod.match(/supabase\.rpc\(CLOUD_RESTORE_RPC/gu) || []).length, 1, 'Restore provider must dispatch exactly once');
-assert.doesNotMatch(restoreMethod, /\b(?:retry|while|for\s*\()/iu, 'Restore provider must not auto-retry');
-assert.match(PROVIDER, /readCompletedCloudRestoreAfterTransportUncertainty[\s\S]+erp_cloud_restore_requests[\s\S]+status,canonical_result/u);
-assert.match(restoreMethod, /catch \(caughtError\)[\s\S]+readCompletedCloudRestoreAfterTransportUncertainty\(command\.idempotencyKey\)[\s\S]+throw safeError/u);
+assert.doesNotMatch(restoreMethod, /\bretry\b|\bwhile\s*\(|\bfor\s*\(/iu, 'Restore provider must not auto-retry');
+assert.match(PROVIDER, /async prepareCloudRestoreAttempt[\s\S]+CLOUD_RESTORE_ATTEMPT_PREPARE_RPC[\s\S]+CLOUD_RESTORE_ATTEMPT_BEGIN_RPC/u);
+assert.match(restoreMethod, /catch \(caughtError\)[\s\S]+reconcileDestructiveUncertainty\(command\.attempt\)/u);
+assert.doesNotMatch(PROVIDER, /readCompletedCloudRestoreAfterTransportUncertainty/u);
 assert.match(SUBMIT, /'57014'/u);
 assert.match(SUBMIT, /伺服器已取消逾時的還原交易/u);
 

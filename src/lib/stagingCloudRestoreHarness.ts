@@ -1,5 +1,5 @@
 import { STAGING_SUPABASE_PROJECT_REF, type SupabaseRuntimeRole } from './supabaseEnvironmentBoundary';
-import type { CloudRestoreCommand, CloudRestoreResult } from '../providers/cloud/cloudAtomicRestore';
+import type { CloudRestoreCommand, CloudRestoreExecutionCommand, CloudRestoreResult } from '../providers/cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from '../providers/cloud/cloudRestorePortability';
 
 export interface StagingCloudRestoreBoundary {
@@ -22,12 +22,12 @@ export function assertStagingCloudRestoreBoundary(input: StagingCloudRestoreBoun
 
 export class StagingCloudRestoreHarnessController {
   readonly environment: Readonly<StagingCloudRestoreBoundary>;
-  private readonly restore: (command: CloudRestoreCommand) => Promise<CloudRestoreResult>;
+  private readonly restore: (command: CloudRestoreExecutionCommand) => Promise<CloudRestoreResult>;
   private readonly preflight: (command: CloudRestoreCommand) => Promise<CloudRestoreTargetCompatibilityResult>;
 
   constructor(
     environment: StagingCloudRestoreBoundary,
-    restore: (command: CloudRestoreCommand) => Promise<CloudRestoreResult>,
+    restore: (command: CloudRestoreExecutionCommand) => Promise<CloudRestoreResult>,
     preflight: (command: CloudRestoreCommand) => Promise<CloudRestoreTargetCompatibilityResult> = async () => {
       throw new Error('CLOUD_RESTORE_PORTABILITY_PREFLIGHT_REQUIRED');
     },
@@ -38,7 +38,7 @@ export class StagingCloudRestoreHarnessController {
     this.preflight = preflight;
   }
 
-  async execute(command: CloudRestoreCommand): Promise<CloudRestoreResult> {
+  async execute(command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult> {
     assertStagingCloudRestoreBoundary(this.environment);
     return this.restore(command);
   }
