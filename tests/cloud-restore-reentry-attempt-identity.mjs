@@ -30,6 +30,15 @@ globalThis.sessionStorage = {
 const vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
 try {
   const identity = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreSubmit.ts');
+  const recovery = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreRecovery.ts');
+  const safeRow = { attempt_id: '1e6a3707-13fd-4000-9281-3a1f3b1a3315', trace_id: 'eec83614-7b05-452d-b6f0-db000295c20c',
+    status: 'executing', submitted_at: '2026-09-21T12:58:08Z', expected_epoch: 4,
+    effective_fingerprint: 'e'.repeat(64), target_environment: 'staging' };
+  assert.equal(recovery.parseCloudRestoreRecoveryRows([safeRow], 'staging')[0].traceId, safeRow.trace_id);
+  for (const invalid of [null, [null], [{ ...safeRow, trace_id: null }], [{ ...safeRow, target_environment: 'other' }], [safeRow, safeRow]]) {
+    assert.throws(() => recovery.parseCloudRestoreRecoveryRows(invalid, 'staging'));
+  }
+  assert.doesNotMatch(recovery.CLOUD_RESTORE_RECOVERY_COLUMNS, /actor_key|snapshot|canonical_result/u);
   const fingerprintA = 'a'.repeat(64);
   const fingerprintB = 'b'.repeat(64);
   const first = identity.readOrCreateCloudRestoreIntentIdentity(fingerprintA, new Map());
@@ -128,6 +137,49 @@ try {
       firstEnvelope,
       'Completed same-candidate replay must use the exact original envelope',
     );
+
+    // Legacy server-only attempt: no full local envelope. Real panel must recover
+    // its stored trace via the read boundary, never pair it with a generated trace.
+    const legacy = { attemptId: '1e6a3707-13fd-4000-9281-3a1f3b1a3315', traceId: 'eec83614-7b05-452d-b6f0-db000295c20c',
+      status: 'executing', submittedAt: '2026-09-21T12:58:08Z', expectedEpoch: 4, effectiveFingerprint: 'e'.repeat(64) };
+    await page.evaluate(row => {
+      sessionStorage.clear();
+      sessionStorage.setItem('erp_cloud_restore_idempotency:legacy', row.attemptId);
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.setRecovery([row]);
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
+    }, legacy);
+    await page.getByTestId('cloud-restore-recovered-attempt').waitFor();
+    assert.match(await page.getByTestId('cloud-restore-recovered-attempt').innerText(), new RegExp(legacy.traceId));
+    assert.equal(await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).isDisabled(), true);
+    let recovered = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(recovered.prepareCalls + recovered.calls + recovered.reconcileCalls, 0);
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
+    await page.getByTestId('cloud-restore-recovered-attempt').waitFor();
+    await page.getByTestId('cloud-restore-check-outcome').click();
+    await page.getByTestId('cloud-restore-new-intent').waitFor();
+    recovered = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(recovered.reconcileCalls, 1);
+    assert.equal(recovered.prepareCalls + recovered.calls, 0);
+    await page.getByTestId('cloud-restore-new-intent').click();
+    await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).waitFor();
+    await submit(true);
+    const newRun = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(newRun.prepareCalls, 1);
+    assert.equal(newRun.calls, 1);
+    assert.notEqual(newRun.prepareAttemptIds[0], legacy.attemptId);
+    assert.notEqual(newRun.traceIds[0], legacy.traceId);
+
+    await page.evaluate(() => {
+      sessionStorage.clear();
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.setRecovery('error');
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
+    });
+    await page.getByText('未決還原查詢失敗；新還原已暫停。', { exact: false }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).isDisabled(), true);
+    const failure = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(failure.prepareCalls + failure.calls + failure.reconcileCalls, 0);
   } finally {
     await browser.close();
   }

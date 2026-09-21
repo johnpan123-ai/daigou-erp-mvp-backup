@@ -12,6 +12,7 @@ import {
   resetCloudRestoreSubmitDiagnosticsForTests,
 } from '../../src/providers/cloud/cloudRestoreSubmit';
 import { dataProvider } from '../../src/providers/dataProvider';
+import type { CloudRestoreRecoveryAttempt } from '../../src/providers/cloud/cloudRestoreRecovery';
 
 localStorage.setItem('erp_provider_mode', 'cloud');
 markCloudReachable();
@@ -39,6 +40,7 @@ declare global {
         diagnostics: ReturnType<typeof getCloudRestoreSubmitDiagnostics>;
       };
       remount: () => void;
+      setRecovery: (attempts: CloudRestoreRecoveryAttempt[] | 'error') => void;
     };
   }
 }
@@ -46,6 +48,7 @@ declare global {
 type RestoreFixtureBehavior = 'success' | 'completed-replay' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
 
 let behavior: RestoreFixtureBehavior = 'success';
+let serverPending: CloudRestoreRecoveryAttempt[] | 'error' = [];
 let calls = 0;
 let prepareCalls = 0;
 let prepareAttemptIds: string[] = [];
@@ -68,6 +71,7 @@ window.__CLOUD_RESTORE_CONNECTIVITY_TEST__ = {
 };
 
 window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
+  setRecovery: attempts => { serverPending = attempts; },
   setBehavior: next => { behavior = next; },
   reset: () => {
     behavior = 'success';
@@ -110,6 +114,11 @@ const restoreResult = (command: Parameters<typeof dataProvider.restoreCloudSnaps
 
 let latestCommand: Parameters<typeof dataProvider.restoreCloudSnapshot>[0] | null = null;
 
+dataProvider.getPendingCloudRestoreAttempts = async () => {
+  if (serverPending === 'error') throw new Error('lookup failed');
+  return structuredClone(serverPending);
+};
+
 dataProvider.prepareCloudRestoreAttempt = async command => {
   prepareCalls += 1;
   prepareAttemptIds.push(command.idempotencyKey);
@@ -143,6 +152,7 @@ dataProvider.prepareCloudRestoreAttempt = async command => {
 
 dataProvider.reconcileCloudRestoreAttempt = async command => {
   reconcileCalls += 1;
+  if (Array.isArray(serverPending)) serverPending = serverPending.filter(row => row.attemptId !== command.attemptId);
   const fingerprint = latestCommand?.candidate.manifest.snapshotFingerprint ?? 'a'.repeat(64);
   if (behavior === 'lost-response-success' && latestCommand) {
     return {

@@ -83,6 +83,7 @@
 })();
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
+import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
 import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
@@ -330,6 +331,18 @@ const fetchAll = async <T>(
 
 export class SupabaseProvider implements IDataProvider {
   private readonly mutationCache = new CloudTargetedCache();
+
+  async getPendingCloudRestoreAttempts() {
+    // This uses the current authenticated client, never a service-role client.
+    // 038 RLS restricts rows to is_owner(auth.uid()) and the caller's actor hash.
+    const { data, error } = await supabase.from('erp_cloud_restore_attempts')
+      .select(CLOUD_RESTORE_RECOVERY_COLUMNS)
+      .eq('target_environment', supabaseEnvironment.projectRef)
+      .in('status', ['prepared', 'executing'])
+      .order('submitted_at', { ascending: true });
+    if (error) throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    return parseCloudRestoreRecoveryRows(data, supabaseEnvironment.projectRef);
+  }
 
   private assertAttemptIdentity(
     outcome: CloudRestoreAttemptOutcome,

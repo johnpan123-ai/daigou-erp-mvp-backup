@@ -56,6 +56,7 @@ dataProvider.getProductVariants = options => {
 dataProvider.waitForCloudBootstrapConvergence = () => (
   bootstrapPending ? bootstrapPromise : Promise.resolve(false)
 );
+dataProvider.getPendingCloudRestoreAttempts = async () => [];
 dataProvider.prepareCloudRestoreAttempt = async command => ({
   status: 'executing',
   attemptId: command.idempotencyKey,

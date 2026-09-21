@@ -1,4 +1,5 @@
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { CloudRestoreRecoveryAttempt } from '../providers/cloud/cloudRestoreRecovery';
 import { AlertTriangle, FileCheck2, RotateCcw } from 'lucide-react';
 import { useAuth } from '../auth/authContext';
 import { useRole } from '../auth/useRole';
@@ -102,6 +103,9 @@ export default function CloudAtomicRestorePanel({
   const [result, setResult] = useState<CloudRestoreResult | null>(null);
   const [attemptClosed, setAttemptClosed] = useState(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [recovery, setRecovery] = useState<{ userId: string; ready: boolean; error: boolean }>({ userId: '', ready: false, error: false });
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
+  const [recoveredAttempt, setRecoveredAttempt] = useState<CloudRestoreRecoveryAttempt | null>(null);
   const cloudMode = getProviderMode() === 'cloud';
   const owner = role === 'owner';
   const connectivity = useSyncExternalStore(
@@ -112,7 +116,8 @@ export default function CloudAtomicRestorePanel({
   const browserOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
   const online = browserOnline && connectivity.status === 'online';
   const fresh = connectivity.readStatus === 'fresh-online' || connectivity.readStatus === 'fresh-empty';
-  const canPreflight = cloudMode && Boolean(user) && owner && online;
+  const recoveryReady = recovery.ready && recovery.userId === user?.id;
+  const canPreflight = cloudMode && Boolean(user) && owner && online && recoveryReady;
   const allowed = canPreflight && fresh;
   useCloudResourceSync(
     'cloud-restore-authoritative-readiness',
@@ -121,8 +126,55 @@ export default function CloudAtomicRestorePanel({
     ignoreCloudResourceRefresh,
   );
 
+  useEffect(() => {
+    if (!cloudMode || !owner || !user?.id || !online) return;
+    let active = true;
+    const userId = user.id;
+    // A failed lookup is not proof of absence. New intents stay blocked.
+    void dataProvider.getPendingCloudRestoreAttempts().then(attempts => {
+      if (!active) return;
+      const pending = attempts[0];
+      if (pending) {
+        candidateGenerationRef.current += 1;
+        pendingAttemptRef.current = null;
+        setConfirmationOpen(false);
+        setRecoveredAttempt(pending);
+        setUnresolvedAttempt(pending);
+        persistCloudRestoreUnresolvedAttempt(pending);
+        submissionLockedRef.current = true;
+        setStatus('unknown');
+        setMessage('找到屬於目前帳號的未決還原；請先查證伺服器結果，勿重複送出。');
+      }
+      setRecovery({ userId, ready: true, error: false });
+    }).catch(() => {
+      if (active) setRecovery({ userId, ready: false, error: true });
+    });
+    return () => { active = false; };
+  }, [cloudMode, owner, user?.id, online, recoveryVersion]);
+
+  const refreshRecovery = () => {
+    setRecovery({ userId: '', ready: false, error: false });
+    setRecoveryVersion(version => version + 1);
+  };
+
+  const startNewIntent = () => {
+    if (unresolvedAttempt || inFlightRef.current || !recoveryReady) return;
+    // Explicit user action; no identity, PREPARE or EXECUTE is created here.
+    setCandidate(null);
+    setSourceCandidate(null);
+    setConfirmation('');
+    setConfirmationOpen(false);
+    setRecoveredAttempt(null);
+    setAttemptClosed(false);
+    submissionLockedRef.current = false;
+    pendingAttemptRef.current = null;
+    setStatus('idle');
+    setMessage('請重新選擇備份並確認新的還原意圖。前次結果保留供查證。');
+    refreshRecovery();
+  };
+
   const selectFile = async (file: File | undefined) => {
-    if (!file || unresolvedAttempt) return;
+    if (!file || unresolvedAttempt || !canPreflight) return;
     const generation = candidateGenerationRef.current + 1;
     candidateGenerationRef.current = generation;
     setStatus('preflighting');
@@ -264,8 +316,10 @@ export default function CloudAtomicRestorePanel({
       }
     }
     setResult(displayedResult);
+    setRecoveredAttempt(null);
     setUnresolvedAttempt(null);
     clearCloudRestoreUnresolvedAttempt();
+    refreshRecovery();
     setStatus('success');
     submissionLockedRef.current = true;
     setMessage(syncPending
@@ -281,7 +335,7 @@ export default function CloudAtomicRestorePanel({
   };
 
   const checkOutcome = async () => {
-    if (!unresolvedAttempt || inFlightRef.current) return;
+    if (!unresolvedAttempt || inFlightRef.current || !cloudMode || !user || !owner || !online || !recoveryReady) return;
     inFlightRef.current = true;
     setStatus('checking');
     setMessage('正在查證伺服器結果；不會重新執行 Restore。');
@@ -295,12 +349,14 @@ export default function CloudAtomicRestorePanel({
         });
       } else if (outcome.status === 'not_committed') {
         setUnresolvedAttempt(null);
+        setRecoveredAttempt(null);
         clearCloudRestoreUnresolvedAttempt();
         retireCloudRestoreIntentIdentity(unresolvedAttempt, retryKeys.current);
         setAttemptClosed(true);
         setStatus('error');
         submissionLockedRef.current = true;
         setMessage('伺服器已確認本次未提交。如需再次還原，必須重新取得人工授權。');
+        refreshRecovery();
       } else {
         setStatus('unknown');
         submissionLockedRef.current = true;
@@ -543,6 +599,25 @@ export default function CloudAtomicRestorePanel({
                   ? '等待重新讀取雲端最新資料，完成後才能還原'
                   : 'Owner / authoritative fresh：可進行本機 preflight 與還原確認。'}
       </p>
+      {!recoveryReady && cloudMode && owner && user && (
+        <p data-testid="cloud-restore-recovery-gate" role={recovery.error ? 'alert' : 'status'}>
+          {recovery.error ? '未決還原查詢失敗；新還原已暫停。' : '正在查詢目前帳號的未決還原…'}
+          {recovery.error && <button type="button" onClick={refreshRecovery}>重新查詢未決還原（唯讀）</button>}
+        </p>
+      )}
+      {recoveredAttempt && (
+        <div data-testid="cloud-restore-recovered-attempt">
+          <div>既有 Attempt：<code>{recoveredAttempt.attemptId}</code></div>
+          <div>Trace：<code>{recoveredAttempt.traceId}</code></div>
+          <div>狀態：{recoveredAttempt.status}；送出時間：{recoveredAttempt.submittedAt}</div>
+          <div>Expected epoch：{recoveredAttempt.expectedEpoch}；Fingerprint：{recoveredAttempt.effectiveFingerprint.slice(0, 16)}…</div>
+        </div>
+      )}
+      {(attemptClosed || status === 'success') && !unresolvedAttempt && (
+        <button type="button" data-testid="cloud-restore-new-intent" disabled={!allowed} onClick={startNewIntent}>
+          開始另一次還原（重新選檔與確認）
+        </button>
+      )}
       <button type="button" className="btn btn-outline" disabled={attemptClosed || Boolean(unresolvedAttempt) || !canPreflight || status === 'restoring' || status === 'checking' || status === 'unknown'} onClick={() => fileRef.current?.click()}>
         <FileCheck2 size={16} /> 選擇 JSON 並 Preflight
       </button>
@@ -636,7 +711,7 @@ export default function CloudAtomicRestorePanel({
           type="button"
           className="btn btn-outline"
           data-testid="cloud-restore-check-outcome"
-          disabled={status === 'checking'}
+          disabled={status === 'checking' || !recoveryReady || !cloudMode || !user || !owner || !online}
           onClick={() => void checkOutcome()}
           style={{ marginTop: 10 }}
         >
