@@ -27,6 +27,8 @@ export interface CloudTargetedQueryRequest {
   table: string;
   databaseIds?: string[];
   updatedAfter?: string;
+  from?: number;
+  to?: number;
   signal?: AbortSignal;
 }
 
@@ -163,6 +165,15 @@ const tablesForResources = (resources: CloudResource[]): string[] => (
     .filter(table => Boolean(TABLES[table]))
 );
 
+const AUTHORITATIVE_PAGE_SIZE = 1000;
+
+class CloudAuthoritativeRefreshSupersededError extends Error {
+  constructor() {
+    super('CLOUD_CACHE_AUTHORITATIVE_REFRESH_SUPERSEDED');
+    this.name = 'CloudAuthoritativeRefreshSupersededError';
+  }
+}
+
 export class CloudTargetedCache {
   private readonly now: () => Date;
   private readonly queryOverride?: CloudTargetedQuery;
@@ -171,6 +182,8 @@ export class CloudTargetedCache {
   private targetedQueries = 0;
   private rowsFetched = 0;
   private requestsByTable = new Map<string, number>();
+  private authoritativeGeneration = 0;
+  private committedAuthoritativeEpoch: number | null = null;
 
   constructor(options: { now?: () => Date; query?: CloudTargetedQuery } = {}) {
     this.now = options.now ?? (() => new Date());
@@ -191,22 +204,38 @@ export class CloudTargetedCache {
     const tables = (request.reason === 'realtime' || (request.reason === 'editing-ended' && hasRowChanges))
       ? [...byTable.keys()]
       : tablesForResources(request.resources);
+    const isAuthoritativeResourceRead = request.reason === 'reconnect'
+      || (request.reason === 'editing-ended' && !hasRowChanges);
+    if (request.authoritativeEpoch !== undefined) {
+      if (!isAuthoritativeResourceRead || !Number.isSafeInteger(request.authoritativeEpoch) || request.authoritativeEpoch < 0) {
+        throw new Error('CLOUD_CACHE_AUTHORITATIVE_EPOCH_INVALID');
+      }
+      if (this.committedAuthoritativeEpoch !== null && request.authoritativeEpoch < this.committedAuthoritativeEpoch) {
+        throw new Error('CLOUD_CACHE_AUTHORITATIVE_EPOCH_REGRESSION');
+      }
+    }
+    const generation = isAuthoritativeResourceRead
+      ? ++this.authoritativeGeneration
+      : this.authoritativeGeneration;
     markCloudReadLoading();
     try {
-      const isAuthoritativeResourceRead = request.reason === 'reconnect'
-        || (request.reason === 'editing-ended' && !hasRowChanges);
       const rowCounts = isAuthoritativeResourceRead
-        ? await this.refreshAuthoritativeTables(tables, signal)
+        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal)
         : await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
           const changes = byTable.get(table) || [];
-          if (changes.length > 0) return this.refreshChanges(table, changes, signal);
-          return this.refreshSince(table, signal);
+          if (changes.length > 0) return this.refreshChanges(table, changes, generation, signal);
+          return this.refreshSince(table, generation, signal);
         })));
       signal?.throwIfAborted();
+      if (generation !== this.authoritativeGeneration) {
+        if (isAuthoritativeResourceRead) throw new CloudAuthoritativeRefreshSupersededError();
+        return;
+      }
       markCloudReadFresh(isAuthoritativeResourceRead
         ? rowCounts.reduce((sum, count) => sum + count, 0)
         : undefined);
     } catch (error) {
+      if (error instanceof CloudAuthoritativeRefreshSupersededError) throw error;
       const cachedRows = await Promise.all(tables.map(table => TABLES[table]?.get() ?? Promise.resolve([])));
       markCloudReadFailed(error, cachedRows.some(rows => rows.length > 0));
       throw error;
@@ -234,6 +263,9 @@ export class CloudTargetedCache {
     if (request.signal) query = query.abortSignal(request.signal);
     if (request.databaseIds) query = query.in('id', request.databaseIds);
     if (request.updatedAfter) query = query.gt('updated_at', request.updatedAfter).order('updated_at');
+    if (request.from !== undefined && request.to !== undefined) {
+      query = query.order('id').range(request.from, request.to);
+    }
     const result = await query;
     if (result.error) {
       markCloudRequestFailed(result.error);
@@ -251,10 +283,26 @@ export class CloudTargetedCache {
       rowsFetched: this.rowsFetched,
       requestsByTable: Object.fromEntries(this.requestsByTable),
       fullPulls: 0,
+      authoritativeGeneration: this.authoritativeGeneration,
+      committedAuthoritativeEpoch: this.committedAuthoritativeEpoch,
     };
   }
 
-  private async refreshChanges(table: string, changes: CloudChange[], signal?: AbortSignal): Promise<number> {
+  private async queryAll(table: string, signal?: AbortSignal): Promise<Row[]> {
+    const rows: Row[] = [];
+    for (let from = 0; ; from += AUTHORITATIVE_PAGE_SIZE) {
+      const page = await this.query({
+        table,
+        from,
+        to: from + AUTHORITATIVE_PAGE_SIZE - 1,
+        signal,
+      });
+      rows.push(...page);
+      if (page.length < AUTHORITATIVE_PAGE_SIZE) return rows;
+    }
+  }
+
+  private async refreshChanges(table: string, changes: CloudChange[], generation: number, signal?: AbortSignal): Promise<number> {
     const adapter = TABLES[table];
     if (!adapter) return 0;
     const touchedIds = [...new Set(changes.map(change => change.canonicalId).filter(Boolean))];
@@ -262,25 +310,32 @@ export class CloudTargetedCache {
     if (databaseIds.length === 0) return 0;
     const rows = await this.query({ table, databaseIds, signal });
     signal?.throwIfAborted();
+    if (generation !== this.authoritativeGeneration) return 0;
     await this.merge(table, adapter, touchedIds, rows);
     const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
     if (newest) this.cursors.set(table, newest);
     return rows.length;
   }
 
-  private async refreshSince(table: string, signal?: AbortSignal): Promise<number> {
+  private async refreshSince(table: string, generation: number, signal?: AbortSignal): Promise<number> {
     const adapter = TABLES[table];
     if (!adapter?.supportsIncremental) return 0;
     const cursor = this.cursors.get(table) || this.now().toISOString();
     const nextCursor = this.now().toISOString();
     const rows = await this.query({ table, updatedAfter: cursor, signal });
     signal?.throwIfAborted();
+    if (generation !== this.authoritativeGeneration) return 0;
     await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows);
     this.cursors.set(table, nextCursor);
     return rows.length;
   }
 
-  private async refreshAuthoritativeTables(tables: string[], signal?: AbortSignal): Promise<number[]> {
+  private async refreshAuthoritativeTables(
+    tables: string[],
+    generation: number,
+    authoritativeEpoch?: number,
+    signal?: AbortSignal,
+  ): Promise<number[]> {
     const attemptController = new AbortController();
     const abortAttempt = () => attemptController.abort();
     signal?.addEventListener('abort', abortAttempt, { once: true });
@@ -290,7 +345,7 @@ export class CloudTargetedCache {
       prepared = await Promise.all(tables.map(async table => {
         const adapter = TABLES[table];
         if (!adapter) return { table, adapter: null, rows: [], activeRows: [], newest: undefined };
-        const rows = await this.query({ table, signal: attemptController.signal });
+        const rows = await this.queryAll(table, attemptController.signal);
         attemptController.signal.throwIfAborted();
         const activeRows = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
         const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
@@ -304,13 +359,15 @@ export class CloudTargetedCache {
     }
 
     signal?.throwIfAborted();
-    signal?.throwIfAborted();
+    if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
     await db.replaceAuthoritativeCloudCollections(prepared
       .filter(entry => entry.adapter && TABLE_STORAGE_KEYS[entry.table])
       .map(entry => ({ storageKey: TABLE_STORAGE_KEYS[entry.table], value: entry.activeRows })));
+    if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
     for (const entry of prepared) {
       if (entry.adapter) this.cursors.set(entry.table, entry.newest || this.now().toISOString());
     }
+    if (authoritativeEpoch !== undefined) this.committedAuthoritativeEpoch = authoritativeEpoch;
     return prepared.map(entry => entry.activeRows.length);
   }
 

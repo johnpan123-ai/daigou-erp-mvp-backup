@@ -36,6 +36,7 @@
     "test:cloud-restore-fail-closed": "node tests/cloud-restore-fail-closed.mjs",
     "test:cloud-atomic-json-restore": "node tests/cloud-atomic-json-restore.mjs",
     "test:post-restore-settings-convergence": "node tests/post-restore-settings-convergence.mjs",
+    "test:cloud-restore-cache-convergence": "node tests/cloud-restore-cache-convergence.mjs",
     "test:cloud-restore-legacy-snapshot": "node tests/cloud-restore-legacy-snapshot-compatibility.mjs",
     "test:cloud-restore-portability": "node tests/cloud-restore-cross-environment-portability.mjs",
     "test:cloud-restore-effective-path": "node tests/cloud-restore-effective-path.mjs",

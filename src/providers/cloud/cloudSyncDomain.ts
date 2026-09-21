@@ -68,6 +68,8 @@ export interface CloudRefreshRequest {
   reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect';
   changes: CloudChange[];
   resources: CloudResource[];
+  /** Server Restore epoch whose complete cache generation this read must commit. */
+  authoritativeEpoch?: number;
 }
 
 export interface CloudSyncMetrics {

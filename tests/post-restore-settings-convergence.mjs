@@ -49,6 +49,8 @@ processVite.stderr.on('data', chunk => { output += String(chunk); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const url = `http://127.0.0.1:${PORT}/tests/fixtures/post-restore-settings-convergence.html`;
 const COUNT_SELECTOR = '.kpi-grid > .card:first-child .font-semibold';
+const OLD_COUNTS = '1000 筆|705 筆|390 筆|721 筆|0 筆|0 筆';
+const NEW_COUNTS = '5517 筆|847 筆|663 筆|4939 筆|1 筆|2 筆';
 
 try {
   for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -63,7 +65,7 @@ try {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => Boolean(window.__POST_RESTORE_SETTINGS_TEST__));
       await page.waitForFunction(selector => document.querySelectorAll(selector).length === 6, COUNT_SELECTOR);
-      await page.waitForFunction(selector => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === '2 筆|3 筆|4 筆|5 筆|0 筆|0 筆', COUNT_SELECTOR);
+      await page.waitForFunction(({ selector, expected }) => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === expected, { selector: COUNT_SELECTOR, expected: OLD_COUNTS });
       await page.evaluate(next => window.__POST_RESTORE_SETTINGS_TEST__.reset(next), behavior);
     };
     const submit = async (duplicate = false) => {
@@ -92,7 +94,7 @@ try {
 
     await open('success');
     await submit(true);
-    await page.waitForFunction(selector => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === '7 筆|8 筆|9 筆|10 筆|1 筆|2 筆', COUNT_SELECTOR);
+    await page.waitForFunction(({ selector, expected }) => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === expected, { selector: COUNT_SELECTOR, expected: NEW_COUNTS });
     assert.match(await page.getByTestId('cloud-restore-status').innerText(), /authoritative refresh 已完成/u);
     assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
       restoreCalls: 1, countGetterCalls: 6, completionEvents: 1, dataset: 'new',
@@ -110,7 +112,7 @@ try {
     await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.remount());
     await page.waitForFunction(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot().countGetterCalls === 6);
     await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.completeBootstrap());
-    await page.waitForFunction(selector => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === '7 筆|8 筆|9 筆|10 筆|1 筆|2 筆', COUNT_SELECTOR);
+    await page.waitForFunction(({ selector, expected }) => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === expected, { selector: COUNT_SELECTOR, expected: NEW_COUNTS });
     assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
       restoreCalls: 0, countGetterCalls: 12, completionEvents: 0, dataset: 'new',
     }, 'Settings must reread counts after the timed-out bootstrap eventually becomes authoritative');

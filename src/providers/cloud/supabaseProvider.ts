@@ -472,6 +472,7 @@ export class SupabaseProvider implements IDataProvider {
         reason: 'reconnect',
         resources: ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'japanPackages', 'outboundShipments', 'salesOrders'],
         changes: [],
+        authoritativeEpoch: result.restoreEpoch,
       }),
       {
         attemptCorrelationId: command.attemptCorrelationId,

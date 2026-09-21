@@ -9,8 +9,8 @@ type Behavior = 'success' | 'count-read-failure' | 'bootstrap-convergence';
 type Dataset = 'old' | 'new' | 'failure';
 
 const lengths = {
-  old: { inventory: 2, salesOrders: 0, salesOrderItems: 0, productGroups: 3, productCategories: 4, productVariants: 5 },
-  new: { inventory: 7, salesOrders: 1, salesOrderItems: 2, productGroups: 8, productCategories: 9, productVariants: 10 },
+  old: { inventory: 1000, salesOrders: 0, salesOrderItems: 0, productGroups: 705, productCategories: 390, productVariants: 721 },
+  new: { inventory: 5517, salesOrders: 1, salesOrderItems: 2, productGroups: 847, productCategories: 663, productVariants: 4939 },
 };
 const rows = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `row-${index}` }));
 
