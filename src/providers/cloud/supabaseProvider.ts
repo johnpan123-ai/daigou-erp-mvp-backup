@@ -1098,7 +1098,7 @@ export class SupabaseProvider implements IDataProvider {
     return data;
   }
 
-  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
+  async getProductVariants(options?: { recalc?: boolean; raw?: boolean }): Promise<ProductVariant[]> {
     try {
       await this.pullCoreProductData();
     } catch (err) {

@@ -71,11 +71,32 @@ try {
       return builder;
     };
     const rows = await supabaseProvider.getProductGroups();
-    return { rows, cached: await cloudCacheDb.getProductGroups(), state: getCloudConnectivitySnapshot() };
+    const duplicateVariants = [
+      {
+        id: '81000000-0000-4000-8000-000000000002', product_group_id: serverGroup.id,
+        myacg_item_code: 'RAW-COUNT-SKU', product_title: 'Raw count product', variant_name: 'A', raw_variant_name: 'A',
+      },
+      {
+        id: '81000000-0000-4000-8000-000000000003', product_group_id: serverGroup.id,
+        myacg_item_code: 'RAW-COUNT-SKU', product_title: 'Raw count product', variant_name: 'A', raw_variant_name: 'A',
+      },
+    ];
+    await cloudCacheDb.replaceProductVariantsFromAuthoritativeCloud(duplicateVariants);
+    const rawVariants = await supabaseProvider.getProductVariants({ raw: true });
+    const canonicalVariants = await supabaseProvider.getProductVariants();
+    return {
+      rows,
+      cached: await cloudCacheDb.getProductGroups(),
+      rawVariantCount: rawVariants.length,
+      canonicalVariantCount: canonicalVariants.length,
+      state: getCloudConnectivitySnapshot(),
+    };
   });
   await freshRowsFixture.context.close();
   assert.equal(freshRows.rows[0].title, 'Server fresh row');
   assert.equal(freshRows.cached[0].title, 'Server fresh row');
+  assert.equal(freshRows.rawVariantCount, 2, 'Settings raw statistics must retain every authoritative Variant row');
+  assert.equal(freshRows.canonicalVariantCount, 1, 'Business consumers must retain the existing Variant dedupe view');
   assert.equal(freshRows.state.readStatus, 'fresh-online');
 
   const slowBootstrapFixture = await openFixturePage();

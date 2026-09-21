@@ -142,7 +142,7 @@ export default function Settings() {
         dataProvider.getSalesOrderItems(),
         dataProvider.getProductGroups(),
         dataProvider.getProductCategories(),
-        dataProvider.getProductVariants()
+        dataProvider.getProductVariants({ raw: true })
       ]);
       return {
         inventory: inv.length,
