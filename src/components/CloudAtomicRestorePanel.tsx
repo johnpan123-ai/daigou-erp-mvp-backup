@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import CloudRestoreIntegrityAudit from './CloudRestoreIntegrityAudit';
 import type { CloudRestoreRecoveryAttempt } from '../providers/cloud/cloudRestoreRecovery';
 import { AlertTriangle, FileCheck2, RotateCcw } from 'lucide-react';
 import { useAuth } from '../auth/authContext';
@@ -729,6 +730,7 @@ export default function CloudAtomicRestorePanel({
           )}
         </div>
       )}
+      {cloudMode && owner && user && <CloudRestoreIntegrityAudit key={user.id} />}
     </section>
   );
 }

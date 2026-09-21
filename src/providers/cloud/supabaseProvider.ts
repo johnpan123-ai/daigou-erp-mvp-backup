@@ -84,6 +84,7 @@
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
+import { readCloudRestoreIntegrityAudit } from './cloudRestoreIntegrityAudit';
 import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
@@ -330,6 +331,10 @@ const fetchAll = async <T>(
 
 
 export class SupabaseProvider implements IDataProvider {
+  async readCloudRestoreIntegrityAudit() {
+    return readCloudRestoreIntegrityAudit(supabase);
+  }
+
   private readonly mutationCache = new CloudTargetedCache();
 
   async getPendingCloudRestoreAttempts() {
