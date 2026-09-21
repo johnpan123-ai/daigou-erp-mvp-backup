@@ -3,7 +3,7 @@ import {
   type CloudConnectivitySnapshot,
   type CloudReadFreshnessStatus,
 } from './cloudConnectivity';
-import type { CloudRestoreResult } from './cloudAtomicRestore';
+import type { CloudRestoreAttemptCommand, CloudRestoreResult } from './cloudAtomicRestore';
 
 export const CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE = '雲端資料正在更新，本次尚未送出。';
 export const CLOUD_RESTORE_UNKNOWN_RESULT_MESSAGE = '還原結果待查證，請勿重複操作。';
@@ -57,6 +57,14 @@ const MAX_DIAGNOSTICS = 100;
 const diagnostics: CloudRestoreSubmitDiagnostic[] = [];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SAFE_PHASES = new Set<CloudRestoreSubmitPhase>(['confirmation', 'readiness', 'rpc', 'authoritative-refresh', 'submit']);
+const CLOUD_RESTORE_INTENT_STORAGE_PREFIX = 'erp_cloud_restore_intent:';
+const CLOUD_RESTORE_UNRESOLVED_STORAGE_KEY = 'erp_cloud_restore_unresolved_attempt';
+
+export interface CloudRestoreIntentIdentity {
+  attemptId: string;
+  traceId: string;
+  executionFingerprint: string;
+}
 
 interface SafeErrorDefinition {
   classification: CloudRestoreErrorClassification;
@@ -401,30 +409,108 @@ export const formatCloudRestoreSubmitError = (error: CloudRestoreVisibleError): 
   return `[${resolved.code}] ${resolved.message}${trace}`;
 };
 
-export const readOrCreateCloudRestoreIdempotencyKey = (
+const validRestoreIntentIdentity = (
+  value: unknown,
+  executionFingerprint: string,
+): CloudRestoreIntentIdentity | null => {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<CloudRestoreIntentIdentity>;
+  if (!UUID_PATTERN.test(candidate.attemptId ?? '')
+    || !UUID_PATTERN.test(candidate.traceId ?? '')
+    || candidate.executionFingerprint !== executionFingerprint) return null;
+  return Object.freeze({
+    attemptId: candidate.attemptId as string,
+    traceId: candidate.traceId as string,
+    executionFingerprint,
+  });
+};
+
+export const readOrCreateCloudRestoreIntentIdentity = (
   fingerprint: string,
-  memory: Map<string, string>,
-): string => {
+  memory: Map<string, CloudRestoreIntentIdentity>,
+): CloudRestoreIntentIdentity => {
   const existing = memory.get(fingerprint);
   if (existing) return existing;
-  const storageKey = `erp_cloud_restore_idempotency:${fingerprint}`;
+  const storageKey = `${CLOUD_RESTORE_INTENT_STORAGE_PREFIX}${fingerprint}`;
   try {
     const persisted = sessionStorage.getItem(storageKey);
-    if (persisted && UUID_PATTERN.test(persisted)) {
-      memory.set(fingerprint, persisted);
-      return persisted;
+    const identity = persisted
+      ? validRestoreIntentIdentity(JSON.parse(persisted), fingerprint)
+      : null;
+    if (identity) {
+      memory.set(fingerprint, identity);
+      return identity;
     }
   } catch {
-    // In-memory idempotency still protects the mounted panel when storage is unavailable.
+    // In-memory intent identity still protects the mounted panel when storage is unavailable.
   }
-  const created = crypto.randomUUID();
+  const created = Object.freeze({
+    attemptId: crypto.randomUUID(),
+    traceId: crypto.randomUUID(),
+    executionFingerprint: fingerprint,
+  });
   memory.set(fingerprint, created);
   try {
-    sessionStorage.setItem(storageKey, created);
+    sessionStorage.setItem(storageKey, JSON.stringify(created));
   } catch {
-    // Storage failure must not replace the key during the current mounted attempt.
+    // Storage failure must not replace either identity field during the mounted intent.
   }
   return created;
+};
+
+export const readCloudRestoreUnresolvedAttempt = (): CloudRestoreAttemptCommand | null => {
+  try {
+    const raw = sessionStorage.getItem(CLOUD_RESTORE_UNRESOLVED_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CloudRestoreAttemptCommand>;
+    if (!UUID_PATTERN.test(parsed.attemptId ?? '') || !UUID_PATTERN.test(parsed.traceId ?? '')) return null;
+    return Object.freeze({ attemptId: parsed.attemptId as string, traceId: parsed.traceId as string });
+  } catch {
+    return null;
+  }
+};
+
+export const persistCloudRestoreUnresolvedAttempt = (attempt: CloudRestoreAttemptCommand): void => {
+  if (!UUID_PATTERN.test(attempt.attemptId) || !UUID_PATTERN.test(attempt.traceId)) return;
+  try {
+    sessionStorage.setItem(CLOUD_RESTORE_UNRESOLVED_STORAGE_KEY, JSON.stringify(attempt));
+  } catch {
+    // The mounted component still keeps the same envelope in memory.
+  }
+};
+
+export const clearCloudRestoreUnresolvedAttempt = (): void => {
+  try {
+    sessionStorage.removeItem(CLOUD_RESTORE_UNRESOLVED_STORAGE_KEY);
+  } catch {
+    // Storage cleanup failure must not change the server-side attempt outcome.
+  }
+};
+
+export const retireCloudRestoreIntentIdentity = (
+  attempt: CloudRestoreAttemptCommand,
+  memory: Map<string, CloudRestoreIntentIdentity>,
+): void => {
+  const retiredFingerprints = new Set<string>();
+  for (const [fingerprint, identity] of memory) {
+    if (identity.attemptId === attempt.attemptId && identity.traceId === attempt.traceId) {
+      memory.delete(fingerprint);
+      retiredFingerprints.add(fingerprint);
+    }
+  }
+  try {
+    for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = sessionStorage.key(index);
+      if (!key?.startsWith(CLOUD_RESTORE_INTENT_STORAGE_PREFIX)) continue;
+      const fingerprint = key.slice(CLOUD_RESTORE_INTENT_STORAGE_PREFIX.length);
+      const raw = sessionStorage.getItem(key);
+      const identity = raw ? validRestoreIntentIdentity(JSON.parse(raw), fingerprint) : null;
+      if ((identity?.attemptId === attempt.attemptId && identity.traceId === attempt.traceId)
+        || retiredFingerprints.has(fingerprint)) sessionStorage.removeItem(key);
+    }
+  } catch {
+    // In-memory retirement still prevents reusing a confirmed not-committed envelope.
+  }
 };
 
 export const preserveCloudRestoreSuccessThroughRefresh = async (

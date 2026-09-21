@@ -30,26 +30,37 @@ declare global {
       snapshot: () => {
         calls: number;
         prepareCalls: number;
+        prepareAttemptIds: string[];
         reconcileCalls: number;
         targetValidationCalls: number;
         idempotencyKeys: string[];
+        traceIds: string[];
         candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }>;
         diagnostics: ReturnType<typeof getCloudRestoreSubmitDiagnostics>;
       };
+      remount: () => void;
     };
   }
 }
 
-type RestoreFixtureBehavior = 'success' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
+type RestoreFixtureBehavior = 'success' | 'completed-replay' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
 
 let behavior: RestoreFixtureBehavior = 'success';
 let calls = 0;
 let prepareCalls = 0;
+let prepareAttemptIds: string[] = [];
 let reconcileCalls = 0;
 let targetValidationCalls = 0;
 let idempotencyKeys: string[] = [];
+let traceIds: string[] = [];
 let candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }> = [];
 let deferredRelease: (() => void) | null = null;
+let completedEnvelope: {
+  attemptId: string;
+  traceId: string;
+  effectiveFingerprint: string;
+  result: ReturnType<typeof restoreResult> & { authoritativeRefresh: { status: 'complete' } };
+} | null = null;
 
 window.__CLOUD_RESTORE_CONNECTIVITY_TEST__ = {
   loading: markCloudReadLoading,
@@ -62,9 +73,11 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     behavior = 'success';
     calls = 0;
     prepareCalls = 0;
+    prepareAttemptIds = [];
     reconcileCalls = 0;
     targetValidationCalls = 0;
     idempotencyKeys = [];
+    traceIds = [];
     candidates = [];
     latestCommand = null;
     deferredRelease = null;
@@ -74,9 +87,11 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
   snapshot: () => ({
     calls,
     prepareCalls,
+    prepareAttemptIds: [...prepareAttemptIds],
     reconcileCalls,
     targetValidationCalls,
     idempotencyKeys: [...idempotencyKeys],
+    traceIds: [...traceIds],
     candidates: structuredClone(candidates),
     diagnostics: getCloudRestoreSubmitDiagnostics(),
   }),
@@ -97,6 +112,24 @@ let latestCommand: Parameters<typeof dataProvider.restoreCloudSnapshot>[0] | nul
 
 dataProvider.prepareCloudRestoreAttempt = async command => {
   prepareCalls += 1;
+  prepareAttemptIds.push(command.idempotencyKey);
+  traceIds.push(command.attemptCorrelationId);
+  if (behavior === 'completed-replay' && completedEnvelope) {
+    if (completedEnvelope.attemptId !== command.idempotencyKey
+      || completedEnvelope.traceId !== command.attemptCorrelationId
+      || completedEnvelope.effectiveFingerprint !== command.candidate.manifest.snapshotFingerprint) {
+      throw { code: 'CLOUD_RESTORE_ATTEMPT_PAYLOAD_MISMATCH' };
+    }
+    return {
+      status: 'completed',
+      attemptId: completedEnvelope.attemptId,
+      traceId: completedEnvelope.traceId,
+      expectedEpoch: 0,
+      effectiveFingerprint: completedEnvelope.effectiveFingerprint,
+      resultEpoch: completedEnvelope.result.restoreEpoch,
+      restoreResult: completedEnvelope.result,
+    };
+  }
   return {
     status: 'executing',
     attemptId: command.idempotencyKey,
@@ -171,9 +204,18 @@ dataProvider.restoreCloudSnapshot = async command => {
     await new Promise<void>(resolve => { deferredRelease = resolve; });
   }
   const result = restoreResult(command);
-  return behavior === 'refresh-pending'
+  const response = behavior === 'refresh-pending'
     ? { ...result, authoritativeRefresh: { status: 'pending' as const, errorCode: 'REFRESH_TEST', errorMessage: 'Refresh pending' } }
     : { ...result, authoritativeRefresh: { status: 'complete' as const } };
+  if (response.authoritativeRefresh.status === 'complete') {
+    completedEnvelope = {
+      attemptId: command.idempotencyKey,
+      traceId: command.attemptCorrelationId,
+      effectiveFingerprint: command.candidate.manifest.snapshotFingerprint,
+      result: response,
+    };
+  }
+  return response;
 };
 
 const { default: StagingCloudRestoreHarness } = await import('../../src/pages/StagingCloudRestoreHarness');
@@ -181,16 +223,23 @@ const user = {
   id: '00000000-0000-4000-8000-000000000099', email: 'owner@example.invalid',
   app_metadata: {}, user_metadata: {}, aud: 'authenticated', created_at: '2026-09-09T00:00:00Z',
 };
-createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <AuthContext.Provider value={{
-      user,
-      profile: { role: 'owner', display_name: 'Restore Owner', is_active: true },
-      loading: false, profileLoading: false, authFlow: 'normal',
-      signInWithPassword: async () => {}, requestPasswordReset: async () => {},
-      setNewPassword: async () => {}, signOut: async () => {},
-    }}>
-      <StagingCloudRestoreHarness />
-    </AuthContext.Provider>
-  </React.StrictMode>,
-);
+const root = createRoot(document.getElementById('root')!);
+let mountVersion = 0;
+const renderFixture = () => {
+  mountVersion += 1;
+  root.render(
+    <React.StrictMode>
+      <AuthContext.Provider value={{
+        user,
+        profile: { role: 'owner', display_name: 'Restore Owner', is_active: true },
+        loading: false, profileLoading: false, authFlow: 'normal',
+        signInWithPassword: async () => {}, requestPasswordReset: async () => {},
+        setNewPassword: async () => {}, signOut: async () => {},
+      }}>
+        <StagingCloudRestoreHarness key={mountVersion} />
+      </AuthContext.Provider>
+    </React.StrictMode>,
+  );
+};
+window.__CLOUD_RESTORE_SUBMIT_TEST__.remount = renderFixture;
+renderFixture();

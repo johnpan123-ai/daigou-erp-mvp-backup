@@ -29,12 +29,17 @@ import {
 import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import {
   CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE,
+  clearCloudRestoreUnresolvedAttempt,
   createCloudRestoreSafeSubmitError,
   formatCloudRestoreSubmitError,
   inspectCurrentCloudRestoreReadiness,
   normalizeCloudRestoreSubmitError,
-  readOrCreateCloudRestoreIdempotencyKey,
+  persistCloudRestoreUnresolvedAttempt,
+  readCloudRestoreUnresolvedAttempt,
+  readOrCreateCloudRestoreIntentIdentity,
   recordCloudRestoreSubmitDiagnostic,
+  retireCloudRestoreIntentIdentity,
+  type CloudRestoreIntentIdentity,
 } from '../providers/cloud/cloudRestoreSubmit';
 
 const CONFIRMATION_TEXT = 'OVERWRITE CLOUD DATA';
@@ -76,19 +81,25 @@ export default function CloudAtomicRestorePanel({
   const { user } = useAuth();
   const { role } = useRole();
   const fileRef = useRef<HTMLInputElement>(null);
-  const retryKeys = useRef(new Map<string, string>());
+  const retryKeys = useRef(new Map<string, CloudRestoreIntentIdentity>());
   const pendingAttemptRef = useRef<PendingRestoreAttempt | null>(null);
   const inFlightRef = useRef(false);
-  const submissionLockedRef = useRef(false);
+  const [unresolvedAttempt, setUnresolvedAttempt] = useState<CloudRestoreAttemptCommand | null>(
+    readCloudRestoreUnresolvedAttempt,
+  );
+  const submissionLockedRef = useRef(Boolean(unresolvedAttempt));
   const candidateGenerationRef = useRef(0);
   const [sourceCandidate, setSourceCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [candidate, setCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [portabilityMode, setPortabilityMode] = useState<RestorePortabilityMode>('strict');
   const [confirmation, setConfirmation] = useState('');
-  const [status, setStatus] = useState<'idle' | 'preflighting' | 'ready' | 'confirming' | 'restoring' | 'checking' | 'success' | 'error' | 'unknown'>('idle');
-  const [message, setMessage] = useState('');
+  const [status, setStatus] = useState<'idle' | 'preflighting' | 'ready' | 'confirming' | 'restoring' | 'checking' | 'success' | 'error' | 'unknown'>(
+    unresolvedAttempt ? 'unknown' : 'idle',
+  );
+  const [message, setMessage] = useState(unresolvedAttempt
+    ? '伺服器執行結果仍待確認；請勿重複送出，可再次查證結果。'
+    : '');
   const [result, setResult] = useState<CloudRestoreResult | null>(null);
-  const [unresolvedAttempt, setUnresolvedAttempt] = useState<CloudRestoreAttemptCommand | null>(null);
   const [attemptClosed, setAttemptClosed] = useState(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const cloudMode = getProviderMode() === 'cloud';
@@ -111,7 +122,7 @@ export default function CloudAtomicRestorePanel({
   );
 
   const selectFile = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || unresolvedAttempt) return;
     const generation = candidateGenerationRef.current + 1;
     candidateGenerationRef.current = generation;
     setStatus('preflighting');
@@ -187,9 +198,10 @@ export default function CloudAtomicRestorePanel({
     if (!candidate || !allowed || confirmation !== CONFIRMATION_TEXT) return;
     if (inFlightRef.current || pendingAttemptRef.current || submissionLockedRef.current) return;
     const fingerprint = candidate.executionFingerprint;
+    const identity = readOrCreateCloudRestoreIntentIdentity(fingerprint, retryKeys.current);
     const pending = {
-      correlationId: crypto.randomUUID(),
-      idempotencyKey: readOrCreateCloudRestoreIdempotencyKey(fingerprint, retryKeys.current),
+      correlationId: identity.traceId,
+      idempotencyKey: identity.attemptId,
       fingerprint,
     };
     pendingAttemptRef.current = pending;
@@ -253,6 +265,7 @@ export default function CloudAtomicRestorePanel({
     }
     setResult(displayedResult);
     setUnresolvedAttempt(null);
+    clearCloudRestoreUnresolvedAttempt();
     setStatus('success');
     submissionLockedRef.current = true;
     setMessage(syncPending
@@ -282,6 +295,8 @@ export default function CloudAtomicRestorePanel({
         });
       } else if (outcome.status === 'not_committed') {
         setUnresolvedAttempt(null);
+        clearCloudRestoreUnresolvedAttempt();
+        retireCloudRestoreIntentIdentity(unresolvedAttempt, retryKeys.current);
         setAttemptClosed(true);
         setStatus('error');
         submissionLockedRef.current = true;
@@ -402,6 +417,10 @@ export default function CloudAtomicRestorePanel({
       }
       await assertCloudRestoreEffectiveCandidate(candidate);
       attemptPrepareStarted = true;
+      persistCloudRestoreUnresolvedAttempt({
+        attemptId: pending.idempotencyKey,
+        traceId: pending.correlationId,
+      });
       durableAttempt = await (prepareRestoreAttempt ?? (command => dataProvider.prepareCloudRestoreAttempt(command)))({
         attemptCorrelationId: pending.correlationId,
         idempotencyKey: pending.idempotencyKey,
@@ -447,10 +466,14 @@ export default function CloudAtomicRestorePanel({
       const unknown = visible.outcome === 'unknown';
       const requiresOutcomeCheck = attemptPrepareStarted && (unknown || restoreDispatched);
       if (requiresOutcomeCheck) {
-        setUnresolvedAttempt({
+        const unresolved = {
           attemptId: durableAttempt?.attemptId ?? pending.idempotencyKey,
           traceId: durableAttempt?.traceId ?? pending.correlationId,
-        });
+        };
+        setUnresolvedAttempt(unresolved);
+        persistCloudRestoreUnresolvedAttempt(unresolved);
+      } else if (attemptPrepareStarted) {
+        clearCloudRestoreUnresolvedAttempt();
       }
       if (!restoreDispatched && candidate.portability) {
         recordCloudRestoreSubmitDiagnostic({
@@ -475,7 +498,13 @@ export default function CloudAtomicRestorePanel({
         });
       }
       submissionLockedRef.current = requiresOutcomeCheck || visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED';
-      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') setAttemptClosed(true);
+      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') {
+        retireCloudRestoreIntentIdentity({
+          attemptId: pending.idempotencyKey,
+          traceId: pending.correlationId,
+        }, retryKeys.current);
+        setAttemptClosed(true);
+      }
       setStatus(unknown ? 'unknown' : 'error');
       setMessage(formatCloudRestoreSubmitError(visible));
       recordCloudRestoreSubmitDiagnostic({

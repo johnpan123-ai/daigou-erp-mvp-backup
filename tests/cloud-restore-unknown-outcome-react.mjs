@@ -53,12 +53,27 @@ try {
     };
 
     await runUntilUnknown('lost-response-success');
+    let snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    const unresolvedIdentity = {
+      attemptId: snapshot.idempotencyKeys[0],
+      traceId: snapshot.traceIds[0],
+    };
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
+    await page.getByTestId('cloud-restore-check-outcome').waitFor();
+    snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(snapshot.prepareCalls, 1, 'Remount must not PREPARE an unresolved attempt again');
+    assert.equal(snapshot.calls, 1, 'Remount must not EXECUTE an unresolved attempt again');
     await page.getByTestId('cloud-restore-check-outcome').click();
     await page.getByTestId('cloud-restore-result').waitFor();
     assert.match(await page.getByTestId('cloud-restore-status').innerText(), /Cloud Restore 完成/u);
-    let snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(snapshot.calls, 1, 'Outcome reconciliation must not dispatch Restore again');
     assert.equal(snapshot.reconcileCalls, 1);
+    assert.deepEqual(
+      { attemptId: snapshot.idempotencyKeys[0], traceId: snapshot.traceIds[0] },
+      unresolvedIdentity,
+      'Outcome reconciliation must retain the original attempt/trace envelope',
+    );
 
     await runUntilUnknown('lost-response-failure');
     await page.getByTestId('cloud-restore-check-outcome').click();
