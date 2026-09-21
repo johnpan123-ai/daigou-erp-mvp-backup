@@ -90,15 +90,18 @@ declare global {
 window.__P0_4_REALTIME_FAKE__ = state;
 
 const queryFor = (table: string) => {
+  let from = 0;
+  let to = Infinity;
   const builder = {
     select() { return builder; },
     abortSignal() { return builder; },
     in() { return builder; },
     gt() { return builder; },
     order() { return builder; },
+    range(start: number, end: number) { from = start; to = end; return builder; },
     then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
       state.queries.push(table);
-      return Promise.resolve({ data: structuredClone(state.rows[table] ?? []), error: null }).then(resolve, reject);
+      return Promise.resolve({ data: structuredClone((state.rows[table] ?? []).slice(from, to + 1)), error: null }).then(resolve, reject);
     },
   };
   return builder;

@@ -66,6 +66,12 @@ class DynamicDataProvider implements IDataProvider {
           try {
             const info = JSON.parse(e.newValue);
             if (info.tabId !== this.tabId) {
+              if (['cloud', 'fallback'].includes(getProviderMode())) {
+                // A tab marker carries no record/version evidence. Ask the existing
+                // authoritative reader; only its result may establish a conflict.
+                window.dispatchEvent(new Event('cloud-cross-tab-change'));
+                return;
+              }
               this.isStale = true;
               this.notifySubscribers(true);
             }
@@ -115,6 +121,9 @@ class DynamicDataProvider implements IDataProvider {
 
   checkIsStaleLive(): boolean {
     if (typeof window === 'undefined') return false;
+    if (['cloud', 'fallback'].includes(getProviderMode())) {
+      return this.isStale || this.cloudStaleResources.size > 0;
+    }
     const stored = localStorage.getItem(this.getWriteInfoKey());
     if (stored) {
       try {

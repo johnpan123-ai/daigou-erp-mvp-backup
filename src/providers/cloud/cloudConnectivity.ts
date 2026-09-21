@@ -62,10 +62,10 @@ export const markCloudReachable = (): void => publish({
     : null,
 });
 
-export const markCloudReadLoading = (): void => publish({
+export const markCloudReadLoading = (reason = 'cloud-read-loading'): void => publish({
   ...snapshot,
   readStatus: 'loading',
-  reason: 'cloud-read-loading',
+  reason,
 });
 
 export const markCloudReadFresh = (rowCount?: number): void => {

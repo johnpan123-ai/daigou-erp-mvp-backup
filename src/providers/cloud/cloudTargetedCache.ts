@@ -11,9 +11,11 @@ import type {
 } from '../../lib/db';
 import { cloudCacheDb as db } from '../../lib/db';
 import { supabase } from './supabaseClient';
-import type { CloudChange, CloudRefreshRequest, CloudResource } from './cloudSyncDomain';
+import type { CloudChange, CloudRefreshRequest, CloudRefreshResult, CloudResource } from './cloudSyncDomain';
+import { cloudBusinessRowsEqual } from './cloudRealtimeComparison';
 import { CLOUD_TABLE_RESOURCE, resolveCloudRowIdentity } from './cloudSyncDomain';
 import {
+  getCloudConnectivitySnapshot,
   markCloudReadFailed,
   markCloudReadFresh,
   markCloudReadLoading,
@@ -184,10 +186,13 @@ export class CloudTargetedCache {
   private requestsByTable = new Map<string, number>();
   private authoritativeGeneration = 0;
   private committedAuthoritativeEpoch: number | null = null;
+  private refreshQueue: Promise<unknown> = Promise.resolve();
+  private readonly protectsDraft?: (table: string, before: Row | undefined, after: Row | undefined) => boolean;
 
-  constructor(options: { now?: () => Date; query?: CloudTargetedQuery } = {}) {
+  constructor(options: { now?: () => Date; query?: CloudTargetedQuery; protectsDraft?: (table: string, before: Row | undefined, after: Row | undefined) => boolean } = {}) {
     this.now = options.now ?? (() => new Date());
     this.queryOverride = options.query;
+    this.protectsDraft = options.protectsDraft;
   }
 
   initializeCursor(): void {
@@ -196,6 +201,20 @@ export class CloudTargetedCache {
   }
 
   async refresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<void> {
+    await this.refreshWithResult(request, signal);
+  }
+
+  refreshWithResult(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
+    if (!this.protectsDraft) return this.performRefresh(request, signal);
+    // Do not let a focus/reconnect read swallow a newer Realtime query through
+    // per-table single-flight, or commit an older response after a newer one.
+    const pending = this.refreshQueue.then(() => this.performRefresh(request, signal));
+    this.refreshQueue = pending.catch(() => undefined);
+    return pending;
+  }
+
+  private async performRefresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
+    const conflicts: CloudChange[] = [];
     const byTable = new Map<string, CloudChange[]>();
     for (const change of request.changes) {
       byTable.set(change.table, [...(byTable.get(change.table) || []), change]);
@@ -217,23 +236,25 @@ export class CloudTargetedCache {
     const generation = isAuthoritativeResourceRead
       ? ++this.authoritativeGeneration
       : this.authoritativeGeneration;
-    markCloudReadLoading();
+    const previousStatus = getCloudConnectivitySnapshot().readStatus;
+    markCloudReadLoading(this.protectsDraft && (previousStatus === 'fresh-online' || previousStatus === 'fresh-empty')
+      ? 'cloud-background-read' : 'cloud-read-loading');
     try {
       const rowCounts = isAuthoritativeResourceRead
-        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal)
+        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal, conflicts)
         : await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
           const changes = byTable.get(table) || [];
-          if (changes.length > 0) return this.refreshChanges(table, changes, generation, signal);
-          return this.refreshSince(table, generation, signal);
+          if (changes.length > 0) return this.refreshChanges(table, changes, generation, signal, conflicts);
+          return this.refreshSince(table, generation, signal, conflicts);
         })));
       signal?.throwIfAborted();
       if (generation !== this.authoritativeGeneration) {
-        if (isAuthoritativeResourceRead) throw new CloudAuthoritativeRefreshSupersededError();
-        return;
+        throw new CloudAuthoritativeRefreshSupersededError();
       }
       markCloudReadFresh(isAuthoritativeResourceRead
         ? rowCounts.reduce((sum, count) => sum + count, 0)
         : undefined);
+      return { conflicts };
     } catch (error) {
       if (error instanceof CloudAuthoritativeRefreshSupersededError) throw error;
       const cachedRows = await Promise.all(tables.map(table => TABLES[table]?.get() ?? Promise.resolve([])));
@@ -302,7 +323,7 @@ export class CloudTargetedCache {
     }
   }
 
-  private async refreshChanges(table: string, changes: CloudChange[], generation: number, signal?: AbortSignal): Promise<number> {
+  private async refreshChanges(table: string, changes: CloudChange[], generation: number, signal?: AbortSignal, conflicts: CloudChange[] = []): Promise<number> {
     const adapter = TABLES[table];
     if (!adapter) return 0;
     const touchedIds = [...new Set(changes.map(change => change.canonicalId).filter(Boolean))];
@@ -311,13 +332,13 @@ export class CloudTargetedCache {
     const rows = await this.query({ table, databaseIds, signal });
     signal?.throwIfAborted();
     if (generation !== this.authoritativeGeneration) return 0;
-    await this.merge(table, adapter, touchedIds, rows);
+    await this.merge(table, adapter, touchedIds, rows, conflicts);
     const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
     if (newest) this.cursors.set(table, newest);
     return rows.length;
   }
 
-  private async refreshSince(table: string, generation: number, signal?: AbortSignal): Promise<number> {
+  private async refreshSince(table: string, generation: number, signal?: AbortSignal, conflicts: CloudChange[] = []): Promise<number> {
     const adapter = TABLES[table];
     if (!adapter?.supportsIncremental) return 0;
     const cursor = this.cursors.get(table) || this.now().toISOString();
@@ -325,7 +346,7 @@ export class CloudTargetedCache {
     const rows = await this.query({ table, updatedAfter: cursor, signal });
     signal?.throwIfAborted();
     if (generation !== this.authoritativeGeneration) return 0;
-    await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows);
+    await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows, conflicts);
     this.cursors.set(table, nextCursor);
     return rows.length;
   }
@@ -335,6 +356,7 @@ export class CloudTargetedCache {
     generation: number,
     authoritativeEpoch?: number,
     signal?: AbortSignal,
+    conflicts: CloudChange[] = [],
   ): Promise<number[]> {
     const attemptController = new AbortController();
     const abortAttempt = () => attemptController.abort();
@@ -347,7 +369,8 @@ export class CloudTargetedCache {
         if (!adapter) return { table, adapter: null, rows: [], activeRows: [], newest: undefined };
         const rows = await this.queryAll(table, attemptController.signal);
         attemptController.signal.throwIfAborted();
-        const activeRows = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
+        const current = await adapter.get();
+        const activeRows = this.protectRows(table, current, rows.filter(row => !row.deleted_at).map(row => adapter.map(row)), conflicts);
         const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
         return { table, adapter, rows, activeRows, newest };
       }));
@@ -371,8 +394,9 @@ export class CloudTargetedCache {
     return prepared.map(entry => entry.activeRows.length);
   }
 
-  private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[]): Promise<void> {
+  private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[], conflicts: CloudChange[]): Promise<void> {
     const current = await adapter.get();
+    const previousById = new Map(current.map(row => [row.id, row]));
     const next = new Map(current.map(row => [row.id, row]));
     const touched = new Set(touchedIds);
     for (const row of current) {
@@ -380,8 +404,30 @@ export class CloudTargetedCache {
       if (touched.has(row.id) || (databaseId && touched.has(databaseId))) next.delete(row.id);
     }
     for (const row of rows) {
-      if (!row.deleted_at) next.set(canonicalId(table, row), adapter.map(row));
+      const id = canonicalId(table, row);
+      const previous = previousById.get(id) as Row | undefined;
+      if (previous && typeof previous.version === 'number' && typeof row.version === 'number' && previous.version > row.version) {
+        next.set(id, previous as T);
+      } else if (!row.deleted_at) next.set(id, adapter.map(row));
     }
-    await adapter.save([...next.values()]);
+    await adapter.save(this.protectRows(table, current, [...next.values()], conflicts));
+  }
+
+  private protectRows<T extends { id: string }>(table: string, current: T[], next: T[], conflicts: CloudChange[]): T[] {
+    if (!this.protectsDraft) return next;
+    const previous = new Map(current.map(row => [row.id, row]));
+    const candidate = new Map(next.map(row => [row.id, row]));
+    for (const id of new Set([...previous.keys(), ...candidate.keys()])) {
+      const before = previous.get(id);
+      const after = candidate.get(id);
+      if (cloudBusinessRowsEqual(before, after) || !this.protectsDraft(table, before, after)) continue;
+      // Preserve the original CAS/business baseline as well as the React draft.
+      if (before) candidate.set(id, before);
+      else candidate.delete(id);
+      const row = (before ?? after) as Row;
+      conflicts.push({ table, canonicalId: id, databaseId: String(row.database_id ?? row.id), localId: null,
+        resource: CLOUD_TABLE_RESOURCE[table], kind: !after ? 'DELETE' : !before ? 'INSERT' : 'UPDATE', origin: 'remote' });
+    }
+    return [...candidate.values()];
   }
 }

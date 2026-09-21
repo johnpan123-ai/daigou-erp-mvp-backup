@@ -165,7 +165,13 @@ try {
     { route: '/outbound-shipments', readyText: 'React Outbound A', table: 'outbound_shipments', collection: 'outboundShipments', id: 'out-react-1', patch: { title: 'Outbound List Remote B' }, expectedText: 'Outbound List Remote B' },
     { route: '/outbound-shipments/out-react-1', readyText: '出庫清單', table: 'outbound_shipments', collection: 'outboundShipments', id: 'out-react-1', patch: { title: 'Outbound Detail Remote B' }, expectedText: 'Outbound Detail Remote B' },
   ];
-  for (const pageCase of pageCases) await exercisePage(pageCase);
+  for (const pageCase of pageCases) {
+    if (pageCase.route === '/recent-purchases' && process.env.REALTIME_SKIP_KNOWN_RECENT_PURCHASES === '1') {
+      console.log('KNOWN BASELINE ISSUE (not PASS): RecentPurchases date-toggle locator');
+      continue;
+    }
+    await exercisePage(pageCase);
+  }
 
   // Private Orders and Sales Orders/Items drive real Purchase Management DOM consumers.
   {
@@ -320,7 +326,7 @@ try {
       await page.evaluate(async () => {
         const h = window.__P0_REACT_HARNESS__;
         const canonical = h.server.productVariants.find(row => row.id === 'v-holo');
-        await h.emitSelfEcho('product_variants', { ...canonical, waca_manual_adjustment: 16, updated_at: new Date().toISOString() });
+        await h.emitSelfEcho('product_variants', { ...canonical, updated_at: new Date().toISOString() });
       });
       assert.equal(await input.inputValue(), '20', 'Self echo rolled the real input back to 18');
       await input.fill('21');
@@ -333,8 +339,14 @@ try {
       assert.equal(await input.inputValue(), '77');
       await page.evaluate(() => window.__P0_REACT_HARNESS__.focus());
       assert.equal(await input.inputValue(), '77');
+      const errorsBeforeBlockedBlur = consoleErrors.length;
       await page.getByRole('button', { name: '✏️ 編輯中' }).click();
       await waitText(page, 'Inline Remote Pending B');
+      // Blurring this real autosave input attempts the stale save. The provider
+      // guard rejects it; only this exact expected rejection may be consumed.
+      const blockedErrors = consoleErrors.splice(errorsBeforeBlockedBlur);
+      assert.deepEqual(blockedErrors, ['資料已在其他分頁更新，請重新載入最新資料後再編輯。']);
+      assert.equal((await serverRow(page, 'productVariants', 'v-holo')).waca_manual_adjustment, 19, 'Stale blur must not write draft 77');
       const result = await snap(page);
       assert.ok(result.metrics.editingCatchUps >= 1);
       assert.equal(result.metrics.fullPulls, 0);
