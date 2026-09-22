@@ -100,6 +100,8 @@ try {
     const submit = async (doubleSubmit = false) => {
       await page.locator('input[type=file]').setInputFiles(SNAPSHOT);
       await page.getByTestId('cloud-restore-preflight').waitFor({ timeout: 30_000 });
+      await page.getByTestId('cloud-restore-proof-button').click();
+      await page.getByTestId('cloud-restore-proof-summary').waitFor({ timeout: 30_000 });
       await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
       await page.getByTestId('cloud-restore-submit').click();
       if (doubleSubmit) {

@@ -85,6 +85,11 @@
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
 import { readCloudRestoreIntegrityAudit } from './cloudRestoreIntegrityAudit';
+import {
+  CLOUD_RESTORE_CANDIDATE_PROOF_RPC,
+  assertCloudRestoreCandidateProofResult,
+  type CloudRestoreCandidateProofResult,
+} from './cloudRestoreCandidateProof';
 import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
@@ -155,6 +160,7 @@ import {
   buildCloudRestoreManifest,
   type CloudRestoreAttemptCommand,
   type CloudRestoreAttemptOutcome,
+  type CloudRestoreCandidate,
   type CloudRestoreCommand,
   type CloudRestoreExecutionCommand,
   type CloudRestoreResult,
@@ -333,6 +339,28 @@ const fetchAll = async <T>(
 export class SupabaseProvider implements IDataProvider {
   async readCloudRestoreIntegrityAudit() {
     return readCloudRestoreIntegrityAudit(supabase);
+  }
+
+  async proveCloudRestoreCandidate(candidate: CloudRestoreCandidate): Promise<CloudRestoreCandidateProofResult> {
+    const effective = await assertCloudRestoreEffectiveCandidate(candidate);
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_CANDIDATE_PROOF_RPC, {
+        p_source_snapshot: effective.sourceData,
+        p_manifest: candidate.manifest,
+        p_restore_mode: effective.mode,
+      }));
+    } catch (caughtError) {
+      try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe transport error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
+    }
+    if (error) {
+      try { markCloudRequestFailed(error); } catch { /* Keep the safe server error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    }
+    markCloudReachable();
+    return assertCloudRestoreCandidateProofResult(data, candidate);
   }
 
   private readonly mutationCache = new CloudTargetedCache();

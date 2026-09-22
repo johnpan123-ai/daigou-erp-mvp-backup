@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import CloudRestoreIntegrityAudit from './CloudRestoreIntegrityAudit';
 import type { CloudRestoreRecoveryAttempt } from '../providers/cloud/cloudRestoreRecovery';
 import { AlertTriangle, FileCheck2, RotateCcw } from 'lucide-react';
@@ -30,6 +30,12 @@ import {
 } from '../providers/cloud/cloudRestorePortability';
 import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import {
+  bindCloudRestoreCandidateProof,
+  isCloudRestoreCandidateProofCurrent,
+  type CloudRestoreCandidateProofRecord,
+  type CloudRestoreCandidateProofResult,
+} from '../providers/cloud/cloudRestoreCandidateProof';
+import {
   CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE,
   clearCloudRestoreUnresolvedAttempt,
   createCloudRestoreSafeSubmitError,
@@ -58,6 +64,7 @@ const CLOUD_RESTORE_READINESS_RESOURCES: CloudResource[] = [
 const ignoreCloudResourceRefresh = () => {};
 
 interface CloudAtomicRestorePanelProps {
+  proveRestoreCandidate?: (candidate: CloudRestoreCandidate) => Promise<CloudRestoreCandidateProofResult>;
   prepareRestoreAttempt?: (command: Parameters<typeof dataProvider.prepareCloudRestoreAttempt>[0]) => ReturnType<typeof dataProvider.prepareCloudRestoreAttempt>;
   checkRestoreOutcome?: (command: CloudRestoreAttemptCommand) => Promise<CloudRestoreAttemptOutcome>;
   executeRestore?: (command: CloudRestoreExecutionCommand) => Promise<CloudRestoreResult>;
@@ -74,6 +81,7 @@ interface PendingRestoreAttempt {
 type RestorePortabilityMode = 'strict' | 'cross-environment';
 
 export default function CloudAtomicRestorePanel({
+  proveRestoreCandidate,
   prepareRestoreAttempt,
   checkRestoreOutcome,
   executeRestore,
@@ -86,13 +94,21 @@ export default function CloudAtomicRestorePanel({
   const retryKeys = useRef(new Map<string, CloudRestoreIntentIdentity>());
   const pendingAttemptRef = useRef<PendingRestoreAttempt | null>(null);
   const inFlightRef = useRef(false);
+  const proofInFlightRef = useRef(false);
+  const proofRequestTokenRef = useRef(0);
+  const proofRecordRef = useRef<CloudRestoreCandidateProofRecord | null>(null);
+  const proofUserIdRef = useRef(user?.id ?? '');
   const [unresolvedAttempt, setUnresolvedAttempt] = useState<CloudRestoreAttemptCommand | null>(
     readCloudRestoreUnresolvedAttempt,
   );
   const submissionLockedRef = useRef(Boolean(unresolvedAttempt));
   const candidateGenerationRef = useRef(0);
+  const [candidateGeneration, setCandidateGeneration] = useState(0);
   const [sourceCandidate, setSourceCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [candidate, setCandidate] = useState<CloudRestoreCandidate | null>(null);
+  const [proofRecord, setProofRecord] = useState<CloudRestoreCandidateProofRecord | null>(null);
+  const [proofStatus, setProofStatus] = useState<'idle' | 'loading' | 'pass' | 'error'>('idle');
+  const [proofMessage, setProofMessage] = useState('尚未完成伺服器候選驗證');
   const [portabilityMode, setPortabilityMode] = useState<RestorePortabilityMode>('strict');
   const [confirmation, setConfirmation] = useState('');
   const [status, setStatus] = useState<'idle' | 'preflighting' | 'ready' | 'confirming' | 'restoring' | 'checking' | 'success' | 'error' | 'unknown'>(
@@ -120,6 +136,27 @@ export default function CloudAtomicRestorePanel({
   const recoveryReady = recovery.ready && recovery.userId === user?.id;
   const canPreflight = cloudMode && Boolean(user) && owner && online && recoveryReady;
   const allowed = canPreflight && fresh;
+  const proofCurrent = isCloudRestoreCandidateProofCurrent(proofRecord, candidate, {
+    candidateGeneration,
+    userId: user?.id ?? '',
+    targetProjectRef: supabaseEnvironment.projectRef,
+  });
+
+  const invalidateProof = useCallback((message = '尚未完成伺服器候選驗證') => {
+    proofRequestTokenRef.current += 1;
+    proofInFlightRef.current = false;
+    proofRecordRef.current = null;
+    setProofRecord(null);
+    setProofStatus('idle');
+    setProofMessage(message);
+  }, [setProofMessage, setProofRecord, setProofStatus]);
+
+  useEffect(() => {
+    const currentUserId = user?.id ?? '';
+    if (proofUserIdRef.current === currentUserId) return;
+    proofUserIdRef.current = currentUserId;
+    invalidateProof('登入身分已變更，請重新進行伺服器候選驗證。');
+  }, [invalidateProof, user?.id]);
   useCloudResourceSync(
     'cloud-restore-authoritative-readiness',
     CLOUD_RESTORE_READINESS_RESOURCES,
@@ -137,6 +174,8 @@ export default function CloudAtomicRestorePanel({
       const pending = attempts[0];
       if (pending) {
         candidateGenerationRef.current += 1;
+        setCandidateGeneration(candidateGenerationRef.current);
+        invalidateProof('已有未決還原，伺服器候選驗證已失效。');
         pendingAttemptRef.current = null;
         setConfirmationOpen(false);
         setRecoveredAttempt(pending);
@@ -151,7 +190,7 @@ export default function CloudAtomicRestorePanel({
       if (active) setRecovery({ userId, ready: false, error: true });
     });
     return () => { active = false; };
-  }, [cloudMode, owner, user?.id, online, recoveryVersion]);
+  }, [cloudMode, owner, user?.id, online, recoveryVersion, invalidateProof]);
 
   const refreshRecovery = () => {
     setRecovery({ userId: '', ready: false, error: false });
@@ -161,6 +200,9 @@ export default function CloudAtomicRestorePanel({
   const startNewIntent = () => {
     if (unresolvedAttempt || inFlightRef.current || !recoveryReady) return;
     // Explicit user action; no identity, PREPARE or EXECUTE is created here.
+    candidateGenerationRef.current += 1;
+    setCandidateGeneration(candidateGenerationRef.current);
+    invalidateProof();
     setCandidate(null);
     setSourceCandidate(null);
     setConfirmation('');
@@ -178,6 +220,8 @@ export default function CloudAtomicRestorePanel({
     if (!file || unresolvedAttempt || !canPreflight) return;
     const generation = candidateGenerationRef.current + 1;
     candidateGenerationRef.current = generation;
+    setCandidateGeneration(generation);
+    invalidateProof();
     setStatus('preflighting');
     setMessage('正在本機解析並檢查 JSON；尚未寫入雲端。');
     setCandidate(null);
@@ -217,6 +261,8 @@ export default function CloudAtomicRestorePanel({
     if (!sourceCandidate || attemptClosed || unresolvedAttempt || status === 'restoring' || status === 'unknown') return;
     const generation = candidateGenerationRef.current + 1;
     candidateGenerationRef.current = generation;
+    setCandidateGeneration(generation);
+    invalidateProof('Restore 模式已變更，請重新進行伺服器候選驗證。');
     setPortabilityMode(mode);
     setCandidate(null);
     setResult(null);
@@ -247,9 +293,58 @@ export default function CloudAtomicRestorePanel({
     }
   };
 
+  const proveCandidate = async () => {
+    if (!candidate || !allowed || proofInFlightRef.current || unresolvedAttempt || attemptClosed) return;
+    const requestToken = proofRequestTokenRef.current + 1;
+    proofRequestTokenRef.current = requestToken;
+    proofInFlightRef.current = true;
+    proofRecordRef.current = null;
+    setProofRecord(null);
+    setProofStatus('loading');
+    setProofMessage('伺服器驗證中…');
+    const candidateGeneration = candidateGenerationRef.current;
+    const userId = user?.id ?? '';
+    const targetProjectRef = supabaseEnvironment.projectRef;
+    try {
+      const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(candidate);
+      if (proofRequestTokenRef.current !== requestToken
+        || candidateGenerationRef.current !== candidateGeneration
+        || proofUserIdRef.current !== userId) return;
+      const record = bindCloudRestoreCandidateProof(candidate, proof, {
+        candidateGeneration,
+        userId,
+        targetProjectRef,
+      });
+      proofRecordRef.current = record;
+      setProofRecord(record);
+      setProofStatus('pass');
+      setProofMessage('伺服器驗證通過，可進行原子還原');
+    } catch (error) {
+      if (proofRequestTokenRef.current !== requestToken
+        || candidateGenerationRef.current !== candidateGeneration
+        || proofUserIdRef.current !== userId) return;
+      const visible = normalizeCloudRestoreSubmitError(error, 'readiness', { source: 'pre-dispatch' });
+      proofRecordRef.current = null;
+      setProofRecord(null);
+      setProofStatus('error');
+      setProofMessage(`伺服器驗證失敗，已阻止還原（${visible.code}）`);
+    } finally {
+      if (proofRequestTokenRef.current === requestToken) proofInFlightRef.current = false;
+    }
+  };
+
   const beginConfirmation = () => {
     if (!candidate || !allowed || confirmation !== CONFIRMATION_TEXT) return;
     if (inFlightRef.current || pendingAttemptRef.current || submissionLockedRef.current) return;
+    if (!isCloudRestoreCandidateProofCurrent(proofRecordRef.current, candidate, {
+      candidateGeneration: candidateGenerationRef.current,
+      userId: proofUserIdRef.current,
+      targetProjectRef: supabaseEnvironment.projectRef,
+    })) {
+      setProofStatus('error');
+      setProofMessage('伺服器候選驗證尚未完成或已失效，已阻止還原。');
+      return;
+    }
     const fingerprint = candidate.executionFingerprint;
     const identity = readOrCreateCloudRestoreIntentIdentity(fingerprint, retryKeys.current);
     const pending = {
@@ -379,6 +474,24 @@ export default function CloudAtomicRestorePanel({
     const pending = pendingAttemptRef.current;
     if (!candidate || !pending || inFlightRef.current || submissionLockedRef.current) return;
     if (pending.fingerprint !== candidate.executionFingerprint || confirmation !== CONFIRMATION_TEXT) return;
+    const hasCurrentProof = () => isCloudRestoreCandidateProofCurrent(proofRecordRef.current, candidate, {
+      candidateGeneration: candidateGenerationRef.current,
+      userId: proofUserIdRef.current,
+      targetProjectRef: supabaseEnvironment.projectRef,
+    });
+    const blockForMissingProof = () => {
+      pendingAttemptRef.current = null;
+      setConfirmationOpen(false);
+      setConfirmation('');
+      setProofStatus('error');
+      setProofMessage('伺服器候選驗證尚未完成或已失效，已阻止還原。');
+      setStatus('error');
+      setMessage('尚未送出：必須先完成與目前候選一致的伺服器驗證。');
+    };
+    if (!hasCurrentProof()) {
+      blockForMissingProof();
+      return;
+    }
     recordCloudRestoreSubmitDiagnostic({
       event: 'confirmation-complete',
       phase: 'confirmation',
@@ -471,6 +584,10 @@ export default function CloudAtomicRestorePanel({
           });
           return;
         }
+      }
+      if (!hasCurrentProof()) {
+        blockForMissingProof();
+        return;
       }
       await assertCloudRestoreEffectiveCandidate(candidate);
       attemptPrepareStarted = true;
@@ -658,6 +775,33 @@ export default function CloudAtomicRestorePanel({
             <summary>各資源筆數</summary>
             <ul>{CLOUD_RESTORE_TABLES.map(([, table]) => <li key={table}>{table}: {candidate.manifest.counts[table]}</li>)}</ul>
           </details>
+          <div data-testid="cloud-restore-owner-proof" style={{ marginTop: 12, padding: 12, border: '1px solid #b45309', borderRadius: 6, background: '#fffbeb' }}>
+            <div><strong>OWNER 伺服器候選驗證</strong></div>
+            <p
+              data-testid="cloud-restore-proof-status"
+              role={proofStatus === 'error' ? 'alert' : 'status'}
+              style={{ margin: '6px 0' }}
+            >
+              {proofMessage}
+            </p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              data-testid="cloud-restore-proof-button"
+              disabled={attemptClosed || Boolean(unresolvedAttempt) || !allowed || proofStatus === 'loading' || proofCurrent || status === 'restoring' || status === 'unknown'}
+              onClick={() => void proveCandidate()}
+            >
+              {proofStatus === 'loading' ? '伺服器驗證中…' : proofCurrent ? '伺服器驗證已通過' : '驗證還原候選'}
+            </button>
+            {proofCurrent && proofRecord && (
+              <div data-testid="cloud-restore-proof-summary" style={{ marginTop: 8 }}>
+                <div>資源：{proofRecord.result.resourceCount}；總筆數：{proofRecord.result.totalRows}</div>
+                <div>跨環境 audit 轉換：{proofRecord.result.transformedUpdatedByCount}</div>
+                <div>Effective fingerprint：<code>{proofRecord.result.effectiveFingerprint.slice(0, 16)}…</code></div>
+                <div>Relationship / integrity：PASS</div>
+              </div>
+            )}
+          </div>
           <label htmlFor="cloud-restore-confirmation" style={{ display: 'block', marginTop: 12 }}>
             請輸入 <code>{CONFIRMATION_TEXT}</code>
           </label>
@@ -667,13 +811,13 @@ export default function CloudAtomicRestorePanel({
             value={confirmation}
             onChange={event => setConfirmation(event.target.value)}
             autoComplete="off"
-            disabled={attemptClosed || Boolean(unresolvedAttempt) || !allowed || status === 'confirming' || status === 'restoring' || status === 'success' || status === 'unknown'}
+            disabled={attemptClosed || Boolean(unresolvedAttempt) || !allowed || !proofCurrent || status === 'confirming' || status === 'restoring' || status === 'success' || status === 'unknown'}
           />
           <button
             type="button"
             className="btn btn-primary"
             data-testid="cloud-restore-submit"
-            disabled={attemptClosed || Boolean(unresolvedAttempt) || !allowed || status === 'confirming' || status === 'restoring' || status === 'success' || status === 'unknown' || confirmation !== CONFIRMATION_TEXT}
+            disabled={attemptClosed || Boolean(unresolvedAttempt) || !allowed || !proofCurrent || status === 'confirming' || status === 'restoring' || status === 'success' || status === 'unknown' || confirmation !== CONFIRMATION_TEXT}
             onClick={beginConfirmation}
             style={{ marginLeft: 10 }}
           >
@@ -692,13 +836,14 @@ export default function CloudAtomicRestorePanel({
           <div id="cloud-restore-final-confirmation-title" className="font-medium">最後確認：完整覆蓋 Cloud authoritative data</div>
           <p>Server 會先建立 rollback snapshot。確認文字必須維持 <code>{CONFIRMATION_TEXT}</code>。</p>
           {!allowed && <p role="alert">{CLOUD_RESTORE_NOT_SUBMITTED_MESSAGE}</p>}
+          {!proofCurrent && <p role="alert">伺服器候選驗證尚未完成或已失效；本次不會送出。</p>}
           <form onSubmit={event => { event.preventDefault(); void execute(); }}>
             <button type="button" className="btn btn-outline" onClick={cancelConfirmation} disabled={status === 'restoring'}>取消</button>
             <button
               type="submit"
               className="btn btn-primary"
               data-testid="cloud-restore-final-submit"
-              disabled={!allowed || status === 'restoring'}
+              disabled={!allowed || !proofCurrent || status === 'restoring'}
               style={{ marginLeft: 10 }}
             >
               最終確認並送出

@@ -8,11 +8,13 @@ import {
   markCloudReachable,
 } from '../../src/providers/cloud/cloudConnectivity';
 import {
+  clearCloudRestoreUnresolvedAttempt,
   getCloudRestoreSubmitDiagnostics,
   resetCloudRestoreSubmitDiagnosticsForTests,
 } from '../../src/providers/cloud/cloudRestoreSubmit';
 import { dataProvider } from '../../src/providers/dataProvider';
 import type { CloudRestoreRecoveryAttempt } from '../../src/providers/cloud/cloudRestoreRecovery';
+import { assertCloudRestoreCandidateProofResult } from '../../src/providers/cloud/cloudRestoreCandidateProof';
 
 localStorage.setItem('erp_provider_mode', 'cloud');
 markCloudReachable();
@@ -26,10 +28,14 @@ declare global {
     };
     __CLOUD_RESTORE_SUBMIT_TEST__: {
       setBehavior: (behavior: RestoreFixtureBehavior) => void;
+      setProofBehavior: (behavior: ProofFixtureBehavior) => void;
       reset: () => void;
       releaseDeferred: () => void;
+      releaseProofDeferred: () => void;
       snapshot: () => {
+        mountVersion: number;
         calls: number;
+        proofCalls: number;
         prepareCalls: number;
         prepareAttemptIds: string[];
         reconcileCalls: number;
@@ -40,16 +46,20 @@ declare global {
         diagnostics: ReturnType<typeof getCloudRestoreSubmitDiagnostics>;
       };
       remount: () => void;
+      setUserId: (userId: string) => void;
       setRecovery: (attempts: CloudRestoreRecoveryAttempt[] | 'error') => void;
     };
   }
 }
 
 type RestoreFixtureBehavior = 'success' | 'completed-replay' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
+type ProofFixtureBehavior = 'success' | 'error' | 'fingerprint-mismatch' | 'deferred-success';
 
 let behavior: RestoreFixtureBehavior = 'success';
+let proofBehavior: ProofFixtureBehavior = 'success';
 let serverPending: CloudRestoreRecoveryAttempt[] | 'error' = [];
 let calls = 0;
+let proofCalls = 0;
 let prepareCalls = 0;
 let prepareAttemptIds: string[] = [];
 let reconcileCalls = 0;
@@ -58,6 +68,8 @@ let idempotencyKeys: string[] = [];
 let traceIds: string[] = [];
 let candidates: Array<{ portability: unknown; fingerprint: string; executionFingerprint: string; allUpdatedByNull: boolean }> = [];
 let deferredRelease: (() => void) | null = null;
+let proofDeferredRelease: (() => void) | null = null;
+let currentUserId = '00000000-0000-4000-8000-000000000099';
 let completedEnvelope: {
   attemptId: string;
   traceId: string;
@@ -71,11 +83,16 @@ window.__CLOUD_RESTORE_CONNECTIVITY_TEST__ = {
 };
 
 window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
+  setUserId: userId => { currentUserId = userId; renderFixture(false); },
   setRecovery: attempts => { serverPending = attempts; },
   setBehavior: next => { behavior = next; },
+  setProofBehavior: next => { proofBehavior = next; },
   reset: () => {
+    clearCloudRestoreUnresolvedAttempt();
     behavior = 'success';
+    proofBehavior = 'success';
     calls = 0;
+    proofCalls = 0;
     prepareCalls = 0;
     prepareAttemptIds = [];
     reconcileCalls = 0;
@@ -85,11 +102,15 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     candidates = [];
     latestCommand = null;
     deferredRelease = null;
+    proofDeferredRelease = null;
     resetCloudRestoreSubmitDiagnosticsForTests();
   },
   releaseDeferred: () => deferredRelease?.(),
+  releaseProofDeferred: () => proofDeferredRelease?.(),
   snapshot: () => ({
+    mountVersion,
     calls,
+    proofCalls,
     prepareCalls,
     prepareAttemptIds: [...prepareAttemptIds],
     reconcileCalls,
@@ -99,6 +120,45 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     candidates: structuredClone(candidates),
     diagnostics: getCloudRestoreSubmitDiagnostics(),
   }),
+};
+
+dataProvider.proveCloudRestoreCandidate = async candidate => {
+  proofCalls += 1;
+  if (proofBehavior === 'error') {
+    throw { code: 'CLOUD_RESTORE_OWNER_REQUIRED', message: 'must-not-render owner identity' };
+  }
+  if (proofBehavior === 'deferred-success') {
+    await new Promise<void>(resolve => { proofDeferredRelease = resolve; });
+  }
+  const proof = {
+    ok: true,
+    candidate_valid: true,
+    schema_version: 'cloud-restore-candidate-proof-v1',
+    policy: candidate.portability?.policyVersion ?? 'strict',
+    resource_count: candidate.manifest.resourceCount,
+    coverage_count: 15,
+    total_rows: candidate.manifest.totalRows,
+    table_counts: candidate.manifest.counts,
+    transformed_updated_by_count: candidate.portability?.totalTransformedRows ?? 0,
+    source_fingerprint: candidate.portability?.sourceSnapshotFingerprint ?? candidate.manifest.snapshotFingerprint,
+    effective_fingerprint: proofBehavior === 'fingerprint-mismatch'
+      ? 'f'.repeat(64)
+      : candidate.manifest.snapshotFingerprint,
+    relationship_hash: candidate.manifest.relationshipHash,
+    integrity: {
+      orphan_count: candidate.manifest.orphanCount,
+      duplicate_variant_id_count: candidate.manifest.duplicateVariantIdCount,
+      duplicate_variant_local_id_count: candidate.manifest.duplicateVariantLocalIdCount,
+      duplicate_canonical_id_count: candidate.manifest.duplicateCanonicalIdCount,
+      canonical_identity_anomaly_count: candidate.manifest.canonicalIdentityAnomalyCount,
+      unknown_product_count: candidate.manifest.unknownProductCount,
+      optional_metadata_missing_reference_count: candidate.manifest.optionalMetadataMissingReferenceCount,
+      duplicate_inventory_key_count: 0,
+      missing_inventory_key_count: 0,
+    },
+    elapsed_ms: 42,
+  };
+  return assertCloudRestoreCandidateProofResult(proof, candidate);
 };
 
 const restoreResult = (command: Parameters<typeof dataProvider.restoreCloudSnapshot>[0]) => ({
@@ -229,18 +289,18 @@ dataProvider.restoreCloudSnapshot = async command => {
 };
 
 const { default: StagingCloudRestoreHarness } = await import('../../src/pages/StagingCloudRestoreHarness');
-const user = {
-  id: '00000000-0000-4000-8000-000000000099', email: 'owner@example.invalid',
+const baseUser = {
+  email: 'owner@example.invalid',
   app_metadata: {}, user_metadata: {}, aud: 'authenticated', created_at: '2026-09-09T00:00:00Z',
 };
 const root = createRoot(document.getElementById('root')!);
 let mountVersion = 0;
-const renderFixture = () => {
-  mountVersion += 1;
+const renderFixture = (remount = true) => {
+  if (remount) mountVersion += 1;
   root.render(
     <React.StrictMode>
       <AuthContext.Provider value={{
-        user,
+        user: { ...baseUser, id: currentUserId },
         profile: { role: 'owner', display_name: 'Restore Owner', is_active: true },
         loading: false, profileLoading: false, authFlow: 'normal',
         signInWithPassword: async () => {}, requestPasswordReset: async () => {},
@@ -251,5 +311,5 @@ const renderFixture = () => {
     </React.StrictMode>,
   );
 };
-window.__CLOUD_RESTORE_SUBMIT_TEST__.remount = renderFixture;
+window.__CLOUD_RESTORE_SUBMIT_TEST__.remount = () => renderFixture(true);
 renderFixture();

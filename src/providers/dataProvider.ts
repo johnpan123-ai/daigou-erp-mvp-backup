@@ -29,10 +29,11 @@ import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTrans
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type {
-  CloudRestoreAttemptCommand, CloudRestoreAttemptOutcome, CloudRestoreCommand,
+  CloudRestoreAttemptCommand, CloudRestoreAttemptOutcome, CloudRestoreCandidate, CloudRestoreCommand,
   CloudRestoreExecutionCommand, CloudRestoreResult,
 } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
+import type { CloudRestoreCandidateProofResult } from './cloud/cloudRestoreCandidateProof';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -357,6 +358,10 @@ class DynamicDataProvider implements IDataProvider {
   async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
     return this.supabaseProvider.validateCloudRestoreTarget(command);
+  }
+  async proveCloudRestoreCandidate(candidate: CloudRestoreCandidate): Promise<CloudRestoreCandidateProofResult> {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.supabaseProvider.proveCloudRestoreCandidate(candidate);
   }
   async prepareCloudRestoreAttempt(command: CloudRestoreCommand): Promise<CloudRestoreAttemptOutcome> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');

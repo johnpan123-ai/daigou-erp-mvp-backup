@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
@@ -12,6 +12,12 @@ const PROVIDER = readFileSync(new URL('../src/providers/cloud/supabaseProvider.t
 const CONTEXT = readFileSync(new URL('../src/contexts/CloudRealtimeSyncContext.tsx', import.meta.url), 'utf8');
 const SUBMIT = readFileSync(new URL('../src/providers/cloud/cloudRestoreSubmit.ts', import.meta.url), 'utf8');
 const PANEL = readFileSync(new URL('../src/components/CloudAtomicRestorePanel.tsx', import.meta.url), 'utf8');
+const PROOF_CONTRACT = readFileSync(new URL('../src/providers/cloud/cloudRestoreCandidateProof.ts', import.meta.url), 'utf8');
+const REAL_SNAPSHOT_PATH = process.env.CLOUD_RESTORE_REALISTIC_SNAPSHOT
+  || 'C:/Users/小河馬/Downloads/cloud-erp-snapshot-2026-09-20-114903.json';
+const realSnapshotDocument = existsSync(REAL_SNAPSHOT_PATH)
+  ? JSON.parse(readFileSync(REAL_SNAPSHOT_PATH, 'utf8'))
+  : null;
 const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const collections = {
@@ -75,8 +81,10 @@ class AtomicServer {
 const vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
 let candidateTables;
 let validDocument;
+let alternateDocument;
 try {
   const domain = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
+  const proofDomain = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreCandidateProof.ts');
   const submitDomain = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreSubmit.ts');
   const stagingHarness = await vite.ssrLoadModule('/src/lib/stagingCloudRestoreHarness.ts');
   let rejectedCalls = 0;
@@ -107,11 +115,56 @@ try {
     return { ...document, manifest: prepared.manifest };
   };
   validDocument = await makeDocument();
+  alternateDocument = clone(validDocument);
+  alternateDocument.sourceEnvironment = 'fixture-alternate-candidate';
   const candidate = await domain.prepareCloudRestoreSnapshot(JSON.stringify(validDocument));
   assert.equal(candidate.manifest.resourceCount, 15);
   assert.equal(candidate.manifest.orphanCount, 0);
   assert.equal(candidate.manifest.duplicateVariantIdCount, 0);
   assert.equal(candidate.manifest.snapshotFingerprint.length, 64);
+  const validProofSummary = {
+    ok: true,
+    candidate_valid: true,
+    schema_version: 'cloud-restore-candidate-proof-v1',
+    policy: 'strict',
+    resource_count: 15,
+    coverage_count: 15,
+    total_rows: candidate.manifest.totalRows,
+    table_counts: candidate.manifest.counts,
+    transformed_updated_by_count: 0,
+    source_fingerprint: candidate.manifest.snapshotFingerprint,
+    effective_fingerprint: candidate.manifest.snapshotFingerprint,
+    relationship_hash: candidate.manifest.relationshipHash,
+    integrity: {
+      orphan_count: candidate.manifest.orphanCount,
+      duplicate_variant_id_count: candidate.manifest.duplicateVariantIdCount,
+      duplicate_variant_local_id_count: candidate.manifest.duplicateVariantLocalIdCount,
+      duplicate_canonical_id_count: candidate.manifest.duplicateCanonicalIdCount,
+      canonical_identity_anomaly_count: candidate.manifest.canonicalIdentityAnomalyCount,
+      unknown_product_count: candidate.manifest.unknownProductCount,
+      optional_metadata_missing_reference_count: candidate.manifest.optionalMetadataMissingReferenceCount,
+      duplicate_inventory_key_count: 0,
+      missing_inventory_key_count: 0,
+    },
+    elapsed_ms: 1,
+  };
+  assert.equal(proofDomain.assertCloudRestoreCandidateProofResult(validProofSummary, candidate).candidateValid, true);
+  for (const mutate of [
+    value => { delete value.candidate_valid; },
+    value => { value.candidate_valid = false; },
+    value => { value.total_rows = '15'; },
+    value => { value.policy = 'cross-environment-audit-null-v1'; },
+    value => { value.effective_fingerprint = 'f'.repeat(64); },
+    value => { delete value.integrity.orphan_count; },
+  ]) {
+    const malformed = clone(validProofSummary);
+    mutate(malformed);
+    assert.throws(
+      () => proofDomain.assertCloudRestoreCandidateProofResult(malformed, candidate),
+      error => String(error?.code ?? '').startsWith('CLOUD_RESTORE_PROOF_'),
+      'Malformed or mismatched proof summaries must fail closed',
+    );
+  }
   const serverSuccess = {
     ok: true, replayed: false, idempotencyKey: uuid(991),
     snapshotFingerprint: candidate.manifest.snapshotFingerprint,
@@ -395,6 +448,18 @@ assert.match(SQL, /erp_cloud_restore_relationship_hash/u);
 assert.match(SQL, /alter publication supabase_realtime add table public\.erp_cloud_restore_epoch/u);
 assert.doesNotMatch(SQL, /service_role|grant\s+.+\s+to\s+(public|anon)/iu);
 assert.match(PROVIDER, /reason: 'reconnect'[\s\S]+resources: \['products', 'purchases'/u);
+const proofProviderMethod = PROVIDER.slice(
+  PROVIDER.indexOf('async proveCloudRestoreCandidate('),
+  PROVIDER.indexOf('private readonly mutationCache'),
+);
+assert.match(proofProviderMethod, /supabase\.rpc\(CLOUD_RESTORE_CANDIDATE_PROOF_RPC/u);
+assert.match(proofProviderMethod, /p_source_snapshot:\s*effective\.sourceData/u);
+assert.match(proofProviderMethod, /p_manifest:\s*candidate\.manifest/u);
+assert.match(proofProviderMethod, /p_restore_mode:\s*effective\.mode/u);
+assert.doesNotMatch(proofProviderMethod, /JSON\.stringify|service[_-]?role/iu);
+assert.match(PROOF_CONTRACT, /candidateGeneration[\s\S]+userId[\s\S]+targetProjectRef[\s\S]+executionFingerprint[\s\S]+sourceFingerprint[\s\S]+effectiveFingerprint[\s\S]+policy/u);
+assert.match(PANEL, /isCloudRestoreCandidateProofCurrent\(proofRecordRef\.current, candidate/u);
+assert.ok((PANEL.match(/isCloudRestoreCandidateProofCurrent\(proofRecordRef\.current, candidate/gu) || []).length >= 2, 'Proof must gate confirmation and the submit handler');
 assert.match(PROVIDER, /event: 'rpc-response'/u);
 assert.match(SUBMIT, /event: 'authoritative-refresh'[\s\S]+outcome: 'sync-pending'/u);
 assert.match(CONTEXT, /erp_cloud_restore_epoch[\s\S]+reconnect\.request/u);
@@ -447,22 +512,46 @@ try {
       await page.getByTestId('staging-cloud-restore-harness').waitFor();
       await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
       await page.getByTestId('cloud-restore-harness-auth').getByText('true').waitFor();
-      await page.evaluate(next => {
+      const mountVersion = await page.evaluate(next => {
+        const previous = window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion;
         window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
         window.__CLOUD_RESTORE_SUBMIT_TEST__.setBehavior(next);
         window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
+        return previous;
       }, behavior);
+      await page.waitForFunction(previous => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > previous, mountVersion);
       await page.getByTestId('cloud-restore-access').getByText('Owner / authoritative fresh', { exact: false }).waitFor();
+      await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
       await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
       await page.getByTestId('cloud-restore-preflight').waitFor();
       if (portabilityMode !== 'strict') {
         await page.getByTestId('cloud-restore-portability-mode').selectOption(portabilityMode);
         await page.getByTestId('cloud-restore-portability-summary').waitFor();
       }
+      await page.getByTestId('cloud-restore-proof-button').click();
+      await page.getByTestId('cloud-restore-proof-summary').waitFor();
       await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
       await page.getByTestId('cloud-restore-submit').click();
       await page.getByTestId('cloud-restore-final-confirmation').waitFor();
     };
+    const openProofCandidate = async (proofBehavior = 'success', document = validDocument) => {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.getByTestId('staging-cloud-restore-harness').waitFor();
+      const mountVersion = await page.evaluate(next => {
+        const previous = window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion;
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.setProofBehavior(next);
+        window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
+        return previous;
+      }, proofBehavior);
+      await page.waitForFunction(previous => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > previous, mountVersion);
+      await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
+      await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+      await page.getByTestId('cloud-restore-preflight').waitFor();
+    };
+    let submitState;
 
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.getByTestId('staging-cloud-restore-harness').waitFor();
@@ -473,12 +562,105 @@ try {
     assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
     assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
 
+    await openProofCandidate();
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true, 'Restore must stay locked before proof');
+    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.proofCalls, 0);
+    assert.equal(submitState.prepareCalls, 0);
+    assert.equal(submitState.calls, 0);
+
+    await page.getByTestId('cloud-restore-proof-button').click();
+    await page.getByTestId('cloud-restore-proof-summary').waitFor();
+    assert.match(await page.getByTestId('cloud-restore-proof-status').innerText(), /伺服器驗證通過/u);
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), false);
+
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.setUserId('00000000-0000-4000-8000-000000000100'));
+    await page.getByTestId('cloud-restore-proof-status').getByText('登入身分已變更', { exact: false }).waitFor();
+    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'A session identity change must invalidate proof');
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
+
+    await openProofCandidate();
+    await page.getByTestId('cloud-restore-proof-button').click();
+    await page.getByTestId('cloud-restore-proof-summary').waitFor();
+
+    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot-2.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(alternateDocument)) });
+    await page.getByTestId('cloud-restore-preflight').waitFor();
+    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'Selecting another candidate must invalidate proof');
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
+
+    await page.getByTestId('cloud-restore-proof-button').click();
+    await page.getByTestId('cloud-restore-proof-summary').waitFor();
+    await page.getByTestId('cloud-restore-portability-mode').selectOption('cross-environment');
+    await page.getByTestId('cloud-restore-portability-summary').waitFor();
+    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'Policy changes must invalidate proof');
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
+
+    await openProofCandidate('fingerprint-mismatch');
+    await page.getByTestId('cloud-restore-proof-button').click();
+    await page.getByTestId('cloud-restore-proof-status').getByText('伺服器驗證失敗，已阻止還原', { exact: false }).waitFor();
+    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0);
+    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.calls, 0);
+    assert.equal(submitState.prepareCalls, 0);
+
+    await openProofCandidate('deferred-success');
+    await page.getByTestId('cloud-restore-proof-button').evaluate(button => {
+      button.click();
+      button.click();
+    });
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.proofCalls, 1, 'Proof double click must be single-flight');
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseProofDeferred());
+    await page.getByTestId('cloud-restore-proof-summary').waitFor();
+
+    await openProofCandidate('deferred-success');
+    await page.getByTestId('cloud-restore-proof-button').click();
+    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot-late.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(alternateDocument)) });
+    await page.getByTestId('cloud-restore-preflight').waitFor();
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseProofDeferred());
+    await page.waitForTimeout(50);
+    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'Late proof must not validate a newer candidate');
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
+
+    await openProofCandidate('error');
+    await page.getByTestId('cloud-restore-proof-button').click();
+    await page.getByTestId('cloud-restore-proof-status').getByText('伺服器驗證失敗，已阻止還原', { exact: false }).waitFor();
+    assert.doesNotMatch(await page.getByTestId('cloud-restore-proof-status').innerText(), /owner identity/u);
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.calls, 0);
+    assert.equal(submitState.prepareCalls, 0);
+
+    if (realSnapshotDocument) {
+      await openProofCandidate('success', realSnapshotDocument);
+      await page.getByTestId('cloud-restore-proof-button').click();
+      await page.getByTestId('cloud-restore-proof-summary').getByText('總筆數：17658', { exact: false }).waitFor();
+      assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), false, 'Real 17,658-row candidate proof must unlock confirmation without starting Restore');
+      submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+      assert.equal(submitState.proofCalls, 1);
+      assert.equal(submitState.prepareCalls, 0);
+      assert.equal(submitState.calls, 0);
+    }
+
+    await openFixture('success');
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.setUserId('00000000-0000-4000-8000-000000000100'));
+    await page.getByTestId('cloud-restore-proof-status').getByText('登入身分已變更', { exact: false }).waitFor();
+    await page.evaluate(() => {
+      document.querySelector('[data-testid="cloud-restore-final-confirmation"] form')
+        ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await page.getByTestId('cloud-restore-status').getByText('尚未送出：必須先完成', { exact: false }).waitFor();
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    assert.equal(submitState.prepareCalls, 0, 'Submit-handler proof gate must block PREPARE after proof invalidation');
+    assert.equal(submitState.calls, 0, 'Submit-handler proof gate must block Restore after proof invalidation');
+
     await openFixture('success');
     await page.getByTestId('cloud-restore-final-submit').click();
     await page.getByTestId('cloud-restore-result').waitFor();
     assert.match(await page.getByTestId('cloud-restore-result').innerText(), /replayed=false.*epoch=1/u);
     assert.match(await page.getByTestId('cloud-restore-timings').locator('pre').textContent(), /"total": 27/u);
-    let submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(submitState.calls, 1, 'Fresh explicit confirmation must dispatch exactly once');
     assert.deepEqual(submitState.diagnostics.map(entry => entry.event), [
       'submit-start', 'confirmation-complete', 'readiness-check-pass', 'rpc-invocation', 'submit-finish',
