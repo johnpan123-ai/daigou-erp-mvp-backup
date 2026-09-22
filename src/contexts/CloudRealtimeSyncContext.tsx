@@ -39,6 +39,7 @@ interface CloudRealtimeContextValue {
   unregister: (owner: string) => void;
   subscribe: (listener: (resources: CloudResource[]) => void) => () => void;
   clearConflict: (resources: CloudResource[]) => void;
+  manualRefresh: (resources: CloudResource[]) => Promise<boolean>;
   stagingFaultControl: {
     available: boolean;
     snapshot: StagingRealtimeFaultSnapshot;
@@ -143,7 +144,6 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       resources.forEach(resource => next.delete(resource));
       return next;
     });
-    listeners.current.forEach(listener => listener(resources));
   }, []);
 
   const notifyConflict = useCallback((resources: CloudResource[]) => {
@@ -175,6 +175,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       isEditing,
       onRefreshed: notifyRefreshed,
       onConflict: notifyConflict,
+      onCommitted: resources => listeners.current.forEach(listener => listener(resources)),
     });
     coordinatorRef.current = coordinator;
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
@@ -495,12 +496,21 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     return snapshot;
   }, []);
 
+  const manualRefresh = useCallback(async (resources: CloudResource[]) => {
+    if (!cloudMode) return false;
+    const coordinator = coordinatorRef.current;
+    if (!coordinator) throw new Error('CLOUD_REFRESH_UNAVAILABLE');
+    await coordinator.manualRefresh(resources);
+    return true;
+  }, [cloudMode]);
+
   const value = useMemo<CloudRealtimeContextValue>(() => ({
     conflictedResources,
     registerEditing,
     unregister,
     subscribe,
     clearConflict,
+    manualRefresh,
     stagingFaultControl: {
       available: faultControlAllowed && enabled && !testBridge,
       snapshot: {
@@ -512,6 +522,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     },
   }), [
     clearConflict,
+    manualRefresh,
     conflictedResources,
     connectivity.readStatus,
     disconnectStagingRealtime,
@@ -601,5 +612,6 @@ export function useCloudResourceSync(
     hasRemoteConflict: Boolean(context && resources.some(resource => context.conflictedResources.has(resource))),
     clearRemoteConflict: () => context?.clearConflict(resources),
     stagingFaultControl: context?.stagingFaultControl ?? null,
+    refreshAuthoritative: context?.manualRefresh,
   };
 }

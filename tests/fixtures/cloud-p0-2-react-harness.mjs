@@ -165,9 +165,9 @@ markCloudReadFresh(Object.values(server).reduce((sum, rows) => sum + (Array.isAr
 const pageLoads = {};
 let writes = 0;
 for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAdapters)) {
-  dataProvider[getMethod] = async () => {
+  dataProvider[getMethod] = async (...args) => {
     pageLoads[getMethod] = (pageLoads[getMethod] || 0) + 1;
-    return clone(await cloudCacheDb[getMethod]());
+    return clone(await cloudCacheDb[getMethod](...args));
   };
   dataProvider[saveMethod] = async rows => {
     writes += 1;
@@ -305,6 +305,7 @@ installCloudRealtimeTestBridge({
     if (request.updatedAfter) {
       rows = rows.filter(row => !row.updated_at || row.updated_at > request.updatedAfter);
     }
+    if (request.from !== undefined && request.to !== undefined) rows = rows.slice(request.from, request.to + 1);
     return rows;
   },
   attach: nextController => {

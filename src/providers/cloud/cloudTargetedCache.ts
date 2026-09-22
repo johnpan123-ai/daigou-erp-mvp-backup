@@ -62,7 +62,7 @@ const commonMeta = (row: Row) => ({
 const TABLES: Readonly<Record<string, TableCacheAdapter<any>>> = {
   product_groups: { get: () => db.getProductGroups(), save: rows => db.saveProductGroups(rows), map: row => ({ ...row, id: canonicalId('product_groups', row), ...commonMeta(row) }), supportsIncremental: true },
   product_categories: { get: () => db.getProductCategories(), save: rows => db.saveProductCategories(rows), map: row => ({ ...row, id: canonicalId('product_categories', row), ...commonMeta(row) }), supportsIncremental: true },
-  product_variants: { get: () => db.getProductVariants(), save: rows => db.replaceProductVariantsFromAuthoritativeCloud(rows), map: row => ({ ...row, id: canonicalId('product_variants', row), ...commonMeta(row) }), supportsIncremental: true },
+  product_variants: { get: () => db.getProductVariants({ raw: true }), save: rows => db.replaceProductVariantsFromAuthoritativeCloud(rows), map: row => ({ ...row, id: canonicalId('product_variants', row), ...commonMeta(row) }), supportsIncremental: true },
   inventory_items: {
     get: () => db.getInventory(),
     save: rows => db.saveInventory(rows),
@@ -225,7 +225,7 @@ export class CloudTargetedCache {
     const tables = (request.reason === 'realtime' || (request.reason === 'editing-ended' && hasRowChanges))
       ? [...byTable.keys()]
       : tablesForResources(request.resources);
-    const isAuthoritativeResourceRead = request.reason === 'reconnect'
+    const isAuthoritativeResourceRead = request.reason === 'manual' || request.reason === 'reconnect'
       || (request.reason === 'editing-ended' && !hasRowChanges);
     if (request.authoritativeEpoch !== undefined) {
       if (!isAuthoritativeResourceRead || !Number.isSafeInteger(request.authoritativeEpoch) || request.authoritativeEpoch < 0) {
@@ -264,7 +264,9 @@ export class CloudTargetedCache {
       return { conflicts };
     } catch (error) {
       if (error instanceof CloudAuthoritativeRefreshSupersededError) throw error;
+      if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
       const cachedRows = await Promise.all(tables.map(table => TABLES[table]?.get() ?? Promise.resolve([])));
+      if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
       markCloudReadFailed(error, cachedRows.some(rows => rows.length > 0));
       throw error;
     }

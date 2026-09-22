@@ -342,10 +342,10 @@ try {
       const errorsBeforeBlockedBlur = consoleErrors.length;
       await page.getByRole('button', { name: '✏️ 編輯中' }).click();
       await waitText(page, 'Inline Remote Pending B');
-      // Blurring this real autosave input attempts the stale save. The provider
-      // guard rejects it; only this exact expected rejection may be consumed.
+      // The known conflict is now blocked before the autosave dispatch. Draft
+      // preservation must not rely on an unhandled provider rejection.
       const blockedErrors = consoleErrors.splice(errorsBeforeBlockedBlur);
-      assert.deepEqual(blockedErrors, ['資料已在其他分頁更新，請重新載入最新資料後再編輯。']);
+      assert.deepEqual(blockedErrors, []);
       assert.equal((await serverRow(page, 'productVariants', 'v-holo')).waca_manual_adjustment, 19, 'Stale blur must not write draft 77');
       const result = await snap(page);
       assert.ok(result.metrics.editingCatchUps >= 1);
