@@ -8,6 +8,7 @@ import { AlertTriangle, ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, 
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { CloudRefreshButton } from '../components/CloudRefreshButton';
 import { getCloudConnectivitySnapshot } from '../providers/cloud/cloudConnectivity';
 
 interface VariantDetail {
@@ -160,6 +161,7 @@ export default function Purchasing() {
   
   const [loading, setLoading] = useState(true);
   const [hasCompletedLoad, setHasCompletedLoad] = useState(false);
+  const hasCompletedLoadRef = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const loadSequenceRef = useRef(0);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -297,10 +299,10 @@ export default function Purchasing() {
     return unsubscribe;
   }, []);
 
-  const loadAllData = async () => {
+  const loadAllData = async ({ propagateError = false } = {}) => {
     const requestId = ++loadSequenceRef.current;
     const convergence = dataProvider.waitForCloudBootstrapConvergence();
-    setLoading(true);
+    if (!hasCompletedLoadRef.current) setLoading(true);
 
     const readSnapshot = async () => {
       const [
@@ -348,6 +350,7 @@ export default function Purchasing() {
       setSalesOrderItems(snapshot.salesOrderItemRows);
       setPurchaseBatches(snapshot.batchRows);
       setLoadError(null);
+      hasCompletedLoadRef.current = true;
       setHasCompletedLoad(true);
     };
 
@@ -380,6 +383,7 @@ export default function Purchasing() {
       if (requestId === loadSequenceRef.current) {
         setLoadError(err instanceof Error ? err.message : String(err));
       }
+      if (propagateError) throw err;
     } finally {
       if (requestId === loadSequenceRef.current) setLoading(false);
     }
@@ -392,11 +396,13 @@ export default function Purchasing() {
     };
   }, []);
 
-  useCloudResourceSync(
+  const { refreshAuthoritative } = useCloudResourceSync(
     `purchasing-summary:${selectedGroupId ?? ''}`,
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
     showBatchModal,
-    loadAllData,
+    () => loadAllData({ propagateError: true }),
+    undefined,
+    { rereadProtectedCacheWhileEditing: true },
   );
 
   const guardAgainstStaleWrite = (): boolean => {
@@ -688,13 +694,14 @@ export default function Purchasing() {
         <AlertTriangle size={28} color="#b42318" />
         <strong>採購資料載入失敗</strong>
         <p style={{ margin: 0, textAlign: 'center' }}>{loadError}</p>
-        <button type="button" className="btn btn-outline" onClick={() => void loadAllData()}>重新載入</button>
+        <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
       </div>
     );
   }
 
   return (
     <div className="mobile-summary-container">
+      <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
       <style>{`
         .mobile-summary-container {
           width: 100%;

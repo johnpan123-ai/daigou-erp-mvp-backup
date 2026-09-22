@@ -11,6 +11,7 @@ import {
   type CloudChange,
   type CloudReconnectDiagnostic,
   type CloudResource,
+  type CloudRefreshResult,
 } from '../providers/cloud/cloudSyncDomain';
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
 import { cloudDraftScopeForOwner, cloudRowAffectsDraft, readCloudDraftRelations, type CloudDraftScope } from '../providers/cloud/cloudDraftScope';
@@ -37,9 +38,9 @@ interface CloudRealtimeContextValue {
   conflictedResources: ReadonlySet<CloudResource>;
   registerEditing: (owner: string, resources: CloudResource[], editing: boolean, draftScope?: CloudDraftScope) => void;
   unregister: (owner: string) => void;
-  subscribe: (listener: (resources: CloudResource[]) => void) => () => void;
+  subscribe: (listener: (resources: CloudResource[]) => void | Promise<void>) => () => void;
   clearConflict: (resources: CloudResource[]) => void;
-  manualRefresh: (resources: CloudResource[]) => Promise<boolean>;
+  manualRefresh: (resources: CloudResource[]) => Promise<CloudRefreshResult | false>;
   stagingFaultControl: {
     available: boolean;
     snapshot: StagingRealtimeFaultSnapshot;
@@ -82,7 +83,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const testBridge = getCloudRealtimeTestBridge();
   const enabled = (getProviderMode() === 'cloud' || Boolean(testBridge)) && Boolean(user);
   const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean; draftScope?: CloudDraftScope }>());
-  const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
+  const listeners = useRef(new Set<(resources: CloudResource[]) => void | Promise<void>>());
   const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
   const reconnectRef = useRef<CloudReconnectCatchUp | null>(null);
   const faultControllerRef = useRef<StagingRealtimeFaultControl | null>(null);
@@ -175,7 +176,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       isEditing,
       onRefreshed: notifyRefreshed,
       onConflict: notifyConflict,
-      onCommitted: resources => listeners.current.forEach(listener => listener(resources)),
+      onCommitted: async resources => { await Promise.all([...listeners.current].map(listener => listener(resources))); },
     });
     coordinatorRef.current = coordinator;
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
@@ -466,7 +467,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
   }, [isEditing, refreshFaultSnapshot, resumeAfterEditing]);
 
-  const subscribe = useCallback((listener: (resources: CloudResource[]) => void) => {
+  const subscribe = useCallback((listener: (resources: CloudResource[]) => void | Promise<void>) => {
     listeners.current.add(listener);
     return () => { listeners.current.delete(listener); };
   }, []);
@@ -500,8 +501,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     if (!cloudMode) return false;
     const coordinator = coordinatorRef.current;
     if (!coordinator) throw new Error('CLOUD_REFRESH_UNAVAILABLE');
-    await coordinator.manualRefresh(resources);
-    return true;
+    return coordinator.manualRefresh(resources);
   }, [cloudMode]);
 
   const value = useMemo<CloudRealtimeContextValue>(() => ({
@@ -579,6 +579,7 @@ export function useCloudResourceSync(
   editing: boolean,
   onRefresh: () => void | Promise<void>,
   draftScope?: CloudDraftScope,
+  options?: { rereadProtectedCacheWhileEditing: boolean },
 ) {
   const context = useContext(CloudRealtimeContext);
   const resourceKey = resources.join('|');
@@ -589,6 +590,10 @@ export function useCloudResourceSync(
   const registerEditing = context?.registerEditing;
   const unregister = context?.unregister;
   const subscribe = context?.subscribe;
+  const rereadWhileEditing = options?.rereadProtectedCacheWhileEditing ?? false;
+  // Opt in only when the route keeps drafts separate from persisted rows.
+  // CloudTargetedCache retains their original conflict/CAS baseline; rereading
+  // that protected cache can therefore update unrelated rows without reset.
 
   useEffect(() => {
     refreshRef.current = onRefresh;
@@ -604,9 +609,9 @@ export function useCloudResourceSync(
   useEffect(() => {
     if (!subscribe) return;
     return subscribe(changed => {
-      if (!editing && changed.some(resource => resourcesRef.current.includes(resource))) void refreshRef.current();
+      if ((!editing || rereadWhileEditing) && changed.some(resource => resourcesRef.current.includes(resource))) return refreshRef.current();
     });
-  }, [editing, resourceKey, subscribe]);
+  }, [editing, resourceKey, subscribe, rereadWhileEditing]);
 
   return {
     hasRemoteConflict: Boolean(context && resources.some(resource => context.conflictedResources.has(resource))),

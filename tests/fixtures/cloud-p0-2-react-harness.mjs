@@ -15,11 +15,20 @@ localStorage.setItem('erp_provider_mode', 'experimental');
 const fixtureParams = new URL(location.href).searchParams;
 const requestedRoute = fixtureParams.get('route') || '/dashboard';
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
+const realProviderReads = fixtureParams.get('realReads') === '1';
+const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
 history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
 
 const clone = value => structuredClone(value);
 const coreFixture = await fetch('/tests/fixtures/core-regression.json').then(response => response.json());
 const server = clone(coreFixture);
+if (realProviderReads) server.inventory = server.inventory.map((row, index) => ({
+  ...row, id: `92000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+}));
+if (fixtureParams.get('bootstrapVariant')) {
+  server.productVariants = server.productVariants.map(row => row.id === 'v-holo'
+    ? { ...row, variant_name: fixtureParams.get('bootstrapVariant'), version: 10 } : row);
+}
 server.productGroups = server.productGroups.map(group => group.id === 'g-holo'
   ? { ...group, show_in_purchase_list: true }
   : group);
@@ -164,10 +173,20 @@ markCloudReadFresh(Object.values(server).reduce((sum, rows) => sum + (Array.isAr
 
 const pageLoads = {};
 let writes = 0;
+let heldPageRead, releasePageRead, pageReadHeld = false;
 for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAdapters)) {
   dataProvider[getMethod] = async (...args) => {
     pageLoads[getMethod] = (pageLoads[getMethod] || 0) + 1;
-    return clone(await cloudCacheDb[getMethod](...args));
+    if (heldPageRead) {
+      const gate = heldPageRead;
+      heldPageRead = null;
+      pageReadHeld = true;
+      await gate;
+      pageReadHeld = false;
+    }
+    return clone(await (realProviderReads && typeof supabaseProvider[getMethod] === 'function'
+      ? supabaseProvider[getMethod](...args)
+      : cloudCacheDb[getMethod](...args)));
   };
   dataProvider[saveMethod] = async rows => {
     writes += 1;
@@ -276,8 +295,7 @@ if (partialReceivingScenario) {
   };
 }
 
-installCloudRealtimeTestBridge({
-  query: async request => {
+const readServer = async request => {
     targetedQueries += 1;
     if (heldTargetedRead) {
       const gate = heldTargetedRead;
@@ -307,7 +325,35 @@ installCloudRealtimeTestBridge({
     }
     if (request.from !== undefined && request.to !== undefined) rows = rows.slice(request.from, request.to + 1);
     return rows;
-  },
+};
+
+if (realProviderReads) {
+  // Only the HTTP boundary is simulated. Routes use the actual Cloud provider,
+  // bootstrap, paged query adapter, IDB/cache and subscription implementation.
+  const { supabase } = await import('/src/providers/cloud/supabaseClient.ts');
+  supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-owner' } } }, error: null });
+  supabase.from = table => {
+    const request = { table };
+    let activeOnly = false;
+    const builder = {
+      select() { return builder; }, order() { return builder; }, limit() { return builder; },
+      eq() { return builder; }, abortSignal() { return builder; },
+      is(column, value) { if (column === 'deleted_at' && value === null) activeOnly = true; return builder; },
+      range(from, to) { Object.assign(request, { from, to }); return builder; },
+      in(column, ids) { if (column === 'id') request.databaseIds = ids; return builder; },
+      gt(column, value) { if (column === 'updated_at') request.updatedAfter = value; return builder; },
+      single: async () => ({ data: table === 'profiles' ? { role: 'owner' } : null, error: null }),
+      then(resolve, reject) {
+        return readServer(request).then(rows => ({ data: activeOnly ? rows.filter(row => !row.deleted_at) : rows, error: null })).then(resolve, reject);
+      },
+    };
+    return builder;
+  };
+  dataProvider.waitForCloudBootstrapConvergence = () => supabaseProvider.waitForCloudBootstrapConvergence();
+}
+
+installCloudRealtimeTestBridge({
+  query: realProviderReads ? undefined : readServer,
   attach: nextController => {
     controller = nextController;
     controllerResolve(nextController);
@@ -425,6 +471,8 @@ window.__P0_REACT_HARNESS__ = {
   },
   failTargetedReadOnce() { failNextQuery = true; },
   holdNextTargetedRead() { heldTargetedRead = new Promise(resolve => { releaseTargetedRead = resolve; }); },
+  holdNextPageRead() { heldPageRead = new Promise(resolve => { releasePageRead = resolve; }); },
+  releasePageRead() { releasePageRead?.(); },
   releaseTargetedRead() { releaseTargetedRead?.(); },
   failTargetedTableRead(table, count = 1) { targetedReadFailures.set(table, count); },
   replaySameKey(canonicalResult) {
@@ -454,6 +502,7 @@ window.__P0_REACT_HARNESS__ = {
       metrics: controller?.metrics() || null,
       targetedQueries,
       targetedReadHeld,
+      pageReadHeld,
       targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,

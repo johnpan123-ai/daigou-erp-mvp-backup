@@ -1,0 +1,6 @@
+.kpi-grid.settings-data-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 767px) {
+  .kpi-grid.settings-data-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Existing desktop cards span two/three tracks; don't create implicit mobile tracks. */
+  .settings-data-grid > .card { grid-column: 1 / -1 !important; min-width: 0; }
+}

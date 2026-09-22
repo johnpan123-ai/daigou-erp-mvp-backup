@@ -1,0 +1,20 @@
+.cloud-refresh-control { margin-bottom: 12px; max-width: 100%; }
+.btn.cloud-refresh-button {
+  min-height: 44px;
+  min-width: 208px;
+  max-width: 100%;
+  padding: 10px 16px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border: 2px solid #2563eb;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.btn.cloud-refresh-button:hover:not(:disabled) { background: #dbeafe; }
+.btn.cloud-refresh-button:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.btn.cloud-refresh-button:disabled { opacity: 1; background: #e2e8f0; color: #334155; border-color: #64748b; cursor: wait; }
+.cloud-refresh-feedback { min-height: 2.8em; margin-top: 4px; font-size: 13px; line-height: 1.4; color: var(--color-text-primary); overflow-wrap: anywhere; }
+.cloud-refresh-feedback[role="alert"] { color: #b42318; font-weight: 600; }
+.cloud-refresh-spinner { animation: cloud-refresh-spin 1s linear infinite; }
+@keyframes cloud-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cloud-refresh-spinner { animation: none; } }

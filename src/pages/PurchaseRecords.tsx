@@ -1507,7 +1507,8 @@ export default function PurchaseRecords() {
   const { refreshAuthoritative } = useCloudResourceSync(
     'purchase-records',
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
-    editMode || showWacaDialog || showClosingDateWorkbench,
+    Object.keys(draftDemands).length > 0 || Object.keys(draftClosingDates).length > 0
+      || showWacaDialog || showClosingDateWorkbench,
     loadFreshData,
     showWacaDialog || showClosingDateWorkbench ? undefined : {
       kind: 'groups',
@@ -1517,6 +1518,7 @@ export default function PurchaseRecords() {
         ...selectedGroupIds,
       ])],
     },
+    { rereadProtectedCacheWhileEditing: true },
   );
 
   const handleUpdateWacaMeta = async (updatedBy: string) => {

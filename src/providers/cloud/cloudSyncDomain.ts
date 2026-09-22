@@ -91,13 +91,15 @@ export interface CloudSyncCoordinatorOptions {
   onRefreshed: (resources: CloudResource[]) => void;
   onConflict: (resources: CloudResource[]) => void;
   /** Cache readers may update even while another consumer protects a draft. */
-  onCommitted?: (resources: CloudResource[]) => void;
+  onCommitted?: (resources: CloudResource[]) => void | Promise<void>;
   coalesceMs?: number;
   now?: () => number;
 }
 
 export interface CloudRefreshResult {
   conflicts: CloudChange[];
+  /** Business change, not just a newer version/timestamp. Explicit reads report this. */
+  changed?: boolean;
 }
 
 const uniqueResources = (resources: CloudResource[]): CloudResource[] => (
@@ -113,7 +115,7 @@ export class CloudSyncCoordinator {
   private disposed = false;
   private inFlight: Promise<void> | null = null;
   private resumeInFlight: Promise<void> | null = null;
-  private manualInFlight = new Map<string, Promise<void>>();
+  private manualInFlight = new Map<string, Promise<CloudRefreshResult>>();
   private manualAbort = new AbortController();
   private readonly coalesceMs: number;
   private readonly now: () => number;
@@ -246,11 +248,11 @@ export class CloudSyncCoordinator {
       if (refreshable.includes(change.resource) && !this.options.isEditing(change.resource)) this.deferred.delete(key);
     });
     refreshable.forEach(resource => this.deferredFallbackResources.delete(resource));
-    this.completeRefresh(refreshable, result);
+    await this.completeRefresh(refreshable, result);
     return true;
   }
 
-  manualRefresh(resources: CloudResource[]): Promise<void> {
+  manualRefresh(resources: CloudResource[]): Promise<CloudRefreshResult> {
     if (this.disposed) return Promise.reject(new Error('CLOUD_REFRESH_UNAVAILABLE'));
     const unique = uniqueResources(resources).sort();
     const key = unique.join('|');
@@ -262,13 +264,14 @@ export class CloudSyncCoordinator {
       if (this.inFlight) await this.inFlight;
       if (this.resumeInFlight) await this.resumeInFlight;
       const result = await this.options.refresh({ reason: 'manual', resources: unique, changes: [] }, this.manualAbort.signal);
-      this.completeRefresh(unique, result);
+      await this.completeRefresh(unique, result);
+      return result ?? { conflicts: [] };
     })().finally(() => this.manualInFlight.delete(key));
     this.manualInFlight.set(key, pending);
     return pending;
   }
 
-  private completeRefresh(resources: CloudResource[], result: void | CloudRefreshResult): void {
+  private async completeRefresh(resources: CloudResource[], result: void | CloudRefreshResult): Promise<void> {
     if (this.disposed) return;
     const conflicts = result?.conflicts ?? [];
     for (const change of conflicts) this.deferred.set(`${change.table}:${change.canonicalId}`, change);
@@ -279,7 +282,9 @@ export class CloudSyncCoordinator {
       this.metrics.conflicts += 1;
       this.options.onConflict(blocked);
     }
-    this.options.onCommitted?.(resources);
+    // A manual button must not report success while mounted consumers are still
+    // reading the committed cache (or silently drop a failed consumer read).
+    await this.options.onCommitted?.(resources);
   }
 
   snapshotMetrics(): Readonly<CloudSyncMetrics> {

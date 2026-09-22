@@ -16,6 +16,7 @@ try {
   }
   browser = await chromium.launch({ executablePath: process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true });
   const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+  page.on('dialog', dialog => dialog.type() === 'confirm' && dialog.message().startsWith('鎖定將放棄') ? dialog.accept() : dialog.dismiss());
   const liveRequests = [];
   await page.route('**/*.supabase.co/**', route => { liveRequests.push(route.request().url()); return route.abort(); });
   await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo`);

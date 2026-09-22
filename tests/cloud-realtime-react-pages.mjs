@@ -340,6 +340,11 @@ try {
       await page.evaluate(() => window.__P0_REACT_HARNESS__.focus());
       assert.equal(await input.inputValue(), '77');
       const errorsBeforeBlockedBlur = consoleErrors.length;
+      page.once('dialog', dialog => {
+        assert.equal(dialog.type(), 'confirm');
+        assert.match(dialog.message(), /^鎖定將放棄/u);
+        void dialog.accept();
+      });
       await page.getByRole('button', { name: '✏️ 編輯中' }).click();
       await waitText(page, 'Inline Remote Pending B');
       // The known conflict is now blocked before the autosave dispatch. Draft

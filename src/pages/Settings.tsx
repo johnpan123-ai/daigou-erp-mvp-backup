@@ -23,6 +23,7 @@ import CloudAtomicRestorePanel from '../components/CloudAtomicRestorePanel';
 import { SettingsCountLoadGate } from './settingsCountLoadGate';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
+import './Settings.css';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
   { field: 'productGroups', label: '商品群組' },
@@ -332,7 +333,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="kpi-grid settings-data-grid">
         <div className="card flex-col">
           <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Database size={18} className="text-primary" /> 
