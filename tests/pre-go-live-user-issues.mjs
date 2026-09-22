@@ -59,6 +59,26 @@ try {
       batchId: 'b', batchItems: items, variants, categoryById: categories,
       groupById: groups, getDisplayProductName: () => '規格',
     });
+    const fourColumnVariants = [
+      { id: 'p900', product_group_id: 'g', product_title: '商品', variant_name: '中文／日本語＆符號' },
+      { id: 'p1100', product_group_id: 'g', product_title: '商品', variant_name: '価格-1100' },
+      { id: 'p1300', product_group_id: 'g', product_title: '商品', variant_name: '価格-1300' },
+      { id: 'p2200', product_group_id: 'g', product_title: '商品', variant_name: '価格-2200' },
+    ];
+    const fourColumnLedgerText = ledger.formatPurchaseBatchLedger({
+      batchId: 'four-column',
+      batchItems: [
+        { id: 'p900-a', purchase_batch_id: 'four-column', product_variant_id: 'p900', quantity: 1, cost: 900 },
+        { id: 'p900-b', purchase_batch_id: 'four-column', product_variant_id: 'p900', quantity: 2, cost: 900 },
+        { id: 'p1100', purchase_batch_id: 'four-column', product_variant_id: 'p1100', quantity: 1, cost: 1100 },
+        { id: 'p1300', purchase_batch_id: 'four-column', product_variant_id: 'p1300', quantity: 1, cost: 1300 },
+        { id: 'p2200', purchase_batch_id: 'four-column', product_variant_id: 'p2200', quantity: 1, cost: 2200 },
+      ],
+      variants: fourColumnVariants,
+      categoryById: categories,
+      groupById: groups,
+      getDisplayProductName: variant => variant.variant_name,
+    });
 
     const packages = [{ id: 'p', title: 'P', status: 'arrived', arrived_at: '2026-09-19' }];
     const packageItems = [
@@ -101,6 +121,7 @@ try {
 
     return {
       ledgerText,
+      fourColumnLedgerText,
       partial: partial.map(entry => ({ id: entry.item.id, available: entry.availableQuantity })),
       unchecked: unchecked.length,
       currentIgnored: currentIgnored[0]?.availableQuantity,
@@ -114,10 +135,17 @@ try {
   });
 
   assert.deepEqual(domain.ledgerText.split('\n'), [
-    '商品-規格\t2\t100',
-    '商品-規格\t1\t120',
-    '商品-規格\t3\t—',
+    '商品-規格\t2\t\t100',
+    '商品-規格\t1\t\t120',
+    '商品-規格\t3\t\t—',
   ]);
+  const fourColumnRows = domain.fourColumnLedgerText.split('\n').map(row => row.split('\t'));
+  assert.deepEqual(fourColumnRows, [
+    ['商品-中文／日本語＆符號', '3', '', '900'],
+    ['商品-価格-1100', '1', '', '1100'],
+    ['商品-価格-1300', '1', '', '1300'],
+    ['商品-価格-2200', '1', '', '2200'],
+  ], 'Every price and Unicode product name must preserve the fixed four-column TSV contract and same-name/same-price grouping');
   assert.deepEqual(domain.partial, [{ id: 'a', available: 1 }]);
   assert.equal(domain.unchecked, 0);
   assert.equal(domain.currentIgnored, 3);

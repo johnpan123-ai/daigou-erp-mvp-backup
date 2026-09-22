@@ -238,9 +238,10 @@ try {
   assert.equal((dailyLedger.match(/商品 A-/g) || []).length, 2, 'Same-day merged product must retain both original batch ledgers');
   const dailyLedgerRows = dailyLedger.split('\n');
   assert.equal(dailyLedgerRows.length, 3, 'Three original one-item batches must produce three continuous rows');
-  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 3), 'Every ledger row must contain product name, quantity, and unit price');
+  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 4), 'Every ledger row must contain product name, quantity, a blank column, and unit price');
   assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[1])), [3, 12, 2], 'Original batch quantities must remain intact in chronological order');
-  assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[2])), [100, 100, 100], 'Ledger price must be the purchase item unit cost, not quantity × cost');
+  assert.deepEqual(dailyLedgerRows.map(row => row.split('\t')[2]), ['', '', ''], 'The third ledger column must always be genuinely empty');
+  assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[3])), [100, 100, 100], 'Ledger price must remain the purchase item unit cost in the fourth column, not quantity × cost');
   await page.waitForTimeout(900);
   await dailyCopyButtons.first().click();
   await page.waitForTimeout(900);

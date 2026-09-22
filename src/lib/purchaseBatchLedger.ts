@@ -54,7 +54,7 @@ export const formatPurchaseBatchLedger = ({
   }
 
   return Array.from(ledgerRows.values())
-    .map(row => `${row.name}\t${row.quantity}\t${row.unitPrice === undefined ? '—' : row.unitPrice}`)
+    .map(row => `${row.name}\t${row.quantity}\t\t${row.unitPrice === undefined ? '—' : row.unitPrice}`)
     .join('\n');
 };
 
