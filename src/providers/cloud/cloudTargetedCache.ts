@@ -187,12 +187,14 @@ export class CloudTargetedCache {
   private authoritativeGeneration = 0;
   private committedAuthoritativeEpoch: number | null = null;
   private refreshQueue: Promise<unknown> = Promise.resolve();
-  private readonly protectsDraft?: (table: string, before: Row | undefined, after: Row | undefined) => boolean;
+  private protectsDraft?: (table: string, before: Row | undefined, after: Row | undefined) => boolean;
+  private readonly prepareDraftProtection?: () => Promise<NonNullable<CloudTargetedCache['protectsDraft']>>;
 
-  constructor(options: { now?: () => Date; query?: CloudTargetedQuery; protectsDraft?: (table: string, before: Row | undefined, after: Row | undefined) => boolean } = {}) {
+  constructor(options: { now?: () => Date; query?: CloudTargetedQuery; protectsDraft?: (table: string, before: Row | undefined, after: Row | undefined) => boolean; prepareDraftProtection?: CloudTargetedCache['prepareDraftProtection'] } = {}) {
     this.now = options.now ?? (() => new Date());
     this.queryOverride = options.query;
     this.protectsDraft = options.protectsDraft;
+    this.prepareDraftProtection = options.prepareDraftProtection;
   }
 
   initializeCursor(): void {
@@ -205,7 +207,7 @@ export class CloudTargetedCache {
   }
 
   refreshWithResult(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
-    if (!this.protectsDraft) return this.performRefresh(request, signal);
+    if (!this.protectsDraft && !this.prepareDraftProtection) return this.performRefresh(request, signal);
     // Do not let a focus/reconnect read swallow a newer Realtime query through
     // per-table single-flight, or commit an older response after a newer one.
     const pending = this.refreshQueue.then(() => this.performRefresh(request, signal));
@@ -237,9 +239,14 @@ export class CloudTargetedCache {
       ? ++this.authoritativeGeneration
       : this.authoritativeGeneration;
     const previousStatus = getCloudConnectivitySnapshot().readStatus;
-    markCloudReadLoading(this.protectsDraft && (previousStatus === 'fresh-online' || previousStatus === 'fresh-empty')
-      ? 'cloud-background-read' : 'cloud-read-loading');
+    // A background record read must not revoke all unrelated editors' readiness.
+    // Existing fresh authority remains valid; actual read failure still fails closed.
+    if ((!this.protectsDraft && !this.prepareDraftProtection) || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty')) {
+      markCloudReadLoading();
+    }
     try {
+      if (this.prepareDraftProtection) this.protectsDraft = await this.prepareDraftProtection();
+      signal?.throwIfAborted();
       const rowCounts = isAuthoritativeResourceRead
         ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal, conflicts)
         : await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {

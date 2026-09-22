@@ -167,17 +167,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div
       className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''}`}
-      style={{ paddingTop: '38px' }}
     >
-      <div style={{
-        position: 'fixed',
-        inset: '0 0 auto 0',
-        height: '38px',
-        zIndex: 12000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '0 16px',
+      <div className="environment-status-bar" style={{
         backgroundColor: providerMode === 'next' ? '#075985' : providerMode === 'experimental' ? '#9f1239' : providerMode === 'test' ? '#5b21b6' : isCloudOrFallback ? '#b45309' : '#475569',
         color: '#fff',
         fontSize: '14px',

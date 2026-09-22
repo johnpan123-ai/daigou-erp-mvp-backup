@@ -225,6 +225,9 @@ let controller = null;
 let targetedQueries = 0;
 const targetedQueriesByTable = {};
 let failNextQuery = false;
+let heldTargetedRead;
+let releaseTargetedRead;
+let targetedReadHeld = false;
 const targetedReadFailures = new Map();
 let idempotentReplays = 0;
 let japanPackageTransactionCalls = 0;
@@ -276,6 +279,13 @@ if (partialReceivingScenario) {
 installCloudRealtimeTestBridge({
   query: async request => {
     targetedQueries += 1;
+    if (heldTargetedRead) {
+      const gate = heldTargetedRead;
+      heldTargetedRead = null;
+      targetedReadHeld = true;
+      await gate;
+      targetedReadHeld = false;
+    }
     targetedQueriesByTable[request.table] = (targetedQueriesByTable[request.table] || 0) + 1;
     const tableFailures = targetedReadFailures.get(request.table) || 0;
     if (tableFailures > 0) {
@@ -413,6 +423,8 @@ window.__P0_REACT_HARNESS__ = {
     return activeController.fallback(reason, resources);
   },
   failTargetedReadOnce() { failNextQuery = true; },
+  holdNextTargetedRead() { heldTargetedRead = new Promise(resolve => { releaseTargetedRead = resolve; }); },
+  releaseTargetedRead() { releaseTargetedRead?.(); },
   failTargetedTableRead(table, count = 1) { targetedReadFailures.set(table, count); },
   replaySameKey(canonicalResult) {
     idempotentReplays += 1;
@@ -440,6 +452,7 @@ window.__P0_REACT_HARNESS__ = {
     return {
       metrics: controller?.metrics() || null,
       targetedQueries,
+      targetedReadHeld,
       targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,

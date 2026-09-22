@@ -13,6 +13,7 @@ import {
   type CloudResource,
 } from '../providers/cloud/cloudSyncDomain';
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
+import { cloudDraftScopeForOwner, cloudRowAffectsDraft, readCloudDraftRelations, type CloudDraftScope } from '../providers/cloud/cloudDraftScope';
 import { consumeLocalCloudEcho } from '../providers/cloud/cloudRealtimeEchoRegistry';
 import {
   getCloudRealtimeTestBridge,
@@ -34,7 +35,7 @@ import { assertP04HarnessBoundary } from '../lib/stagingP04AuthenticatedHarness'
 
 interface CloudRealtimeContextValue {
   conflictedResources: ReadonlySet<CloudResource>;
-  registerEditing: (owner: string, resources: CloudResource[], editing: boolean) => void;
+  registerEditing: (owner: string, resources: CloudResource[], editing: boolean, draftScope?: CloudDraftScope) => void;
   unregister: (owner: string) => void;
   subscribe: (listener: (resources: CloudResource[]) => void) => () => void;
   clearConflict: (resources: CloudResource[]) => void;
@@ -79,7 +80,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const { user } = useAuth();
   const testBridge = getCloudRealtimeTestBridge();
   const enabled = (getProviderMode() === 'cloud' || Boolean(testBridge)) && Boolean(user);
-  const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean }>());
+  const editingOwners = useRef(new Map<string, { resources: Set<CloudResource>; editing: boolean; draftScope?: CloudDraftScope }>());
   const listeners = useRef(new Set<(resources: CloudResource[]) => void>());
   const coordinatorRef = useRef<CloudSyncCoordinator | null>(null);
   const reconnectRef = useRef<CloudReconnectCatchUp | null>(null);
@@ -154,29 +155,18 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     if (!enabled) return;
     const cache = new CloudTargetedCache({
       ...(testBridge ? { query: testBridge.query } : {}),
-      protectsDraft: (table, before, after) => [...editingOwners.current.entries()].some(([owner, scope]) => {
-        if (!scope.editing || !scope.resources.has(CLOUD_TABLE_RESOURCE[table])) return false;
-        const rows = [before, after].filter((row): row is NonNullable<typeof row> => Boolean(row));
-        if (rows.length === 0) return true;
-        // Detail pages edit one aggregate; changes to other aggregates do not conflict.
-        const [page, id] = owner.split(':');
-        if (page === 'japan-package-detail') {
-          return rows.some(row => table === 'japan_packages' ? row.id === id
-            : table === 'japan_package_items' && row.japan_package_id === id);
-        }
-        if (page === 'outbound-shipment-detail') {
-          return rows.some(row => table === 'outbound_shipments' ? row.id === id
-            : table === 'outbound_shipment_items' && row.outbound_shipment_id === id);
-        }
-        if (['purchase-management', 'purchasing-summary'].includes(page) && id
-          && ['product_groups', 'product_categories', 'product_variants', 'private_orders', 'purchase_batches', 'purchase_batch_items'].includes(table)) {
-          // Unknown aggregate membership remains protected; never infer safety
-          // from a missing optional FK (e.g. a category-linked variant).
-          return rows.some(row => table === 'product_groups' ? row.id === id
-            : !row.product_group_id || row.product_group_id === id);
-        }
-        return true;
-      }),
+      prepareDraftProtection: async () => {
+        const needsRelations = () => [...editingOwners.current.entries()].some(([owner, scope]) =>
+          scope.editing && (scope.draftScope ?? cloudDraftScopeForOwner(owner))?.kind === 'groups');
+        const relations = needsRelations() ? await readCloudDraftRelations() : undefined;
+        // Read active registrations at commit, not query start: a draft can start
+        // while a request is in flight. Missing evidence remains conservative.
+        return (table, before, after) => [...editingOwners.current.entries()].some(([owner, scope]) => {
+          if (!scope.editing || !scope.resources.has(CLOUD_TABLE_RESOURCE[table])) return false;
+          const draftScope = scope.draftScope ?? cloudDraftScopeForOwner(owner);
+          return !draftScope || cloudRowAffectsDraft(draftScope, table, before, after, relations);
+        });
+      },
     });
     cache.initializeCursor();
     const coordinator = new CloudSyncCoordinator({
@@ -454,11 +444,11 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     }
   }, []);
 
-  const registerEditing = useCallback((owner: string, resources: CloudResource[], editing: boolean) => {
+  const registerEditing = useCallback((owner: string, resources: CloudResource[], editing: boolean, draftScope?: CloudDraftScope) => {
     const previous = editingOwners.current.get(owner);
     const affected = [...new Set([...(previous?.resources ?? []), ...resources])];
     const wasEditing = new Set(affected.filter(isEditing));
-    editingOwners.current.set(owner, { resources: new Set(resources), editing });
+    editingOwners.current.set(owner, { resources: new Set(resources), editing, draftScope });
     reconnectRef.current?.updateResources([...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))]);
     refreshFaultSnapshot();
     resumeAfterEditing(affected.filter(resource => wasEditing.has(resource) && !isEditing(resource)));
@@ -537,8 +527,10 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
 
   return (
     <CloudRealtimeContext.Provider value={value}>
+      <div className="cloud-runtime-frame">
+      <div className="cloud-status-stack">
       {cloudMode && showCloudReadStatus && (
-        <div role="status" aria-live="polite" style={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10060, padding: '9px 15px', borderRadius: 8, background: connectivity.readStatus === 'fresh-empty' ? '#065f46' : '#7f1d1d', color: '#fff', border: `1px solid ${connectivity.readStatus === 'fresh-empty' ? '#6ee7b7' : '#fecaca'}`, boxShadow: '0 4px 12px rgba(15,23,42,.18)', fontSize: 13, fontWeight: 700 }}>
+        <div role="status" aria-live="polite" style={{ background: connectivity.readStatus === 'fresh-empty' ? '#065f46' : '#7f1d1d', color: '#fff' }}>
           {connectivity.status === 'offline'
             ? 'Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用'
             : connectivity.readStatus === 'stale-cache'
@@ -553,17 +545,19 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         </div>
       )}
       {conflictedResources.size > 0 && (
-        <div role="alert" style={{ position: 'fixed', top: showCloudReadStatus ? 54 : 8, left: '50%', transform: 'translateX(-50%)', zIndex: 10050, padding: '8px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
+        <div role="alert" style={{ background: '#fff7ed', color: '#9a3412' }}>
           資料已被其他使用者更新；目前編輯內容未被覆蓋，結束編輯後會自動更新。
         </div>
       )}
       {mutationConflictMessage && (
-        <div role="alert" data-cloud-field-conflict style={{ position: 'fixed', top: showCloudReadStatus || conflictedResources.size > 0 ? 54 : 8, right: 16, zIndex: 10070, maxWidth: 420, padding: '9px 14px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74', boxShadow: '0 4px 12px rgba(15,23,42,.12)', fontSize: 13, fontWeight: 600 }}>
+        <div role="alert" data-cloud-field-conflict style={{ background: '#fff7ed', color: '#9a3412' }}>
           {mutationConflictMessage}
           <button type="button" aria-label="關閉衝突提示" onClick={() => setMutationConflictMessage('')} style={{ marginLeft: 12, border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 }}>×</button>
         </div>
       )}
+      </div>
       {children}
+      </div>
     </CloudRealtimeContext.Provider>
   );
 }
@@ -573,11 +567,13 @@ export function useCloudResourceSync(
   resources: CloudResource[],
   editing: boolean,
   onRefresh: () => void | Promise<void>,
+  draftScope?: CloudDraftScope,
 ) {
   const context = useContext(CloudRealtimeContext);
   const resourceKey = resources.join('|');
   const refreshRef = useRef(onRefresh);
   const resourcesRef = useRef(resources);
+  const draftScopeKey = JSON.stringify(draftScope);
 
   const registerEditing = context?.registerEditing;
   const unregister = context?.unregister;
@@ -589,8 +585,8 @@ export function useCloudResourceSync(
   }, [onRefresh, resourceKey, resources]);
 
   useEffect(() => {
-    registerEditing?.(owner, resourcesRef.current, editing);
-  }, [editing, owner, registerEditing, resourceKey]);
+    registerEditing?.(owner, resourcesRef.current, editing, draftScopeKey ? JSON.parse(draftScopeKey) as CloudDraftScope : undefined);
+  }, [editing, owner, registerEditing, resourceKey, draftScopeKey]);
 
   useEffect(() => () => unregister?.(owner), [owner, unregister]);
 
