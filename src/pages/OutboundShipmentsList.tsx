@@ -23,6 +23,7 @@ import {
   parseOutboundStatusFilter,
   sortOutboundShipments,
 } from '../lib/outboundShipmentListState';
+import { buildOutboundShipmentMetrics } from '../lib/growthSafeSelectors';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: '全部' },
@@ -146,11 +147,10 @@ export default function OutboundShipmentsList() {
     return sortOutboundShipments(list, sortMode);
   }, [productSearchIndex, shipments, sortMode, statusFilter, searchTerm]);
 
-  const getItemCount = (shipmentId: string) =>
-    shipmentItems.filter(i => i.outbound_shipment_id === shipmentId).length;
-
-  const getTotalQty = (shipmentId: string) =>
-    shipmentItems.filter(i => i.outbound_shipment_id === shipmentId).reduce((sum, i) => sum + i.quantity, 0);
+  const shipmentMetricsById = useMemo(
+    () => buildOutboundShipmentMetrics(shipmentItems),
+    [shipmentItems],
+  );
 
   const handleCreate = async () => {
     const title = newTitle.trim() || `出庫 ${new Date().toISOString().slice(0, 10)}`;
@@ -200,9 +200,10 @@ export default function OutboundShipmentsList() {
       {shipments.length > 0 && (() => {
         const packingShipments = shipments.filter(shipment => shipment.status === 'packing');
         const draftCount = shipments.filter(shipment => shipment.status === 'draft').length;
-        const packingItems = packingShipments.flatMap(shipment => (
-          shipmentItems.filter(item => item.outbound_shipment_id === shipment.id)
-        ));
+        const packingQuantity = packingShipments.reduce(
+          (sum, shipment) => sum + (shipmentMetricsById.get(shipment.id)?.totalQuantity ?? 0),
+          0,
+        );
         if (draftCount === 0 && packingShipments.length === 0) return null;
 
         return (
@@ -223,11 +224,11 @@ export default function OutboundShipmentsList() {
                 <div style={{ fontSize: 22, fontWeight: 700, color: '#92400e' }}>
                   {packingShipments.length} 箱
                   <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 6 }}>
-                    ({packingItems.reduce((sum, item) => sum + item.quantity, 0)} 件)
+                    ({packingQuantity} 件)
                   </span>
                 </div>
                 {packingShipments.map(shipment => {
-                  const items = shipmentItems.filter(item => item.outbound_shipment_id === shipment.id);
+                  const metrics = shipmentMetricsById.get(shipment.id);
                   return (
                     <button
                       type="button"
@@ -236,7 +237,7 @@ export default function OutboundShipmentsList() {
                       style={{ width: '100%', padding: 0, border: 0, background: 'transparent', fontSize: 12, color: '#78350f', marginTop: 4, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, textAlign: 'left' }}
                     >
                       <span style={{ fontWeight: 500 }}>{shipment.title}</span>
-                      <span style={{ color: '#92400e' }}>— {items.length} 項 {items.reduce((sum, item) => sum + item.quantity, 0)} 件</span>
+                      <span style={{ color: '#92400e' }}>— {metrics?.itemCount ?? 0} 項 {metrics?.totalQuantity ?? 0} 件</span>
                     </button>
                   );
                 })}
@@ -340,8 +341,9 @@ export default function OutboundShipmentsList() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {filteredShipments.map(s => {
             const badge = getStatusBadge(s.status);
-            const itemCount = getItemCount(s.id);
-            const totalQty = getTotalQty(s.id);
+            const metrics = shipmentMetricsById.get(s.id);
+            const itemCount = metrics?.itemCount ?? 0;
+            const totalQty = metrics?.totalQuantity ?? 0;
             return (
               <div
                 key={s.id}

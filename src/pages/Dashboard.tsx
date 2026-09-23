@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Archive, Check, ChevronRight, Clock3, Copy, RefreshCw, ShoppingCart } from 'lucide-react';
-import { calculateGroupDemandAndPurchased } from '../lib/db';
 import type {
   InventoryItem,
   PrivateOrder,
@@ -21,6 +20,12 @@ import {
   type UnlistedProcessedSnapshot,
 } from '../lib/dashboardDailyWork';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
+import {
+  buildInventoryDemandLookup,
+  buildVariantDemandLookup,
+  buildVariantsByGroup,
+  calculateDemandForIndexedVariants,
+} from '../lib/growthSafeSelectors';
 import { dataProvider } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
@@ -212,6 +217,38 @@ export default function Dashboard() {
     () => mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems),
     [privateOrders, privateOrderItems],
   );
+  const variantsByGroupId = useMemo(
+    () => buildVariantsByGroup(categories, variants),
+    [categories, variants],
+  );
+  const inventoryDemandLookup = useMemo(
+    () => buildInventoryDemandLookup(inventory),
+    [inventory],
+  );
+  const groupDemandTotalsById = useMemo(() => {
+    // Preserve the accepted refresh dependency even though the current demand contract does
+    // not derive quantities from sales-order rows (the legacy calculator explicitly ignored it).
+    void salesOrderItems;
+    const totalsByGroupId = new Map<string, ReturnType<typeof calculateDemandForIndexedVariants>>();
+    for (const group of groups) {
+      const groupPrivateOrderItems = privateOrderItemsByGroupId.get(group.id) ?? [];
+      const groupBatchItems = batchItemsByGroupId.get(group.id) ?? [];
+      const lookup = buildVariantDemandLookup(
+        groupPrivateOrderItems,
+        groupBatchItems,
+        inventory,
+        inventoryDemandLookup,
+      );
+      totalsByGroupId.set(
+        group.id,
+        calculateDemandForIndexedVariants(
+          variantsByGroupId.get(group.id) ?? [],
+          lookup,
+        ),
+      );
+    }
+    return totalsByGroupId;
+  }, [batchItemsByGroupId, groups, inventory, inventoryDemandLookup, privateOrderItemsByGroupId, salesOrderItems, variantsByGroupId]);
 
   const loadData = async () => {
     const requestId = ++loadSequenceRef.current;
@@ -287,15 +324,8 @@ export default function Dashboard() {
     const byGroupId = new Map<string, WorkQueueItem>();
 
     groups.forEach(group => {
-      const totals = calculateGroupDemandAndPurchased(
-        group.id,
-        categories,
-        variants,
-        privateOrderItemsByGroupId.get(group.id) || [],
-        batchItemsByGroupId.get(group.id) || [],
-        inventory,
-        salesOrderItems,
-      );
+      const totals = groupDemandTotalsById.get(group.id);
+      if (!totals) return;
       const targetDate = normalizeDate(group.closing_date);
       const hasClosingDateValue = Boolean(group.closing_date?.trim());
       const diffDays = targetDate ? daysFromToday(targetDate, today) : null;
@@ -329,7 +359,7 @@ export default function Dashboard() {
     });
 
     return { upcoming, overdue, unordered, byGroupId };
-  }, [batchItemsByGroupId, categories, groups, inventory, privateOrderItemsByGroupId, salesOrderItems, today, variants]);
+  }, [groupDemandTotalsById, groups, today]);
 
   const pendingUnlistedGroupIds = useMemo(
     () => getPendingUnlistedGroupIds({

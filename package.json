@@ -21,6 +21,7 @@
     "test:dual-sandbox-lifecycle": "node tests/dual-sandbox-lifecycle.mjs",
     "test:sandbox-snapshot-parity": "node tests/sandbox-snapshot-parity.mjs",
     "benchmark:sandbox-baseline": "node tests/sandbox-performance-baseline.mjs",
+    "benchmark:performance-batch-a": "node tests/performance-growth-batch-a.mjs",
     "test:test-owner-auth": "node tests/test-owner-auth.mjs",
     "test:test-snapshot-import": "node tests/test-snapshot-import.mjs",
     "test:p0-gh-next-raw-integrity": "node tests/p0-gh-next-raw-integrity.mjs",

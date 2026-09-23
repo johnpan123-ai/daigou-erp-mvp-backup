@@ -6,6 +6,7 @@ import type { JapanPackage, JapanPackageItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { isJapanPackageSubmitBoundaryError, japanPackageIntentCoordinator } from '../providers/cloud/japanPackageTransaction';
+import { buildJapanPackageQuantityById } from '../lib/growthSafeSelectors';
 
 const CARRIERS_LIST = [
   { name: 'ヤマト運輸 (Yamato)', keyword: 'yamato' },
@@ -528,10 +529,10 @@ export default function JapanPackagesList() {
     );
   };
 
-  // Get items count inside package
-  const getPackageItemsCount = (pkgId: string) => {
-    return packageItems.filter(item => item.japan_package_id === pkgId).reduce((sum, item) => sum + item.quantity, 0);
-  };
+  const packageItemQuantityById = useMemo(
+    () => buildJapanPackageQuantityById(packageItems),
+    [packageItems],
+  );
 
   return (
     <div style={{ padding: '24px', maxWidth: '1800px', width: '100%', margin: '0 auto' }}>
@@ -1470,7 +1471,7 @@ export default function JapanPackagesList() {
         // Mobile layout
         <div>
           {filteredPackages.map(p => {
-            const itemsCount = getPackageItemsCount(p.id);
+            const itemsCount = packageItemQuantityById.get(p.id) ?? 0;
             return (
               <div 
                 key={p.id} 
@@ -1560,7 +1561,7 @@ export default function JapanPackagesList() {
         // Desktop Logistics Dashboard Cards Layout
         <div className="package-cards-list">
           {filteredPackages.map(p => {
-            const itemsCount = getPackageItemsCount(p.id);
+            const itemsCount = packageItemQuantityById.get(p.id) ?? 0;
             return (
               <div 
                 key={p.id} 
