@@ -385,6 +385,9 @@ export default function PurchaseRecords() {
   };
 
   const [draftDemands, setDraftDemands] = useState<Record<string, string>>({});
+  const [pendingDemandCommits, setPendingDemandCommits] = useState<Set<string>>(() => new Set());
+  const pendingDemandCommitKeysRef = useRef<Set<string>>(new Set());
+  const cancelledDemandCommitKeysRef = useRef<Set<string>>(new Set());
 
   const [draftClosingDates, setDraftClosingDates] = useState<Record<string, string>>({});
   const [closingDateSaveErrors, setClosingDateSaveErrors] = useState<Record<string, string>>({});
@@ -455,26 +458,37 @@ export default function PurchaseRecords() {
 
   const handleCommitDraft = async (groupId: string, platform: 'myacg' | 'waca' | 'purchased') => {
     const key = `${groupId}_${platform}`;
+    if (cancelledDemandCommitKeysRef.current.delete(key)) return;
+    if (pendingDemandCommitKeysRef.current.has(key)) return;
     const valStr = draftDemands[key];
     if (valStr !== undefined) {
       const val = parseInt(valStr, 10) || 0;
-      const saved = await handleUpdateGroupPlatformDemand(groupId, platform, val);
-      if (saved) {
-        setDraftDemands(prev => {
-          // Keep a newer edit if the user changed this field while the save was pending.
-          if (prev[key] !== valStr) return prev;
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        });
+      pendingDemandCommitKeysRef.current.add(key);
+      setPendingDemandCommits(new Set(pendingDemandCommitKeysRef.current));
+      try {
+        const saved = await handleUpdateGroupPlatformDemand(groupId, platform, val);
+        if (saved) {
+          setDraftDemands(prev => {
+            // Keep a newer edit if the user changed this field while the save was pending.
+            if (prev[key] !== valStr) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        }
+      } finally {
+        pendingDemandCommitKeysRef.current.delete(key);
+        setPendingDemandCommits(new Set(pendingDemandCommitKeysRef.current));
       }
     }
   };
 
   const handleCancelDraft = (groupId: string, platform: 'myacg' | 'waca' | 'purchased') => {
+    const key = `${groupId}_${platform}`;
+    cancelledDemandCommitKeysRef.current.add(key);
     setDraftDemands(prev => {
       const next = { ...prev };
-      delete next[`${groupId}_${platform}`];
+      delete next[key];
       return next;
     });
   };
@@ -2285,7 +2299,6 @@ export default function PurchaseRecords() {
       } else if (platform === 'purchased') {
         patch = { purchased_manual_adjustment: totalValue };
       }
-      patch.updated_at = new Date().toISOString();
       try {
         await dataProvider.updateProductVariantPatch(targetVar.id, patch);
         setVariants(prev => prev.map(v => v.id === targetVar.id ? { ...v, ...patch } : v));
@@ -4022,6 +4035,10 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input
+                              data-testid={`proxy-purchased-quantity-${g.id}`}
+                              aria-label={`代理版商品 ${g.normalized_title || g.title} 叫貨數量`}
+                              aria-busy={pendingDemandCommits.has(`${g.id}_purchased`)}
+                              disabled={pendingDemandCommits.has(`${g.id}_purchased`)}
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"
@@ -4120,6 +4137,8 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
+                              aria-busy={pendingDemandCommits.has(`${g.id}_myacg`)}
+                              disabled={pendingDemandCommits.has(`${g.id}_myacg`)}
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"
@@ -4145,6 +4164,8 @@ export default function PurchaseRecords() {
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>
                           {editMode && isProxyProduct(g) ? (
                             <input 
+                              aria-busy={pendingDemandCommits.has(`${g.id}_waca`)}
+                              disabled={pendingDemandCommits.has(`${g.id}_waca`)}
                               type="text"
                               inputMode="numeric"
                               pattern="[0-9]*"

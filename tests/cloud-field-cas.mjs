@@ -186,6 +186,32 @@ try {
     );
   }
 
+  // A ProductVariant read model may carry server metadata, but an agency-order
+  // quantity write sends only the business field. Version remains CAS context;
+  // updated_at remains server-owned and is still rejected if supplied as a new value.
+  {
+    const variantBase = {
+      id: uuid(90), product_group_id: uuid(91), product_category_id: uuid(92),
+      purchased_manual_adjustment: 2, version: 7,
+      updated_at: '2026-09-23T00:00:00.000Z', updated_by: uuid(93),
+    };
+    const operation = buildCloudPatchOperation(
+      'product_variants',
+      variantBase,
+      { purchased_manual_adjustment: 8 },
+    );
+    assert.deepEqual(operation.changes, { purchased_manual_adjustment: 8 });
+    assert.deepEqual(operation.expected, { purchased_manual_adjustment: 2 });
+    assert.equal(operation.observedVersion, 7);
+    assert.throws(
+      () => buildCloudPatchOperation('product_variants', variantBase, {
+        purchased_manual_adjustment: 8,
+        updated_at: 'client-owned-value',
+      }),
+      /CLOUD_MUTATION_FIELD_NOT_ALLOWED:updated_at/u,
+    );
+  }
+
   const sql = await readFile(SQL_PATH, 'utf8');
   const provider = await readFile(PROVIDER_PATH, 'utf8');
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.erp_apply_field_mutations/u);
