@@ -209,6 +209,7 @@ let writes = 0;
 let heldPageRead, releasePageRead, pageReadHeld = false;
 let holdAllPageReads = false;
 let heldOutboundSave, releaseOutboundSave, outboundSaveHeld = false;
+let heldJapanPackageTransaction, releaseJapanPackageTransaction, japanPackageTransactionHeld = false;
 let failNextOutboundSave = false;
 let heldVariantPatch, releaseVariantPatch, variantPatchHeld = false;
 let nextVariantPatchFailure = null;
@@ -356,6 +357,13 @@ if (partialReceivingScenario) {
   dataProvider.applyJapanPackageTransaction = async command => {
     japanPackageTransactionCalls += 1;
     if (command.transactionType !== 'set-receiving') throw new Error('PARTIAL_RECEIVING_FIXTURE_EXPECTED_SET_RECEIVING');
+    if (heldJapanPackageTransaction) {
+      const gate = heldJapanPackageTransaction;
+      heldJapanPackageTransaction = null;
+      japanPackageTransactionHeld = true;
+      await gate;
+      japanPackageTransactionHeld = false;
+    }
     for (const update of command.updates) applyReceivingState(update.itemId, update.checked, update.checkedAt);
     await cloudCacheDb.saveJapanPackageTransaction(
       clone(server.japanPackages),
@@ -550,6 +558,7 @@ window.__P0_REACT_HARNESS__ = {
   holdNextTargetedRead() { heldTargetedRead = new Promise(resolve => { releaseTargetedRead = resolve; }); },
   holdNextPageRead() { heldPageRead = new Promise(resolve => { releasePageRead = resolve; }); },
   holdNextOutboundSave() { heldOutboundSave = new Promise(resolve => { releaseOutboundSave = resolve; }); },
+  holdNextJapanPackageTransaction() { heldJapanPackageTransaction = new Promise(resolve => { releaseJapanPackageTransaction = resolve; }); },
   holdNextVariantPatch() { heldVariantPatch = new Promise(resolve => { releaseVariantPatch = resolve; }); },
   failNextVariantPatch(message = 'simulated product variant patch failure') { nextVariantPatchFailure = message; },
   failNextOutboundSave() { failNextOutboundSave = true; },
@@ -559,6 +568,7 @@ window.__P0_REACT_HARNESS__ = {
     releasePageRead?.();
   },
   releaseOutboundSave() { releaseOutboundSave?.(); },
+  releaseJapanPackageTransaction() { releaseJapanPackageTransaction?.(); },
   releaseVariantPatch() { releaseVariantPatch?.(); },
   releaseTargetedRead() { releaseTargetedRead?.(); },
   failTargetedTableRead(table, count = 1) { targetedReadFailures.set(table, count); },
@@ -591,6 +601,7 @@ window.__P0_REACT_HARNESS__ = {
       targetedReadHeld,
       pageReadHeld,
       outboundSaveHeld,
+      japanPackageTransactionHeld,
       variantPatchHeld,
       variantPatchCalls: clone(variantPatchCalls),
       targetedQueriesByTable: clone(targetedQueriesByTable),

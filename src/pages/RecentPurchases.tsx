@@ -468,7 +468,10 @@ export default function RecentPurchases() {
           </p>
         </div>
         <div style={{ color: '#475569', fontSize: '13px', fontWeight: 600 }}>
-          {visibleProductCount} 項商品・採購 {visibleQuantity} 件{isRefreshing ? '・同步中…' : ''}
+          {visibleProductCount} 項商品・採購 {visibleQuantity} 件
+          <span role="status" aria-live="polite" aria-hidden={isRefreshing ? undefined : true} style={{ display: 'inline-block', width: '76px', whiteSpace: 'nowrap', visibility: isRefreshing ? 'visible' : 'hidden' }}>
+            ・同步中…
+          </span>
         </div>
       </header>
 

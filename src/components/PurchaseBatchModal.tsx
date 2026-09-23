@@ -1208,38 +1208,41 @@ export default function PurchaseBatchModal({
               <div style={{ fontSize: '12px', color: '#92400e', lineHeight: 1.5 }}>
                 僅分攤至「數量 &gt; 0 且實支單價 &gt; 0」的品項；按鈕只會更新本視窗草稿。
               </div>
-              {freightStatus && (
-                <div
-                  role="status"
-                  style={{
+              <div
+                role="status"
+                aria-live="polite"
+                aria-hidden={freightStatus ? undefined : true}
+                style={{
+                    minHeight: '18px',
+                    lineHeight: '18px',
                     fontSize: '12px',
                     fontWeight: 600,
-                    color: freightStatus.kind === 'success' ? '#15803d' : freightStatus.kind === 'warning' ? '#b45309' : '#dc2626'
+                    color: freightStatus?.kind === 'success' ? '#15803d' : freightStatus?.kind === 'warning' ? '#b45309' : '#dc2626',
+                    visibility: freightStatus ? 'visible' : 'hidden',
                   }}
-                >
-                  {freightStatus.message}
-                </div>
-              )}
+              >
+                {freightStatus?.message || '\u00a0'}
+              </div>
             </div>
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
-            {submitStatus && (
-              <div
-                data-testid="purchase-batch-submit-status"
-                role="status"
-                style={{ fontSize: '13px', fontWeight: 600, color: submitStatus.kind === 'error' ? '#b91c1c' : '#b45309' }}
-              >
-                {submitStatus.message}
-              </div>
-            )}
+            <div
+              data-testid="purchase-batch-submit-status"
+              role="status"
+              aria-live="polite"
+              aria-hidden={submitStatus ? undefined : true}
+              style={{ minHeight: '19px', lineHeight: '19px', fontSize: '13px', fontWeight: 600, color: submitStatus?.kind === 'error' ? '#b91c1c' : '#b45309', visibility: submitStatus ? 'visible' : 'hidden' }}
+            >
+              {submitStatus?.message || '\u00a0'}
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
                 本批次合計：<span data-testid="purchase-batch-total" style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={onClose}>取消</button>
-                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={isSaving || submitStatus?.lockRetry === true || (!!editingBatchId && !batchForm.name.trim())}>{isSaving ? '儲存中…' : '儲存'}</button>
+                <button className="btn btn-primary" style={{ minWidth: '92px', justifyContent: 'center', whiteSpace: 'nowrap', padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={isSaving || submitStatus?.lockRetry === true || (!!editingBatchId && !batchForm.name.trim())}>{isSaving ? '儲存中…' : '儲存'}</button>
               </div>
             </div>
             {(() => {
