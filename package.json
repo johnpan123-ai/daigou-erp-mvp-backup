@@ -80,6 +80,7 @@
     "test:partial-receiving-outbound-route": "node tests/partial-receiving-outbound-route.mjs",
     "test:cloud-japan-package-ui": "node tests/japan-package-transaction-ui.mjs",
     "test:japan-package-confirmation-flicker": "node tests/japan-package-confirmation-flicker.mjs",
+    "test:mounted-content-stability": "node tests/mounted-content-stability.mjs",
     "test:cloud-japan-package-provider": "node tests/cloud-japan-package-provider-integration.mjs",
     "test:cloud-outbound-transaction": "node tests/cloud-outbound-shipment-transaction.mjs",
     "test:cloud-outbound-sql-artifact": "node tests/cloud-outbound-shipment-sql-artifact.mjs",

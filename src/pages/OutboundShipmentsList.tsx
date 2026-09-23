@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PackageOpen, Plus, Search } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
@@ -12,6 +12,7 @@ import type {
 } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
 import {
   buildOutboundShipmentProductSearchIndex,
   outboundShipmentMatchesSearch,
@@ -54,7 +55,7 @@ export default function OutboundShipmentsList() {
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
   const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
   const statusFilter = parseOutboundStatusFilter(searchParams.get('status'));
   const searchTerm = searchParams.get('q') ?? '';
   const sortMode = searchParams.has('sort')
@@ -85,33 +86,31 @@ export default function OutboundShipmentsList() {
     navigate(`/outbound-shipments/${shipmentId}${search ? `?${search}` : ''}`);
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    setIsLoading(true);
+  const loadData = useCallback(async () => {
     try {
-      const [s, si, jpi, groups, variants, bundles] = await Promise.all([
+      await runLoad(async () => Promise.all([
         dataProvider.getOutboundShipments(),
         dataProvider.getOutboundShipmentItems(),
         dataProvider.getJapanPackageItems(),
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
         dataProvider.getBundleComponents(),
-      ]);
-      setShipments(s);
-      setShipmentItems(si);
-      setJapanPackageItems(jpi);
-      setProductGroups(groups);
-      setProductVariants(variants);
-      setBundleComponents(bundles);
+      ]), ([s, si, jpi, groups, variants, bundles]) => {
+        setShipments(s);
+        setShipmentItems(si);
+        setJapanPackageItems(jpi);
+        setProductGroups(groups);
+        setProductVariants(variants);
+        setBundleComponents(bundles);
+      });
     } catch (e) {
       console.error('[OutboundShipmentsList] load failed:', e);
-    } finally {
-      setIsLoading(false);
     }
-  };
+  }, [runLoad]);
+
+  useEffect(() => {
+    void Promise.resolve().then(loadData);
+  }, [loadData]);
 
   useCloudResourceSync(
     'outbound-shipments-list',
@@ -178,11 +177,13 @@ export default function OutboundShipmentsList() {
   }, [shipments]);
 
   return (
-    <div style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: 900, margin: '0 auto' }}>
+    <div data-testid="outbound-shipments-list-root" style={{ padding: isMobile ? '16px' : '24px 32px', maxWidth: 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>出庫管理</h1>
-          <p style={{ color: '#64748b', fontSize: 14, margin: '4px 0 0' }}>管理從日本寄回台灣的出庫單</p>
+          <p style={{ color: '#64748b', fontSize: 14, margin: '4px 0 0' }}>
+            管理從日本寄回台灣的出庫單{isRefreshing ? ' · 同步最新資料中…' : ''}
+          </p>
         </div>
         <button
           onClick={() => setShowCreateForm(true)}
@@ -330,7 +331,7 @@ export default function OutboundShipmentsList() {
       </div>
 
       {/* List */}
-      {isLoading ? (
+      {isInitialLoading ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>載入中...</div>
       ) : filteredShipments.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>

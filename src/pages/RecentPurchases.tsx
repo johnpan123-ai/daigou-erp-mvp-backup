@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import { formatMultiplePurchaseBatchLedgers } from '../lib/purchaseBatchLedger';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
 import { writeTextToClipboard } from '../lib/safeClipboard';
 
 type DateFilter = 'today' | 'yesterday' | '7d' | '30d';
@@ -86,7 +87,7 @@ export default function RecentPurchases() {
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(() => new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [onlyWithOfficialSite, setOnlyWithOfficialSite] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const { hasUsableData, isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
   const [loadError, setLoadError] = useState('');
   const [dailyCopyFeedback, setDailyCopyFeedback] = useState<Record<string, CopyFeedback>>({});
   const [rowCopyFeedback, setRowCopyFeedback] = useState<Record<string, CopyFeedback>>({});
@@ -95,35 +96,33 @@ export default function RecentPurchases() {
   const copyRequestIdsRef = useRef<Map<string, number>>(new Map());
   const isMountedRef = useRef(true);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = useCallback(async () => {
     setLoadError('');
     try {
-      const [nextGroups, nextCategories, nextVariants, nextBatches, nextBatchItems] = await Promise.all([
+      await runLoad(async () => Promise.all([
         dataProvider.getProductGroups(),
         dataProvider.getProductCategories(),
         dataProvider.getProductVariants(),
         dataProvider.getPurchaseBatches(),
         dataProvider.getPurchaseBatchItems(),
-      ]);
-      setGroups(nextGroups);
-      setCategories(nextCategories);
-      setVariants(nextVariants);
-      setBatches(nextBatches);
-      setBatchItems(nextBatchItems);
+      ]), ([nextGroups, nextCategories, nextVariants, nextBatches, nextBatchItems]) => {
+        setGroups(nextGroups);
+        setCategories(nextCategories);
+        setVariants(nextVariants);
+        setBatches(nextBatches);
+        setBatchItems(nextBatchItems);
+      });
     } catch (error) {
       console.error('[RecentPurchases] Failed to load recent purchase data:', error);
       setLoadError('近期採購資料載入失敗，請重新整理或重試。');
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [runLoad]);
 
   useCloudResourceSync('recent-purchases', ['products', 'purchases'], false, loadData);
 
   useEffect(() => {
-    void loadData();
-  }, []);
+    void Promise.resolve().then(loadData);
+  }, [loadData]);
 
   useEffect(() => {
     setExpandedDateKeys(new Set());
@@ -469,7 +468,7 @@ export default function RecentPurchases() {
           </p>
         </div>
         <div style={{ color: '#475569', fontSize: '13px', fontWeight: 600 }}>
-          {visibleProductCount} 項商品・採購 {visibleQuantity} 件
+          {visibleProductCount} 項商品・採購 {visibleQuantity} 件{isRefreshing ? '・同步中…' : ''}
         </div>
       </header>
 
@@ -513,9 +512,15 @@ export default function RecentPurchases() {
         </label>
       </div>
 
-      {loading ? (
+      {loadError && hasUsableData && (
+        <div role="alert" style={{ marginBottom: 16, padding: '12px 14px', border: '1px solid #fecaca', borderRadius: 10, background: '#fff7f7', color: '#991b1b' }}>
+          {loadError}（畫面保留上次資料）
+        </div>
+      )}
+
+      {isInitialLoading ? (
         <div style={{ padding: '80px 20px', textAlign: 'center', color: '#64748b' }}>載入近期採購資料中…</div>
-      ) : loadError ? (
+      ) : !hasUsableData && loadError ? (
         <div style={{ padding: '28px', border: '1px solid #fecaca', borderRadius: '12px', background: '#fff7f7', color: '#991b1b', textAlign: 'center' }}>
           <div>{loadError}</div>
           <button type="button" onClick={() => void loadData()} style={{ marginTop: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }} className="btn">

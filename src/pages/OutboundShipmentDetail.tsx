@@ -21,6 +21,7 @@ import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import * as XLSX from 'xlsx';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
 import {
   copyOutboundGroupNameToClipboard,
   copyOutboundGroupNameAndOpenMyacg,
@@ -125,7 +126,7 @@ export default function OutboundShipmentDetail() {
   const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
   const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
   const [poolSearch, setPoolSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [collapsedSelectedGroups, setCollapsedSelectedGroups] = useState<Set<string>>(new Set());
@@ -144,6 +145,7 @@ export default function OutboundShipmentDetail() {
   const [editingManualItemId, setEditingManualItemId] = useState<string | null>(null);
   const [isSavingManualEdit, setIsSavingManualEdit] = useState(false);
   const [pendingItemSaveCount, setPendingItemSaveCount] = useState(0);
+  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
   const [itemSaveError, setItemSaveError] = useState<string | null>(null);
   const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
   const [deleteStatus, setDeleteStatus] = useState<'idle' | 'submitting' | 'unknown' | 'sync-pending'>('idle');
@@ -153,6 +155,7 @@ export default function OutboundShipmentDetail() {
   const itemSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const latestQueuedSaveRef = useRef(0);
   const pendingItemSaveCountRef = useRef(0);
+  const pendingItemIdsRef = useRef<Set<string>>(new Set());
   const isMountedRef = useRef(true);
   const [manualEditForm, setManualEditForm] = useState({
     sku: '',
@@ -171,9 +174,7 @@ export default function OutboundShipmentDetail() {
   const [formNote, setFormNote] = useState('');
 
   const loadData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [shipments, items, jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems] = await Promise.all([
+    await runLoad(async () => Promise.all([
         dataProvider.getOutboundShipments(),
         dataProvider.getOutboundShipmentItems(),
         dataProvider.getJapanPackages(),
@@ -186,7 +187,7 @@ export default function OutboundShipmentDetail() {
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getSalesOrderItems(),
         dataProvider.getBundleComponents(),
-      ]);
+      ]), ([shipments, items, jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems]) => {
       allShipmentItemsRef.current = items;
       setAllShipmentItems(items);
       setJapanPackages(jp);
@@ -214,10 +215,8 @@ export default function OutboundShipmentDetail() {
         setFormCost(current.shipping_cost?.toString() || '');
         setFormNote(current.note || '');
       }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [id]);
+    });
+  }, [id, runLoad]);
 
   const headerDirty = Boolean(shipment && (
     formTitle !== shipment.title
@@ -605,7 +604,7 @@ export default function OutboundShipmentDetail() {
     });
   };
 
-  const saveItems = useCallback((items: OutboundShipmentItem[]): Promise<boolean> => {
+  const saveItems = useCallback((items: OutboundShipmentItem[], affectedItemIds: string[] = []): Promise<boolean> => {
     const otherItems = allShipmentItemsRef.current.filter(i => i.outbound_shipment_id !== id);
     const allItems = [...otherItems, ...items];
     const sequence = ++latestQueuedSaveRef.current;
@@ -614,6 +613,10 @@ export default function OutboundShipmentDetail() {
     setAllShipmentItems(allItems);
     pendingItemSaveCountRef.current += 1;
     setPendingItemSaveCount(pendingItemSaveCountRef.current);
+    if (affectedItemIds.length > 0) {
+      pendingItemIdsRef.current = new Set([...pendingItemIdsRef.current, ...affectedItemIds]);
+      setPendingItemIds(new Set(pendingItemIdsRef.current));
+    }
 
     const operation = itemSaveQueueRef.current.then(async () => {
       try {
@@ -654,13 +657,20 @@ export default function OutboundShipmentDetail() {
     }).finally(() => {
       pendingItemSaveCountRef.current = Math.max(0, pendingItemSaveCountRef.current - 1);
       if (isMountedRef.current) setPendingItemSaveCount(pendingItemSaveCountRef.current);
+      if (affectedItemIds.length > 0) {
+        const completedIds = new Set(affectedItemIds);
+        pendingItemIdsRef.current = new Set(
+          [...pendingItemIdsRef.current].filter(itemId => !completedIds.has(itemId)),
+        );
+        if (isMountedRef.current) setPendingItemIds(new Set(pendingItemIdsRef.current));
+      }
     });
   }, [id, loadData]);
 
-  const applyAndSaveItems = useCallback((items: OutboundShipmentItem[]) => {
+  const applyAndSaveItems = useCallback((items: OutboundShipmentItem[], affectedItemIds: string[] = []) => {
     selectedItemsRef.current = items;
     setSelectedItems(items);
-    return saveItems(items);
+    return saveItems(items, affectedItemIds);
   }, [saveItems]);
 
   const addItemToShipment = useCallback((poolItem: PoolItem, qty?: number) => {
@@ -753,15 +763,17 @@ export default function OutboundShipmentDetail() {
   }, [applyAndSaveItems, poolItems]);
 
   const toggleChecked = useCallback((itemId: string) => {
+    if (pendingItemIdsRef.current.has(itemId)) return;
     const updated = selectedItemsRef.current.map(i => {
       if (i.id !== itemId) return i;
       return { ...i, checked: !i.checked, checked_at: !i.checked ? new Date().toISOString() : undefined };
     });
-    void applyAndSaveItems(updated);
+    void applyAndSaveItems(updated, [itemId]);
   }, [applyAndSaveItems]);
 
   const toggleCheckedSources = useCallback((sourceItems: OutboundShipmentItem[]) => {
     const sourceIds = new Set(sourceItems.map(item => item.id));
+    if (sourceItems.some(item => pendingItemIdsRef.current.has(item.id))) return;
     const currentItems = selectedItemsRef.current;
     const currentSources = currentItems.filter(item => sourceIds.has(item.id));
     const shouldCheck = !currentSources.every(item => item.checked);
@@ -774,7 +786,7 @@ export default function OutboundShipmentDetail() {
         checked_at: shouldCheck ? (item.checked_at || checkedAt) : undefined,
       };
     });
-    void applyAndSaveItems(updated);
+    void applyAndSaveItems(updated, [...sourceIds]);
   }, [applyAndSaveItems]);
 
   const addManualItem = useCallback(() => {
@@ -1106,6 +1118,7 @@ export default function OutboundShipmentDetail() {
     const sourceKey = `${groupName}::${row.key}`;
     const sourcesExpanded = expandedReceivingSources.has(sourceKey);
     const singleSource = sourceCount === 1 ? row.sourceItems[0] : undefined;
+    const rowPending = row.sourceItems.some(item => pendingItemIds.has(item.id));
     const singleVariant = singleSource ? resolveItemVariant(singleSource) : undefined;
     const singleBundleVariants = singleVariant ? (bundleVariantsByParentId.get(singleVariant.id) || []) : [];
     const prices = Array.from(new Set(
@@ -1117,13 +1130,15 @@ export default function OutboundShipmentDetail() {
     return (
       <div
         key={row.key}
-        onClick={singleSource ? () => toggleChecked(singleSource.id) : undefined}
+        data-testid="outbound-receiving-row"
+        data-pending={rowPending ? 'true' : 'false'}
+        onClick={singleSource && !rowPending ? () => toggleChecked(singleSource.id) : undefined}
         style={{
           margin: '4px 0 0 22px', padding: '11px 12px', borderRadius: 8,
           background: allChecked ? '#f0fdf4' : partiallyChecked ? '#fffbeb' : '#fff',
           border: '1px solid',
           borderColor: allChecked ? '#bbf7d0' : partiallyChecked ? '#fde68a' : '#e2e8f0',
-          cursor: singleSource ? 'pointer' : 'default',
+          cursor: singleSource && !rowPending ? 'pointer' : rowPending ? 'wait' : 'default',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
@@ -1131,6 +1146,7 @@ export default function OutboundShipmentDetail() {
             type="button"
             aria-label={allChecked ? `取消 ${row.label} 全部來源點收` : `完成 ${row.label} 全部來源點收`}
             title={allChecked ? '取消全部來源點收' : '完成全部來源點收'}
+            disabled={rowPending}
             onClick={event => {
               event.stopPropagation();
               if (singleSource) toggleChecked(singleSource.id);
@@ -1142,7 +1158,7 @@ export default function OutboundShipmentDetail() {
             borderColor: allChecked ? '#10b981' : partiallyChecked ? '#f59e0b' : '#cbd5e1',
             background: allChecked ? '#10b981' : partiallyChecked ? '#f59e0b' : '#fff',
             color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            padding: 0, cursor: 'pointer',
+            padding: 0, cursor: rowPending ? 'wait' : 'pointer', opacity: rowPending ? 0.65 : 1,
           }}>
             {allChecked ? <CheckSquare size={16} /> : partiallyChecked ? <span style={{ fontWeight: 900 }}>—</span> : null}
           </button>
@@ -1164,7 +1180,7 @@ export default function OutboundShipmentDetail() {
             color: allChecked ? '#166534' : partiallyChecked ? '#92400e' : '#64748b',
             fontSize: 11, fontWeight: 700,
           }}>
-            {allChecked ? '完成' : partiallyChecked ? `部分完成 ${checkedQuantity}/${row.totalQuantity}` : '未完成'}
+            {rowPending ? '確認中…' : allChecked ? '完成' : partiallyChecked ? `部分完成 ${checkedQuantity}/${row.totalQuantity}` : '未完成'}
           </span>
         </div>
 
@@ -1225,13 +1241,16 @@ export default function OutboundShipmentDetail() {
                             toggleChecked(sourceItem.id);
                           }}
                           aria-label={`切換來源 ${index + 1} 點收狀態`}
+                          disabled={pendingItemIds.has(sourceItem.id)}
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: 6,
                             padding: '5px 9px', borderRadius: 6,
                             border: `1px solid ${sourceItem.checked ? '#86efac' : '#cbd5e1'}`,
                             background: sourceItem.checked ? '#dcfce7' : '#fff',
                             color: sourceItem.checked ? '#166534' : '#475569',
-                            fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                            fontSize: 12, fontWeight: 800,
+                            cursor: pendingItemIds.has(sourceItem.id) ? 'wait' : 'pointer',
+                            opacity: pendingItemIds.has(sourceItem.id) ? 0.65 : 1,
                           }}
                         >
                           <span style={{
@@ -1275,7 +1294,7 @@ export default function OutboundShipmentDetail() {
     );
   };
 
-  if (isLoading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>載入中...</div>;
+  if (isInitialLoading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>載入中...</div>;
   if (!shipment) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>找不到此出庫單</div>;
 
   const badge = getStatusBadge(shipment.status);
@@ -1283,7 +1302,7 @@ export default function OutboundShipmentDetail() {
   const totalQty = selectedItems.reduce((sum, i) => sum + i.quantity, 0);
 
   return (
-    <div style={{ padding: isMobile ? '12px' : '20px 28px', maxWidth: 1400, margin: '0 auto' }}>
+    <div data-testid="outbound-shipment-detail-root" style={{ padding: isMobile ? '12px' : '20px 28px', maxWidth: 1400, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
         <button onClick={returnToShipmentList} style={{
@@ -1426,6 +1445,9 @@ export default function OutboundShipmentDetail() {
           }}>{deleteStatus === 'submitting' ? '刪除中…' : '刪除出庫單'}</button>
           {deleteStatus === 'unknown' && (
             <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>
+          )}
+          {pendingItemSaveCount === 0 && isRefreshing && (
+            <span role="status" style={{ color: '#64748b', fontWeight: 600 }}>同步最新資料中…</span>
           )}
           {deleteStatus === 'sync-pending' && (
             <span role="status" style={{ color: '#b45309', fontWeight: 700 }}>出庫單已刪除，畫面同步尚未完成，請勿重複操作。</span>

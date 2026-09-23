@@ -35,7 +35,7 @@ assert.ok(targetItemCount >= 10, 'Snapshot needs at least 10 outbound items in t
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--host', '127.0.0.1', '--port', '4192', '--strictPort',
+  '--mode', 'experimental', '--host', '127.0.0.1', '--port', '4192', '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });

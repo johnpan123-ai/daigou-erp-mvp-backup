@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import type {
   ProductVariant, ProductGroup, ProductCategory,
@@ -7,6 +7,7 @@ import type {
 import { RefreshCw, ChevronDown, ChevronRight, AlertTriangle, Trash2, CheckCircle2, Layers } from 'lucide-react';
 import { useRole } from '../auth/useRole';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
 
 // 與 src/lib/db.ts computeVariantDedupe() 相同的去重 key：
 // 同 key 的列會被讀取端自動合併（UI 看不到），因此「疑似重複」的定義是
@@ -60,15 +61,14 @@ export default function DuplicateVariants() {
   const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
   const [privateItems, setPrivateItems] = useState<PrivateOrderItem[]>([]);
   const [salesItems, setSalesItems] = useState<SalesOrderItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [keepChoice, setKeepChoice] = useState<Record<string, string>>({});
   const [deletingSetKey, setDeletingSetKey] = useState<string | null>(null);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = useCallback(async () => {
     try {
-      const [vars, gs, cats, bs, bis, pois, sois] = await Promise.all([
+      await runLoad(async () => Promise.all([
         dataProvider.getProductVariants(),
         dataProvider.getProductGroups(),
         dataProvider.getProductCategories(),
@@ -76,23 +76,22 @@ export default function DuplicateVariants() {
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getPrivateOrderItems(),
         dataProvider.getSalesOrderItems()
-      ]);
-      setVariants(vars);
-      setGroups(gs);
-      setCategories(cats);
-      setBatches(bs);
-      setBatchItems(bis);
-      setPrivateItems(pois);
-      setSalesItems(sois);
+      ]), ([vars, gs, cats, bs, bis, pois, sois]) => {
+        setVariants(vars);
+        setGroups(gs);
+        setCategories(cats);
+        setBatches(bs);
+        setBatchItems(bis);
+        setPrivateItems(pois);
+        setSalesItems(sois);
+      });
     } catch (err) {
       console.error('[DuplicateVariants] load failed:', err);
       alert('載入資料失敗：' + ((err as Error).message || err));
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [runLoad]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { void Promise.resolve().then(loadData); }, [loadData]);
 
   useCloudResourceSync(
     'duplicate-variants',
@@ -327,18 +326,18 @@ export default function DuplicateVariants() {
   };
 
   return (
-    <div style={{ padding: '16px', maxWidth: '1100px' }}>
+    <div data-testid="duplicate-variants-root" style={{ padding: '16px', maxWidth: '1100px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
         <Layers size={22} style={{ color: '#0f766e' }} />
         <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', margin: 0 }}>重複品項管理</h1>
         <button
           className="btn"
           onClick={loadData}
-          disabled={loading}
+          disabled={isInitialLoading || isRefreshing}
           style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '6px 12px' }}
         >
-          <RefreshCw size={14} className={loading ? 'spin' : undefined} />
-          重新整理
+          <RefreshCw size={14} className={isInitialLoading || isRefreshing ? 'spin' : undefined} />
+          {isRefreshing ? '同步中…' : '重新整理'}
         </button>
       </div>
       <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
@@ -356,16 +355,16 @@ export default function DuplicateVariants() {
         <span>刪除候選全部零關聯的組數：<b>{dupSets.filter(s => s.rows.slice(1).every(r => !r.hasAssoc)).length}</b></span>
       </div>
 
-      {loading && <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>載入中…</div>}
+      {isInitialLoading && <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>載入中…</div>}
 
-      {!loading && dupSets.length === 0 && (
+      {!isInitialLoading && dupSets.length === 0 && (
         <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
           <CheckCircle2 size={36} style={{ color: '#16a34a', marginBottom: '8px' }} />
           <div>沒有偵測到重複品項 🎉</div>
         </div>
       )}
 
-      {!loading && dupSets.map((set, idx) => {
+      {!isInitialLoading && dupSets.map((set, idx) => {
         const isOpen = expanded.has(set.key);
         const keepId = keepChoice[set.key] ?? set.suggestedKeepId;
         const targets = set.rows.filter(r => r.v.id !== keepId);
