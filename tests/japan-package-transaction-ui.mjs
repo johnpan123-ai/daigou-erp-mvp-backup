@@ -87,6 +87,24 @@ try {
       await page.close();
     }
     {
+      const { page } = await open(context, 'pending');
+      const root = page.getByTestId('japan-package-detail-root');
+      await root.evaluate(element => { window.__JAPAN_PACKAGE_DETAIL_ROOT__ = element; });
+      const confirmButton = page.getByRole('button', { name: '確認點收包裹' });
+      await confirmButton.click();
+      await page.waitForFunction(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.snapshot().rpcCalls === 1);
+      assert.equal(await root.getAttribute('aria-busy'), 'true');
+      assert.equal(await page.getByRole('button', { name: '確認中…' }).isDisabled(), true);
+      assert.equal(await page.getByText('F3 Transaction Item', { exact: false }).first().isVisible(), true);
+      assert.equal(await page.getByText('載入包裹詳情中...', { exact: true }).count(), 0);
+      assert.equal(await page.evaluate(() => document.querySelector('[data-testid="japan-package-detail-root"]') === window.__JAPAN_PACKAGE_DETAIL_ROOT__), true);
+      await page.evaluate(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.releasePending());
+      await page.waitForFunction(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.snapshot().items[0].checked === true);
+      await page.waitForFunction(() => document.querySelector('[data-testid="japan-package-detail-root"]')?.getAttribute('aria-busy') === 'false');
+      assert.equal(await page.evaluate(() => document.querySelector('[data-testid="japan-package-detail-root"]') === window.__JAPAN_PACKAGE_DETAIL_ROOT__), true);
+      await page.close();
+    }
+    {
       const { page, checkbox, dialogs } = await open(context, 'server-rejected');
       await checkbox.click();
       await page.waitForFunction(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.snapshot().rpcCalls === 1);
@@ -118,6 +136,7 @@ try {
     console.log('PASS stale/offline pre-RPC keeps item unchanged; double activation is synchronously deduped');
     console.log('PASS unknown result latches duplicate dispatch; server rejection remains fail-closed');
     console.log('PASS committed-sync-pending retains successful canonical result');
+    console.log('PASS package confirmation keeps the real detail list mounted and exposes a disabled pending state');
   } finally {
     await context.close();
     await browser.close();

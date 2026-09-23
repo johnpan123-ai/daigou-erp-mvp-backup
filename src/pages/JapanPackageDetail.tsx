@@ -113,10 +113,16 @@ export default function JapanPackageDetail() {
   
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isReceivingPending, setIsReceivingPending] = useState<boolean>(false);
+  const hasLoadedDataRef = useRef(false);
+  const loadGenerationRef = useRef(0);
   const transactionInFlightRef = useRef(new Set<string>());
   const transactionOutcomeUnknownRef = useRef(new Set<string>());
 
   const commitTransactionResult = (result: JapanPackageTransactionSuccess) => {
+    // A canonical transaction result supersedes any page read that started
+    // before the server committed the receiving change.
+    loadGenerationRef.current += 1;
     const canonicalPackage = result.package as unknown as JapanPackage;
     const canonicalItems = result.items as unknown as JapanPackageItem[];
     setPkg(canonicalPackage);
@@ -397,6 +403,7 @@ export default function JapanPackageDetail() {
       updates: [...itemIdsSet].map(itemId => ({ itemId, checked: checkedVal, checkedAt: checkedVal ? now : undefined })),
     }));
     transactionInFlightRef.current.add(scope);
+    setIsReceivingPending(true);
     try {
       const result = await dataProvider.applyJapanPackageTransaction(command);
       commitTransactionResult(result);
@@ -411,6 +418,7 @@ export default function JapanPackageDetail() {
       else alert('批量修改點收狀態失敗，請重新讀取資料後再確認。');
     } finally {
       transactionInFlightRef.current.delete(scope);
+      setIsReceivingPending(false);
     }
   };
 
@@ -511,16 +519,34 @@ export default function JapanPackageDetail() {
   }, [id]);
 
   const loadData = async (pkgId: string) => {
-    setIsLoading(true);
+    const generation = ++loadGenerationRef.current;
+    const isInitialLoad = !hasLoadedDataRef.current;
+    if (isInitialLoad) setIsLoading(true);
     try {
-      const allPkgs = await dataProvider.getJapanPackages();
-      setAllPackages(allPkgs || []);
+      const [
+        allPkgs,
+        allItems,
+        [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedBundleComponents],
+      ] = await Promise.all([
+        dataProvider.getJapanPackages(),
+        dataProvider.getJapanPackageItems(),
+        Promise.all([
+          dataProvider.getProductGroups().catch(() => []),
+          dataProvider.getProductVariants().catch(() => []),
+          dataProvider.getProductCategories().catch(() => []),
+          dataProvider.getPurchaseBatches().catch(() => []),
+          dataProvider.getPurchaseBatchItems().catch(() => []),
+          dataProvider.getBundleComponents().catch(() => []),
+        ]),
+      ]);
+      if (generation !== loadGenerationRef.current) return;
       const currentPkg = allPkgs.find(p => p.id === pkgId);
       if (!currentPkg) {
         alert('找不到該包裹資料！');
         navigate('/japan-packages');
         return;
       }
+      setAllPackages(allPkgs || []);
       setPkg(currentPkg);
       setPkgForm({
         title: currentPkg.title || '',
@@ -534,20 +560,9 @@ export default function JapanPackageDetail() {
         note: currentPkg.note || ''
       });
 
-      const allItems = await dataProvider.getJapanPackageItems();
       setAllPackageItems(allItems || []);
       const currentItems = allItems.filter(item => item.japan_package_id === pkgId);
       setPackageItems(currentItems);
-
-      // Load products metadata
-      const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedBundleComponents] = await Promise.all([
-        dataProvider.getProductGroups().catch(() => []),
-        dataProvider.getProductVariants().catch(() => []),
-        dataProvider.getProductCategories().catch(() => []),
-        dataProvider.getPurchaseBatches().catch(() => []),
-        dataProvider.getPurchaseBatchItems().catch(() => []),
-        dataProvider.getBundleComponents().catch(() => [])
-      ]);
 
       setProductGroups(fetchedGroups || []);
       setVariants(fetchedVars || []);
@@ -555,10 +570,13 @@ export default function JapanPackageDetail() {
       setBatches(fetchedBatches || []);
       setBatchItems(fetchedBatchItems || []);
       setBundleComponents(fetchedBundleComponents || []);
+      hasLoadedDataRef.current = true;
     } catch (e) {
-      console.error('Failed to load package details:', e);
+      if (generation === loadGenerationRef.current) {
+        console.error('Failed to load package details:', e);
+      }
     } finally {
-      setIsLoading(false);
+      if (generation === loadGenerationRef.current) setIsLoading(false);
     }
   };
 
@@ -572,7 +590,7 @@ export default function JapanPackageDetail() {
   useCloudResourceSync(
     `japan-package-detail:${id || 'unknown'}`,
     ['japanPackages', 'products', 'purchases', 'bundles'],
-    packageHeaderDirty || isSaving || isAddingManualItem || Boolean(editingManualItemId),
+    packageHeaderDirty || isSaving || isReceivingPending || isAddingManualItem || Boolean(editingManualItemId),
     () => id ? loadData(id) : undefined,
   );
 
@@ -1323,7 +1341,7 @@ export default function JapanPackageDetail() {
 
   if (isMobile) {
     return (
-      <div className="container" style={{ padding: '16px 16px 80px 16px', background: '#f8fafc', minHeight: '100vh', boxSizing: 'border-box', maxWidth: 'none', width: '100%', margin: '0' }}>
+      <div data-testid="japan-package-detail-root" aria-busy={isReceivingPending} className="container" style={{ padding: '16px 16px 80px 16px', background: '#f8fafc', minHeight: '100vh', boxSizing: 'border-box', maxWidth: 'none', width: '100%', margin: '0' }}>
         <style>{`
           .badge {
             display: inline-flex;
@@ -1731,8 +1749,8 @@ export default function JapanPackageDetail() {
                           <div style={{ width: `${percent}%`, height: '100%', background: '#10b981', borderRadius: '999px' }} />
                         </div>
                         <div style={{ display: 'flex', gap: '6px', width: '100%' }} onClick={event => event.stopPropagation()}>
-                          <button type="button" className="btn btn-outline" style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, true)}>全選已點收</button>
-                          <button type="button" className="btn btn-outline" style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, false)}>全取消點收</button>
+                          <button type="button" className="btn btn-outline" disabled={isReceivingPending} style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, true)}>全選已點收</button>
+                          <button type="button" className="btn btn-outline" disabled={isReceivingPending} style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, false)}>全取消點收</button>
                         </div>
                       </div>
                     </div>
@@ -1766,7 +1784,7 @@ export default function JapanPackageDetail() {
                                 cursor: 'pointer',
                                 transition: 'all 0.2s'
                               }}
-                              onClick={() => handleToggleCheck(item.id, !item.checked)}
+                              onClick={() => { if (!isReceivingPending) void handleToggleCheck(item.id, !item.checked); }}
                             >
                               {/* Checkbox */}
                               <div 
@@ -1920,9 +1938,9 @@ export default function JapanPackageDetail() {
                 e.stopPropagation();
                 handlePageBulkCheck(true);
               }}
-              disabled={packageItems.length === 0}
+              disabled={packageItems.length === 0 || isReceivingPending}
             >
-              全部標記為已點收
+              {isReceivingPending ? '確認中…' : '全部標記為已點收'}
             </button>
           </div>
         </div>
@@ -1949,7 +1967,7 @@ export default function JapanPackageDetail() {
   }
 
   return (
-    <div style={{ padding: '20px 0', maxWidth: 'none', width: '100%', margin: '0' }}>
+    <div data-testid="japan-package-detail-root" aria-busy={isReceivingPending} style={{ padding: '20px 0', maxWidth: 'none', width: '100%', margin: '0' }}>
       <style>{`
         .custom-select-container {
           position: relative;
@@ -2549,7 +2567,7 @@ export default function JapanPackageDetail() {
                       href={url} 
                       target="_blank" 
                       rel="noopener noreferrer" 
-                      className="btn btn-outline" 
+                      className="btn btn-outline"
                       style={{ padding: '6px 10px' }}
                       title="日本物流官網查詢"
                     >
@@ -3216,6 +3234,7 @@ export default function JapanPackageDetail() {
                     <button
                       type="button"
                       className="btn btn-outline"
+                      disabled={isReceivingPending}
                       style={{ padding: '4px 10px', fontSize: '12.5px', height: 'auto', borderRadius: '6px' }}
                       onClick={() => handlePageBulkCheck(true)}
                     >
@@ -3224,6 +3243,7 @@ export default function JapanPackageDetail() {
                     <button
                       type="button"
                       className="btn btn-outline"
+                      disabled={isReceivingPending}
                       style={{ padding: '4px 10px', fontSize: '12.5px', height: 'auto', borderRadius: '6px' }}
                       onClick={() => handlePageBulkCheck(false)}
                     >
@@ -3260,7 +3280,8 @@ export default function JapanPackageDetail() {
                     className={`mobile-item-card ${item.checked ? 'mobile-item-checked' : ''}`}
                   >
                     <button 
-                      onClick={() => handleToggleCheck(item.id, !item.checked)}
+                      disabled={isReceivingPending}
+                      onClick={() => { if (!isReceivingPending) void handleToggleCheck(item.id, !item.checked); }}
                       style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: item.checked ? '#059669' : '#94a3b8', alignSelf: 'flex-start', marginTop: '2px' }}
                     >
                       {item.checked ? <CheckSquare size={24} /> : <Square size={24} />}
@@ -3437,6 +3458,7 @@ export default function JapanPackageDetail() {
                           <button
                             type="button"
                             className="btn-bulk"
+                            disabled={isReceivingPending}
                             onClick={() => handleGroupBulkCheck(g.title, g.items, true)}
                             title="將此群組所有商品標記為已點收"
                           >
@@ -3445,6 +3467,7 @@ export default function JapanPackageDetail() {
                           <button
                             type="button"
                             className="btn-bulk"
+                            disabled={isReceivingPending}
                             onClick={() => handleGroupBulkCheck(g.title, g.items, false)}
                             title="取消此群組所有商品的已點收狀態"
                           >
@@ -3476,6 +3499,7 @@ export default function JapanPackageDetail() {
                                 <input 
                                   type="checkbox"
                                   checked={item.checked}
+                                  disabled={isReceivingPending}
                                   onChange={e => handleToggleCheck(item.id, e.target.checked)}
                                   style={{ cursor: 'pointer', width: '22px', height: '22px', flexShrink: 0, marginTop: '1px' }}
                                 />
@@ -3619,6 +3643,7 @@ export default function JapanPackageDetail() {
               </div>
               <button 
                 className="btn btn-primary"
+                disabled={isReceivingPending}
                 style={{ backgroundColor: '#2563eb', padding: '8px 16px', borderRadius: '6px' }}
                 onClick={async () => {
                   const uncheckedIds = packageItems.filter(item => !item.checked).map(item => item.id);
@@ -3629,7 +3654,7 @@ export default function JapanPackageDetail() {
                   await handleBulkToggleCheck(uncheckedIds, true);
                 }}
               >
-                確認點收包裹
+                {isReceivingPending ? '確認中…' : '確認點收包裹'}
               </button>
             </div>
           )}
