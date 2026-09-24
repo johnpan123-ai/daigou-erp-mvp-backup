@@ -437,8 +437,22 @@ const progressiveMetadataEvidenceCount = (
   return evidence;
 };
 
-export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnalyzer => (
-  async context => {
+export interface ProxyClosingDateBatchAnalyzerOptions {
+  maxParallelQueries?: number;
+}
+
+export const createProxyClosingDateBatchAnalyzer = (
+  options: ProxyClosingDateBatchAnalyzerOptions = {},
+): ClosingDateBatchItemAnalyzer => {
+  const maxParallelQueries = options.maxParallelQueries ?? 4;
+  if (
+    !Number.isInteger(maxParallelQueries)
+    || maxParallelQueries < 1
+    || maxParallelQueries > 6
+  ) {
+    throw new Error('Closing Date query concurrency must be an integer between 1 and 6');
+  }
+  return async context => {
     const title = context.item.title;
     const queries = buildClosingDateCandidateRetrievalQueries(title);
     const compoundMemberQueries = buildClosingDateCompoundMemberQueries(title);
@@ -455,53 +469,7 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       : CLOSING_DATE_MAX_NON_COMPOUND_REQUESTS;
     const executedPrimaryQueries: ClosingDateCandidateRetrievalQuery[] = [];
 
-    const runQueryStage = async (
-      stageQueries: readonly ReturnType<typeof buildClosingDateCandidateRetrievalQueries>[number][],
-      allowProgressiveStop: boolean,
-      executedQueries?: ClosingDateCandidateRetrievalQuery[],
-    ): Promise<boolean> => {
-      for (const query of stageQueries) {
-      if (executedRequestCount >= requestBudget) return false;
-      if (context.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
-      try {
-        executedRequestCount += 1;
-        const products = await context.search(query.text, { limit: query.limit });
-        executedQueries?.push(query);
-        for (const [nativeIndex, product] of products.entries()) {
-          const sourceProductId = candidateSourceProductId(product);
-          if (!sourceProductId) continue;
-          const key = catalogCandidateKey(product);
-          let retrieved = candidateMap.get(key);
-          if (!retrieved) {
-            firstSeenOrder += 1;
-            retrieved = { candidate: product, firstSeenOrder, queryHits: [] };
-            candidateMap.set(key, retrieved);
-          }
-          const queryHit = {
-            queryText: query.text,
-            queryPriority: query.priority,
-            queryKind: query.kind,
-            nativeRank: nativeIndex + 1,
-            sourceSupplier: candidateSupplier(product),
-            sourceProductId,
-          };
-          if (!retrieved.queryHits.some(hit => (
-            hit.queryText === queryHit.queryText
-            && hit.queryPriority === queryHit.queryPriority
-            && hit.queryKind === queryHit.queryKind
-            && hit.nativeRank === queryHit.nativeRank
-            && hit.sourceSupplier === queryHit.sourceSupplier
-            && hit.sourceProductId === queryHit.sourceProductId
-          ))) retrieved.queryHits.push(queryHit);
-        }
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        if (error instanceof ClosingDateCatalogGatewayError) {
-          lastServiceError = error;
-          continue;
-        }
-        throw error;
-      }
+    const shouldProgressivelyStop = (allowProgressiveStop: boolean): boolean => {
       const scoredCandidates = [...candidateMap.entries()].map(([key, retrieved]) => ({
         key,
         retrieved,
@@ -559,9 +527,86 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       const reliableCandidateCount = new Set(
         compatibleCandidates.map(entry => entry.key),
       ).size;
-      if (allowProgressiveStop && reliableCandidateCount >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N) {
-        return true;
-      }
+      return allowProgressiveStop && reliableCandidateCount >= CLOSING_DATE_RELIABLE_NATIVE_TOP_N;
+    };
+
+    const runQueryStage = async (
+      stageQueries: readonly ReturnType<typeof buildClosingDateCandidateRetrievalQueries>[number][],
+      allowProgressiveStop: boolean,
+      executedQueries?: ClosingDateCandidateRetrievalQuery[],
+    ): Promise<boolean> => {
+      for (let offset = 0; offset < stageQueries.length;) {
+        if (executedRequestCount >= requestBudget) return false;
+        if (context.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
+        const availableBudget = requestBudget - executedRequestCount;
+        // Preserve the established progressive-stop request contract: the first query always
+        // runs alone, and any stage that has already returned candidates continues serially so
+        // a later structural match can stop without speculative extra requests. Only an empty
+        // retrieval prefix unlocks bounded parallel lookahead for the remaining independent
+        // queries—the cold-path shape that otherwise multiplies upstream latency.
+        const windowSize = offset === 0 || candidateMap.size > 0 ? 1 : maxParallelQueries;
+        const queryWindow = stageQueries.slice(
+          offset,
+          offset + Math.min(windowSize, availableBudget),
+        );
+        offset += queryWindow.length;
+        executedRequestCount += queryWindow.length;
+        const outcomes = await Promise.all(queryWindow.map(async query => {
+          try {
+            return {
+              query,
+              products: await context.search(query.text, { limit: query.limit }),
+              error: null,
+            };
+          } catch (error) {
+            return { query, products: null, error };
+          }
+        }));
+
+        // Requests in a window are independent, but their results are folded in the original
+        // planner order. That preserves candidate first-seen order, progressive-stop semantics,
+        // ranking, and query evidence while removing serial network wait from cold analysis.
+        for (const outcome of outcomes) {
+          const { query, error } = outcome;
+          if (error) {
+            if (isAbortError(error)) throw error;
+            if (error instanceof ClosingDateCatalogGatewayError) {
+              lastServiceError = error;
+              continue;
+            }
+            throw error;
+          }
+          const products = outcome.products ?? [];
+          executedQueries?.push(query);
+          for (const [nativeIndex, product] of products.entries()) {
+            const sourceProductId = candidateSourceProductId(product);
+            if (!sourceProductId) continue;
+            const key = catalogCandidateKey(product);
+            let retrieved = candidateMap.get(key);
+            if (!retrieved) {
+              firstSeenOrder += 1;
+              retrieved = { candidate: product, firstSeenOrder, queryHits: [] };
+              candidateMap.set(key, retrieved);
+            }
+            const queryHit = {
+              queryText: query.text,
+              queryPriority: query.priority,
+              queryKind: query.kind,
+              nativeRank: nativeIndex + 1,
+              sourceSupplier: candidateSupplier(product),
+              sourceProductId,
+            };
+            if (!retrieved.queryHits.some(hit => (
+              hit.queryText === queryHit.queryText
+              && hit.queryPriority === queryHit.queryPriority
+              && hit.queryKind === queryHit.queryKind
+              && hit.nativeRank === queryHit.nativeRank
+              && hit.sourceSupplier === queryHit.sourceSupplier
+              && hit.sourceProductId === queryHit.sourceProductId
+            ))) retrieved.queryHits.push(queryHit);
+          }
+          if (shouldProgressivelyStop(allowProgressiveStop)) return true;
+        }
       }
       return false;
     };
@@ -735,8 +780,8 @@ export const createProxyClosingDateBatchAnalyzer = (): ClosingDateBatchItemAnaly
       snapshotVersion: context.snapshot.version,
       analyzedAt: context.analyzedAt,
     });
-  }
-);
+  };
+};
 
 export interface CreateClosingDateBatchGatewayOptions {
   repository: ClosingDateResolutionSidecarRepository;
