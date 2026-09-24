@@ -95,6 +95,8 @@
     "test:proxy-product-identity-query-v2": "node tests/proxy-product-identity-query-v2.mjs",
     "probe:closing-date-runtime-v2": "node tests/closing-date-runtime-v2-probe.mjs",
     "test:catalog-api-availability": "node tests/catalog-api-availability.mjs",
+    "test:catalog-proxy-reliability": "node tests/catalog-proxy-reliability.mjs",
+    "test:catalog-error-contract": "node tests/catalog-error-contract.mjs",
     "capture:closing-date-fixtures": "node tests/capture-closing-date-fixtures.mjs",
     "test:closing-date-evaluation": "node tests/evaluate-closing-date.mjs",
     "test:closing-date-domain": "node tests/closing-date-resolution-domain.mjs",

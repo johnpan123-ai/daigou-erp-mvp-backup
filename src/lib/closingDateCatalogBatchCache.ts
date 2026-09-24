@@ -259,6 +259,7 @@ export class CatalogSnapshotQueryCache {
         query: normalizedQuery,
         limit,
         snapshotVersion: input.snapshot.version,
+        signal: input.signal,
       });
       if (response.snapshotVersion !== input.snapshot.version) {
         throw new ClosingDateCatalogGatewayError({
@@ -412,10 +413,16 @@ export function createReadonlyCatalogHttpClient(
         };
       } catch (error) {
         if (error instanceof CatalogServiceError) {
+          if (error.category === 'ABORTED') throw abortError();
           throw new ClosingDateCatalogGatewayError({
-            code: 'CATALOG_SERVICE_ERROR',
+            code: error.category === 'TIMEOUT'
+              ? 'CATALOG_TIMEOUT'
+              : 'CATALOG_SERVICE_ERROR',
             message: error.message,
-            retryable: error.status === null || error.status >= 500 || error.status === 429,
+            retryable: error.category === 'TIMEOUT'
+              || error.status === null
+              || error.status >= 500
+              || error.status === 429,
             status: error.status,
             cause: error,
           });
