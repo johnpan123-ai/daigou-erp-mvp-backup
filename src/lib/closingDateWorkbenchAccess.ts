@@ -4,6 +4,8 @@ import { getBuildSandboxMode } from './testSandboxEnvironment';
 
 export const CLOSING_DATE_WORKBENCH_UI_FEATURE_FLAG = 'VITE_ENABLE_CLOSING_DATE_WORKBENCH_UI';
 
+export type ClosingDateWorkbenchMode = 'next' | 'cloud';
+
 const defaultFeatureFlagValue = import.meta.env.VITE_ENABLE_CLOSING_DATE_WORKBENCH_UI;
 
 export function parseClosingDateWorkbenchUiFeatureFlag(
@@ -12,20 +14,33 @@ export function parseClosingDateWorkbenchUiFeatureFlag(
   return rawValue === true || rawValue === 'true';
 }
 
-/**
- * The build role and the active provider role must both be Next. Checking only
- * the mutable provider mode would allow the tool to appear in another build.
- */
+export function getClosingDateWorkbenchMode(
+  providerMode: ProviderMode = getProviderMode(),
+  buildMode: ReturnType<typeof getBuildSandboxMode> = getBuildSandboxMode(),
+  featureEnabled = parseClosingDateWorkbenchUiFeatureFlag(defaultFeatureFlagValue),
+): ClosingDateWorkbenchMode | null {
+  if (buildMode === 'next' && providerMode === 'next' && featureEnabled) return 'next';
+  if (buildMode === null && (providerMode === 'cloud' || providerMode === 'fallback')) return 'cloud';
+  if (buildMode === 'experimental' && (providerMode === 'experimental' || providerMode === 'cloud')) return 'cloud';
+  return null;
+}
+
 export function canUseClosingDateWorkbenchUi(
   providerMode: ProviderMode = getProviderMode(),
   buildMode: ReturnType<typeof getBuildSandboxMode> = getBuildSandboxMode(),
   featureEnabled = parseClosingDateWorkbenchUiFeatureFlag(defaultFeatureFlagValue),
 ): boolean {
-  return buildMode === 'next' && providerMode === 'next' && featureEnabled;
+  return getClosingDateWorkbenchMode(providerMode, buildMode, featureEnabled) !== null;
 }
 
 export function assertClosingDateWorkbenchUiAccess(): void {
   if (!canUseClosingDateWorkbenchUi()) {
-    throw new Error('Closing Date Resolution Workbench is available only in the enabled Next Sandbox build.');
+    throw new Error('Closing Date Resolution Workbench is unavailable in this build/provider combination.');
+  }
+}
+
+export function assertNextClosingDateWorkbenchUiAccess(): void {
+  if (getClosingDateWorkbenchMode() !== 'next') {
+    throw new Error('The local atomic Closing Date apply path is available only in the enabled Next Sandbox build.');
   }
 }

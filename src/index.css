@@ -12,3 +12,9 @@
   margin: 0;
   padding: 0;
 }
+
+@media (max-width: 640px) {
+  .closing-date-workbench-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

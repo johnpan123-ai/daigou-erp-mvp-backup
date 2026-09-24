@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue, useCallback } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, cloudCacheDb, localDb } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
@@ -47,8 +47,12 @@ import {
   canUseNextFieldTestClosingDateClear,
   createNextFieldTestClosingDateClearPlan,
 } from '../lib/nextFieldTestClosingDate';
-import { canUseClosingDateWorkbenchUi } from '../lib/closingDateWorkbenchAccess';
+import {
+  canUseClosingDateWorkbenchUi,
+  getClosingDateWorkbenchMode,
+} from '../lib/closingDateWorkbenchAccess';
 import { capturePurchaseRecordsEditView, resolvePurchaseRecordsEditView } from '../lib/purchaseRecordsEditView';
+import type { ClosingDateWorkbenchApplyRequest } from '../components/closingDateResolution/ClosingDateResolutionWorkbench';
 
 const ClosingDateResolutionWorkbench = lazy(
   () => import('../components/closingDateResolution/ClosingDateResolutionWorkbench'),
@@ -304,6 +308,7 @@ export default function PurchaseRecords() {
   const providerMode = getProviderMode();
   const isNextIdentityShadowMode = canUseProxyIdentityShadow(providerMode);
   const isClosingDateWorkbenchAvailable = canUseClosingDateWorkbenchUi(providerMode);
+  const closingDateWorkbenchMode = getClosingDateWorkbenchMode(providerMode);
 
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -1617,6 +1622,11 @@ export default function PurchaseRecords() {
     }
     return true;
   };
+
+  const applyCloudClosingDateSelections = useCallback(async (request: ClosingDateWorkbenchApplyRequest) => {
+    const { applyCloudClosingDateResolutionBatch } = await import('../lib/cloudClosingDateWorkbenchApply');
+    return applyCloudClosingDateResolutionBatch(request.resolutionBatch, request.selections);
+  }, []);
 
   const handleBatchApply = async () => {
     if (guardAgainstStaleWrite()) return;
@@ -3449,7 +3459,7 @@ export default function PurchaseRecords() {
                 type="button"
                 data-testid="open-closing-date-workbench"
                 onClick={() => setShowClosingDateWorkbench(true)}
-                title="NEXT FIELD TEST ONLY"
+                title={closingDateWorkbenchMode === 'cloud' ? '候選結單日查詢' : 'NEXT FIELD TEST ONLY'}
                 style={{
                   padding: '0 14px',
                   height: '36px',
@@ -3467,9 +3477,11 @@ export default function PurchaseRecords() {
               >
                 <Search size={14} />
                 <span>分析結單日</span>
-                <span style={{ fontSize: '9px', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' }}>
-                  NEXT ONLY
-                </span>
+                {closingDateWorkbenchMode === 'next' && (
+                  <span style={{ fontSize: '9px', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' }}>
+                    NEXT ONLY
+                  </span>
+                )}
               </button>
             )}
             <button
@@ -4809,6 +4821,9 @@ export default function PurchaseRecords() {
             selectedGroups={closingDateWorkbenchSelection}
             allGroups={groups}
             onClose={() => setShowClosingDateWorkbench(false)}
+            applySelections={closingDateWorkbenchMode === 'cloud'
+              ? applyCloudClosingDateSelections
+              : undefined}
             onApplied={async appliedCount => {
               await loadData();
               setSelectedGroupIds(new Set());

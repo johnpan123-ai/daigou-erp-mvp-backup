@@ -11,12 +11,16 @@ import { markLocalCloudWrite } from '/src/providers/cloud/cloudRealtimeEchoRegis
 import { installCloudRealtimeTestBridge } from '/src/contexts/cloudRealtimeTestBridge.ts';
 import '/src/index.css';
 
-localStorage.setItem('erp_provider_mode', 'experimental');
 const fixtureParams = new URL(location.href).searchParams;
+const requestedProviderMode = fixtureParams.get('providerMode') || 'experimental';
+// The test bridge is intentionally sandbox-only. Cloud-mode route fixtures install
+// the bridge while sandboxed, then switch before mounting the real App route.
+localStorage.setItem('erp_provider_mode', requestedProviderMode === 'cloud' ? 'experimental' : requestedProviderMode);
 const requestedRoute = fixtureParams.get('route') || '/dashboard';
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
 const outboundReceivingScenario = fixtureParams.get('outboundReceiving') === '1';
 const proxyDemandScenario = fixtureParams.get('proxyDemand') === '1';
+const closingDateWorkbenchScenario = fixtureParams.get('closingDateWorkbench') === '1';
 const realProviderReads = fixtureParams.get('realReads') === '1';
 const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
 history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
@@ -52,6 +56,75 @@ if (proxyDemandScenario) {
     myacg_item_code: 'SKU-PROXY-B', product_title: 'Second Proxy Product', version: 4,
     updated_at: '2026-09-23T00:00:00.000Z', purchased_manual_adjustment: 6,
   });
+}
+if (closingDateWorkbenchScenario) {
+  server.productGroups.push(
+    {
+      id: '94000000-0000-4000-8000-000000000001',
+      title: '代理版 GSC 黏土人 峰月律',
+      normalized_title: '代理版 GSC 黏土人 峰月律',
+      source_type: '代理版',
+      closing_date: '',
+      purchase_date: '',
+      release_month: '',
+      priority: 'Low',
+      show_in_purchase_list: true,
+      updated_at: '2026-09-24T00:00:00.000Z',
+      version: 4,
+    },
+    {
+      id: '94000000-0000-4000-8000-000000000002',
+      title: '代理版 GSC 黏土人 切換測試商品',
+      normalized_title: '代理版 GSC 黏土人 切換測試商品',
+      source_type: '代理版',
+      closing_date: '',
+      purchase_date: '',
+      release_month: '',
+      priority: 'Low',
+      show_in_purchase_list: true,
+      updated_at: '2026-09-24T00:00:00.000Z',
+      version: 2,
+    },
+    {
+      id: '94000000-0000-4000-8000-000000000003',
+      title: '代理版 GSC 黏土人 單一候選商品',
+      normalized_title: '代理版 GSC 黏土人 單一候選商品',
+      source_type: '代理版',
+      closing_date: '',
+      purchase_date: '',
+      release_month: '',
+      priority: 'Low',
+      show_in_purchase_list: true,
+      updated_at: '2026-09-24T00:00:00.000Z',
+      version: 3,
+    },
+    {
+      id: '94000000-0000-4000-8000-000000000004',
+      title: '代理版 GSC 黏土人 空結果商品',
+      normalized_title: '代理版 GSC 黏土人 空結果商品',
+      source_type: '代理版',
+      closing_date: '',
+      purchase_date: '',
+      release_month: '',
+      priority: 'Low',
+      show_in_purchase_list: true,
+      updated_at: '2026-09-24T00:00:00.000Z',
+      version: 5,
+    },
+    {
+      id: '94000000-0000-4000-8000-000000000005',
+      title: '代理版 GSC 黏土人 查詢失敗商品',
+      normalized_title: '代理版 GSC 黏土人 查詢失敗商品',
+      source_type: '代理版',
+      closing_date: '',
+      purchase_date: '',
+      release_month: '',
+      priority: 'Low',
+      show_in_purchase_list: true,
+      updated_at: '2026-09-24T00:00:00.000Z',
+      version: 6,
+    },
+  );
 }
 server.purchaseBatches = server.purchaseBatches.map(batch => batch.id === 'b-holo'
   ? { ...batch, name: 'React Batch A', date: '2026-09-07', created_at: '2026-09-07T00:00:00.000Z', updated_at: '2026-09-07T00:00:00.000Z' }
@@ -213,7 +286,9 @@ let heldJapanPackageTransaction, releaseJapanPackageTransaction, japanPackageTra
 let failNextOutboundSave = false;
 let heldVariantPatch, releaseVariantPatch, variantPatchHeld = false;
 let nextVariantPatchFailure = null;
+let nextProductGroupSaveFailure = null;
 const variantPatchCalls = [];
+const productGroupSaveCalls = [];
 if (fixtureParams.get('holdInitialPageRead') === '1') {
   holdAllPageReads = true;
   heldPageRead = new Promise(resolve => { releasePageRead = resolve; });
@@ -234,6 +309,12 @@ for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAda
   };
   dataProvider[saveMethod] = async rows => {
     writes += 1;
+    if (saveMethod === 'saveProductGroups') productGroupSaveCalls.push(clone(rows));
+    if (saveMethod === 'saveProductGroups' && nextProductGroupSaveFailure) {
+      const message = nextProductGroupSaveFailure;
+      nextProductGroupSaveFailure = null;
+      throw new Error(message);
+    }
     if (saveMethod === 'saveOutboundShipmentItems' && heldOutboundSave) {
       const gate = heldOutboundSave;
       heldOutboundSave = null;
@@ -561,6 +642,7 @@ window.__P0_REACT_HARNESS__ = {
   holdNextJapanPackageTransaction() { heldJapanPackageTransaction = new Promise(resolve => { releaseJapanPackageTransaction = resolve; }); },
   holdNextVariantPatch() { heldVariantPatch = new Promise(resolve => { releaseVariantPatch = resolve; }); },
   failNextVariantPatch(message = 'simulated product variant patch failure') { nextVariantPatchFailure = message; },
+  failNextProductGroupSave(message = 'simulated ProductGroup save failure') { nextProductGroupSaveFailure = message; },
   failNextOutboundSave() { failNextOutboundSave = true; },
   releasePageRead() {
     holdAllPageReads = false;
@@ -604,6 +686,7 @@ window.__P0_REACT_HARNESS__ = {
       japanPackageTransactionHeld,
       variantPatchHeld,
       variantPatchCalls: clone(variantPatchCalls),
+      productGroupSaveCalls: clone(productGroupSaveCalls),
       targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,
@@ -615,5 +698,6 @@ window.__P0_REACT_HARNESS__ = {
   },
 };
 
+if (requestedProviderMode === 'cloud') localStorage.setItem('erp_provider_mode', 'cloud');
 const [{ default: App }] = await Promise.all([import('/src/App.tsx')]);
 createRoot(document.getElementById('root')).render(React.createElement(StrictMode, null, React.createElement(App)));

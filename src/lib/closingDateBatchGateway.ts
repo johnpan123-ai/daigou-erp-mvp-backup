@@ -57,6 +57,7 @@ import {
 } from './closingDateCandidateRetrievalV2';
 import type { ClosingDateCandidateRetrievalQuery } from './closingDateCandidateRetrievalV2';
 import { getBuildSandboxMode } from './testSandboxEnvironment';
+import { getProviderMode } from '../providers/providerMode';
 
 export const CLOSING_DATE_BATCH_GATEWAY_FEATURE_FLAG = 'VITE_ENABLE_CLOSING_DATE_BATCH_GATEWAY';
 
@@ -89,6 +90,20 @@ export function assertNextClosingDateBatchGatewayAccess(
   if (!featureEnabled) {
     throw new ClosingDateBatchGatewayUnavailableError(
       'Closing Date Batch Gateway feature flag is disabled.',
+    );
+  }
+}
+
+export function assertCloudClosingDateBatchGatewayAccess(
+  buildMode: ReturnType<typeof getBuildSandboxMode>,
+  providerMode = getProviderMode(),
+): void {
+  const cloudRuntime = buildMode === null && (providerMode === 'cloud' || providerMode === 'fallback');
+  const experimentalHarness = buildMode === 'experimental'
+    && (providerMode === 'experimental' || providerMode === 'cloud');
+  if (!cloudRuntime && !experimentalHarness) {
+    throw new ClosingDateBatchGatewayUnavailableError(
+      'Closing Date Batch Gateway Cloud access requires the Cloud build/provider.',
     );
   }
 }
@@ -1134,5 +1149,12 @@ export function createNextClosingDateBatchGateway(
     getBuildSandboxMode(),
     isClosingDateBatchGatewayFeatureEnabled(),
   );
+  return new NextClosingDateBatchGateway(options);
+}
+
+export function createCloudClosingDateBatchGateway(
+  options: CreateClosingDateBatchGatewayOptions,
+): ClosingDateBatchGateway {
+  assertCloudClosingDateBatchGatewayAccess(getBuildSandboxMode(), getProviderMode());
   return new NextClosingDateBatchGateway(options);
 }

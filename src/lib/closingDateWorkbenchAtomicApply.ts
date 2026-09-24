@@ -17,7 +17,7 @@ import type {
   ResolutionBatch,
   VerifiedMappingRegistryEntry,
 } from './closingDateResolutionDomain';
-import { assertClosingDateWorkbenchUiAccess } from './closingDateWorkbenchAccess';
+import { assertNextClosingDateWorkbenchUiAccess } from './closingDateWorkbenchAccess';
 import { NEXT_SANDBOX_INDEXED_DB_NAME } from './testSandboxEnvironment';
 
 const PRODUCT_GROUPS_KEY = 'erp_product_groups';
@@ -419,7 +419,7 @@ export async function getAtomicClosingDateApplyAudits(
 export async function applyClosingDateResolutionBatch(
   options: ClosingDateAtomicApplyOptions,
 ): Promise<ApplyResolutionBatchResponse> {
-  assertClosingDateWorkbenchUiAccess();
+  assertNextClosingDateWorkbenchUiAccess();
   if (options.resolutionBatch.status !== 'COMPLETED') {
     throw new Error(`Only a completed resolution batch can be applied: ${options.resolutionBatch.status}`);
   }

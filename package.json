@@ -108,6 +108,7 @@
     "benchmark:closing-date-batch-gateway": "node tests/closing-date-batch-gateway-performance.mjs",
     "benchmark:closing-date-workbench-load": "node tests/closing-date-workbench-load-performance.mjs",
     "test:closing-date-workbench-ui": "node tests/closing-date-workbench-ui.mjs",
+    "test:closing-date-cloud-parity": "node tests/closing-date-cloud-parity.mjs",
     "test:closing-date-wanrong-priority": "node tests/closing-date-wanrong-priority.mjs",
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs",

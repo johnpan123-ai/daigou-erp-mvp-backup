@@ -1,14 +1,19 @@
 import {
+  createCloudClosingDateBatchGateway,
   createNextClosingDateBatchGateway,
 } from './closingDateBatchGateway';
 import type { ClosingDateBatchGateway } from './closingDateBatchGateway';
 import {
+  createCloudClosingDateResolutionRepository,
   createNextClosingDateResolutionRepository,
 } from './closingDateResolutionSidecarRepository';
 import type { ClosingDateResolutionSidecarRepository } from './closingDateResolutionSidecarRepository';
 import { transitionResolutionBatch } from './closingDateResolutionDomain';
 import type { ResolutionBatch } from './closingDateResolutionDomain';
-import { assertClosingDateWorkbenchUiAccess } from './closingDateWorkbenchAccess';
+import {
+  assertClosingDateWorkbenchUiAccess,
+  getClosingDateWorkbenchMode,
+} from './closingDateWorkbenchAccess';
 
 export interface ClosingDateWorkbenchRuntime {
   repository: ClosingDateResolutionSidecarRepository;
@@ -16,15 +21,27 @@ export interface ClosingDateWorkbenchRuntime {
 }
 
 let singleton: ClosingDateWorkbenchRuntime | null = null;
+let singletonMode: ReturnType<typeof getClosingDateWorkbenchMode> = null;
 
 export function getClosingDateWorkbenchRuntime(): ClosingDateWorkbenchRuntime {
   assertClosingDateWorkbenchUiAccess();
+  const mode = getClosingDateWorkbenchMode();
+  if (!mode) throw new Error('Closing Date Resolution Workbench runtime mode is unavailable.');
+  if (singleton && singletonMode !== mode) {
+    singleton.repository.close();
+    singleton = null;
+  }
   if (!singleton) {
-    const repository = createNextClosingDateResolutionRepository();
+    const repository = mode === 'cloud'
+      ? createCloudClosingDateResolutionRepository()
+      : createNextClosingDateResolutionRepository();
     singleton = {
       repository,
-      gateway: createNextClosingDateBatchGateway({ repository }),
+      gateway: mode === 'cloud'
+        ? createCloudClosingDateBatchGateway({ repository })
+        : createNextClosingDateBatchGateway({ repository }),
     };
+    singletonMode = mode;
   }
   return singleton;
 }

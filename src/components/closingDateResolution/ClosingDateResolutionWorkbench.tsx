@@ -28,11 +28,23 @@ import {
 } from '../../lib/closingDateWorkbenchAtomicApply';
 import { orderClosingDateReviewCandidates } from '../../lib/closingDateWorkbenchReviewOrder';
 
+export type ClosingDateWorkbenchApplyResult =
+  | { status: 'APPLIED'; appliedCount: number }
+  | { status: 'CONFLICT'; codes: string[] };
+
+export interface ClosingDateWorkbenchApplyRequest {
+  resolutionBatch: ResolutionBatch;
+  selections: readonly NonNullable<ReturnType<typeof createApplySelectionFromResolutionResult>>[];
+}
+
 interface ClosingDateResolutionWorkbenchProps {
   selectedGroups: readonly ProductGroup[];
   allGroups: readonly ProductGroup[];
   onClose: () => void;
   onApplied: (appliedCount: number) => Promise<void> | void;
+  applySelections?: (
+    request: ClosingDateWorkbenchApplyRequest,
+  ) => Promise<ClosingDateWorkbenchApplyResult>;
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string } | null;
@@ -115,10 +127,12 @@ const ResultCard = ({
   result,
   selectedCandidateId,
   onSelect,
+  cloudApply,
 }: {
   result: ResolutionResult;
   selectedCandidateId: string | null;
   onSelect: (candidate: RankedResolutionCandidate) => void;
+  cloudApply: boolean;
 }) => {
   const colors = classificationColors[result.classification];
   const reviewCandidates = orderClosingDateReviewCandidates(result.candidates);
@@ -283,7 +297,9 @@ const ResultCard = ({
                 </details>
                 {result.classification === 'YELLOW' && selected && (
                   <div style={{ color: '#6d28d9', fontSize: 12, fontWeight: 700, marginTop: 8, marginLeft: 27 }}>
-                    ✓ 本批次已選定；將於最後套用時記住此選擇
+                    {cloudApply
+                      ? '✓ 本批次已選定；尚未修改結單日'
+                      : '✓ 本批次已選定；將於最後套用時記住此選擇'}
                   </div>
                 )}
               </div>
@@ -300,6 +316,7 @@ export default function ClosingDateResolutionWorkbench({
   allGroups,
   onClose,
   onApplied,
+  applySelections,
 }: ClosingDateResolutionWorkbenchProps) {
   const [initializing, setInitializing] = useState(true);
   const [recentBatches, setRecentBatches] = useState<readonly ResolutionBatch[]>([]);
@@ -328,7 +345,9 @@ export default function ClosingDateResolutionWorkbench({
       const repository = getClosingDateWorkbenchRuntime().repository;
       const productGroupIds = poll.results.map(result => result.erpProductGroupId);
       const [atomicMappings, legacySidecarMappings] = await Promise.all([
-        findAtomicClosingDateVerifiedMappings(productGroupIds),
+        applySelections
+          ? Promise.resolve([] as VerifiedMappingRegistryEntry[])
+          : findAtomicClosingDateVerifiedMappings(productGroupIds),
         repository.findActiveMappings(productGroupIds),
       ]);
       const atomicGroups = new Set(atomicMappings.map(mapping => mapping.erpProductGroupId));
@@ -374,7 +393,7 @@ export default function ClosingDateResolutionWorkbench({
       });
       return next;
     });
-  }, []);
+  }, [applySelections]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -528,11 +547,16 @@ export default function ClosingDateResolutionWorkbench({
       sourceTitleAtVerification: candidate.catalogTitle,
       erpTitleFingerprint: result.erpTitleAtAnalysis,
       verifiedAt: new Date().toISOString(),
-      verifiedBy: 'next-owner',
+      verifiedBy: applySelections ? 'cloud-owner' : 'next-owner',
     });
     setSelectedCandidates(previous => ({ ...previous, [result.id]: candidate.id }));
     setPendingMappings(previous => ({ ...previous, [result.id]: mapping }));
-    setNotice({ kind: 'info', text: '已選定候選；將於最後 Atomic 套用時一併建立 Verified Mapping。' });
+    setNotice({
+      kind: 'info',
+      text: applySelections
+        ? '已選定候選；只有最後確認後才會透過 Cloud 安全寫入路徑套用。'
+        : '已選定候選；將於最後 Atomic 套用時一併建立 Verified Mapping。',
+    });
   };
 
   const applicableSelections = useMemo(() => results.flatMap(result => {
@@ -556,6 +580,20 @@ export default function ClosingDateResolutionWorkbench({
     setShowApplyConfirmation(false);
     setApplying(true);
     try {
+      if (applySelections) {
+        const response = await applySelections({
+          resolutionBatch: currentBatch,
+          selections: applicableSelections,
+        });
+        if (response.status === 'APPLIED') {
+          setNotice({ kind: 'success', text: `已成功套用 ${response.appliedCount} 筆結單日。` });
+          await onApplied(response.appliedCount);
+          onClose();
+        } else {
+          setNotice({ kind: 'error', text: `偵測到資料衝突，整批 0 write：${response.codes.join('、') || 'UNKNOWN_CONFLICT'}` });
+        }
+        return;
+      }
       const identity = createClosingDateApplyIdentity(currentBatch, applicableSelections);
       const response = await applyClosingDateResolutionBatch({
         resolutionBatch: currentBatch,
@@ -602,7 +640,9 @@ export default function ClosingDateResolutionWorkbench({
         <header style={{ padding: '16px 20px', background: '#fff', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 20 }}>結單日分析工作台</h2>
-            <div style={{ marginTop: 3, color: '#64748b', fontSize: 12 }}>NEXT FIELD TEST ONLY・分析階段 0 ProductGroup write</div>
+            <div style={{ marginTop: 3, color: '#64748b', fontSize: 12 }}>
+              {applySelections ? 'CLOUD OWNER・分析與選擇階段 0 ProductGroup write' : 'NEXT FIELD TEST ONLY・分析階段 0 ProductGroup write'}
+            </div>
           </div>
           <button type="button" aria-label="關閉結單日分析工作台" data-testid="closing-date-workbench-close" onClick={onClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', padding: 6 }}>
             <X size={22} />
@@ -616,7 +656,7 @@ export default function ClosingDateResolutionWorkbench({
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 260px', gap: 14 }}>
+          <div className="closing-date-workbench-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 260px', gap: 14 }}>
             <main style={{ minWidth: 0 }}>
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 14, marginBottom: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -679,6 +719,7 @@ export default function ClosingDateResolutionWorkbench({
                           result={result}
                           selectedCandidateId={selectedCandidates[result.id] ?? result.selectedCandidateId ?? null}
                           onSelect={candidate => selectCandidate(result, candidate)}
+                          cloudApply={Boolean(applySelections)}
                         />
                       ))}
                     </div>
@@ -687,7 +728,7 @@ export default function ClosingDateResolutionWorkbench({
               })}
 
               {currentBatch?.status === 'COMPLETED' && (
-                <div style={{ position: 'sticky', bottom: 0, background: 'rgba(248,250,252,0.96)', borderTop: '1px solid #cbd5e1', padding: '12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div style={{ position: 'sticky', bottom: 0, background: 'rgba(248,250,252,0.96)', borderTop: '1px solid #cbd5e1', padding: '12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <span style={{ color: '#475569', fontSize: 13 }}>
                     已選 {applicableSelections.length} / {results.length} 筆；紅色與未選黃色不會套用。
                   </span>

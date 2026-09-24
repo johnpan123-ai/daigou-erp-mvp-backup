@@ -646,8 +646,9 @@ try {
   assert.equal(catalogRequests.length, requestsBeforeClose, 'Closing Workbench must stop UI polling/network work');
 
   await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /已結單/u }).click();
   await page.getByText('代理版 figma 地獄征服者 Helltaker 路西法').waitFor();
-  for (const id of ['ui-green', 'ui-yellow', 'ui-red']) {
+  for (const id of ['ui-green', 'ui-yellow']) {
     await page.getByTestId(`purchase-record-select-${id}`).first().check();
   }
   await page.getByTestId('open-closing-date-workbench').click();
