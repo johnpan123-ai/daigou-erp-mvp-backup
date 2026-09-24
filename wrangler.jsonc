@@ -1,0 +1,10 @@
+{
+  "$schema": "https://developers.cloudflare.com/schema/wrangler.json",
+  "name": "hippo-erp-realtime-preview",
+  "pages_build_output_dir": "./staging-release-artifacts/dist",
+  "compatibility_date": "2026-08-24",
+  "compatibility_flags": [
+    "enable_request_signal",
+    "request_signal_passthrough"
+  ]
+}

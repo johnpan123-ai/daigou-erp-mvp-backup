@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 staging-refresh-artifacts/
+staging-release-artifacts/
 
 # Editor directories and files
 .vscode/*

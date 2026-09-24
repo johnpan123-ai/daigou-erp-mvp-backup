@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "build:next": "tsc -b && vite build --mode next",
     "build:experimental": "tsc -b && vite build --mode experimental",
-    "build:staging": "tsc -b && vite build --mode staging",
+    "build:staging": "node scripts/staging-release-build.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
@@ -121,7 +121,8 @@
     "test:supabase-environment-boundary": "node tests/supabase-environment-boundary.mjs",
     "test:staging-refresh-tooling": "node tests/staging-refresh-tooling.mjs",
     "test:staging-schema-parity": "node tests/staging-schema-parity-migration.mjs",
-    "test:staging-sidecar-refresh": "node tests/staging-sidecar-refresh.mjs"
+    "test:staging-sidecar-refresh": "node tests/staging-sidecar-refresh.mjs",
+    "test:staging-release-build": "node tests/staging-release-build.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

@@ -171,6 +171,10 @@ interface CachedCatalogResponse {
 
 interface InflightCatalogResponse {
   promise: Promise<{ response: ReadonlyCatalogSearchResponse; observedConcurrency: number }>;
+  controller: AbortController;
+  consumers: number;
+  settled: boolean;
+  cacheKey: string;
   snapshotVersion: string;
   normalizedQuery: string;
   limit: number;
@@ -245,7 +249,7 @@ export class CatalogSnapshotQueryCache {
     const active = this.inflight.get(cacheKey)
       ?? this.findInflightSuperset(input.snapshot.version, normalizedQuery, limit);
     if (active) {
-      const shared = await raceWithAbort(active.promise, input.signal);
+      const shared = await this.consumeInflight(active, input.signal);
       return {
         response: this.limitResponse(shared.response, limit),
         source: 'SINGLE_FLIGHT',
@@ -254,12 +258,13 @@ export class CatalogSnapshotQueryCache {
       };
     }
 
+    const controller = new AbortController();
     const request: InflightCatalogResponse['promise'] = this.concurrency.run(async () => {
       const response = await this.client.search({
         query: normalizedQuery,
         limit,
         snapshotVersion: input.snapshot.version,
-        signal: input.signal,
+        signal: controller.signal,
       });
       if (response.snapshotVersion !== input.snapshot.version) {
         throw new ClosingDateCatalogGatewayError({
@@ -269,14 +274,17 @@ export class CatalogSnapshotQueryCache {
         });
       }
       return response;
-    }, input.signal).then(({ value, observedConcurrency }) => {
+    }, controller.signal).then(({ value, observedConcurrency }) => {
+      const shared = { response: value, observedConcurrency };
+      // A retired request may still resolve when an upstream ignores abort.
+      // It must not repopulate the cache or overwrite a replacement request.
+      if (controller.signal.aborted || this.inflight.get(cacheKey)?.controller !== controller) return shared;
       const completedAt = this.nowMs();
       const snapshotExpiry = Date.parse(input.snapshot.expiresAt);
       const expiresAtMs = Math.min(
         completedAt + this.ttlMs,
         Number.isFinite(snapshotExpiry) ? snapshotExpiry : completedAt + this.ttlMs,
       );
-      const shared = { response: value, observedConcurrency };
       this.cached.set(cacheKey, {
         response: value,
         expiresAtMs,
@@ -287,19 +295,23 @@ export class CatalogSnapshotQueryCache {
       this.trim();
       return shared;
     });
-    this.inflight.set(cacheKey, {
+    const created: InflightCatalogResponse = {
       promise: request,
+      controller,
+      consumers: 0,
+      settled: false,
+      cacheKey,
       snapshotVersion: input.snapshot.version,
       normalizedQuery,
       limit,
-    });
-    void request.then(() => {
-      if (this.inflight.get(cacheKey)?.promise === request) this.inflight.delete(cacheKey);
-    }, () => {
-      if (this.inflight.get(cacheKey)?.promise === request) this.inflight.delete(cacheKey);
-    });
+    };
+    this.inflight.set(cacheKey, created);
+    void request.then(
+      () => this.settleInflight(cacheKey, created),
+      () => this.settleInflight(cacheKey, created),
+    );
 
-    const shared = await raceWithAbort(request, input.signal);
+    const shared = await this.consumeInflight(created, input.signal);
     return {
       response: shared.response,
       source: 'UPSTREAM',
@@ -314,6 +326,30 @@ export class CatalogSnapshotQueryCache {
 
   get peakUpstreamConcurrency(): number {
     return this.concurrency.peak;
+  }
+
+  private async consumeInflight(
+    active: InflightCatalogResponse,
+    signal?: AbortSignal,
+  ): Promise<{ response: ReadonlyCatalogSearchResponse; observedConcurrency: number }> {
+    active.consumers += 1;
+    try {
+      return await raceWithAbort(active.promise, signal);
+    } finally {
+      active.consumers -= 1;
+      if (active.consumers === 0 && !active.settled) {
+        // Detach immediately so a dependency that ignores AbortSignal cannot
+        // permanently occupy the single-flight entry. The concurrency gate is
+        // still released by its own finally block when the operation settles.
+        if (this.inflight.get(active.cacheKey) === active) this.inflight.delete(active.cacheKey);
+        active.controller.abort(abortError());
+      }
+    }
+  }
+
+  private settleInflight(cacheKey: string, active: InflightCatalogResponse): void {
+    active.settled = true;
+    if (this.inflight.get(cacheKey) === active) this.inflight.delete(cacheKey);
   }
 
   private limitResponse(

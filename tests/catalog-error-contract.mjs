@@ -89,6 +89,65 @@ try {
       signal: cacheController.signal,
     });
 
+    const snapshot = {
+      version: 'snapshot-shared',
+      capturedAt: '2026-09-24T00:00:00.000Z',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    };
+    let sharedResolve;
+    let sharedSignal;
+    let sharedCalls = 0;
+    const sharedCache = new cacheModule.CatalogSnapshotQueryCache({
+      async openSnapshot() { return snapshot; },
+      async search(request) {
+        sharedCalls += 1;
+        sharedSignal = request.signal;
+        return new Promise((resolve, reject) => {
+          sharedResolve = resolve;
+          request.signal?.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+        });
+      },
+    });
+    const consumerA = new AbortController();
+    const consumerB = new AbortController();
+    const sharedA = sharedCache.lookup({ snapshot, query: 'shared', signal: consumerA.signal })
+      .then(() => 'resolved', error => error.name);
+    const sharedB = sharedCache.lookup({ snapshot, query: 'shared', signal: consumerB.signal });
+    await Promise.resolve();
+    consumerA.abort();
+    sharedResolve({ products: [{ id: 'kept-for-b' }], snapshotVersion: snapshot.version });
+    const sharedAOutcome = await sharedA;
+    const sharedBResult = await sharedB;
+
+    let allCancelCalls = 0;
+    let allCancelUnderlyingAborted = false;
+    const allCancelCache = new cacheModule.CatalogSnapshotQueryCache({
+      async openSnapshot() { return snapshot; },
+      async search(request) {
+        allCancelCalls += 1;
+        if (allCancelCalls > 1) {
+          return { products: [{ id: 'replacement' }], snapshotVersion: request.snapshotVersion };
+        }
+        return new Promise((_resolve, reject) => {
+          request.signal?.addEventListener('abort', () => {
+            allCancelUnderlyingAborted = true;
+            reject(request.signal.reason);
+          }, { once: true });
+        });
+      },
+    });
+    const allCancelA = new AbortController();
+    const allCancelB = new AbortController();
+    const cancelledA = allCancelCache.lookup({ snapshot, query: 'all-cancel', signal: allCancelA.signal })
+      .then(() => 'resolved', error => error.name);
+    const cancelledB = allCancelCache.lookup({ snapshot, query: 'all-cancel', signal: allCancelB.signal })
+      .then(() => 'resolved', error => error.name);
+    await Promise.resolve();
+    allCancelA.abort();
+    allCancelB.abort();
+    const cancelledOutcomes = await Promise.all([cancelledA, cancelledB]);
+    const replacement = await allCancelCache.lookup({ snapshot, query: 'all-cancel' });
+
     let jsonCalls = 0;
     let directError;
     try {
@@ -107,6 +166,18 @@ try {
       service502: await classify(502),
       abortName: await abortedPromise,
       cacheSignalMatches,
+      sharedIsolation: {
+        calls: sharedCalls,
+        firstConsumer: sharedAOutcome,
+        secondProducts: sharedBResult.response.products,
+        underlyingAborted: sharedSignal?.aborted ?? null,
+      },
+      allCancel: {
+        calls: allCancelCalls,
+        outcomes: cancelledOutcomes,
+        underlyingAborted: allCancelUnderlyingAborted,
+        replacementProducts: replacement.response.products,
+      },
       directError,
       jsonCalls,
     };
@@ -116,7 +187,19 @@ try {
   assert.deepEqual(result.service500, { name: 'ClosingDateCatalogGatewayError', code: 'CATALOG_SERVICE_ERROR', status: 500 });
   assert.deepEqual(result.service502, { name: 'ClosingDateCatalogGatewayError', code: 'CATALOG_SERVICE_ERROR', status: 502 });
   assert.equal(result.abortName, 'AbortError');
-  assert.equal(result.cacheSignalMatches, true, 'cache must propagate the consumer signal to the actual upstream request');
+  assert.equal(result.cacheSignalMatches, false, 'shared cache must not permanently bind the upstream request to the first consumer signal');
+  assert.deepEqual(result.sharedIsolation, {
+    calls: 1,
+    firstConsumer: 'AbortError',
+    secondProducts: [{ id: 'kept-for-b' }],
+    underlyingAborted: false,
+  }, 'one cancelled consumer must not abort the shared request while another consumer remains');
+  assert.deepEqual(result.allCancel, {
+    calls: 2,
+    outcomes: ['AbortError', 'AbortError'],
+    underlyingAborted: true,
+    replacementProducts: [{ id: 'replacement' }],
+  }, 'all consumers cancelling must retire the entry and allow the next request to start');
   assert.deepEqual(result.directError, { category: 'TIMEOUT', status: 504 });
   assert.equal(result.jsonCalls, 0, 'timeout must fail closed without parsing an empty candidate response');
   console.log('Catalog TIMEOUT / SERVICE_ERROR / ABORTED mapping and fail-closed signal propagation: PASS');
