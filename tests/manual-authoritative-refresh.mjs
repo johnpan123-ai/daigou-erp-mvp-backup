@@ -20,12 +20,13 @@ try {
   const runtimeErrors = [];
   await page.route('**/*.supabase.co/**', route => { liveRequests.push(route.request().url()); return route.abort(); });
   page.on('pageerror', error => runtimeErrors.push(error.message));
-  page.on('dialog', dialog => dialog.dismiss());
-  await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo`);
+  let discardDrafts = false;
+  page.on('dialog', dialog => discardDrafts && dialog.type() === 'confirm' && dialog.message().startsWith('鎖定將放棄') ? dialog.accept() : dialog.dismiss());
+  await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1`);
   const reload = () => page.getByRole('button', { name: '重新載入最新資料', exact: true });
   const refreshed = async () => {
     await reload().click();
-    await page.getByRole('button', { name: '更新中…', exact: true }).waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: '正在更新…', exact: true }).waitFor({ state: 'hidden' });
   };
   await reload().waitFor();
   const rootNode = await page.locator('.main-area').elementHandle();
@@ -33,25 +34,61 @@ try {
     const h = window.__P0_REACT_HARNESS__;
     h.mutateServerRow('product_variants', { ...h.server.productVariants.find(r => r.id === 'v-holo'), ...patch });
   }, patch);
+  // Real users leave this persisted switch unlocked. Being editable is not an
+  // unsaved draft: the previous fixture always refreshed the locked route.
+  await page.getByRole('button', { name: '🔒 已鎖定' }).click();
+  await patchVariant({ variant_name: 'Unlocked remote update', version: 9 });
+  await refreshed();
+  await page.getByText('Unlocked remote update', { exact: false }).filter({ visible: true }).first().waitFor({ timeout: 4000 });
+  assert.equal(await page.getByRole('alert').count(), 0, 'editable without draft is not a conflict');
+  await page.getByRole('button', { name: '✏️ 編輯中' }).click();
   await patchVariant({ variant_name: 'Manual authoritative A', version: 10 });
   assert.equal(await page.getByText('Manual authoritative A', { exact: false }).count(), 0);
   await refreshed();
   await page.getByText('Manual authoritative A', { exact: false }).first().waitFor();
+  await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).waitFor();
   assert.equal(await rootNode.evaluate(e => e.isConnected), true, 'same mounted route');
   assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0);
   console.log('PASS A: actual purchase-management button → paged Cloud read → atomic cache commit → same mounted UI');
+
+  // A separate fresh client exercises the actual bootstrap/getter path; the
+  // manual-refresh client stays mounted throughout this equivalence assertion.
+  const bootstrapPage = await browser.newPage();
+  await bootstrapPage.route('**/*.supabase.co/**', route => { liveRequests.push(route.request().url()); return route.abort(); });
+  await bootstrapPage.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1&bootstrapVariant=Manual%20authoritative%20A`);
+  await bootstrapPage.getByText('Manual authoritative A', { exact: false }).filter({ visible: true }).first().waitFor();
+  const projectedVariant = async target => target.evaluate(async () => {
+    const { supabaseProvider } = await import('/src/providers/cloud/supabaseProvider.ts');
+    const row = (await supabaseProvider.getProductVariants()).find(row => row.id === 'v-holo');
+    return { id: row.id, name: row.variant_name, sku: row.myacg_item_code, group: row.product_group_id, version: row.version };
+  });
+  assert.deepEqual(await projectedVariant(page), await projectedVariant(bootstrapPage));
+  assert.equal(await rootNode.evaluate(e => e.isConnected), true);
+  await bootstrapPage.close();
+  console.log('PASS actual Cloud getters/bootstrap and manual click produce identical canonical business view; manual route never remounted');
+
+  await patchVariant({ variant_name: 'Consumer completion awaited', version: 10 });
+  await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextPageRead());
+  await reload().click();
+  await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().pageReadHeld);
+  assert.equal(await page.getByRole('button', { name: '正在更新…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).count(), 0);
+  await page.evaluate(() => window.__P0_REACT_HARNESS__.releasePageRead());
+  await page.getByText('Consumer completion awaited', { exact: false }).filter({ visible: true }).first().waitFor();
+  await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).waitFor();
 
   // A held read makes duplicate clicks deterministic and proves no early success.
   const before = await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot());
   await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextTargetedRead());
   await reload().evaluate(e => { e.click(); e.click(); });
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().targetedReadHeld);
-  assert.equal(await page.getByRole('button', { name: '更新中…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '正在更新…' }).isDisabled(), true);
   await page.evaluate(() => window.__P0_REACT_HARNESS__.releaseTargetedRead());
   await reload().waitFor();
   const after = await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot());
   assert.equal(after.targetedQueriesByTable.product_groups - before.targetedQueriesByTable.product_groups, 1, 'double click = one authoritative read');
   assert.equal(await page.getByRole('alert').count(), 0, 'no-op is quiet');
+  await page.getByRole('status').filter({ hasText: '目前已是最新資料' }).waitFor();
 
   await page.getByRole('button', { name: '🔒 已鎖定' }).click();
   const draft = page.getByRole('textbox', { name: 'WACA 需求 SKU-HOLO' });
@@ -84,6 +121,10 @@ try {
   await draft.press('Enter');
   assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0, 'stale save blocked');
   await page.getByRole('button', { name: '✏️ 編輯中' }).click();
+  assert.equal(await draft.inputValue(), '77', 'declining discard must retain draft/conflict');
+  assert.equal(await page.getByRole('button', { name: '✏️ 編輯中' }).count(), 1);
+  discardDrafts = true;
+  await page.getByRole('button', { name: '✏️ 編輯中' }).click();
   await page.getByText('Remote same entity changed', { exact: false }).first().waitFor();
   console.log('PASS C/D/E: unrelated draft preserved, same-value CAS advanced, true conflict preserves draft/base and blocks stale Save');
 
@@ -107,6 +148,17 @@ try {
   await refreshed();
   await page.getByText('Summary manual fresh', { exact: false }).first().waitFor();
   console.log('PASS purchase-records summary uses the same real manual button, not just the detail route');
+
+  await page.evaluate(() => window.__P0_REACT_HARNESS__.navigate('/purchasing'));
+  await reload().waitFor();
+  await page.getByText('Summary manual fresh', { exact: true }).click();
+  await page.locator('.detail-view').waitFor();
+  const purchasingDetail = await page.locator('.detail-view').elementHandle();
+  await patchVariant({ variant_name: 'Purchasing refreshed variant', version: 14 });
+  await refreshed();
+  await page.getByText('Purchasing refreshed variant', { exact: false }).filter({ visible: true }).first().waitFor();
+  assert.equal(await purchasingDetail.evaluate(e => e.isConnected), true, 'purchasing detail must not unmount during refresh');
+  console.log('PASS Purchasing actual button updates selected detail in place (no navigation or remount)');
 
   await page.evaluate(() => window.__P0_REACT_HARNESS__.navigate('/settings'));
   await page.getByText('商品 SKU (ProductVariant)', { exact: true }).waitFor();
@@ -151,6 +203,43 @@ try {
   assert.equal(await stat('訂購紀錄母體 (ProductGroup)').textContent(), '706 筆');
   assert.equal(await stat('商品分類 (ProductCategory)').textContent(), '391 筆');
   console.log('PASS B: mounted Settings 705/390/3254 → delayed 705/390/3461 → 706/391/3462; all pages, no F5/remount/full pull');
+
+  for (const width of [1366, 1280, 390]) {
+    await page.setViewportSize({ width, height: 768 });
+    await reload().scrollIntoViewIfNeeded();
+    const geometry = () => reload().evaluate(button => {
+      const r = button.getBoundingClientRect(), css = getComputedStyle(button);
+      const bar = document.querySelector('.environment-status-bar').getBoundingClientRect();
+      const feedback = button.parentElement.getBoundingClientRect();
+      const luminance = value => {
+        const [r, g, b] = value.match(/[\d.]+/g).slice(0, 3).map(n => {
+          const v = Number(n) / 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+        });
+        return .2126 * r + .7152 * g + .0722 * b;
+      };
+      const fg = luminance(css.color), bg = luminance(css.backgroundColor);
+      return { width: r.width, height: r.height, left: r.left, right: r.right, top: r.top,
+        barBottom: bar.bottom, feedbackHeight: feedback.height, border: parseFloat(css.borderWidth),
+        contrast: (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05),
+        hit: button.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) };
+    });
+    const idle = await geometry();
+    assert.ok(idle.left >= 0 && idle.right <= width && idle.height >= 44 && idle.border >= 2 && idle.hit);
+    assert.ok(idle.top >= idle.barBottom && idle.contrast >= 4.5, `${width}: readable and not covered by status bar`);
+    assert.equal(await page.locator('.main-area').evaluate(e => e.scrollWidth <= e.clientWidth + 1), true, 'Settings cards must not create horizontal overflow');
+    await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextTargetedRead());
+    await reload().click();
+    await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().targetedReadHeld);
+    const loading = await page.getByRole('button', { name: '正在更新…' }).boundingBox();
+    assert.equal(loading.width, idle.width);
+    assert.equal(loading.height, idle.height);
+    await page.screenshot({ path: `scratch/manual-refresh-loading-${width}.png` });
+    await page.evaluate(() => window.__P0_REACT_HARNESS__.releaseTargetedRead());
+    await page.getByRole('status').filter({ hasText: '目前已是最新資料' }).waitFor();
+    assert.equal((await geometry()).feedbackHeight, idle.feedbackHeight, 'feedback reserves height');
+    await page.screenshot({ path: `scratch/manual-refresh-idle-${width}.png` });
+  }
+  console.log('PASS 1366/1280/390 actual button: contrast >=4.5, 44px target, border, spinner/disabled, no loading layout shift or status overlap');
 
   const ordering = await page.evaluate(async () => {
     const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');

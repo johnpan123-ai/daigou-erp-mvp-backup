@@ -217,6 +217,7 @@ export class CloudTargetedCache {
 
   private async performRefresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
     const conflicts: CloudChange[] = [];
+    const comparison = { changed: false };
     const byTable = new Map<string, CloudChange[]>();
     for (const change of request.changes) {
       byTable.set(change.table, [...(byTable.get(change.table) || []), change]);
@@ -248,7 +249,7 @@ export class CloudTargetedCache {
       if (this.prepareDraftProtection) this.protectsDraft = await this.prepareDraftProtection();
       signal?.throwIfAborted();
       const rowCounts = isAuthoritativeResourceRead
-        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal, conflicts)
+        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal, conflicts, comparison)
         : await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
           const changes = byTable.get(table) || [];
           if (changes.length > 0) return this.refreshChanges(table, changes, generation, signal, conflicts);
@@ -261,7 +262,7 @@ export class CloudTargetedCache {
       markCloudReadFresh(isAuthoritativeResourceRead
         ? rowCounts.reduce((sum, count) => sum + count, 0)
         : undefined);
-      return { conflicts };
+      return isAuthoritativeResourceRead ? { conflicts, changed: comparison.changed } : { conflicts };
     } catch (error) {
       if (error instanceof CloudAuthoritativeRefreshSupersededError) throw error;
       if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
@@ -366,6 +367,7 @@ export class CloudTargetedCache {
     authoritativeEpoch?: number,
     signal?: AbortSignal,
     conflicts: CloudChange[] = [],
+    comparison = { changed: false },
   ): Promise<number[]> {
     const attemptController = new AbortController();
     const abortAttempt = () => attemptController.abort();
@@ -379,7 +381,12 @@ export class CloudTargetedCache {
         const rows = await this.queryAll(table, attemptController.signal);
         attemptController.signal.throwIfAborted();
         const current = await adapter.get();
-        const activeRows = this.protectRows(table, current, rows.filter(row => !row.deleted_at).map(row => adapter.map(row)), conflicts);
+        const incoming = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
+        const previous = new Map(current.map(row => [row.id, row]));
+        if (current.length !== incoming.length || incoming.some(row => !cloudBusinessRowsEqual(previous.get(row.id), row))) {
+          comparison.changed = true;
+        }
+        const activeRows = this.protectRows(table, current, incoming, conflicts);
         const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
         return { table, adapter, rows, activeRows, newest };
       }));

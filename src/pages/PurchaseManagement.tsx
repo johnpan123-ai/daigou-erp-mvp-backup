@@ -485,6 +485,14 @@ export default function PurchaseManagement() {
 
   const toggleEditMode = () => {
     const nextVal = !editMode;
+    if (!nextVal && (Object.keys(platformDemandDrafts).length > 0
+      || Object.keys(tempJpyCosts).length > 0 || Object.keys(tempTwdCosts).length > 0)) {
+      if (!window.confirm('鎖定將放棄未儲存的數量與成本草稿，並讀取最新資料。確定繼續？')) return;
+      setPlatformDemandDrafts({});
+      setTempJpyCosts({});
+      setTempTwdCosts({});
+      originalValuesRef.current = {};
+    }
     setEditMode(nextVal);
     localStorage.setItem('purchase_management_edit_mode', String(nextVal));
     setToastMessage(nextVal ? '已進入編輯模式，可修改數量' : '已鎖定數量欄位，避免誤觸');
@@ -961,8 +969,11 @@ export default function PurchaseManagement() {
   const { refreshAuthoritative } = useCloudResourceSync(
     `purchase-management:${id || 'unknown'}`,
     ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
-    editMode || showBatchModal || showPrivateOrderModal || isBundleDialogOpen,
+    Object.keys(platformDemandDrafts).length > 0 || Object.keys(tempJpyCosts).length > 0
+      || Object.keys(tempTwdCosts).length > 0 || showBatchModal || showPrivateOrderModal || isBundleDialogOpen,
     () => loadData({ readOnly: true }),
+    undefined,
+    { rereadProtectedCacheWhileEditing: true },
   );
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   // Bulk master cost setting state
