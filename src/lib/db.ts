@@ -2508,6 +2508,27 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     }
   }
 
+  async getCloudInventoryCatalogSnapshot(): Promise<{
+    inventory: InventoryItem[];
+    productGroups: ProductGroup[];
+  }> {
+    if (this.databaseName !== CLOUD_CACHE_INDEXED_DB_NAME) {
+      throw new Error('CLOUD_INVENTORY_CATALOG_SNAPSHOT_WRONG_NAMESPACE');
+    }
+    const database = await this.dbPromise;
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readonly');
+      const store = transaction.objectStore('kv');
+      const inventoryRequest = store.get('erp_inventory');
+      const groupsRequest = store.get('erp_product_groups');
+      transaction.oncomplete = () => resolve({
+        inventory: (inventoryRequest.result as InventoryItem[] | undefined) ?? [],
+        productGroups: (groupsRequest.result as ProductGroup[] | undefined) ?? [],
+      });
+      transaction.onerror = () => reject(transaction.error ?? new Error('Cloud inventory catalog snapshot failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Cloud inventory catalog snapshot aborted'));
+    });
+  }
   private async set<T>(key: string, value: T): Promise<void> {
     try {
       const db = await this.dbPromise;

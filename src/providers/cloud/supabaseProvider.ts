@@ -111,6 +111,7 @@ import { CloudTargetedCache } from './cloudTargetedCache';
 import { CLOUD_TABLE_RESOURCE } from './cloudSyncDomain';
 import {
   PURCHASE_BATCH_TRANSACTION_RPC,
+  PurchaseBatchSubmitBoundaryError,
   assertPurchaseBatchTransactionSucceeded,
   buildPurchaseBatchTransactionRequest,
   clearPendingRpcRequest,
@@ -414,6 +415,8 @@ export class SupabaseProvider implements IDataProvider {
 
   private isPulled = false;
   private pullPromise: Promise<void> | null = null;
+  private corePullCompletionPromise: Promise<void> | null = null;
+  private authoritativeCacheGeneration = 0;
   private cachedRole: 'owner' | 'staff' | 'viewer' | 'helper' | null = null;
   private cachedRoleUserId: string | null = null;
 
@@ -504,6 +507,7 @@ export class SupabaseProvider implements IDataProvider {
     }
     if (this.isPulled) return;
     if (this.pullPromise) return this.pullPromise;
+    const startingAuthoritativeGeneration = this.authoritativeCacheGeneration;
 
     const syncPromise = (async () => {
       try {
@@ -775,6 +779,7 @@ export class SupabaseProvider implements IDataProvider {
             importBatches: [],
           }));
           if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
+          this.authoritativeCacheGeneration += 1;
 
           // Dashboard images are cache-only and are replaced only after the complete
           // server read and IndexedDB transaction have succeeded.
@@ -827,12 +832,18 @@ export class SupabaseProvider implements IDataProvider {
       }
     })();
 
+    this.corePullCompletionPromise = syncPromise;
+
     const syncTimeout = new Promise<void>((_, reject) => {
       setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
     });
 
     this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(async err => {
       console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
+      // The detached authoritative pull continues after the four-second UI boundary.
+      // If it committed while this fallback was being scheduled, it is newer than the
+      // timeout and must not be downgraded back to stale or made eligible for a second pull.
+      if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
       const cachedRows = await Promise.all([
         db.getProductGroups(),
         db.getProductCategories(),
@@ -842,11 +853,32 @@ export class SupabaseProvider implements IDataProvider {
         db.getPrivateOrders(),
         db.getPrivateOrderItems(),
       ]);
+      if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
       markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
       this.isPulled = false;
     });
 
     return this.pullPromise;
+  }
+
+  async waitForCloudBootstrapConvergence(): Promise<boolean> {
+    const startingGeneration = this.authoritativeCacheGeneration;
+    void this.pullCoreProductData().catch(() => undefined);
+    const completion = this.corePullCompletionPromise;
+    if (!completion) return false;
+    try {
+      await completion;
+    } catch {
+      return false;
+    }
+    return this.authoritativeCacheGeneration > startingGeneration;
+  }
+
+  async getInventoryCatalogSnapshot(): Promise<{
+    inventory: InventoryItem[];
+    productGroups: ProductGroup[];
+  }> {
+    return db.getCloudInventoryCatalogSnapshot();
   }
 
   // === 3 張 Synced 表讀取 (Pull 後從本地快取讀取) ===
@@ -1456,7 +1488,11 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
-    await this.requireCloudWritePermission();
+    try {
+      await this.requireCloudWritePermission();
+    } catch {
+      throw new PurchaseBatchSubmitBoundaryError('precondition-blocked');
+    }
     assertCloudWriteAllowed();
     const [currentBatches, currentItems] = await Promise.all([
       db.getPurchaseBatches(),
@@ -1484,49 +1520,56 @@ export class SupabaseProvider implements IDataProvider {
       clearLocalCloudWrites('purchase_batches', batchIds);
       clearLocalCloudWrites('purchase_batch_items', itemIds);
       markCloudRequestFailed(caughtError);
-      throw caughtError;
+      throw new PurchaseBatchSubmitBoundaryError('result-unknown');
     }
     if (error) {
       clearLocalCloudWrites('purchase_batches', batchIds);
       clearLocalCloudWrites('purchase_batch_items', itemIds);
       markCloudRequestFailed(error);
-      throw error;
+      throw new PurchaseBatchSubmitBoundaryError('server-rejected');
     }
     markCloudReachable();
 
+    let result;
     try {
-      const result = assertPurchaseBatchTransactionSucceeded(data);
-      const canonicalBatch = {
-        ...result.batch,
-        id: String(result.batch.id),
-        database_id: String(result.batch.id),
-        note: String(result.batch.note || ''),
-        date: String(result.batch.date || ''),
-      } as unknown as PurchaseBatch;
-      const canonicalItems = result.items.map(row => ({
-        ...row,
-        id: String(row.id),
-        database_id: String(row.id),
-        purchase_batch_id: String(row.purchase_batch_id),
-        product_variant_id: String(row.product_variant_id),
-        quantity: Number(row.quantity ?? 0),
-        cost: Number(row.cost ?? 0),
-        note: String(row.note || ''),
-      } as PurchaseBatchItem));
-      const nextBatches = [...currentBatches.filter(batch => batch.id !== canonicalBatch.id), canonicalBatch];
-      const nextItems = [
-        ...currentItems.filter(item => item.purchase_batch_id !== canonicalBatch.id),
-        ...canonicalItems,
-      ];
-      // The Server mutation commits before the two cache collections are replaced
-      // together; a failed/unknown RPC never reaches this cache transaction.
-      await db.savePurchaseBatchTransaction(nextBatches, nextItems);
-      clearPendingRpcRequest(command.idempotencyKey);
+      result = assertPurchaseBatchTransactionSucceeded(data);
     } catch (transactionError) {
       clearLocalCloudWrites('purchase_batches', batchIds);
       clearLocalCloudWrites('purchase_batch_items', itemIds);
       if (isCloudFieldMutationError(transactionError)) notifyCloudFieldMutationConflict(transactionError);
       throw transactionError;
+    }
+
+    const canonicalBatch = {
+      ...result.batch,
+      id: String(result.batch.id),
+      database_id: String(result.batch.id),
+      note: String(result.batch.note || ''),
+      date: String(result.batch.date || ''),
+    } as unknown as PurchaseBatch;
+    const canonicalItems = result.items.map(row => ({
+      ...row,
+      id: String(row.id),
+      database_id: String(row.id),
+      purchase_batch_id: String(row.purchase_batch_id),
+      product_variant_id: String(row.product_variant_id),
+      quantity: Number(row.quantity ?? 0),
+      cost: Number(row.cost ?? 0),
+      note: String(row.note || ''),
+    } as PurchaseBatchItem));
+    const nextBatches = [...currentBatches.filter(batch => batch.id !== canonicalBatch.id), canonicalBatch];
+    const nextItems = [
+      ...currentItems.filter(item => item.purchase_batch_id !== canonicalBatch.id),
+      ...canonicalItems,
+    ];
+    try {
+      // The Server mutation has succeeded before this local cache transaction starts.
+      await db.savePurchaseBatchTransaction(nextBatches, nextItems);
+      clearPendingRpcRequest(command.idempotencyKey);
+    } catch {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      throw new PurchaseBatchSubmitBoundaryError('committed-sync-pending');
     }
   }
 

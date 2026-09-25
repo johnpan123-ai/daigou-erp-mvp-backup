@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
 import {
@@ -19,6 +19,7 @@ import {
   type TestSnapshotCollectionName,
   type TestSnapshotMetadata,
 } from '../lib/testSnapshotImport';
+import { SettingsCountLoadGate } from './settingsCountLoadGate';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
   { field: 'productGroups', label: '商品群組' },
@@ -101,6 +102,7 @@ export default function Settings() {
     productCategories: 0,
     productVariants: 0
   });
+  const [countLoadGate] = useState(() => new SettingsCountLoadGate());
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const testSnapshotInputRef = useRef<HTMLInputElement>(null);
@@ -131,35 +133,42 @@ export default function Settings() {
     }
   };
 
+  const loadCounts = useCallback(async (): Promise<void> => {
+    const readCounts = async () => {
+      const [inv, so, soi, pg, pc, pv] = await Promise.all([
+        dataProvider.getInventory(),
+        dataProvider.getSalesOrders(),
+        dataProvider.getSalesOrderItems(),
+        dataProvider.getProductGroups(),
+        dataProvider.getProductCategories(),
+        dataProvider.getProductVariants()
+      ]);
+      return {
+        inventory: inv.length,
+        salesOrders: so.length,
+        salesOrderItems: soi.length,
+        productGroups: pg.length,
+        productCategories: pc.length,
+        productVariants: pv.length
+      };
+    };
+    const convergence = dataProvider.waitForCloudBootstrapConvergence();
+    await countLoadGate.run(readCounts, setCounts);
+    if (await convergence) await countLoadGate.run(readCounts, setCounts);
+  }, [countLoadGate]);
+
   useEffect(() => {
-    (window as any).dataProvider = dataProvider;
-    loadCounts();
+    (window as Window & { dataProvider?: typeof dataProvider }).dataProvider = dataProvider;
+    void loadCounts();
     if (isSandbox) {
       getTestSnapshotMetadata()
         .then(setTestSnapshotMetadata)
         .catch(error => setTestSnapshotError(error instanceof Error ? error.message : String(error)));
     }
-  }, []);
-
-  const loadCounts = async () => {
-    const [inv, so, soi, pg, pc, pv] = await Promise.all([
-      dataProvider.getInventory(),
-      dataProvider.getSalesOrders(),
-      dataProvider.getSalesOrderItems(),
-      dataProvider.getProductGroups(),
-      dataProvider.getProductCategories(),
-      dataProvider.getProductVariants()
-    ]);
-    
-    setCounts({
-      inventory: inv.length,
-      salesOrders: so.length,
-      salesOrderItems: soi.length,
-      productGroups: pg.length,
-      productCategories: pc.length,
-      productVariants: pv.length
-    });
-  };
+    return () => {
+      countLoadGate.invalidate();
+    };
+  }, [countLoadGate, isSandbox, loadCounts]);
 
   const handleExport = async () => {
     await dataProvider.exportData();

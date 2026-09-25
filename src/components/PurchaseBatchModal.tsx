@@ -6,7 +6,11 @@ import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../li
 import type { ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem, InventoryItem, PrivateOrder, PrivateOrderItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { allocatePurchaseBatchFreight } from '../lib/purchaseBatchFreightAllocation';
-import { purchaseBatchIntentCoordinator } from '../providers/cloud/purchaseBatchTransaction';
+import {
+  isPurchaseBatchSubmitBoundaryError,
+  purchaseBatchIntentCoordinator,
+} from '../providers/cloud/purchaseBatchTransaction';
+import { CloudOfflineWriteError } from '../providers/cloud/cloudConnectivity';
 
 interface PurchaseBatchModalProps {
   show: boolean;
@@ -150,7 +154,6 @@ export default function PurchaseBatchModal({
   purchaseBatches,
   editingBatchId,
   onSaveSuccess,
-  onStale,
   getDisplayProductName: propGetDisplayProductName
 }: PurchaseBatchModalProps) {
   const { isMobile } = useViewport();
@@ -172,6 +175,11 @@ export default function PurchaseBatchModal({
   const initializedRef = useRef<string | null>(null);
   const saveInFlightRef = useRef<Promise<void> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<{
+    kind: 'error' | 'warning';
+    message: string;
+    lockRetry?: boolean;
+  } | null>(null);
 
   const isDaili = group?.listing_type === '代理版';
 
@@ -514,8 +522,15 @@ export default function PurchaseBatchModal({
 
   const performBatchSubmit = async () => {
     const validLines = batchLines.filter(l => l.quantity > 0);
-    if (!group || validLines.length === 0) return;
-    if (editingBatchId && !batchForm.name.trim()) return;
+    if (!group || validLines.length === 0) {
+      setSubmitStatus({ kind: 'error', message: '請至少填寫一筆數量大於 0 的採購品項。' });
+      return;
+    }
+    if (editingBatchId && !batchForm.name.trim()) {
+      setSubmitStatus({ kind: 'error', message: '請填寫採購批次名稱。' });
+      return;
+    }
+    setSubmitStatus(null);
 
     try {
       const allBatches = await dataProvider.getPurchaseBatches();
@@ -575,17 +590,26 @@ export default function PurchaseBatchModal({
       onSaveSuccess();
     } catch (err) {
       if (err instanceof StaleDataError) {
-        alert(err.message);
-        onStale?.();
-        onClose();
+        setSubmitStatus({ kind: 'warning', message: '雲端資料已更新，本次尚未送出；草稿已保留，請確認後再儲存。' });
+        return;
+      }
+      if (err instanceof CloudOfflineWriteError) {
+        setSubmitStatus({ kind: 'warning', message: '雲端資料正在更新，本次尚未送出；草稿已保留，請稍後重新確認。' });
+        return;
+      }
+      if (isPurchaseBatchSubmitBoundaryError(err)) {
+        setSubmitStatus({
+          kind: err.kind === 'server-rejected' ? 'error' : 'warning',
+          message: err.message,
+          lockRetry: err.kind !== 'server-rejected',
+        });
         return;
       }
       if (err instanceof Error && err.name === 'PurchaseBatchTransactionError') {
-        alert(err.message);
-        onStale?.();
+        setSubmitStatus({ kind: 'error', message: err.message });
         return;
       }
-      throw err;
+      setSubmitStatus({ kind: 'error', message: '無法完成採購儲存前檢查，本次尚未送出；草稿已保留。' });
     }
   };
 
@@ -1200,13 +1224,22 @@ export default function PurchaseBatchModal({
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>
+            {submitStatus && (
+              <div
+                data-testid="purchase-batch-submit-status"
+                role="status"
+                style={{ fontSize: '13px', fontWeight: 600, color: submitStatus.kind === 'error' ? '#b91c1c' : '#b45309' }}
+              >
+                {submitStatus.message}
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b' }}>
                 本批次合計：<span data-testid="purchase-batch-total" style={{ color: '#2563eb', fontSize: '15px', fontWeight: 700 }}>{isDaili ? 'NT$ ' : '¥ '}{batchTotal.toLocaleString()}</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', cursor: 'pointer' }} onClick={onClose}>取消</button>
-                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={isSaving || (!!editingBatchId && !batchForm.name.trim())}>{isSaving ? '儲存中…' : '儲存'}</button>
+                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff', cursor: 'pointer' }} onClick={handleAddBatchSubmit} disabled={isSaving || submitStatus?.lockRetry === true || (!!editingBatchId && !batchForm.name.trim())}>{isSaving ? '儲存中…' : '儲存'}</button>
               </div>
             </div>
             {(() => {
