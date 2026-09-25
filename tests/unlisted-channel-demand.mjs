@@ -56,8 +56,12 @@ const fixture = {
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--host', '127.0.0.1', '--port', '4195', '--strictPort',
-], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
+  '--mode', 'experimental', '--host', '127.0.0.1', '--port', '4195', '--strictPort',
+], {
+  cwd: ROOT_PATH,
+  env: { ...process.env, VITE_SANDBOX_ENV: 'test' },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });
 vite.stderr.on('data', chunk => { viteOutput += String(chunk); });

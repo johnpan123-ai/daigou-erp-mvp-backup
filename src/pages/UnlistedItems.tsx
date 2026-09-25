@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
@@ -6,6 +6,7 @@ import { dataProvider } from '../providers/dataProvider';
 import { calculateGroupDemandAndPurchased, normalizeProductTitle } from '../lib/db';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
 
 interface UnlistedItemSku {
   sku: string;
@@ -65,6 +66,25 @@ const saveUnlistedProcessedData = (data: UnlistedProcessedData) => {
   localStorage.setItem(UNLISTED_PROCESSED_STORAGE_KEY, JSON.stringify(data));
 };
 
+const getTodayStr = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const normalizeDate = (dateStr: string | undefined | null): string | null => {
+  if (!dateStr) return null;
+  const clean = dateStr.trim().replace(/\//g, '-');
+  const match = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!match) return null;
+  const year = match[1];
+  const month = match[2].padStart(2, '0');
+  const day = match[3].padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Shared capsule style so every info badge on a row has identical height/radius/font size --
 // only color/icon/label differ. Keeps the row reading as one consistent strip instead of
 // several differently-styled bits of text.
@@ -114,7 +134,7 @@ function UnlistedChannelDemand({ item, compact = false }: { item: UnlistedItem; 
 export default function UnlistedItems() {
   const { isMobile } = useViewport();
 
-  const [loading, setLoading] = useState(true);
+  const { isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
   const [items, setItems] = useState<UnlistedItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
@@ -125,10 +145,10 @@ export default function UnlistedItems() {
   const [showOnlyGap, setShowOnlyGap] = useState<boolean>(false);
 
   // Load and process data
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = useCallback(async () => {
     try {
-      const [inventory, groups, variants, categories, privateOrders, privateOrderItems, batches, batchItems, salesOrderItems] = await Promise.all([
+      await runLoad(async () => {
+        const [inventory, groups, variants, categories, privateOrders, privateOrderItems, batches, batchItems, salesOrderItems] = await Promise.all([
         dataProvider.getInventory(),
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
@@ -138,7 +158,7 @@ export default function UnlistedItems() {
         dataProvider.getPurchaseBatches(),
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getSalesOrderItems()
-      ]);
+        ]);
       const batchItemsByGroupId = mapPurchaseBatchItemsByGroup(batches, batchItems);
       const privateOrderItemsByGroupId = mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems);
 
@@ -157,19 +177,16 @@ export default function UnlistedItems() {
         }
       }
 
-      setCatalogImportTime(latestImportTime);
-
       // Reconcile local "已處理" marks against the current latest catalog import batch. If a
       // newer Catalog import has happened since the marks were made, they're stale -- reset
       // so every item gets re-evaluated fresh instead of staying hidden forever.
       const currentImportKey = latestImportId || '';
       let currentProcessed = loadUnlistedProcessedData();
+      let processedStateNeedsReset = false;
       if (currentProcessed.catalog_import_id !== currentImportKey) {
         currentProcessed = { catalog_import_id: currentImportKey, processed_group_ids: [], processed_at_map: {} };
-        saveUnlistedProcessedData(currentProcessed);
+        processedStateNeedsReset = true;
       }
-      setProcessedData(currentProcessed);
-
       // Filter inventory to only items from the latest import batch (fallback to all if none have timestamps)
       const latestInventory = latestImportId
         ? inventory.filter(item => item.latest_catalog_import_id === latestImportId)
@@ -270,14 +287,19 @@ export default function UnlistedItems() {
 
       // Sort by days overdue descending
       unlistedList.sort((a, b) => b.daysOverdue - a.daysOverdue);
-      setItems(unlistedList);
-      setSelectedIds(new Set()); // Reset selections
+        return { catalogImportTime: latestImportTime, items: unlistedList, processedData: currentProcessed, processedStateNeedsReset };
+      }, result => {
+        setCatalogImportTime(result.catalogImportTime);
+        if (result.processedStateNeedsReset) saveUnlistedProcessedData(result.processedData);
+        setProcessedData(result.processedData);
+        setItems(result.items);
+        const validIds = new Set(result.items.map(item => item.id));
+        setSelectedIds(previous => new Set([...previous].filter(itemId => validIds.has(itemId))));
+      });
     } catch (err) {
       console.error('[UnlistedItems Load Error]:', err);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [runLoad]);
 
   useCloudResourceSync(
     'unlisted-items',
@@ -287,28 +309,8 @@ export default function UnlistedItems() {
   );
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  // Helper date parsing
-  const getTodayStr = (): string => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const normalizeDate = (dateStr: string | undefined | null): string | null => {
-    if (!dateStr) return null;
-    const clean = dateStr.trim().replace(/\//g, '-');
-    const match = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (!match) return null;
-    const year = match[1];
-    const month = match[2].padStart(2, '0');
-    const day = match[3].padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+    void Promise.resolve().then(loadData);
+  }, [loadData]);
 
   const processedGroupIdSet = useMemo(() => new Set(processedData.processed_group_ids), [processedData]);
 
@@ -438,7 +440,7 @@ export default function UnlistedItems() {
   }, [pendingItems]);
 
   return (
-    <div className="unlisted-container">
+    <div className="unlisted-container" data-testid="unlisted-items-root">
       <style>{`
         .unlisted-container {
           width: 100%;
@@ -697,6 +699,7 @@ export default function UnlistedItems() {
                 ? new Date(catalogImportTime).toLocaleString('zh-TW', { hour12: false })
                 : '無暫存匯入記錄 (比對全部快取)'
               }
+              {isRefreshing && <span role="status"> · 同步最新資料中…</span>}
             </span>
           </p>
         </div>
@@ -837,7 +840,7 @@ export default function UnlistedItems() {
         </div>
       </div>
 
-      {loading ? (
+      {isInitialLoading ? (
         <div className="flex justify-center items-center" style={{ height: '200px', gap: '8px' }}>
           <Loader2 className="animate-spin" size={24} style={{ color: '#2563eb' }} />
           <span className="text-sm text-secondary font-medium">資料整理中...</span>

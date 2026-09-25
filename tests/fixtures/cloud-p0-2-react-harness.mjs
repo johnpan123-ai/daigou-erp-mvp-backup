@@ -15,6 +15,7 @@ localStorage.setItem('erp_provider_mode', 'experimental');
 const fixtureParams = new URL(location.href).searchParams;
 const requestedRoute = fixtureParams.get('route') || '/dashboard';
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
+const outboundReceivingScenario = fixtureParams.get('outboundReceiving') === '1';
 const realProviderReads = fixtureParams.get('realReads') === '1';
 const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
 history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
@@ -120,6 +121,18 @@ server.outboundShipmentItems = [{
   created_at: '2026-09-07T00:00:00.000Z',
   updated_at: '2026-09-07T00:00:00.000Z',
 }];
+if (outboundReceivingScenario) {
+  server.outboundShipments[0] = { ...server.outboundShipments[0], status: 'received' };
+  server.outboundShipmentItems.push({
+    ...server.outboundShipmentItems[0],
+    id: 'outi-react-2',
+    japan_package_item_id: undefined,
+    product_variant_id: undefined,
+    product_title: 'Second Receiving Item',
+    variant_name: 'B',
+    sku: 'SKU-SECOND',
+  });
+}
 if (partialReceivingScenario) server.outboundShipmentItems = [];
 
 const tableToCollection = {
@@ -174,12 +187,19 @@ markCloudReadFresh(Object.values(server).reduce((sum, rows) => sum + (Array.isAr
 const pageLoads = {};
 let writes = 0;
 let heldPageRead, releasePageRead, pageReadHeld = false;
+let holdAllPageReads = false;
+let heldOutboundSave, releaseOutboundSave, outboundSaveHeld = false;
+let failNextOutboundSave = false;
+if (fixtureParams.get('holdInitialPageRead') === '1') {
+  holdAllPageReads = true;
+  heldPageRead = new Promise(resolve => { releasePageRead = resolve; });
+}
 for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAdapters)) {
   dataProvider[getMethod] = async (...args) => {
     pageLoads[getMethod] = (pageLoads[getMethod] || 0) + 1;
     if (heldPageRead) {
       const gate = heldPageRead;
-      heldPageRead = null;
+      if (!holdAllPageReads) heldPageRead = null;
       pageReadHeld = true;
       await gate;
       pageReadHeld = false;
@@ -190,6 +210,17 @@ for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAda
   };
   dataProvider[saveMethod] = async rows => {
     writes += 1;
+    if (saveMethod === 'saveOutboundShipmentItems' && heldOutboundSave) {
+      const gate = heldOutboundSave;
+      heldOutboundSave = null;
+      outboundSaveHeld = true;
+      await gate;
+      outboundSaveHeld = false;
+    }
+    if (saveMethod === 'saveOutboundShipmentItems' && failNextOutboundSave) {
+      failNextOutboundSave = false;
+      throw new Error('simulated outbound confirmation failure');
+    }
     server[collection] = clone(rows);
     if (saveMethod === 'upsertInventory') return cloudCacheDb.upsertInventory(clone(rows));
     return cloudCacheDb[saveMethod](clone(rows));
@@ -472,7 +503,14 @@ window.__P0_REACT_HARNESS__ = {
   failTargetedReadOnce() { failNextQuery = true; },
   holdNextTargetedRead() { heldTargetedRead = new Promise(resolve => { releaseTargetedRead = resolve; }); },
   holdNextPageRead() { heldPageRead = new Promise(resolve => { releasePageRead = resolve; }); },
-  releasePageRead() { releasePageRead?.(); },
+  holdNextOutboundSave() { heldOutboundSave = new Promise(resolve => { releaseOutboundSave = resolve; }); },
+  failNextOutboundSave() { failNextOutboundSave = true; },
+  releasePageRead() {
+    holdAllPageReads = false;
+    heldPageRead = null;
+    releasePageRead?.();
+  },
+  releaseOutboundSave() { releaseOutboundSave?.(); },
   releaseTargetedRead() { releaseTargetedRead?.(); },
   failTargetedTableRead(table, count = 1) { targetedReadFailures.set(table, count); },
   replaySameKey(canonicalResult) {
@@ -503,6 +541,7 @@ window.__P0_REACT_HARNESS__ = {
       targetedQueries,
       targetedReadHeld,
       pageReadHeld,
+      outboundSaveHeld,
       targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,
