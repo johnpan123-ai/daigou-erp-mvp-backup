@@ -20,6 +20,8 @@ import {
   type TestSnapshotMetadata,
 } from '../lib/testSnapshotImport';
 import { SettingsCountLoadGate } from './settingsCountLoadGate';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { CloudRefreshButton } from '../components/CloudRefreshButton';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
   { field: 'productGroups', label: '商品群組' },
@@ -156,6 +158,8 @@ export default function Settings() {
     await countLoadGate.run(readCounts, setCounts);
     if (await convergence) await countLoadGate.run(readCounts, setCounts);
   }, [countLoadGate]);
+
+  const { refreshAuthoritative } = useCloudResourceSync('settings-statistics', ['products', 'inventory', 'salesOrders'], false, loadCounts);
 
   useEffect(() => {
     (window as Window & { dataProvider?: typeof dataProvider }).dataProvider = dataProvider;
@@ -333,6 +337,7 @@ export default function Settings() {
             <Database size={18} className="text-primary" /> 
             資料庫狀態
           </h3>
+          <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'inventory', 'salesOrders']} onLocalRefresh={loadCounts} />
           <div className="flex-col gap-sm" style={{ backgroundColor: 'var(--color-bg-base)', padding: '16px', borderRadius: '8px' }}>
             <div className="flex justify-between">
               <span className="text-muted text-sm">商品主檔 (InventoryItem)</span>

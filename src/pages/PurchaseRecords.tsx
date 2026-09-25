@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, 
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, cloudCacheDb, localDb } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { CloudRefreshButton } from '../components/CloudRefreshButton';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
@@ -1409,7 +1410,10 @@ export default function PurchaseRecords() {
     loadData();
   }, []);
 
+  const loadGeneration = useRef(0);
+  useEffect(() => () => { loadGeneration.current += 1; }, []);
   const loadData = async () => {
+    const generation = ++loadGeneration.current;
     // Stale-while-revalidate: if the local IndexedDB cache already has data (from a previous
     // visit), show it immediately instead of a blank "0 筆" table while the real cloud sync —
     // which can take several seconds — is still in flight. This reads straight from the local
@@ -1431,6 +1435,7 @@ export default function PurchaseRecords() {
           directCache.getSalesOrderItems()
         ]);
         const cachedMeta = cachedGroups.find(g => g.id === WACA_META_ID) || null;
+        if (generation !== loadGeneration.current) return;
         setWacaMeta(cachedMeta);
         setGroups(cachedGroups.filter(g => g.id !== WACA_META_ID));
         setVariants(cachedVars);
@@ -1453,6 +1458,7 @@ export default function PurchaseRecords() {
     // forever. The error itself is intentionally NOT swallowed here — it still propagates
     // as an unhandled rejection afterwards, same as before this change.
     try {
+      if (generation !== loadGeneration.current) return;
       await loadFreshData();
     } finally {
       setIsInitialLoading(false);
@@ -1461,6 +1467,7 @@ export default function PurchaseRecords() {
   };
 
   const loadFreshData = async () => {
+    const generation = ++loadGeneration.current;
     const [fetchedGroups, fetchedVars, fetchedCats, fetchedBatches, fetchedBatchItems, fetchedPrivateOrders, fetchedPrivateItems, fetchedInventory, fetchedOrderItems] = await Promise.all([
       dataProvider.getProductGroups(),
       dataProvider.getProductVariants(),
@@ -1472,6 +1479,7 @@ export default function PurchaseRecords() {
       dataProvider.getInventory(),
       dataProvider.getSalesOrderItems()
     ]);
+    if (generation !== loadGeneration.current) return;
     console.log(`[UI Load] UI groups count: ${fetchedGroups.length}`);
     console.log(`[UI Load] UI variants count: ${fetchedVars.length}`);
     console.log('[UI Load] variants sample:', fetchedVars.length > 0 ? JSON.stringify(fetchedVars[0]) : 'empty');
@@ -1496,7 +1504,7 @@ export default function PurchaseRecords() {
     dataProvider.registerFreshLoad();
   };
 
-  useCloudResourceSync(
+  const { refreshAuthoritative } = useCloudResourceSync(
     'purchase-records',
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
     editMode || showWacaDialog || showClosingDateWorkbench,
@@ -1569,10 +1577,6 @@ export default function PurchaseRecords() {
       return true; // blocked
     }
     return false; // allowed
-  };
-
-  const handleReloadData = async () => {
-    await loadData();
   };
 
   useEffect(() => {
@@ -2715,6 +2719,11 @@ export default function PurchaseRecords() {
         </div>
       </div>
 
+      <CloudRefreshButton
+        refresh={refreshAuthoritative}
+        resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']}
+        onLocalRefresh={loadFreshData}
+      />
       {isStale && (
         <div style={{
           backgroundColor: '#fef3c7',
@@ -2731,25 +2740,6 @@ export default function PurchaseRecords() {
             <span style={{ fontSize: '18px' }}>⚠️</span>
             <span style={{ color: '#92400e', fontWeight: 500 }}>你正在編輯的資料已在其他 Client 變更；草稿已保留，請先處理衝突。</span>
           </div>
-          <button
-            onClick={handleReloadData}
-            style={{
-              backgroundColor: '#d97706',
-              color: '#ffffff',
-              border: 'none',
-              padding: '6px 12px',
-              borderRadius: '4px',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
-              marginLeft: 'auto',
-              transition: 'background-color 0.2s'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#b45309'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#d97706'}
-          >
-            重新載入最新資料
-          </button>
         </div>
       )}
 

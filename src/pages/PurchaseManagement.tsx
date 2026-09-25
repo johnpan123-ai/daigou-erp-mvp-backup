@@ -13,6 +13,7 @@ import PrivateOrderTab from '../components/PrivateOrderTab';
 import { useViewport } from '../contexts/ViewportContext';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { CloudRefreshButton } from '../components/CloudRefreshButton';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 import { writeTextToClipboard } from '../lib/safeClipboard';
@@ -458,10 +459,6 @@ export default function PurchaseManagement() {
     setIsStale(dataProvider.checkIsStaleLive());
     return unsubscribe;
   }, []);
-
-  const handleReloadData = async () => {
-    await loadData();
-  };
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [exchangeRate, setExchangeRate] = useState<number>(() => {
@@ -961,11 +958,11 @@ export default function PurchaseManagement() {
   // Modal: Purchase Batch
   const [showBatchModal, setShowBatchModal] = useState(false);
 
-  useCloudResourceSync(
+  const { refreshAuthoritative } = useCloudResourceSync(
     `purchase-management:${id || 'unknown'}`,
     ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
     editMode || showBatchModal || showPrivateOrderModal || isBundleDialogOpen,
-    () => loadData(),
+    () => loadData({ readOnly: true }),
   );
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   // Bulk master cost setting state
@@ -991,9 +988,14 @@ export default function PurchaseManagement() {
   }, [id]);
 
 
-  const loadData = async () => {
+  const loadGeneration = useRef(0);
+  useEffect(() => () => { loadGeneration.current += 1; }, []);
+  const loadData = async ({ readOnly = false } = {}) => {
+    const generation = ++loadGeneration.current;
+    const current = () => generation === loadGeneration.current;
     if (!id) return;
     const allGroups = await dataProvider.getProductGroups();
+    if (!current()) return;
     const g = allGroups.find(x => x.id === id);
     if (!g) {
       navigate(fromPath);
@@ -1004,6 +1006,7 @@ export default function PurchaseManagement() {
 
     const allVars = await dataProvider.getProductVariants();
     const allCats = await dataProvider.getProductCategories();
+    if (!current()) return;
     const catMap = new Map(allCats.map(c => [c.id, c]));
     setCategoryMap(catMap);
 
@@ -1033,6 +1036,7 @@ export default function PurchaseManagement() {
     });
 
     const writePermission = await dataProvider.canWriteCloud();
+    if (!current()) return;
     setCanWrite(writePermission);
 
     // Sync legacy costs to variants and update cost state maps
@@ -1083,7 +1087,7 @@ export default function PurchaseManagement() {
     localStorage.setItem('variant_default_jpy_costs', JSON.stringify(jpyCosts));
     localStorage.setItem('variant_default_twd_costs', JSON.stringify(twdCosts));
 
-    if (needsSync && writePermission) {
+    if (needsSync && writePermission && !readOnly) {
       console.log('[Default Cost Sync] Migrating legacy local storage costs to cloud...');
       if (allVars && allVars.length > 0) {
         const updatedAllVars = allVars.map(av => {
@@ -1110,15 +1114,18 @@ export default function PurchaseManagement() {
       }
     }
 
-    setVariants(updatedGroupVars);
+    if (!current()) return;
+    setVariants(readOnly ? groupVars : updatedGroupVars);
 
     const inventory = await dataProvider.getInventory();
+    if (!current()) return;
     const invMap = new Map(inventory.map(i => [i.myacg_item_code, i]));
     setInventoryMap(invMap);
 
     // Fetch new architecture data
     const allPrivateOrders = await dataProvider.getPrivateOrders();
     const allPrivateOrderItems = await dataProvider.getPrivateOrderItems();
+    if (!current()) return;
     const groupPrivateOrders = allPrivateOrders.filter(po => po.product_group_id === id);
     const groupPoIds = new Set(groupPrivateOrders.map(po => po.id));
     const groupPrivateOrderItems = allPrivateOrderItems.filter(poi => groupPoIds.has(poi.private_order_id));
@@ -1128,6 +1135,7 @@ export default function PurchaseManagement() {
 
     const allBatches = await dataProvider.getPurchaseBatches();
     const allBatchItems = await dataProvider.getPurchaseBatchItems();
+    if (!current()) return;
     const groupBatches = allBatches.filter(b => b.product_group_id === id);
     const groupBatchIds = new Set(groupBatches.map(b => b.id));
     const groupBatchItems = allBatchItems.filter(bi => groupBatchIds.has(bi.purchase_batch_id));
@@ -1141,11 +1149,13 @@ export default function PurchaseManagement() {
       dataProvider.getJapanPackageItems(),
     ]);
     const relevantJPI = allJPI.filter(jpi => jpi.purchase_batch_id && groupBatchIds.has(jpi.purchase_batch_id));
+    if (!current()) return;
     const relevantJPIds = new Set(relevantJPI.map(jpi => jpi.japan_package_id));
     setJapanPackages(allJP.filter(p => relevantJPIds.has(p.id)));
     setJapanPackageItems(relevantJPI);
 
     const allSOI = await dataProvider.getSalesOrderItems();
+    if (!current()) return;
     const groupSOI = allSOI.filter(i => {
       const iCode = i.myacg_item_code;
       return groupVars.some(v => 
@@ -1158,6 +1168,7 @@ export default function PurchaseManagement() {
     setSalesOrderItems(groupSOI);
 
     const allBundleComponents = await dataProvider.getBundleComponents().catch(() => []);
+    if (!current()) return;
     setBundleComponents(allBundleComponents);
 
     dataProvider.registerFreshLoad();
@@ -1209,6 +1220,10 @@ export default function PurchaseManagement() {
   };
 
   const handleCommitPlatformDemand = async (variantId: string, platform: PlatformDemand, rawValue: string) => {
+    if (isStale || dataProvider.checkIsStaleLive()) {
+      setIsStale(true);
+      return; // Keep the draft; a refresh must not release a genuine conflict.
+    }
     const key = getPlatformDemandDraftKey(variantId, platform);
     if (platformDemandCommitInFlightRef.current.has(key)) return;
 
@@ -1988,6 +2003,11 @@ export default function PurchaseManagement() {
 
       <div style={{ padding: '24px', paddingBottom: isMobile ? '80px' : '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
         
+        <CloudRefreshButton
+          refresh={refreshAuthoritative}
+          resources={['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders', 'japanPackages']}
+          onLocalRefresh={() => loadData({ readOnly: true })}
+        />
         {isStale && (
           <div style={{
             backgroundColor: '#fef3c7',
@@ -2004,25 +2024,6 @@ export default function PurchaseManagement() {
               <span style={{ fontSize: '18px' }}>⚠️</span>
               <span style={{ color: '#92400e', fontWeight: 500 }}>你正在編輯的資料已在其他 Client 變更；草稿已保留，請先處理衝突。</span>
             </div>
-            <button
-              onClick={handleReloadData}
-              style={{
-                backgroundColor: '#d97706',
-                color: '#ffffff',
-                border: 'none',
-                padding: '6px 12px',
-                borderRadius: '4px',
-                fontWeight: 600,
-                fontSize: '13px',
-                cursor: 'pointer',
-                marginLeft: 'auto',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#b45309'}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#d97706'}
-            >
-              重新載入最新資料
-            </button>
           </div>
         )}
 

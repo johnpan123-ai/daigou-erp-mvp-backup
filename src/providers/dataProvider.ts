@@ -94,6 +94,9 @@ class DynamicDataProvider implements IDataProvider {
   }
 
   registerFreshLoad(): void {
+    // Reading cache is not evidence that a Cloud conflict has resolved. Only
+    // the authoritative coordinator may release those resource guards.
+    if (['cloud', 'fallback'].includes(getProviderMode()) || this.cloudStaleResources.size > 0) return;
     this.lastLoadedTime = Date.now();
     this.cloudStaleResources.clear();
     this.isStale = false;

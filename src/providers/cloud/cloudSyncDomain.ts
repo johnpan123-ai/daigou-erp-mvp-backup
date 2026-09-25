@@ -65,7 +65,7 @@ export const resolveCloudRowIdentity = (
 };
 
 export interface CloudRefreshRequest {
-  reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect';
+  reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect' | 'manual';
   changes: CloudChange[];
   resources: CloudResource[];
   /** Monotonic generation for a complete authoritative cache replacement. */
@@ -90,6 +90,8 @@ export interface CloudSyncCoordinatorOptions {
   isEditing: (resource: CloudResource) => boolean;
   onRefreshed: (resources: CloudResource[]) => void;
   onConflict: (resources: CloudResource[]) => void;
+  /** Cache readers may update even while another consumer protects a draft. */
+  onCommitted?: (resources: CloudResource[]) => void;
   coalesceMs?: number;
   now?: () => number;
 }
@@ -111,6 +113,8 @@ export class CloudSyncCoordinator {
   private disposed = false;
   private inFlight: Promise<void> | null = null;
   private resumeInFlight: Promise<void> | null = null;
+  private manualInFlight = new Map<string, Promise<void>>();
+  private manualAbort = new AbortController();
   private readonly coalesceMs: number;
   private readonly now: () => number;
   private lastFallbackAt = 0;
@@ -246,6 +250,24 @@ export class CloudSyncCoordinator {
     return true;
   }
 
+  manualRefresh(resources: CloudResource[]): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error('CLOUD_REFRESH_UNAVAILABLE'));
+    const unique = uniqueResources(resources).sort();
+    const key = unique.join('|');
+    const existing = this.manualInFlight.get(key);
+    if (existing) return existing;
+    // Explicit refresh is not focus's throttled/incremental fallback. Reuse the
+    // same cache queue, atomic replacement and entity-scoped draft protection.
+    const pending = (async () => {
+      if (this.inFlight) await this.inFlight;
+      if (this.resumeInFlight) await this.resumeInFlight;
+      const result = await this.options.refresh({ reason: 'manual', resources: unique, changes: [] }, this.manualAbort.signal);
+      this.completeRefresh(unique, result);
+    })().finally(() => this.manualInFlight.delete(key));
+    this.manualInFlight.set(key, pending);
+    return pending;
+  }
+
   private completeRefresh(resources: CloudResource[], result: void | CloudRefreshResult): void {
     if (this.disposed) return;
     const conflicts = result?.conflicts ?? [];
@@ -257,6 +279,7 @@ export class CloudSyncCoordinator {
       this.metrics.conflicts += 1;
       this.options.onConflict(blocked);
     }
+    this.options.onCommitted?.(resources);
   }
 
   snapshotMetrics(): Readonly<CloudSyncMetrics> {
@@ -265,6 +288,7 @@ export class CloudSyncCoordinator {
 
   dispose(): void {
     this.disposed = true;
+    this.manualAbort.abort();
     this.pending.clear();
     this.deferred.clear();
     this.deferredFallbackResources.clear();
