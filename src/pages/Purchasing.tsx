@@ -2,8 +2,13 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrder, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
-import { calculateVariantDemandAndPurchased } from '../lib/db';
-import { mapPrivateOrderItemsByGroup } from '../lib/purchaseBatchScope';
+import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
+import {
+  buildInventoryDemandLookup,
+  buildVariantDemandLookup,
+  buildVariantsByGroup,
+  calculateVariantDemandFromLookup,
+} from '../lib/growthSafeSelectors';
 import { AlertTriangle, ArrowLeft, ChevronRight, Search, ClipboardList, Trash2, ExternalLink, Plus } from 'lucide-react';
 import PurchaseBatchModal from '../components/PurchaseBatchModal';
 import { useViewport } from '../contexts/ViewportContext';
@@ -484,6 +489,9 @@ export default function Purchasing() {
     const categoryMap = new Map(categories.map(c => [c.id, c]));
     const inventoryMap = new Map(inventory.map(inv => [inv.myacg_item_code, inv]));
     const privateOrderItemsByGroupId = mapPrivateOrderItemsByGroup(privateOrders, privateOrderItems);
+    const purchaseBatchItemsByGroupId = mapPurchaseBatchItemsByGroup(purchaseBatches, purchaseBatchItems);
+    const variantsByGroupId = buildVariantsByGroup(categories, variants);
+    const inventoryDemandLookup = buildInventoryDemandLookup(inventory);
 
     const variantDefaultJpyCosts = (() => {
       try {
@@ -495,34 +503,31 @@ export default function Purchasing() {
     })();
 
     return purchaseGroups.map(g => {
-      const groupBatchIds = new Set(
-        purchaseBatches
-          .filter(batch => batch.product_group_id === g.id)
-          .map(batch => batch.id)
-      );
-      const groupBatchItems = purchaseBatchItems.filter(item =>
-        groupBatchIds.has(item.purchase_batch_id)
-      );
+      const groupBatchItems = purchaseBatchItemsByGroupId.get(g.id) ?? [];
       const groupPrivateOrderItems = privateOrderItemsByGroupId.get(g.id) ?? [];
 
-      // Find all variants of this group
-      const catIds = new Set(categories.filter(c => c.product_group_id === g.id).map(c => c.id));
-      const groupVars = variants.filter(v => v.product_group_id === g.id || (v.product_category_id && catIds.has(v.product_category_id)));
+      // Copy because the accepted display order below sorts in place; the shared index remains immutable.
+      const groupVars = [...(variantsByGroupId.get(g.id) ?? [])];
+      const demandLookup = buildVariantDemandLookup(
+        groupPrivateOrderItems,
+        groupBatchItems,
+        inventory,
+        inventoryDemandLookup,
+      );
 
       // Sort Catalog variants of this group by SKU
       const catalogVars = groupVars.filter(v => v.source !== 'manual');
       catalogVars.sort((a, b) => {
         return (a.myacg_item_code || '').localeCompare(b.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
       });
-      const tempCatalogIds = catalogVars.map(v => v.id);
+      const catalogSortByVariantId = new Map(catalogVars.map((variant, index) => [variant.id, index * 10]));
 
       // Define getSortVal for this group
       const getSortVal = (x: ProductVariant) => {
         if (x.source === 'manual') {
           return x.sort_order ?? 999999;
         } else {
-          const catIdx = tempCatalogIds.indexOf(x.id);
-          return catIdx !== -1 ? catIdx * 10 : 999999;
+          return catalogSortByVariantId.get(x.id) ?? 999999;
         }
       };
 
@@ -538,13 +543,7 @@ export default function Purchasing() {
       const categoryGroupsMap = new Map<string, VariantDetail[]>();
 
       groupVars.forEach(v => {
-        const res = calculateVariantDemandAndPurchased(
-          v,
-          groupPrivateOrderItems,
-          groupBatchItems,
-          inventory,
-          salesOrderItems
-        );
+        const res = calculateVariantDemandFromLookup(v, demandLookup);
         const totalDemand = res.myacg + res.waca + res.privateOrder;
         const gap = res.gap;
         const purchased = res.purchased;
@@ -588,13 +587,16 @@ export default function Purchasing() {
         };
       });
 
+      const variantById = new Map(groupVars.map(variant => [variant.id, variant]));
+      const sortValueByVariantId = new Map(groupVars.map(variant => [variant.id, getSortVal(variant)]));
+
       // Sort variants within each category using the exact same variant order
       categoryGroups.forEach(cg => {
         cg.variants.sort((a, b) => {
-          const origA = groupVars.find(x => x.id === a.id);
-          const origB = groupVars.find(x => x.id === b.id);
-          const valA = origA ? getSortVal(origA) : 999999;
-          const valB = origB ? getSortVal(origB) : 999999;
+          const origA = variantById.get(a.id);
+          const origB = variantById.get(b.id);
+          const valA = sortValueByVariantId.get(a.id) ?? 999999;
+          const valB = sortValueByVariantId.get(b.id) ?? 999999;
           if (valA !== valB) return valA - valB;
           return (origA?.myacg_item_code || '').localeCompare(origB?.myacg_item_code || '', undefined, { numeric: true, sensitivity: 'base' });
         });
@@ -603,10 +605,7 @@ export default function Purchasing() {
       // Sort categoryGroups by minSortVal and min SKU of their variants
       const getGroupSortOrder = (cgVariants: VariantDetail[]) => {
         const itemSorts = cgVariants
-          .map(v => {
-            const orig = groupVars.find(x => x.id === v.id);
-            return orig ? getSortVal(orig) : 999999;
-          })
+          .map(v => sortValueByVariantId.get(v.id) ?? 999999)
           .filter(n => Number.isFinite(n));
         return itemSorts.length > 0 ? Math.min(...itemSorts) : 999999;
       };
@@ -614,7 +613,7 @@ export default function Purchasing() {
       const getGroupMinSku = (cgVariants: VariantDetail[]) => {
         return cgVariants
           .map(v => {
-            const orig = groupVars.find(x => x.id === v.id);
+            const orig = variantById.get(v.id);
             return orig ? orig.myacg_item_code || '' : '';
           })
           .filter(Boolean)
@@ -662,7 +661,7 @@ export default function Purchasing() {
     })
     .filter(g => g.demand > 0) // Only show items with actual demand
     .sort((a, b) => b.demand - a.demand); // Sort by demand quantity descending
-  }, [groups, variants, categories, privateOrders, privateOrderItems, inventory, purchaseBatches, purchaseBatchItems, salesOrderItems]);
+  }, [groups, variants, categories, privateOrders, privateOrderItems, inventory, purchaseBatches, purchaseBatchItems]);
 
   // Filtered summaries for search
   const filteredSummaries = useMemo(() => {

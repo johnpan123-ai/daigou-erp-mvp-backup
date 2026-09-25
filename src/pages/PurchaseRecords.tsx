@@ -4,6 +4,7 @@ import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
+import { buildPurchaseRecordSearchDocuments, buildVariantsByGroup, purchaseRecordMatchesSearch } from '../lib/growthSafeSelectors';
 
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
@@ -1074,37 +1075,26 @@ export default function PurchaseRecords() {
     return { text: closingDate, color: '#334155', fontWeight: 500 };
   };
 
-  // The search filter used to rebuild catIds (categories.filter) and groupVars
-  // (variants.filter) from scratch per group per keystroke. Precompute the same group →
-  // variants mapping (including the category → group indirection) and a first-match-wins
-  // categories-by-id index (mirroring categories.find()) once, memoized on the data.
+  // The search and secondary filters share one group → variants index. It is rebuilt only
+  // when catalog data changes, not for every search query or displayed row.
   const searchIndex = useMemo(() => {
     try {
-      const catToGroup = new Map<string, string>();
-      for (const c of categories) {
-        if (c.product_group_id) catToGroup.set(c.id, c.product_group_id);
-      }
-      const varsByGroup = new Map<string, ProductVariant[]>();
-      for (const v of variants) {
-        const direct = v.product_group_id;
-        const viaCat = v.product_category_id ? catToGroup.get(v.product_category_id) : undefined;
-        for (const gid of direct === viaCat ? [direct] : [direct, viaCat]) {
-          if (!gid) continue;
-          const arr = varsByGroup.get(gid);
-          if (arr) arr.push(v); else varsByGroup.set(gid, [v]);
-        }
-      }
-      const categoriesById = new Map<string, ProductCategory>();
-      for (const c of categories) {
-        if (!categoriesById.has(c.id)) categoriesById.set(c.id, c);
-      }
-      return { varsByGroup, categoriesById };
+      return { varsByGroup: buildVariantsByGroup(categories, variants) };
     } catch (err) {
       console.error('[PurchaseRecords] searchIndex build failed:', err);
       logCrash('searchIndex useMemo', err);
-      return { varsByGroup: new Map<string, ProductVariant[]>(), categoriesById: new Map<string, ProductCategory>() };
+      return { varsByGroup: new Map<string, ProductVariant[]>() };
     }
   }, [variants, categories]);
+
+  // Build normalized searchable fields only when catalog data changes. Raw keystrokes update
+  // the controlled input immediately; the deferred query below only performs one O(groups)
+  // pass over these prepared documents instead of lowercasing and traversing variants and
+  // categories again for every candidate group.
+  const purchaseRecordSearchDocuments = useMemo(
+    () => buildPurchaseRecordSearchDocuments(groups, categories, variants, isProxyProductMap),
+    [categories, groups, isProxyProductMap, variants],
+  );
 
   const baseGroups = useMemo(() => {
     try {
@@ -1146,30 +1136,7 @@ export default function PurchaseRecords() {
         const lowerTerm = deferredSearchTerm.toLowerCase();
         result = result.filter(g => {
           try {
-            const isProxy = checkIsProxyProduct(g);
-            const effectiveListingType = isProxy ? '代理版' : (g.listing_type || '');
-
-            const groupVars = searchIndex.varsByGroup.get(g.id) ?? [];
-
-            const hasMatchingVariantOrCategory = groupVars.some(v => {
-              if (v.variant_name && v.variant_name.toLowerCase().includes(lowerTerm)) return true;
-              if (v.raw_variant_name && v.raw_variant_name.toLowerCase().includes(lowerTerm)) return true;
-              if (v.product_category_id) {
-                const cat = searchIndex.categoriesById.get(v.product_category_id);
-                if (cat && cat.title && cat.title.toLowerCase().includes(lowerTerm)) return true;
-              }
-              return false;
-            });
-
-            return (
-              (g.title && g.title.toLowerCase().includes(lowerTerm)) ||
-              (g.normalized_title && g.normalized_title.toLowerCase().includes(lowerTerm)) ||
-              (g.release_month && g.release_month.toLowerCase().includes(lowerTerm)) ||
-              (g.closing_date && g.closing_date.toLowerCase().includes(lowerTerm)) ||
-              effectiveListingType.includes(lowerTerm) ||
-              (g.product_url && g.product_url.toLowerCase().includes(lowerTerm)) ||
-              hasMatchingVariantOrCategory
-            );
+            return purchaseRecordMatchesSearch(purchaseRecordSearchDocuments.get(g.id), lowerTerm);
           } catch {
             return true;
           }
@@ -1182,7 +1149,10 @@ export default function PurchaseRecords() {
       logCrash('baseGroups useMemo', err);
       return [...groups];
     }
-  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, variants, categories, inventory, isProxyProductMap, searchIndex]);
+    // Classification helpers are pure projections of groups/isProxyProductMap and are
+    // intentionally represented by those stable data dependencies rather than function identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments]);
 
   const checkHasMissingJpyCost = (g: ProductGroup): boolean => {
     if (isProxyProduct(g)) return false;
