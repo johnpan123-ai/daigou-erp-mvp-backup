@@ -17,6 +17,7 @@ import type {
   OutboundShipment,
   OutboundShipmentItem
 } from '../lib/db';
+import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 
 export interface IDataProvider {
   getInventory(): Promise<InventoryItem[]>;
@@ -41,6 +42,7 @@ export interface IDataProvider {
   savePurchaseBatches(batches: PurchaseBatch[]): Promise<void>;
   getPurchaseBatchItems(): Promise<PurchaseBatchItem[]>;
   savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void>;
+  savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void>;
 
   getPrivateOrders(): Promise<PrivateOrder[]>;
   savePrivateOrders(orders: PrivateOrder[]): Promise<void>;

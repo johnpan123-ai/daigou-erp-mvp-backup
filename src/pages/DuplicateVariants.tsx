@@ -6,6 +6,7 @@ import type {
 } from '../lib/db';
 import { RefreshCw, ChevronDown, ChevronRight, AlertTriangle, Trash2, CheckCircle2, Layers } from 'lucide-react';
 import { useRole } from '../auth/useRole';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 // 與 src/lib/db.ts computeVariantDedupe() 相同的去重 key：
 // 同 key 的列會被讀取端自動合併（UI 看不到），因此「疑似重複」的定義是
@@ -92,6 +93,13 @@ export default function DuplicateVariants() {
   };
 
   useEffect(() => { loadData(); }, []);
+
+  useCloudResourceSync(
+    'duplicate-variants',
+    ['products', 'purchases', 'privateOrders', 'salesOrders'],
+    Boolean(deletingSetKey),
+    loadData,
+  );
 
   const dupSets = useMemo<DupSet[]>(() => {
     const gById = new Map(groups.map(g => [g.id, g]));

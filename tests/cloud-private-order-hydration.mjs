@@ -52,7 +52,7 @@ page.on('pageerror', error => unexpectedErrors.push(error.message));
 try {
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
   const result = await page.evaluate(async () => {
-    const { db, calculateVariantDemandAndPurchased } = await import('/src/lib/db.ts');
+    const { cloudCacheDb: db, calculateVariantDemandAndPurchased } = await import('/src/lib/db.ts');
     const { SupabaseProvider } = await import('/src/providers/cloud/supabaseProvider.ts');
 
     const groupId = '10000000-0000-4000-8000-000000000001';

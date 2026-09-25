@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue } from 'react';
-import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, db } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, cloudCacheDb, localDb } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
@@ -1417,17 +1417,18 @@ export default function PurchaseRecords() {
     // still runs afterwards and is what actually gets persisted into state/localStorage as
     // before; this is purely an early, possibly-stale preview.
     try {
-      const cachedGroups = await db.getProductGroups();
+      const directCache = ['cloud', 'fallback'].includes(getProviderMode()) ? cloudCacheDb : localDb;
+      const cachedGroups = await directCache.getProductGroups();
       if (cachedGroups.length > 0) {
         const [cachedVars, cachedCats, cachedBatches, cachedBatchItems, cachedPrivateOrders, cachedPrivateItems, cachedInventory, cachedOrderItems] = await Promise.all([
-          db.getProductVariants(),
-          db.getProductCategories(),
-          db.getPurchaseBatches(),
-          db.getPurchaseBatchItems(),
-          db.getPrivateOrders(),
-          db.getPrivateOrderItems(),
-          db.getInventory(),
-          db.getSalesOrderItems()
+          directCache.getProductVariants(),
+          directCache.getProductCategories(),
+          directCache.getPurchaseBatches(),
+          directCache.getPurchaseBatchItems(),
+          directCache.getPrivateOrders(),
+          directCache.getPrivateOrderItems(),
+          directCache.getInventory(),
+          directCache.getSalesOrderItems()
         ]);
         const cachedMeta = cachedGroups.find(g => g.id === WACA_META_ID) || null;
         setWacaMeta(cachedMeta);
@@ -1498,7 +1499,7 @@ export default function PurchaseRecords() {
   useCloudResourceSync(
     'purchase-records',
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
-    editMode,
+    editMode || showWacaDialog || showClosingDateWorkbench,
     loadFreshData,
   );
 

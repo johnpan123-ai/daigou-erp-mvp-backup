@@ -17,6 +17,7 @@ import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
   isCloudRestoreDisabledMode,
 } from '../providers/cloudRestorePolicy';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 interface InventoryGroup {
   title: string;
@@ -104,6 +105,13 @@ export default function Inventory() {
     const pad = (n: number) => String(n).padStart(2, '0');
     setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
   };
+
+  useCloudResourceSync(
+    'inventory-catalog',
+    ['inventory', 'products'],
+    isImporting || isRollbackPending,
+    loadItems,
+  );
 
   const existingGroupTitles = useMemo(() => {
     return new Set(productGroups.map(g => g.normalized_title || g.title));

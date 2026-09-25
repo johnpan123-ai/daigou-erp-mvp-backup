@@ -1,4 +1,5 @@
 import { reportStorageWriteFailure } from './storageGuard';
+import { LOCAL_AUTHORITATIVE_INDEXED_DB_NAME } from './db';
 
 // Dashboard category images are user-uploaded Base64 Data URLs that can each run to
 // several megabytes. localStorage is a ~5MB origin-wide budget shared with the Supabase
@@ -22,7 +23,7 @@ function openImageDb(): Promise<IDBDatabase> {
       return;
     }
 
-    const request = window.indexedDB.open('daigou-erp-db', 1);
+    const request = window.indexedDB.open(LOCAL_AUTHORITATIVE_INDEXED_DB_NAME, 1);
 
     // Mirrors IndexedDbAdapter: whichever connection opens a fresh database first
     // creates the shared 'kv' store.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Archive, Check, ChevronRight, Clock3, Copy, RefreshCw, ShoppingCart } from 'lucide-react';
 import { calculateGroupDemandAndPurchased } from '../lib/db';
@@ -22,6 +22,7 @@ import {
 } from '../lib/dashboardDailyWork';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import { dataProvider } from '../providers/dataProvider';
+import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 
 const UPCOMING_WINDOW_DAYS = 7;
 const UNLISTED_PROCESSED_STORAGE_KEY = 'erp_unlisted_processed_local';
@@ -80,6 +81,7 @@ function WorkQueueSection({
   onOpenItem,
   onViewAll,
   showCopyAction = false,
+  loadState,
 }: {
   id: string;
   title: string;
@@ -90,6 +92,7 @@ function WorkQueueSection({
   onOpenItem: (groupId: string) => void;
   onViewAll?: () => void;
   showCopyAction?: boolean;
+  loadState: 'loading' | 'error' | 'ready';
 }) {
   const visibleItems = onViewAll ? items.slice(0, 10) : items;
   const [copiedGroupId, setCopiedGroupId] = useState<string | null>(null);
@@ -121,7 +124,11 @@ function WorkQueueSection({
         )}
       </div>
 
-      {visibleItems.length === 0 ? (
+      {loadState === 'loading' ? (
+        <div className="work-queue-empty">資料載入中…</div>
+      ) : loadState === 'error' ? (
+        <div className="work-queue-empty">資料尚未成功載入，請按上方「重新整理」。</div>
+      ) : visibleItems.length === 0 ? (
         <div className="work-queue-empty">{emptyText}</div>
       ) : (
         <div className="work-queue-list">
@@ -195,6 +202,7 @@ export default function Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeQueue, setActiveQueue] = useState<WorkQueueKey>('unlisted');
   const [unorderedCategory, setUnorderedCategory] = useState<UnorderedCategoryFilter>('all');
+  const loadSequenceRef = useRef(0);
 
   const batchItemsByGroupId = useMemo(
     () => mapPurchaseBatchItemsByGroup(batches, batchItems),
@@ -206,6 +214,7 @@ export default function Dashboard() {
   );
 
   const loadData = async () => {
+    const requestId = ++loadSequenceRef.current;
     setIsLoading(true);
     try {
       const [
@@ -230,6 +239,8 @@ export default function Dashboard() {
         dataProvider.getSalesOrderItems(),
       ]);
 
+      if (requestId !== loadSequenceRef.current) return;
+
       setGroups(fetchedGroups || []);
       setVariants(fetchedVariants || []);
       setCategories(fetchedCategories || []);
@@ -247,9 +258,11 @@ export default function Dashboard() {
       setRefreshTime(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`);
     } catch (error) {
       console.error('Failed to load data on Dashboard', error);
-      setLoadError(error instanceof Error ? error.message : String(error));
+      if (requestId === loadSequenceRef.current) {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setIsLoading(false);
+      if (requestId === loadSequenceRef.current) setIsLoading(false);
     }
   };
 
@@ -258,6 +271,13 @@ export default function Dashboard() {
     // already in the loading state, and this avoids a synchronous effect cascade.
     void Promise.resolve().then(loadData);
   }, []);
+
+  useCloudResourceSync(
+    'daily-work-dashboard',
+    ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
+    false,
+    loadData,
+  );
 
   const today = localToday();
   const queues = useMemo(() => {
@@ -353,7 +373,8 @@ export default function Dashboard() {
     [productDisplayCategoryMap, queues.unordered, unorderedCategory],
   );
 
-  const displayCount = (count: number) => (isLoading && !hasCompletedLoad ? '…' : String(count));
+  const displayCount = (count: number) => (!hasCompletedLoad ? '…' : String(count));
+  const queueLoadState = hasCompletedLoad ? 'ready' : isLoading ? 'loading' : 'error';
   const activeQueueConfig = {
     unlisted: {
       title: '待下架',
@@ -465,7 +486,7 @@ export default function Dashboard() {
             data-work-queue-tab="unlisted"
             onClick={() => setActiveQueue('unlisted')}
           >
-            待下架 <span>{pendingUnlistedItems.length}</span>
+            待下架 <span>{displayCount(pendingUnlistedItems.length)}</span>
           </button>
           <button
             type="button"
@@ -475,7 +496,7 @@ export default function Dashboard() {
             data-work-queue-tab="upcoming"
             onClick={() => setActiveQueue('upcoming')}
           >
-            快結單 <span>{queues.upcoming.length}</span>
+            快結單 <span>{displayCount(queues.upcoming.length)}</span>
           </button>
           <button
             type="button"
@@ -485,7 +506,7 @@ export default function Dashboard() {
             data-work-queue-tab="overdue"
             onClick={() => setActiveQueue('overdue')}
           >
-            已過期 <span>{queues.overdue.length}</span>
+            已過期 <span>{displayCount(queues.overdue.length)}</span>
           </button>
           <button
             type="button"
@@ -495,7 +516,7 @@ export default function Dashboard() {
             data-work-queue-tab="unordered"
             onClick={() => setActiveQueue('unordered')}
           >
-            尚未下單 <span>{queues.unordered.length}</span>
+            尚未下單 <span>{displayCount(queues.unordered.length)}</span>
           </button>
         </div>
 
@@ -518,7 +539,7 @@ export default function Dashboard() {
                 key={key}
                 onClick={() => setUnorderedCategory(key)}
               >
-                {label} <span>{unorderedCategoryCounts[key]}</span>
+                {label} <span>{displayCount(unorderedCategoryCounts[key])}</span>
               </button>
             ))}
           </div>
@@ -534,6 +555,7 @@ export default function Dashboard() {
           onOpenItem={groupId => navigate(activeQueueConfig.itemRoute || `/purchase-records/${groupId}`)}
           onViewAll={activeQueueConfig.route ? () => navigate(activeQueueConfig.route) : undefined}
           showCopyAction={activeQueue === 'unlisted'}
+          loadState={queueLoadState}
         />
       </section>
 

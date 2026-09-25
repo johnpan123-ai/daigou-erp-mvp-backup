@@ -19,9 +19,13 @@ const migrationPath = fileURLToPath(new URL(
   import.meta.url,
 ));
 const providerPath = fileURLToPath(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url));
+const payloadPath = fileURLToPath(new URL('../src/providers/cloud/cloudEntityPayload.ts', import.meta.url));
+const fieldCasPath = fileURLToPath(new URL('../src/providers/cloud/cloudFieldCas.ts', import.meta.url));
 const dbPath = fileURLToPath(new URL('../src/lib/db.ts', import.meta.url));
 const migrationSql = readFileSync(migrationPath, 'utf8');
 const providerSource = readFileSync(providerPath, 'utf8');
+const payloadSource = readFileSync(payloadPath, 'utf8');
+const fieldCasSource = readFileSync(fieldCasPath, 'utf8');
 const dbSource = readFileSync(dbPath, 'utf8');
 
 const legacy = createLegacyStagingParityFixture();
@@ -270,16 +274,13 @@ assert.deepEqual(
   [...STAGING_SCHEMA_PARITY_TABLES].sort(),
 );
 
-const inventorySave = providerSource.slice(
-  providerSource.indexOf('const upsertData = allInventory.map'),
-  providerSource.indexOf('async getSalesOrders'),
-);
-assert.match(inventorySave, /onConflict: 'inventory_key'/);
-assert.doesNotMatch(inventorySave, /\bid\s*:\s*item\./);
-assert.match(providerSource, /purchase_date: g\.purchase_date \|\| null/);
-assert.match(providerSource, /date: b\.date \|\| null/);
-assert.match(providerSource, /private_manual_adjustment: v\.private_manual_adjustment \?\? null/);
-assert.match(providerSource, /purchased_manual_adjustment: v\.purchased_manual_adjustment \?\? null/);
+assert.match(providerSource, /applyCloudCollection\('inventory_items'/);
+assert.match(payloadSource, /deterministicCloudUuid\(`inventory_items:\$\{inventoryKey\}`\)/);
+assert.match(payloadSource, /inventory_key: text\(row\.inventory_key\)/);
+assert.match(payloadSource, /purchase_date: optionalText\(row\.purchase_date\)/);
+assert.match(payloadSource, /date: optionalText\(row\.date\)/);
+assert.match(payloadSource, /private_manual_adjustment: optionalNumeric\(row\.private_manual_adjustment\)/);
+assert.match(payloadSource, /purchased_manual_adjustment: optionalNumeric\(row\.purchased_manual_adjustment\)/);
 assert.match(dbSource, /private_manual_adjustment\?: number \| null/);
 assert.match(dbSource, /purchased_manual_adjustment\?: number \| null/);
 
@@ -293,6 +294,8 @@ const salesItemSave = providerSource.slice(
 );
 assert.doesNotMatch(salesOrderSave, /\bversion\s*:/);
 assert.doesNotMatch(salesItemSave, /\bversion\s*:/);
+assert.match(fieldCasSource, /sales_orders: contract\(\['local_id', 'platform', 'order_number', 'buyer_name'\]\)/);
+assert.doesNotMatch(fieldCasSource, /sales_orders: contract\([^\n]*version/u);
 
 console.log('PASS audited legacy Staging fixture migrates to the Production column/constraint contract');
 console.log('PASS unsafe date casts and nullable buyer violations fail closed with zero fixture change');

@@ -65,7 +65,7 @@ export const resolveCloudRowIdentity = (
 };
 
 export interface CloudRefreshRequest {
-  reason: 'realtime' | 'focus' | 'visibility' | 'reconnect';
+  reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect';
   changes: CloudChange[];
   resources: CloudResource[];
 }
@@ -73,6 +73,8 @@ export interface CloudRefreshRequest {
 export interface CloudSyncMetrics {
   receivedEvents: number;
   dedupedEvents: number;
+  deferredEvents: number;
+  editingCatchUps: number;
   targetedRefreshes: number;
   fallbackRefreshes: number;
   conflicts: number;
@@ -80,7 +82,7 @@ export interface CloudSyncMetrics {
 }
 
 export interface CloudSyncCoordinatorOptions {
-  refresh: (request: CloudRefreshRequest) => Promise<void>;
+  refresh: (request: CloudRefreshRequest, signal?: AbortSignal) => Promise<void>;
   isEditing: (resource: CloudResource) => boolean;
   onRefreshed: (resources: CloudResource[]) => void;
   onConflict: (resources: CloudResource[]) => void;
@@ -95,15 +97,20 @@ const uniqueResources = (resources: CloudResource[]): CloudResource[] => (
 export class CloudSyncCoordinator {
   private readonly options: CloudSyncCoordinatorOptions;
   private pending = new Map<string, CloudChange>();
+  private deferred = new Map<string, CloudChange>();
+  private deferredFallbackResources = new Set<CloudResource>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private inFlight: Promise<void> | null = null;
+  private resumeInFlight: Promise<void> | null = null;
   private readonly coalesceMs: number;
   private readonly now: () => number;
   private lastFallbackAt = 0;
   private readonly metrics: CloudSyncMetrics = {
     receivedEvents: 0,
     dedupedEvents: 0,
+    deferredEvents: 0,
+    editingCatchUps: 0,
     targetedRefreshes: 0,
     fallbackRefreshes: 0,
     conflicts: 0,
@@ -145,6 +152,14 @@ export class CloudSyncCoordinator {
     const refreshable = resources.filter(resource => !editing.includes(resource));
 
     if (editing.length > 0) {
+      changes
+        .filter(change => change.origin !== 'local' && editing.includes(change.resource))
+        .forEach(change => {
+          const key = `${change.table}:${change.canonicalId}`;
+          if (this.deferred.has(key)) this.metrics.dedupedEvents += 1;
+          else this.metrics.deferredEvents += 1;
+          this.deferred.set(key, change);
+        });
       this.metrics.conflicts += 1;
       this.options.onConflict(editing);
     }
@@ -158,13 +173,50 @@ export class CloudSyncCoordinator {
     await this.inFlight;
   }
 
-  async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[]): Promise<boolean> {
+  async resume(resources: CloudResource[]): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.inFlight) await this.inFlight;
+    if (this.resumeInFlight) await this.resumeInFlight;
+
+    const eligible = uniqueResources(resources).filter(resource => !this.options.isEditing(resource));
+    if (eligible.length === 0) return false;
+
+    const changes = [...this.deferred.values()].filter(change => eligible.includes(change.resource));
+    const fallbackResources = eligible.filter(resource => this.deferredFallbackResources.has(resource));
+    const changedResources = uniqueResources(changes.map(change => change.resource));
+    const refreshedResources = uniqueResources([...changedResources, ...fallbackResources]);
+    if (refreshedResources.length === 0) return false;
+
+    changes.forEach(change => this.deferred.delete(`${change.table}:${change.canonicalId}`));
+    fallbackResources.forEach(resource => this.deferredFallbackResources.delete(resource));
+    const needsResourceCatchUp = fallbackResources.length > 0;
+
+    this.metrics.editingCatchUps += 1;
+    this.metrics.targetedRefreshes += 1;
+    this.resumeInFlight = this.options.refresh({
+      reason: needsResourceCatchUp ? 'editing-ended' : 'realtime',
+      changes: needsResourceCatchUp ? [] : changes,
+      resources: refreshedResources,
+    })
+      .then(() => this.options.onRefreshed(refreshedResources))
+      .catch(error => {
+        changes.forEach(change => this.deferred.set(`${change.table}:${change.canonicalId}`, change));
+        fallbackResources.forEach(resource => this.deferredFallbackResources.add(resource));
+        throw error;
+      })
+      .finally(() => { this.resumeInFlight = null; });
+    await this.resumeInFlight;
+    return true;
+  }
+
+  async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[], signal?: AbortSignal): Promise<boolean> {
     if (this.disposed) return false;
     const now = this.now();
     if (reason !== 'reconnect' && now - this.lastFallbackAt < 15_000) return false;
     const unique = uniqueResources(resources);
     const editing = unique.filter(resource => this.options.isEditing(resource));
     if (editing.length > 0) {
+      editing.forEach(resource => this.deferredFallbackResources.add(resource));
       this.metrics.conflicts += 1;
       this.options.onConflict(editing);
     }
@@ -172,7 +224,12 @@ export class CloudSyncCoordinator {
     if (refreshable.length === 0) return false;
     this.lastFallbackAt = now;
     this.metrics.fallbackRefreshes += 1;
-    await this.options.refresh({ reason, changes: [], resources: refreshable });
+    await this.options.refresh({ reason, changes: [], resources: refreshable }, signal);
+    signal?.throwIfAborted();
+    [...this.deferred.entries()].forEach(([key, change]) => {
+      if (refreshable.includes(change.resource)) this.deferred.delete(key);
+    });
+    refreshable.forEach(resource => this.deferredFallbackResources.delete(resource));
     this.options.onRefreshed(refreshable);
     return true;
   }
@@ -184,8 +241,206 @@ export class CloudSyncCoordinator {
   dispose(): void {
     this.disposed = true;
     this.pending.clear();
+    this.deferred.clear();
+    this.deferredFallbackResources.clear();
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+}
+
+export type CloudReconnectTrigger =
+  | 'online'
+  | 'subscribed'
+  | 'focus'
+  | 'visibility'
+  | 'resource-registration'
+  | 'channel-interrupted';
+
+export interface CloudReconnectDiagnostic {
+  event: 'trigger' | 'deferred-no-resources' | 'attempt-start' | 'attempt-succeeded' | 'attempt-failed' | 'retry-scheduled' | 'complete' | 'exhausted' | 'cancelled';
+  trigger: CloudReconnectTrigger;
+  generation: number;
+  attempt: number;
+  resources: CloudResource[];
+  retryDelayMs?: number;
+}
+
+interface CloudReconnectCatchUpOptions {
+  refresh: (resources: CloudResource[], signal: AbortSignal) => Promise<boolean>;
+  retryDelaysMs?: readonly number[];
+  onDiagnostic?: (diagnostic: CloudReconnectDiagnostic) => void;
+}
+
+const sortedResources = (resources: CloudResource[]): CloudResource[] => (
+  uniqueResources(resources).sort()
+);
+
+/**
+ * Owns the reconnect-to-fresh transition. Connectivity events merely request
+ * a cycle; this controller keeps retrying authoritative targeted reads without
+ * requiring another Realtime event. Only one generation is active at a time.
+ */
+export class CloudReconnectCatchUp {
+  private readonly options: CloudReconnectCatchUpOptions;
+  private readonly retryDelaysMs: readonly number[];
+  private resources: CloudResource[] = [];
+  private pending = false;
+  private armed = false;
+  private exhausted = false;
+  private disposed = false;
+  private generation = 0;
+  private resourceRevision = 0;
+  private attempt = 0;
+  private trigger: CloudReconnectTrigger = 'online';
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private inFlight: Promise<void> | null = null;
+  private abortController: AbortController | null = null;
+  private waiters: Array<(completed: boolean) => void> = [];
+
+  constructor(options: CloudReconnectCatchUpOptions) {
+    this.options = options;
+    this.retryDelaysMs = options.retryDelaysMs ?? [500, 1_500, 5_000, 15_000];
+  }
+
+  updateResources(resources: CloudResource[]): void {
+    if (this.disposed) return;
+    const next = sortedResources(resources);
+    const changed = next.join('|') !== this.resources.join('|');
+    this.resources = next;
+    if (changed) this.resourceRevision += 1;
+    if (!changed || !this.pending || next.length === 0) return;
+    this.trigger = 'resource-registration';
+    this.emit('trigger');
+    this.startIfReady();
+  }
+
+  markNeeded(trigger: CloudReconnectTrigger): void {
+    if (this.disposed) return;
+    this.generation += 1;
+    this.attempt = 0;
+    this.pending = true;
+    this.armed = false;
+    this.exhausted = false;
+    this.trigger = trigger;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.abortController?.abort();
+    this.resolveWaiters(false);
+    this.emit('trigger');
+  }
+
+  request(trigger: CloudReconnectTrigger, resources?: CloudResource[]): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
+    if (resources) {
+      const next = sortedResources(resources);
+      if (next.join('|') !== this.resources.join('|')) this.resourceRevision += 1;
+      this.resources = next;
+    }
+    if (!this.pending) {
+      this.generation += 1;
+      this.attempt = 0;
+    } else if (this.exhausted) {
+      this.attempt = 0;
+      this.exhausted = false;
+    }
+    this.pending = true;
+    this.armed = true;
+    this.trigger = trigger;
+    this.emit('trigger');
+    const completion = new Promise<boolean>(resolve => this.waiters.push(resolve));
+    this.startIfReady();
+    return completion;
+  }
+
+  isPending(): boolean {
+    return this.pending;
+  }
+
+  waitForCurrentCycle(): Promise<boolean> {
+    if (this.exhausted) return Promise.resolve(false);
+    if (!this.pending) return Promise.resolve(true);
+    return new Promise<boolean>(resolve => this.waiters.push(resolve));
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.pending = false;
+    this.armed = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.abortController?.abort();
+    this.abortController = null;
+    this.emit('cancelled');
+    this.resolveWaiters(false);
+  }
+
+  private startIfReady(): void {
+    if (this.disposed || !this.pending || !this.armed || this.timer || this.inFlight) return;
+    if (this.resources.length === 0) {
+      this.emit('deferred-no-resources');
+      return;
+    }
+    const generation = this.generation;
+    const resourceRevision = this.resourceRevision;
+    const resources = [...this.resources];
+    const attempt = this.attempt + 1;
+    this.attempt = attempt;
+    const abortController = new AbortController();
+    this.abortController = abortController;
+    this.emit('attempt-start');
+    this.inFlight = this.options.refresh(resources, abortController.signal)
+      .then(completed => {
+        if (this.disposed || generation !== this.generation) return;
+        if (!completed) throw new Error('RECONNECT_CATCH_UP_DEFERRED');
+        this.emit('attempt-succeeded');
+        if (resourceRevision !== this.resourceRevision) {
+          this.attempt = 0;
+          return;
+        }
+        this.pending = false;
+        this.exhausted = false;
+        this.attempt = 0;
+        this.emit('complete');
+        this.resolveWaiters(true);
+      })
+      .catch(() => {
+        if (this.disposed || generation !== this.generation) return;
+        this.emit('attempt-failed');
+        const retryDelayMs = this.retryDelaysMs[attempt - 1];
+        if (retryDelayMs === undefined) {
+          this.exhausted = true;
+          this.emit('exhausted');
+          this.resolveWaiters(false);
+          return;
+        }
+        this.emit('retry-scheduled', retryDelayMs);
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.startIfReady();
+        }, retryDelayMs);
+      })
+      .finally(() => {
+        if (this.abortController === abortController) this.abortController = null;
+        this.inFlight = null;
+        this.startIfReady();
+      });
+  }
+
+  private emit(event: CloudReconnectDiagnostic['event'], retryDelayMs?: number): void {
+    this.options.onDiagnostic?.({
+      event,
+      trigger: this.trigger,
+      generation: this.generation,
+      attempt: this.attempt,
+      resources: [...this.resources],
+      ...(retryDelayMs === undefined ? {} : { retryDelayMs }),
+    });
+  }
+
+  private resolveWaiters(completed: boolean): void {
+    const waiters = this.waiters.splice(0);
+    waiters.forEach(resolve => resolve(completed));
   }
 }
 

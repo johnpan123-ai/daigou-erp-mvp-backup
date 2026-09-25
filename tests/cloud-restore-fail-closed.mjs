@@ -127,7 +127,7 @@ try {
 
   const localAfterSuccess = await page.evaluate(async () => {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
-    return environment.readPhysicalIndexedDbSnapshot('daigou-erp-db');
+    return environment.readPhysicalIndexedDbSnapshot('daigou-erp-local-authoritative-v1');
   });
   assert.equal(stableStringify(localAfterSuccess), stableStringify(expectedSnapshot(validFixture)), 'Local restore B must survive F5');
 
@@ -135,7 +135,7 @@ try {
   assert.equal(localInvalidResult, false, 'Local malformed restore must fail');
   const localAfterInvalid = await page.evaluate(async () => {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
-    return environment.readPhysicalIndexedDbSnapshot('daigou-erp-db');
+    return environment.readPhysicalIndexedDbSnapshot('daigou-erp-local-authoritative-v1');
   });
   assert.equal(stableStringify(localAfterInvalid), stableStringify(localAfterSuccess), 'Failed Local restore must roll back completely');
 
@@ -205,7 +205,7 @@ try {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
     return {
       testDb: await environment.readPhysicalIndexedDbSnapshot('daigou-erp-db-test-v1'),
-      productionDb: await environment.readPhysicalIndexedDbSnapshot('daigou-erp-db'),
+      productionDb: await environment.readPhysicalIndexedDbSnapshot('daigou-erp-local-authoritative-v1'),
       productionLocalStorage: environment.readPhysicalLocalStorageValue('erp_search_term'),
     };
   });

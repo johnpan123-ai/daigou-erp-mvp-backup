@@ -1,4 +1,4 @@
-import { useAuth } from './AuthProvider';
+import { useAuth } from './authContext';
 import { getProviderMode } from '../providers/providerMode';
 
 export interface UserRole {

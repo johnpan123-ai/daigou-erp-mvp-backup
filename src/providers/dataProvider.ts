@@ -24,6 +24,8 @@ import type {
 } from '../lib/db';
 import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
+import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
+import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -43,10 +45,17 @@ class DynamicDataProvider implements IDataProvider {
   private staleCallbacks: ((isStale: boolean) => void)[] = [];
   private cloudStaleResources = new Set<CloudResource>();
 
+  private getWriteInfoKey(): string {
+    const mode = getProviderMode();
+    return mode === 'cloud' || mode === 'fallback'
+      ? 'erp_cloud_cache_last_write_info'
+      : 'erp_local_last_write_info';
+  }
+
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', (e) => {
-        if (e.key === 'erp_last_write_info' && e.newValue) {
+        if (e.key === this.getWriteInfoKey() && e.newValue) {
           try {
             const info = JSON.parse(e.newValue);
             if (info.tabId !== this.tabId) {
@@ -99,7 +108,7 @@ class DynamicDataProvider implements IDataProvider {
 
   checkIsStaleLive(): boolean {
     if (typeof window === 'undefined') return false;
-    const stored = localStorage.getItem('erp_last_write_info');
+    const stored = localStorage.getItem(this.getWriteInfoKey());
     if (stored) {
       try {
         const info = JSON.parse(stored);
@@ -121,6 +130,8 @@ class DynamicDataProvider implements IDataProvider {
 
   private async guardedWrite<T>(write: () => Promise<T>): Promise<T> {
     this.guardStale();
+    const mode = getProviderMode();
+    if (mode === 'cloud' || mode === 'fallback') assertCloudWriteAllowed();
     try {
       const result = await write();
       this.registerWrite();
@@ -140,29 +151,26 @@ class DynamicDataProvider implements IDataProvider {
     this.lastLoadedTime = now;
     this.isStale = false;
     this.notifySubscribers(false);
-    localStorage.setItem('erp_last_write_info', JSON.stringify({ timestamp: now, tabId: this.tabId }));
+    localStorage.setItem(this.getWriteInfoKey(), JSON.stringify({ timestamp: now, tabId: this.tabId }));
   }
 
   async getInventory(): Promise<InventoryItem[]> {
     return this.getActiveProvider().getInventory();
   }
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
-    this.guardStale();
-    const result = await this.getActiveProvider().upsertInventory(items);
-    this.registerWrite();
-    return result;
+    return this.guardedWrite(() => this.getActiveProvider().upsertInventory(items));
   }
   async getSalesOrders(): Promise<SalesOrder[]> {
     return this.getActiveProvider().getSalesOrders();
   }
   async saveSalesOrders(items: SalesOrder[]): Promise<void> {
-    return this.getActiveProvider().saveSalesOrders(items);
+    return this.guardedWrite(() => this.getActiveProvider().saveSalesOrders(items));
   }
   async getSalesOrderItems(): Promise<SalesOrderItem[]> {
     return this.getActiveProvider().getSalesOrderItems();
   }
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
-    return this.getActiveProvider().saveSalesOrderItems(items);
+    return this.guardedWrite(() => this.getActiveProvider().saveSalesOrderItems(items));
   }
   async getProductGroups(): Promise<ProductGroup[]> {
     return this.getActiveProvider().getProductGroups();
@@ -174,7 +182,7 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getProductCategories();
   }
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
-    return this.getActiveProvider().saveProductCategories(categories);
+    return this.guardedWrite(() => this.getActiveProvider().saveProductCategories(categories));
   }
   async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
     return this.getActiveProvider().getProductVariants(options);
@@ -203,6 +211,9 @@ class DynamicDataProvider implements IDataProvider {
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
     await this.guardedWrite(() => this.getActiveProvider().savePurchaseBatchItems(items));
   }
+  async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
+    await this.guardedWrite(() => this.getActiveProvider().savePurchaseBatchTransaction(command));
+  }
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return this.getActiveProvider().getPrivateOrders();
   }
@@ -222,85 +233,70 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getJapanPackages();
   }
   async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
-    this.guardStale();
-    await this.getActiveProvider().saveJapanPackages(packages);
-    this.registerWrite();
+    await this.guardedWrite(() => this.getActiveProvider().saveJapanPackages(packages));
   }
   async getJapanPackageItems(): Promise<JapanPackageItem[]> {
     return this.getActiveProvider().getJapanPackageItems();
   }
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
-    this.guardStale();
-    await this.getActiveProvider().saveJapanPackageItems(items);
-    this.registerWrite();
+    await this.guardedWrite(() => this.getActiveProvider().saveJapanPackageItems(items));
   }
   async getOutboundShipments(): Promise<OutboundShipment[]> {
     return this.getActiveProvider().getOutboundShipments();
   }
   async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
-    this.guardStale();
-    await this.getActiveProvider().saveOutboundShipments(shipments);
-    this.registerWrite();
+    await this.guardedWrite(() => this.getActiveProvider().saveOutboundShipments(shipments));
   }
   async getOutboundShipmentItems(): Promise<OutboundShipmentItem[]> {
     return this.getActiveProvider().getOutboundShipmentItems();
   }
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
-    this.guardStale();
-    await this.getActiveProvider().saveOutboundShipmentItems(items);
-    this.registerWrite();
+    await this.guardedWrite(() => this.getActiveProvider().saveOutboundShipmentItems(items));
   }
   async getBundleComponents(): Promise<BundleComponent[]> {
     return this.getActiveProvider().getBundleComponents();
   }
   async saveBundleComponents(components: BundleComponent[]): Promise<void> {
-    this.guardStale();
-    await this.getActiveProvider().saveBundleComponents(components);
-    this.registerWrite();
+    await this.guardedWrite(() => this.getActiveProvider().saveBundleComponents(components));
   }
   async saveBundleComponentsForVariant(bundleVariantId: string, componentVariantIds: string[]): Promise<void> {
-    this.guardStale();
-    await this.getActiveProvider().saveBundleComponentsForVariant(bundleVariantId, componentVariantIds);
-    this.registerWrite();
+    await this.guardedWrite(() => this.getActiveProvider().saveBundleComponentsForVariant(bundleVariantId, componentVariantIds));
   }
   async getImportBatches(): Promise<ImportBatch[]> {
     return this.getActiveProvider().getImportBatches();
   }
   async saveImportBatches(batches: ImportBatch[]): Promise<void> {
-    return this.getActiveProvider().saveImportBatches(batches);
+    return this.guardedWrite(() => this.getActiveProvider().saveImportBatches(batches));
   }
   async exportData(): Promise<void> {
     return this.getActiveProvider().exportData();
   }
   async importData(jsonString: string): Promise<boolean> {
-    this.guardStale();
-    const result = await this.getActiveProvider().importData(jsonString);
-    this.registerWrite();
-    return result;
+    return this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
   }
   async clearData(): Promise<void> {
-    return this.getActiveProvider().clearData();
+    return this.guardedWrite(() => this.getActiveProvider().clearData());
   }
   async clearPurchaseRecords(): Promise<void> {
-    return this.getActiveProvider().clearPurchaseRecords();
+    return this.guardedWrite(() => this.getActiveProvider().clearPurchaseRecords());
   }
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
-    return this.getActiveProvider().createPurchaseRecordFromInventory(itemCodes);
+    return this.guardedWrite(() => this.getActiveProvider().createPurchaseRecordFromInventory(itemCodes));
   }
   async reparseProductVariants(): Promise<void> {
-    return this.getActiveProvider().reparseProductVariants();
+    return this.guardedWrite(() => this.getActiveProvider().reparseProductVariants());
   }
   async reparseProductTitles(): Promise<void> {
-    return this.getActiveProvider().reparseProductTitles();
+    return this.guardedWrite(() => this.getActiveProvider().reparseProductTitles());
   }
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount?: number }> {
-    return this.getActiveProvider().syncProductGroupsWithInventory();
+    return this.guardedWrite(() => this.getActiveProvider().syncProductGroupsWithInventory());
   }
   async deleteProductGroup(groupId: string): Promise<void> {
-    return this.getActiveProvider().deleteProductGroup(groupId);
+    return this.guardedWrite(() => this.getActiveProvider().deleteProductGroup(groupId));
   }
   async deleteProductGroups(groupIds: string[]): Promise<void> {
-    return this.getActiveProvider().deleteProductGroups(groupIds);
+    return this.guardedWrite(() => this.getActiveProvider().deleteProductGroups(groupIds));
   }
   async canWriteCloud(): Promise<boolean> {
     return this.getActiveProvider().canWriteCloud();
@@ -309,13 +305,10 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().getLastImportBackup();
   }
   async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
-    return this.getActiveProvider().saveLastImportBackup(backup);
+    return this.guardedWrite(() => this.getActiveProvider().saveLastImportBackup(backup));
   }
   async restoreBackup(backupData: any): Promise<boolean> {
-    this.guardStale();
-    const result = await this.getActiveProvider().restoreBackup(backupData);
-    this.registerWrite();
-    return result;
+    return this.guardedWrite(() => this.getActiveProvider().restoreBackup(backupData));
   }
 
   private getActiveProvider(): IDataProvider {

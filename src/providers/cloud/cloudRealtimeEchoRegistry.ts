@@ -22,6 +22,10 @@ export const consumeLocalCloudEchoAliases = (table: string, ids: string[]): bool
   return false;
 };
 
+export const clearLocalCloudWrites = (table: string, ids: string[]): void => {
+  ids.filter(Boolean).forEach(id => localEchoes.delete(keyOf(table, id)));
+};
+
 export const clearExpiredLocalCloudEchoes = (): void => {
   const now = Date.now();
   for (const [key, expiresAt] of localEchoes) {

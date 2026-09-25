@@ -83,12 +83,40 @@
 })();
 
 import { supabase } from './supabaseClient';
-import { db, calculateFinalMyacgDemand, normalizeProductTitle, getBaseSku } from '../../lib/db';
+import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
-import { getProviderMode } from '../providerMode';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
-import { assertSnapshotVersion, CloudStaleWriteError } from './cloudOptimisticLock';
-import { markLocalCloudWrite } from './cloudRealtimeEchoRegistry';
+import { clearLocalCloudWrites, markLocalCloudWrite } from './cloudRealtimeEchoRegistry';
+import {
+  assertCloudFieldMutationSucceeded,
+  buildCloudCollectionMutationPlan,
+  buildCloudPatchOperation,
+  isCloudFieldMutationError,
+  notifyCloudFieldMutationConflict,
+  type CloudFieldMutationOperation,
+  type CloudMutableEntity,
+  type CloudPatchOperation,
+} from './cloudFieldCas';
+import { toCloudFieldRow } from './cloudEntityPayload';
+import {
+  assertCloudWriteAllowed,
+  isLikelyCloudConnectivityError,
+  markCloudReadFailed,
+  markCloudReadFresh,
+  markCloudReadLoading,
+  markCloudReachable,
+  markCloudRequestFailed,
+} from './cloudConnectivity';
+import { CloudTargetedCache } from './cloudTargetedCache';
+import { CLOUD_TABLE_RESOURCE } from './cloudSyncDomain';
+import {
+  PURCHASE_BATCH_TRANSACTION_RPC,
+  assertPurchaseBatchTransactionSucceeded,
+  buildPurchaseBatchTransactionRequest,
+  clearPendingRpcRequest,
+  readOrCreatePendingRpcRequest,
+  type PurchaseBatchTransactionCommand,
+} from './purchaseBatchTransaction';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -112,11 +140,6 @@ import type {
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isValidUuid = (val: any): boolean => typeof val === 'string' && UUID_REGEX.test(val);
-const cloudLocalIdOf = (row: { id: string; local_id?: unknown }): string => (
-  typeof row.local_id === 'string' && row.local_id.trim()
-    ? row.local_id.trim()
-    : row.id
-);
 const generateFallbackUuid = (): string => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
@@ -132,21 +155,6 @@ const concurrencyFingerprint = (record: Record<string, unknown>): string => {
   return JSON.stringify(copy, Object.keys(copy).sort());
 };
 
-const changedExistingRows = <T extends { id: string }>(current: T[], incoming: T[], includeRemoved = true): T[] => {
-  const currentById = new Map(current.map(row => [row.id, row]));
-  if (!includeRemoved) {
-    return incoming
-      .map(row => currentById.get(row.id))
-      .filter((row): row is T => Boolean(row))
-      .filter(row => concurrencyFingerprint(row as any) !== concurrencyFingerprint(incoming.find(item => item.id === row.id) as any));
-  }
-  const incomingById = new Map(incoming.map(row => [row.id, row]));
-  return current.filter(row => {
-    const next = incomingById.get(row.id);
-    return !next || concurrencyFingerprint(row as any) !== concurrencyFingerprint(next as any);
-  });
-};
-
 const changedOrNewRows = <T extends { id: string }>(current: T[], incoming: T[]): T[] => {
   const currentById = new Map(current.map(row => [row.id, row]));
   return incoming.filter(row => {
@@ -154,18 +162,6 @@ const changedOrNewRows = <T extends { id: string }>(current: T[], incoming: T[])
     return !previous || concurrencyFingerprint(previous as any) !== concurrencyFingerprint(row as any);
   });
 };
-
-async function assertCloudRowsFresh(table: string, snapshots: Array<{ id: string; version?: number; updated_at?: string }>): Promise<void> {
-  const valid = snapshots.filter(row => isValidUuid(row.id));
-  if (valid.length === 0) return;
-  const { data, error } = await supabase
-    .from(table)
-    .select('id, version, updated_at')
-    .in('id', valid.map(row => row.id));
-  if (error) throw error;
-  const remote = new Map((data || []).map((row: any) => [row.id, row]));
-  for (const snapshot of valid) assertSnapshotVersion(snapshot, remote.get(snapshot.id) || null);
-}
 
 function getDeterministicUuid(str: string): string {
   if (isValidUuid(str)) {
@@ -206,26 +202,40 @@ function getDeterministicUuid(str: string): string {
   return `${part1}-${part2}-${part3}-${part4}-${part5}`;
 }
 
-function isSchemaMissingError(err: any): boolean {
+function isSchemaMissingError(err: unknown): boolean {
   if (!err) return false;
-  const msg = (err.message || '').toLowerCase();
-  const code = err.code || '';
+  const record = err as { message?: unknown; code?: unknown };
+  const msg = String(record.message ?? '').toLowerCase();
+  const code = String(record.code ?? '');
   return code === '42P01' || msg.includes('could not find the table') || msg.includes('relation') || msg.includes('does not exist');
 }
 async function retrySupabase(
-  fn: () => PromiseLike<{ data: any; error: any }>,
+  fn: () => PromiseLike<{ data: unknown; error: unknown }>,
   maxRetries = 3,
   baseDelay = 500,
 ): Promise<void> {
-  let lastError: any;
+  assertCloudWriteAllowed();
+  let lastError: unknown;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const { error } = await fn();
-    if (!error) return;
+    let error: unknown;
+    try {
+      ({ error } = await fn());
+    } catch (caughtError) {
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (!error) {
+      markCloudReachable();
+      return;
+    }
+    markCloudRequestFailed(error);
     lastError = error;
+    if (isLikelyCloudConnectivityError(error)) throw error;
     if (isSchemaMissingError(error)) throw error;
     if (attempt < maxRetries - 1) {
       const delay = baseDelay * Math.pow(2, attempt);
-      console.warn(`[retrySupabase] attempt ${attempt + 1} failed, retrying in ${delay}ms...`, error.message || error);
+      const retryMessage = error instanceof Error ? error.message : error;
+      console.warn(`[retrySupabase] attempt ${attempt + 1} failed, retrying in ${delay}ms...`, retryMessage);
       await new Promise(r => setTimeout(r, delay));
     }
   }
@@ -241,7 +251,11 @@ const fetchAll = async <T>(
   const seen = new Set<string>();
   while (true) {
     const { data, error } = await fetchFn(page * size, (page + 1) * size - 1);
-    if (error) throw error;
+    if (error) {
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
     if (!data || data.length === 0) break;
     for (const item of data) {
       const anyItem = item as any;
@@ -263,10 +277,151 @@ const fetchAll = async <T>(
 
 
 export class SupabaseProvider implements IDataProvider {
+  private readonly mutationCache = new CloudTargetedCache();
+
+  private async applyCloudFieldMutations(
+    entity: CloudMutableEntity,
+    operations: CloudFieldMutationOperation[],
+  ): Promise<void> {
+    if (operations.length === 0) return;
+    const ids = operations.map(operation => operation.id);
+    assertCloudWriteAllowed();
+    markLocalCloudWrite(entity, ids);
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc('erp_apply_field_mutations', {
+        p_entity: entity,
+        p_operations: operations,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites(entity, ids);
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (error) {
+      clearLocalCloudWrites(entity, ids);
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
+    try {
+      assertCloudFieldMutationSucceeded(data, entity);
+    } catch (mutationError) {
+      clearLocalCloudWrites(entity, ids);
+      if (isCloudFieldMutationError(mutationError)) notifyCloudFieldMutationConflict(mutationError);
+      throw mutationError;
+    }
+    await this.refreshAcknowledgedCloudRows(entity, ids.map(databaseId => ({ databaseId })));
+  }
+
+  private async applyCloudCollection(
+    entity: CloudMutableEntity,
+    currentRows: unknown[],
+    nextRows: unknown[],
+    options: { deleteMissing?: boolean } = {},
+  ): Promise<void> {
+    const current = currentRows.map(row => toCloudFieldRow(entity, row));
+    const next = nextRows.map(row => toCloudFieldRow(entity, row));
+    const operations = buildCloudCollectionMutationPlan(entity, current, next, options);
+    await this.applyCloudFieldMutations(entity, operations);
+  }
+
+  private async deleteCloudProductGroupTrees(groupIds: string[]): Promise<void> {
+    const [groups, categories, variants] = await Promise.all([
+      db.getProductGroups(),
+      db.getProductCategories(),
+      db.getProductVariants(),
+    ]);
+    const groupSet = new Set(groupIds);
+    const selectedGroups = groups.filter(group => groupSet.has(group.id));
+    if (selectedGroups.length !== groupSet.size) throw new Error('CLOUD_GROUP_DELETE_BASE_MISSING');
+    const expected = selectedGroups.map(group => ({
+      id: String(toCloudFieldRow('product_groups', group).id),
+      expectedVersion: Number(toCloudFieldRow('product_groups', group).version),
+      categories: categories.filter(category => category.product_group_id === group.id).map(category => ({
+        id: String(toCloudFieldRow('product_categories', category).id),
+        expectedVersion: Number(toCloudFieldRow('product_categories', category).version),
+      })),
+      variants: variants.filter(variant => variant.product_group_id === group.id).map(variant => ({
+        id: String(toCloudFieldRow('product_variants', variant).id),
+        expectedVersion: Number(toCloudFieldRow('product_variants', variant).version),
+      })),
+    }));
+    if (expected.some(group => !Number.isInteger(group.expectedVersion)
+      || group.categories.some(category => !Number.isInteger(category.expectedVersion))
+      || group.variants.some(variant => !Number.isInteger(variant.expectedVersion)))) {
+      throw new Error('CLOUD_MUTATION_VERSION_REQUIRED');
+    }
+
+    const idsByTable = {
+      product_groups: expected.map(group => group.id),
+      product_categories: expected.flatMap(group => group.categories.map(category => category.id)),
+      product_variants: expected.flatMap(group => group.variants.map(variant => variant.id)),
+    };
+    Object.entries(idsByTable).forEach(([table, ids]) => markLocalCloudWrite(table, ids));
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc('erp_delete_product_group_trees', { p_groups: expected }));
+    } catch (caughtError) {
+      Object.entries(idsByTable).forEach(([table, ids]) => clearLocalCloudWrites(table, ids));
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (error) {
+      Object.entries(idsByTable).forEach(([table, ids]) => clearLocalCloudWrites(table, ids));
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
+    try {
+      assertCloudFieldMutationSucceeded(data, 'product_groups');
+    } catch (mutationError) {
+      Object.entries(idsByTable).forEach(([table, ids]) => clearLocalCloudWrites(table, ids));
+      if (isCloudFieldMutationError(mutationError)) notifyCloudFieldMutationConflict(mutationError);
+      throw mutationError;
+    }
+    await Promise.all(Object.entries(idsByTable).map(([table, ids]) => (
+      this.refreshAcknowledgedCloudRows(table, ids.map(databaseId => ({ databaseId })))
+    )));
+  }
+
+  private async refreshAcknowledgedCloudRows(
+    table: string,
+    identities: Array<{ databaseId: string; canonicalId?: string }>,
+  ): Promise<void> {
+    const resource = CLOUD_TABLE_RESOURCE[table];
+    if (!resource) throw new Error(`Unsupported Cloud mutation cache table: ${table}`);
+    const unique = [...new Map(identities
+      .filter(identity => identity.databaseId)
+      .map(identity => [identity.databaseId, identity])).values()];
+    if (unique.length === 0) return;
+    await this.mutationCache.refresh({
+      reason: 'realtime',
+      resources: [resource],
+      changes: unique.map(identity => ({
+        table,
+        databaseId: identity.databaseId,
+        canonicalId: identity.canonicalId || identity.databaseId,
+        localId: identity.canonicalId || null,
+        resource,
+        kind: 'UPDATE',
+        origin: 'local',
+      })),
+    });
+  }
+
   private isPulled = false;
   private pullPromise: Promise<void> | null = null;
   private cachedRole: 'owner' | 'staff' | 'viewer' | 'helper' | null = null;
   private cachedRoleUserId: string | null = null;
+
+  private async requireCloudWritePermission(): Promise<void> {
+    if (!(await this.canWriteCloud())) {
+      throw new Error('目前帳號沒有雲端寫入權限，快取未變更。');
+    }
+  }
 
   async getRole(): Promise<'owner' | 'staff' | 'viewer' | 'helper' | null> {
     const { data: { session } } = await supabase.auth.getSession();
@@ -289,8 +444,10 @@ export class SupabaseProvider implements IDataProvider {
         .single();
       
       if (error || !data) {
+        if (error) markCloudRequestFailed(error);
         return null;
       }
+      markCloudReachable();
       
       this.cachedRole = data.role as any;
       this.cachedRoleUserId = userId;
@@ -301,6 +458,7 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async canWriteCloud(): Promise<boolean> {
+    assertCloudWriteAllowed();
     const role = await this.getRole();
     return role === 'owner' || role === 'staff' || role === 'helper';
   }
@@ -332,12 +490,12 @@ export class SupabaseProvider implements IDataProvider {
    */
   async pullCoreProductData(force = false): Promise<void> {
     const SYNC_VERSION = 'v2_pagination';
-    const currentSyncVer = localStorage.getItem('erp_sync_version');
+    const currentSyncVer = localStorage.getItem('erp_cloud_cache_sync_version');
     let shouldForce = force;
     if (currentSyncVer !== SYNC_VERSION) {
       console.log(`[Sync] Sync version mismatch (found ${currentSyncVer || 'none'}, expected ${SYNC_VERSION}). Forcing full pull...`);
       shouldForce = true;
-      localStorage.setItem('erp_sync_version', SYNC_VERSION);
+      localStorage.setItem('erp_cloud_cache_sync_version', SYNC_VERSION);
     }
 
     if (shouldForce) {
@@ -350,6 +508,7 @@ export class SupabaseProvider implements IDataProvider {
     const syncPromise = (async () => {
       try {
         try {
+          markCloudReadLoading();
           console.log('[Sync] 正在等待 Supabase 驗證狀態初始化...');
           
           // 等待並獲取當前登入的 session，確保 JWT token 已載入 client
@@ -357,6 +516,8 @@ export class SupabaseProvider implements IDataProvider {
           
           if (!session) {
             console.warn('[Sync] Supabase 尚未偵測到有效登入 Session，略過雲端 Pull 以避免覆蓋本機資料。');
+            const cachedGroups = await db.getProductGroups();
+            markCloudReadFailed(new Error('Cloud session unavailable'), cachedGroups.length > 0);
             return;
           }
 
@@ -373,6 +534,22 @@ export class SupabaseProvider implements IDataProvider {
             fetchAll<any>(async (from, to) => supabase.from('private_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
             fetchAll<any>(async (from, to) => supabase.from('japan_packages').select('*').is('deleted_at', null).order('id').range(from, to)),
             fetchAll<any>(async (from, to) => supabase.from('japan_package_items').select('*').is('deleted_at', null).order('id').range(from, to))
+          ]);
+          const [bcData, osData, osiData, salesOrderRows, salesOrderItemRows, inventoryRows, dashboardImageRows] = await Promise.all([
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('outbound_shipments').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('outbound_shipment_items').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('sales_orders').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('sales_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('inventory_items').select('*').is('deleted_at', null).order('inventory_key').range(from, to)),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            fetchAll<any>(async (from, to) => supabase.from('dashboard_category_images').select('category_key, image_url, storage_path').is('deleted_at', null).order('category_key').range(from, to)),
           ]);
 
           const gLen = groups.length;
@@ -416,40 +593,17 @@ export class SupabaseProvider implements IDataProvider {
           console.log(`[Cloud Pull Guard] local counts - groups: ${lg}, variants: ${lv}, orders: ${lso}, items: ${lsoi}`);
           console.log(`[Cloud Pull Guard] remote counts - groups: ${gLen}, variants: ${vLen}`);
 
-          // If local has data, but remote returns 0 for core tables, treat as suspicious empty pull.
-          // Exception: new empty account initialization (local count is 0).
-          const isNewAccount = (lg === 0 && lv === 0);
-          const isSuspicious = !isNewAccount && (
-            (lg > 0 && gLen === 0) || 
-            (lv > 0 && vLen === 0)
-          );
-
-          if (isSuspicious) {
-            const msg = `[Cloud Pull Guard] Suspicious empty pull detected! Local variants: ${lv}, remote variants: ${vLen}. Local groups: ${lg}, remote groups: ${gLen}.`;
-            console.warn(msg);
-            console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-            console.log('[Cloud Pull Guard] keep local cache');
-            throw new Error(msg);
-          }
-
-          // Check if all of them are empty
-          if (gLen === 0 && cLen === 0 && vLen === 0 && bLen === 0 && biLen === 0 && poLen === 0 && poiLen === 0) {
-            console.log('[Sync Pull] core skipped: empty cloud result');
-            this.isPulled = true;
-            return;
-          }
+          // A complete successful response is authoritative even when it contains zero rows.
+          // The Cloud cache must reflect that empty server state instead of reviving stale rows.
 
           // 2. 將雲端拉回的資料覆寫寫入本地 IndexedDB / LocalStorage 快取
           console.log(`[Sync] 正在寫入本地快取：groups: ${gLen} 筆, categories: ${cLen} 筆, variants: ${vLen} 筆, batches: ${bLen} 筆, batchItems: ${biLen} 筆, privateOrders: ${poLen} 筆, privateOrderItems: ${poiLen} 筆`);
           
-          await db.saveProductGroups(groups);
-          await db.saveProductCategories(categories);
           console.log(`[Before IndexedDB Save Variants] count: ${variants.length}`);
           console.log('[Before IndexedDB Save Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
-          await db.saveProductVariants(variants);
-          await db.savePurchaseBatches(batches);
           const mappedBatchItems = batchItems.map((r: any) => ({
             id: r.local_id || r.id,
+            database_id: r.id,
             purchase_batch_id: r.purchase_batch_id,
             product_variant_id: r.product_variant_id,
             quantity: r.quantity || 0,
@@ -458,10 +612,9 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-          await db.savePurchaseBatchItems(mappedBatchItems);
-
           const mappedOrders: PrivateOrder[] = po.map(r => ({
             id: r.local_id || r.id,
+            database_id: r.id,
             product_group_id: r.product_group_id,
             customer_name: r.customer_name,
             contact: r.contact || '',
@@ -473,6 +626,7 @@ export class SupabaseProvider implements IDataProvider {
 
           const mappedItems: PrivateOrderItem[] = poi.map(r => ({
             id: r.local_id || r.id,
+            database_id: r.id,
             private_order_id: r.private_order_id,
             product_variant_id: r.product_variant_id,
             quantity: r.quantity || 0,
@@ -481,9 +635,6 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-
-          await db.savePrivateOrders(mappedOrders);
-          await db.savePrivateOrderItems(mappedItems);
 
           // Japan Packages Sync
           const mappedPackages = jp.map((r: any) => ({
@@ -501,8 +652,6 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-          await db.saveJapanPackages(mappedPackages);
-
           const mappedPackageItems = jpi.map((r: any) => ({
             id: r.id,
             japan_package_id: r.japan_package_id,
@@ -522,34 +671,17 @@ export class SupabaseProvider implements IDataProvider {
             updated_at: r.updated_at,
             version: r.version
           }));
-          await db.saveJapanPackageItems(mappedPackageItems);
-
-          // 2.5 Pull and save bundle components (gracefully handle missing table)
-          let bcData: any[] = [];
-          try {
-            bcData = await fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').order('id').range(from, to));
-            console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
-          } catch (e: any) {
-            console.warn('[Sync WARNING] 抓取 bundle_components 發生異常:', e.message || e);
-          }
+          console.log(`[Sync] 從 Supabase 成功拉取到 bundle_components = ${bcData.length} 筆`);
           const mappedBundleComponents: BundleComponent[] = bcData.map(r => ({
             id: r.id,
+            database_id: r.id,
             bundle_variant_id: r.bundle_variant_id,
             component_variant_id: r.component_variant_id,
-            created_at: r.created_at
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            version: r.version
           }));
-          await db.saveBundleComponents(mappedBundleComponents);
-
-          // 2.6 Pull and save outbound shipments (gracefully handle missing table)
-          let osData: any[] = [];
-          let osiData: any[] = [];
-          try {
-            osData = await fetchAll<any>(async (from, to) => supabase.from('outbound_shipments').select('*').is('deleted_at', null).order('id').range(from, to));
-            osiData = await fetchAll<any>(async (from, to) => supabase.from('outbound_shipment_items').select('*').is('deleted_at', null).order('id').range(from, to));
-            console.log(`[Sync] 從 Supabase 成功拉取到 outbound_shipments = ${osData.length} 筆, outbound_shipment_items = ${osiData.length} 筆`);
-          } catch (e: any) {
-            console.warn('[Sync WARNING] 抓取 outbound_shipments 發生異常:', e.message || e);
-          }
+          console.log(`[Sync] 從 Supabase 成功拉取到 outbound_shipments = ${osData.length} 筆, outbound_shipment_items = ${osiData.length} 筆`);
           const mappedShipments: OutboundShipment[] = osData.map(r => ({
             id: r.id, title: r.title, status: r.status || 'draft',
             carrier: r.carrier || '', tracking_number: r.tracking_number || '',
@@ -558,7 +690,6 @@ export class SupabaseProvider implements IDataProvider {
             shipped_at: r.shipped_at || '', received_at: r.received_at || '',
             note: r.note || '', created_at: r.created_at, updated_at: r.updated_at, version: r.version
           }));
-          await db.saveOutboundShipments(mappedShipments);
           const mappedShipmentItems: OutboundShipmentItem[] = osiData.map(r => ({
             id: r.id, outbound_shipment_id: r.outbound_shipment_id,
             japan_package_item_id: r.japan_package_item_id || null,
@@ -569,21 +700,102 @@ export class SupabaseProvider implements IDataProvider {
             checked: Boolean(r.checked ?? false), checked_at: r.checked_at || null,
             note: r.note || '', created_at: r.created_at, updated_at: r.updated_at, version: r.version
           }));
-          await db.saveOutboundShipmentItems(mappedShipmentItems);
+          const mappedSalesOrders: SalesOrder[] = salesOrderRows.map(r => ({
+            id: r.local_id || r.id,
+            database_id: r.id,
+            platform: r.platform,
+            order_number: r.order_number,
+            buyer_name: r.buyer_name,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            version: r.version
+          }));
+          const orderUuidToLocalIdMap = new Map<string, string>();
+          for (const order of mappedSalesOrders) {
+            const uuid = getDeterministicUuid(order.id.trim().toUpperCase());
+            orderUuidToLocalIdMap.set(uuid, order.id);
+          }
+          const mappedSalesOrderItems: SalesOrderItem[] = salesOrderItemRows.map(r => ({
+            id: r.local_id || r.id,
+            database_id: r.id,
+            order_database_id: r.order_id,
+            order_id: orderUuidToLocalIdMap.get(r.order_id) || r.order_id,
+            product_variant_id: r.product_variant_id || undefined,
+            myacg_item_code: r.myacg_item_code,
+            product_name: r.product_name || undefined,
+            variant_name: r.variant_name || undefined,
+            quantity: r.quantity,
+            price: r.price !== null ? Number(r.price) : undefined,
+            amount: r.amount !== null ? Number(r.amount) : undefined,
+            order_status: r.order_status || undefined,
+            updated_at: r.updated_at,
+            version: r.version
+          }));
+          const mappedInventory: InventoryItem[] = inventoryRows.map(r => ({
+            id: r.id,
+            database_id: r.id,
+            inventory_key: r.inventory_key || `${normalizeProductTitle(r.product_title)}::${r.myacg_item_code}::${r.raw_variant_name || ''}`,
+            myacg_item_code: r.myacg_item_code,
+            product_id: r.product_id || undefined,
+            product_title: r.product_title,
+            normalized_product_title: r.normalized_product_title || undefined,
+            raw_variant_name: r.raw_variant_name || '',
+            listing_type: r.listing_type || '',
+            final_price: r.final_price || 0,
+            myacg_available_quantity: r.myacg_available_quantity || 0,
+            myacg_sold_quantity: r.myacg_sold_quantity || 0,
+            myacg_demand_quantity: r.myacg_demand_quantity || undefined,
+            myacg_listed_at: r.myacg_listed_at || '',
+            import_sort_index: r.import_sort_index || undefined,
+            latest_catalog_import_id: r.latest_catalog_import_id || undefined,
+            catalog_last_seen_at: r.catalog_last_seen_at || undefined,
+            updated_at: r.updated_at,
+            version: r.version
+          }));
 
-          // 3. 一併拉取雲端 sales_orders 與 sales_order_items 到本地，並還原 local_id 格式
-          await this.pullSalesOrders();
-          await this.pullSalesOrderItems();
-          await this.pullDashboardCategoryImages();
+          // A successful Cloud read is applied as one all-or-nothing cache transaction.
+          // Until this point every operation is read-only, so any failed/timeout request
+          // leaves the previous Cloud cache intact.
+          const cacheApplied = await db.importData(JSON.stringify({
+            inventory: mappedInventory,
+            salesOrders: mappedSalesOrders,
+            salesOrderItems: mappedSalesOrderItems,
+            productGroups: groups,
+            productCategories: categories,
+            productVariants: variants,
+            purchaseBatches: batches,
+            purchaseBatchItems: mappedBatchItems,
+            privateOrders: mappedOrders,
+            privateOrderItems: mappedItems,
+            japanPackages: mappedPackages,
+            japanPackageItems: mappedPackageItems,
+            outboundShipments: mappedShipments,
+            outboundShipmentItems: mappedShipmentItems,
+            bundleComponents: mappedBundleComponents,
+            importBatches: [],
+          }));
+          if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
 
-          // 4. 呼叫既有的重新計算流程（即 db.getProductVariants），依雲端訂單重新計算
-          console.log('[Sync] 觸發本地變體 auto quantity 重新計算...');
-          const recalculatedVariants = await db.getProductVariants();
-
-          // 5. 將重新計算後的變體資料庫存儲存至本地，絕不推送回雲端，防止洗掉雲端數量
-          await db.saveProductVariants(recalculatedVariants);
+          // Dashboard images are cache-only and are replaced only after the complete
+          // server read and IndexedDB transaction have succeeded.
+          for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+            const key = localStorage.key(index);
+            if (key?.startsWith('dashboard_cloud_img_') || key?.startsWith('dashboard_cloud_path_')) {
+              localStorage.removeItem(key);
+            }
+          }
+          dashboardImageRows.forEach(item => {
+            if (!item.category_key) return;
+            if (item.image_url) localStorage.setItem(`dashboard_cloud_img_${item.category_key}`, item.image_url);
+            if (item.storage_path) localStorage.setItem(`dashboard_cloud_path_${item.category_key}`, item.storage_path);
+          });
 
           this.isPulled = true;
+          const completeCloudRowCount = gLen + cLen + vLen + bLen + biLen + poLen + poiLen
+            + jp.length + jpi.length + bcData.length + osData.length + osiData.length
+            + mappedSalesOrders.length + mappedSalesOrderItems.length + mappedInventory.length
+            + dashboardImageRows.length;
+          markCloudReadFresh(completeCloudRowCount);
           console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
 
           checkDataSizeWarnings({
@@ -593,20 +805,22 @@ export class SupabaseProvider implements IDataProvider {
           }, role);
         } catch (err: any) {
           console.error('[Sync] 商品核心主檔同步失敗:', err);
+          const cachedRows = await Promise.all([
+            db.getProductGroups(),
+            db.getProductCategories(),
+            db.getProductVariants(),
+            db.getPurchaseBatches(),
+            db.getPurchaseBatchItems(),
+            db.getPrivateOrders(),
+            db.getPrivateOrderItems(),
+          ]);
+          markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
           if (isSchemaMissingError(err)) {
             alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
             this.isPulled = false;
             throw err;
           }
           console.log('[Sync Pull] core failed: keep local cache');
-        }
-        
-        // === pullCoreProductData() ↓ pullInventory() ===
-        // 在 core sync 成功或失敗完畢後，接續拉取庫存 (使用獨立 try-catch 避免阻礙 core data 流程)
-        try {
-          await this.pullInventory();
-        } catch (e) {
-          console.error('[Sync] 庫存拉取失敗，但不影響核心主檔：', e);
         }
       } finally {
         this.pullPromise = null;
@@ -617,9 +831,19 @@ export class SupabaseProvider implements IDataProvider {
       setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
     });
 
-    this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(err => {
+    this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(async err => {
       console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
-      this.isPulled = true; // Bypasses future blockages
+      const cachedRows = await Promise.all([
+        db.getProductGroups(),
+        db.getProductCategories(),
+        db.getProductVariants(),
+        db.getPurchaseBatches(),
+        db.getPurchaseBatchItems(),
+        db.getPrivateOrders(),
+        db.getPrivateOrderItems(),
+      ]);
+      markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
+      this.isPulled = false;
     });
 
     return this.pullPromise;
@@ -652,51 +876,36 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveProductGroups(groups: ProductGroup[]): Promise<void> {
+    await this.requireCloudWritePermission();
     const currentLocalGroups = await db.getProductGroups();
-    const sanitizedGroups = [];
+    const sanitizedGroups: ProductGroup[] = [];
+    let categoriesWithRekeyedParents: ProductCategory[] | null = null;
+    let variantsWithRekeyedParents: ProductVariant[] | null = null;
     for (const g of groups) {
       if (!isValidUuid(g.id)) {
         const newId = generateFallbackUuid();
         console.warn(`[UUID Stabilization] Detected invalid Group ID "${g.id}". Regenerated to "${newId}".`);
         
         // Update any child categories in IndexedDB
-        const cats = await db.getProductCategories();
+        const cats: ProductCategory[] = categoriesWithRekeyedParents ?? await db.getProductCategories();
         const childCats = cats.filter(c => c.product_group_id === g.id);
         if (childCats.length > 0) {
           childCats.forEach(c => c.product_group_id = newId);
-          await db.saveProductCategories(cats);
-          // Push the FULL category set, not just childCats: saveProductCategories() now
-          // does delete-detection by diffing against local storage, so pushing a subset
-          // here would make every other category look "removed" and get soft-deleted.
-          await this.saveProductCategories(cats);
+          categoriesWithRekeyedParents = cats;
         }
 
         // Update any child variants in IndexedDB
-        const vars = await db.getProductVariants();
+        const vars: ProductVariant[] = variantsWithRekeyedParents ?? await db.getProductVariants();
         const childVars = vars.filter(v => v.product_group_id === g.id);
         if (childVars.length > 0) {
           childVars.forEach(v => v.product_group_id = newId);
-          await db.saveProductVariants(vars);
-          await this.saveProductVariants(childVars);
+          variantsWithRekeyedParents = vars;
         }
 
         sanitizedGroups.push({ ...g, id: newId });
       } else {
         sanitizedGroups.push(g);
       }
-    }
-
-    const canWrite = await this.canWriteCloud();
-    if (canWrite) {
-      await assertCloudRowsFresh('product_groups', changedExistingRows(currentLocalGroups, sanitizedGroups));
-    }
-
-    // 1. 寫入本地 IndexedDB 快取
-    await db.saveProductGroups(sanitizedGroups);
-
-    if (!canWrite) {
-      console.log('[Sync Push] Skip product_groups cloud push (Read-Only Viewer/Helper)');
-      return;
     }
 
     // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
@@ -715,39 +924,22 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log(`[Cloud Push] product_groups count: ${validGroups.length}`);
 
-      const upsertData = validGroups.map(g => ({
-        id: g.id,
-        local_id: cloudLocalIdOf(g as ProductGroup & { local_id?: string }),
-        title: g.title,
-        listing_type: g.listing_type || null,
-        purchase_date: g.purchase_date || null,
-        closing_date: g.closing_date || null,
-        release_month: g.release_month || null,
-        product_url: g.product_url || null,
-        priority: g.priority || 'Medium',
-        normalized_title: g.normalized_title || null,
-        has_official_site: g.has_official_site || false,
-        proxy_agent: g.proxy_agent || null,
-        show_in_purchase_list: g.show_in_purchase_list ?? false
-      }));
-
-      markLocalCloudWrite('product_groups', validGroups.map(group => group.id));
-      await retrySupabase(() => supabase
-        .from('product_groups')
-        .upsert(upsertData));
+      await this.applyCloudCollection('product_groups', currentLocalGroups, sanitizedGroups, { deleteMissing: false });
+      if (categoriesWithRekeyedParents) await this.saveProductCategories(categoriesWithRekeyedParents);
+      if (variantsWithRekeyedParents) await this.saveProductVariants(variantsWithRekeyedParents);
 
       {
-        console.log(`[Sync Push] product_groups upsert success: ${upsertData.length} rows`);
+        console.log(`[Sync Push] product_groups field mutation success: ${validGroups.length} candidate rows`);
       }
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步商品群組發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步商品群組發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
 
   async saveProductCategories(categories: ProductCategory[]): Promise<void> {
+    await this.requireCloudWritePermission();
     // Identify deleted ones by comparing with current local storage records, BEFORE it gets
     // overwritten below. Without this, a caller that just omits a category from the array
     // (e.g. reparseProductVariants()'s empty-category cleanup) only ever removes it locally --
@@ -799,22 +991,6 @@ export class SupabaseProvider implements IDataProvider {
       sanitizedCategories.push(updatedCat);
     }
 
-    if (categoriesChanged) {
-      await db.saveProductCategories(sanitizedCategories);
-    } else {
-      await db.saveProductCategories(categories);
-    }
-
-    if (variantsChanged) {
-      await db.saveProductVariants(vars);
-      await this.saveProductVariants(vars);
-    }
-
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip product_categories cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
-
     const finalCategories = categoriesChanged ? sanitizedCategories : categories;
 
     try {
@@ -824,19 +1000,13 @@ export class SupabaseProvider implements IDataProvider {
       if (removedCategories.length > 0) {
         const removedIds = removedCategories.map(c => c.id).filter(isValidUuid);
         if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
           console.log(`[Sync Push] product_categories marking deleted_at: ${removedIds.length} rows`);
-          await retrySupabase(() => supabase
-            .from('product_categories')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(delError => {
-            console.error('[Sync Push] product_categories delete update failed:', delError);
-          });
         }
       }
 
       // (B) 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
       if (finalCategories.length === 0) {
+        await this.applyCloudCollection('product_categories', currentLocalCategories, finalCategories);
         return;
       }
 
@@ -847,30 +1017,21 @@ export class SupabaseProvider implements IDataProvider {
 
       if (validCategories.length === 0) {
         console.log('[Sync Push] product_categories skipped: no valid rows');
+        await this.refreshAcknowledgedCloudRows('product_categories', removedCategories.map(category => ({ databaseId: category.id })));
         return;
       }
 
       console.log(`[Cloud Push] product_categories count: ${validCategories.length}`);
 
-      const upsertData = validCategories.map(c => ({
-        id: c.id,
-        local_id: cloudLocalIdOf(c as ProductCategory & { local_id?: string }),
-        product_group_id: c.product_group_id,
-        title: c.title,
-        sort_order: c.sort_order || 0
-      }));
-
-      await retrySupabase(() => supabase
-        .from('product_categories')
-        .upsert(upsertData));
+      await this.applyCloudCollection('product_categories', currentLocalCategories, finalCategories);
+      if (variantsChanged) await this.saveProductVariants(vars);
 
       {
-        console.log(`[Sync Push] product_categories upsert success: ${upsertData.length} rows`);
+        console.log(`[Sync Push] product_categories field mutation success: ${validCategories.length} candidate rows`);
       }
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步商品分類發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步商品分類發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -881,6 +1042,7 @@ export class SupabaseProvider implements IDataProvider {
    * For single-field or local updates, use updateProductVariantPatch instead.
    */
   async saveProductVariants(variants: ProductVariant[]): Promise<void> {
+    await this.requireCloudWritePermission();
     if (!variants || variants.length === 0) {
       console.warn("[Sync Push] SKIP saveProductVariants because variants array is empty");
       return;
@@ -933,32 +1095,9 @@ export class SupabaseProvider implements IDataProvider {
       sanitizedVariants.push(updatedVar);
     }
 
-    const finalVars = variantsChanged ? sanitizedVariants : variants;
-    
-    // 安全合併：獲取本地所有 variants，合併後儲存，避免覆蓋 IndexedDB 清空其他規格
+    // Read the current cache only for stale comparison. The acknowledged rows
+    // are read back from Supabase before the Cloud cache is changed.
     const allLocalVars = await db.getProductVariants();
-    const allLocalVarsMap = new Map(allLocalVars.map(v => [v.id, v]));
-    for (const v of finalVars) {
-      const existing = allLocalVarsMap.get(v.id);
-      if (existing) {
-        allLocalVarsMap.set(v.id, { ...existing, ...v });
-      } else {
-        allLocalVarsMap.set(v.id, v);
-      }
-    }
-    const mergedVars = Array.from(allLocalVarsMap.values());
-    const canWrite = await this.canWriteCloud();
-    if (canWrite) {
-      await assertCloudRowsFresh('product_variants', changedExistingRows(allLocalVars, finalVars as ProductVariant[], false));
-    }
-    console.log(`[Before IndexedDB Save Variants] merged count: ${mergedVars.length}`);
-    await db.saveProductVariants(mergedVars);
-
-    if (!canWrite) {
-      console.log('[Sync Push] Skip product_variants cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
-
     // 2. 如果傳入陣列為空，直接略過，不向 Supabase 發送 upsert
     const finalVariants = variantsChanged ? sanitizedVariants : variants;
     if (finalVariants.length === 0) {
@@ -978,187 +1117,59 @@ export class SupabaseProvider implements IDataProvider {
 
       console.log(`[Cloud Push] product_variants count: ${validVariants.length}`);
 
-      const upsertData = validVariants.map(v => {
-        const payload: any = {
-          id: v.id,
-          local_id: cloudLocalIdOf(v as ProductVariant & { local_id?: string }),
-          product_group_id: v.product_group_id,
-          product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
-          myacg_item_code: v.myacg_item_code,
-          variant_name: v.variant_name,
-          raw_variant_name: v.raw_variant_name || null,
-          product_title: v.product_title,
-          note: v.note || '',
-          sort_order: v.sort_order ?? 0,
-          catalog_missing: v.catalog_missing || false,
-          source: v.source || null,
-          default_jpy_cost: v.default_jpy_cost ?? null,
-          default_twd_cost: v.default_twd_cost ?? null,
-          myacg_manual_adjustment: v.myacg_manual_adjustment ?? 0,
-          waca_manual_adjustment: v.waca_manual_adjustment ?? 0,
-          private_manual_adjustment: v.private_manual_adjustment ?? null,
-          purchased_manual_adjustment: v.purchased_manual_adjustment ?? null,
-          myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
-          effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
-          waca_auto_quantity: v.waca_auto_quantity ?? 0,
-          version: (v as any).version ?? 1,
-          updated_at: new Date().toISOString()
-        };
+      await this.applyCloudCollection('product_variants', allLocalVars, finalVariants, { deleteMissing: false });
 
-        return payload;
-      });
+      console.log(`[Cloud Cache Commit] product_variants acknowledged count: ${validVariants.length}`);
 
-      console.log('[Default Cost Sync] save payload sample:', upsertData.length > 0 ? JSON.stringify(upsertData[0]) : 'empty');
-
-      markLocalCloudWrite('product_variants', validVariants.map(variant => variant.id));
-      await retrySupabase(() => supabase
-        .from('product_variants')
-        .upsert(upsertData));
-
-      console.log(`[Sync Push] product_variants upsert success: ${upsertData.length} rows`);
+      console.log(`[Sync Push] product_variants field mutation success: ${validVariants.length} candidate rows`);
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步商品規格發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
 
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
-    const whitelist = new Set([
-      'myacg_manual_adjustment',
-      'waca_manual_adjustment',
-      'private_manual_adjustment',
-      'purchased_manual_adjustment',
-      'default_jpy_cost',
-      'default_twd_cost',
-      'note',
-      'updated_at',
-      'version',
-      'variant_name',
-      'myacg_item_code'
-    ]);
-    for (const key of Object.keys(patch)) {
-      if (!whitelist.has(key)) {
-        throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatch`);
-      }
-    }
-
+    await this.requireCloudWritePermission();
     const localVariant = (await db.getProductVariants()).find(variant => variant.id === id);
     if (!localVariant) throw new Error(`Product variant not found: ${id}`);
-    const canWrite = await this.canWriteCloud();
-    if (!canWrite) {
-      await db.updateProductVariantPatch(id, patch);
-      console.log('[Sync Push] Skip updateProductVariantPatch cloud update (Read-Only Viewer/Helper)');
-      return;
-    }
-
     try {
       console.log(`[Cloud Patch] product_variants target id: ${id}, patch keys: ${Object.keys(patch).join(', ')}`);
-      
-      const finalPatch = {
-        ...patch,
-        updated_at: patch.updated_at || new Date().toISOString()
-      };
-
-      markLocalCloudWrite('product_variants', [id]);
-      const { data, error } = await supabase
-        .from('product_variants')
-        .update(finalPatch)
-        .eq('id', id)
-        .eq('version', localVariant.version ?? -1)
-        .select('version, updated_at');
-
-      if (error) throw error;
-      if (!data || data.length !== 1) throw new CloudStaleWriteError();
-      await db.updateProductVariantPatch(id, { ...patch, version: data[0].version, updated_at: data[0].updated_at });
+      const base = toCloudFieldRow('product_variants', localVariant);
+      const operation = buildCloudPatchOperation('product_variants', base, patch as Record<string, unknown>);
+      if (operation) await this.applyCloudFieldMutations('product_variants', [operation]);
 
       console.log(`[Sync Patch] product_variants update success for id: ${id}`);
     } catch (err: any) {
       console.error(`[Cloud Patch ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullCoreProductData(true);
-      alert(`雲端局部更新商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端局部更新商品規格發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
 
   async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
-    const whitelist = new Set([
-      'myacg_manual_adjustment',
-      'waca_manual_adjustment',
-      'private_manual_adjustment',
-      'purchased_manual_adjustment',
-      'default_jpy_cost',
-      'default_twd_cost',
-      'note',
-      'updated_at',
-      'version',
-      'variant_name',
-      'myacg_item_code'
-    ]);
-    for (const item of patches) {
-      for (const key of Object.keys(item.patch)) {
-        if (!whitelist.has(key)) {
-          throw new Error(`Field '${key}' is not allowed to be patched in updateProductVariantPatchBulk`);
-        }
-      }
-    }
-
-    // 1. Update local IndexedDB in one bulk save
-    await db.updateProductVariantPatchBulk(patches);
-
-    // 2. Check cloud write permission
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip updateProductVariantPatchBulk cloud update (Read-Only Viewer/Helper)');
-      return;
-    }
-
+    await this.requireCloudWritePermission();
     if (patches.length === 0) return;
 
     try {
       console.log(`[Cloud Patch Bulk] product_variants target count: ${patches.length}`);
-      
       const allLocalVars = await db.getProductVariants();
-      const upsertData: any[] = [];
-      for (const item of patches) {
-        const v = allLocalVars.find(x => x.id === item.id);
-        if (v) {
-          upsertData.push({
-            id: v.id,
-            local_id: cloudLocalIdOf(v as ProductVariant & { local_id?: string }),
-            product_group_id: v.product_group_id,
-            product_category_id: isValidUuid(v.product_category_id) ? v.product_category_id : null,
-            myacg_item_code: v.myacg_item_code,
-            variant_name: v.variant_name,
-            raw_variant_name: v.raw_variant_name || null,
-            product_title: v.product_title,
-            note: v.note || '',
-            sort_order: v.sort_order ?? 0,
-            catalog_missing: v.catalog_missing || false,
-            source: v.source || null,
-            myacg_manual_adjustment: v.myacg_manual_adjustment ?? 0,
-            waca_manual_adjustment: v.waca_manual_adjustment ?? 0,
-            private_manual_adjustment: v.private_manual_adjustment ?? null,
-            purchased_manual_adjustment: v.purchased_manual_adjustment ?? null,
-            myacg_auto_quantity: v.myacg_auto_quantity ?? 0,
-            effective_myacg_quantity: v.effective_myacg_quantity ?? 0,
-            waca_auto_quantity: v.waca_auto_quantity ?? 0,
-            version: (v as any).version ?? 1,
-            ...item.patch,
-            updated_at: item.patch.updated_at || new Date().toISOString()
-          });
-        }
-      }
-
-      await retrySupabase(() => supabase
-        .from('product_variants')
-        .upsert(upsertData));
+      const byId = new Map(allLocalVars.map(variant => [variant.id, variant]));
+      const operations = patches.map(item => {
+        const variant = byId.get(item.id);
+        if (!variant) throw new Error(`Product variant not found: ${item.id}`);
+        return buildCloudPatchOperation(
+          'product_variants',
+          toCloudFieldRow('product_variants', variant),
+          item.patch as Record<string, unknown>,
+        );
+      }).filter((operation): operation is CloudPatchOperation => Boolean(operation));
+      await this.applyCloudFieldMutations('product_variants', operations);
 
       console.log(`[Sync Patch Bulk] product_variants bulk update success for count: ${patches.length}`);
     } catch (err: any) {
       console.error(`[Cloud Patch Bulk ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullCoreProductData(true);
-      alert(`雲端批量局部更新商品規格發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端批量局部更新商品規格發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -1170,93 +1181,11 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
-    const stats = await db.upsertInventory(items);
-    
-    if (!(await this.canWriteCloud())) {
-      console.log('[Inventory Sync] Skip inventory cloud push (Read-Only Viewer/Helper)');
-      return stats;
-    }
+    await this.requireCloudWritePermission();
+    const currentInventory = await db.getInventory();
+    const { inventory: preparedInventory, stats } = prepareInventoryUpsert(currentInventory, items);
 
-    try {
-      // Clean up Supabase inventory_items residue before pushing new ones
-      const parentCodes = new Set<string>();
-      const normalizedTitles = new Set<string>();
-      for (const item of items) {
-        const pCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
-        if (pCode) {
-          parentCodes.add(pCode.trim().toUpperCase());
-        } else {
-          const normTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
-          if (normTitle) {
-            normalizedTitles.add(normTitle);
-          }
-        }
-      }
-
-      // 1. Delete by parentCode conditions using a single regex match query for optimal performance
-      if (parentCodes.size > 0) {
-        const parentCodesArr = Array.from(parentCodes);
-        const regexPattern = `^(${parentCodesArr.join('|')})(_.*)?$`;
-        console.log(`[Inventory Sync] Deleting old residue in Supabase using regex pattern: ${regexPattern}`);
-        const { error: delErr } = await supabase
-          .from('inventory_items')
-          .delete()
-          .filter('myacg_item_code', 'match', regexPattern);
-        if (delErr) {
-          console.error(`[Inventory Sync WARNING] Failed to delete residue for parentCodes:`, delErr);
-        }
-      }
-
-      // 2. Delete by normalized_product_title fallback conditions
-      if (normalizedTitles.size > 0) {
-        const normalizedTitlesArr = Array.from(normalizedTitles);
-        console.log(`[Inventory Sync] Deleting old residue in Supabase for normalized titles:`, normalizedTitlesArr);
-        const { error: delErr } = await supabase
-          .from('inventory_items')
-          .delete()
-          .in('normalized_product_title', normalizedTitlesArr);
-        if (delErr) {
-          console.error(`[Inventory Sync WARNING] Failed to delete residue for normalized titles:`, delErr);
-        }
-      }
-
-      const allInventory = await db.getInventory();
-      if (allInventory.length === 0) {
-        console.log('[Inventory Sync] push skipped: empty local array');
-        return stats;
-      }
-
-      console.log(`[Inventory Sync] push starting: ${allInventory.length} rows`);
-      const upsertData = allInventory.map(item => ({
-        inventory_key: item.inventory_key || `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`,
-        myacg_item_code: item.myacg_item_code,
-        product_id: item.product_id || null,
-        product_title: item.product_title,
-        normalized_product_title: item.normalized_product_title || null,
-        raw_variant_name: item.raw_variant_name || null,
-        listing_type: item.listing_type || null,
-        final_price: item.final_price ?? 0,
-        myacg_available_quantity: item.myacg_available_quantity ?? 0,
-        myacg_sold_quantity: item.myacg_sold_quantity ?? 0,
-        myacg_demand_quantity: item.myacg_demand_quantity ?? 0,
-        myacg_listed_at: item.myacg_listed_at || null,
-        import_sort_index: item.import_sort_index || null,
-        latest_catalog_import_id: item.latest_catalog_import_id || null,
-        catalog_last_seen_at: item.catalog_last_seen_at || null
-      }));
-
-      console.log('[Inventory Sync] actual upsert payload sample', JSON.stringify(upsertData[0]));
-
-      await retrySupabase(() => supabase
-        .from('inventory_items')
-        .upsert(upsertData, { onConflict: 'inventory_key' }));
-
-      console.log(`[Inventory Sync] push success: ${upsertData.length} rows`);
-    } catch (err: any) {
-      console.error('[Inventory Sync ERROR] push failed:', err.message || err);
-      throw err;
-    }
-    
+    await this.applyCloudCollection('inventory_items', currentInventory, preparedInventory);
     return stats;
   }
 
@@ -1265,13 +1194,8 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveSalesOrders(orders: SalesOrder[]): Promise<void> {
-    // 1. 本地照舊保存
-    await db.saveSalesOrders(orders);
-
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip sales_orders cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
+    await this.requireCloudWritePermission();
+    const currentOrders = await db.getSalesOrders();
 
     // 2. Cloud Mode 時 upsert sales_orders
     if (orders.length === 0) {
@@ -1281,24 +1205,12 @@ export class SupabaseProvider implements IDataProvider {
     try {
       console.log(`[Sync Push] sales_orders preparing: ${orders.length} rows`);
 
-      const upsertData = orders.map(o => ({
-        id: getDeterministicUuid(o.id.trim().toUpperCase()),
-        local_id: o.id,
-        platform: o.platform,
-        order_number: o.order_number,
-        buyer_name: o.buyer_name,
-        created_at: o.created_at || new Date().toISOString()
-      }));
+      await this.applyCloudCollection('sales_orders', currentOrders, orders, { deleteMissing: false });
 
-      await retrySupabase(() => supabase
-        .from('sales_orders')
-        .upsert(upsertData, { onConflict: 'order_number' }));
-
-      console.log(`[Sync Push] sales_orders upsert success: ${upsertData.length} rows`);
+      console.log(`[Sync Push] sales_orders field mutation success: ${orders.length} candidate rows`);
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullSalesOrders();
-      alert(`雲端同步銷售訂單發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步銷售訂單發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -1308,13 +1220,8 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveSalesOrderItems(items: SalesOrderItem[]): Promise<void> {
-    // 1. 本地照舊保存
-    await db.saveSalesOrderItems(items);
-
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip sales_order_items cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
+    await this.requireCloudWritePermission();
+    const currentItems = await db.getSalesOrderItems();
 
     // 2. Cloud Mode 時 upsert sales_order_items
     if (items.length === 0) {
@@ -1324,43 +1231,17 @@ export class SupabaseProvider implements IDataProvider {
     try {
       console.log(`[Sync Push] sales_order_items preparing: ${items.length} rows`);
 
-      const upsertData = items.map(item => {
-        const orderIdPart = item.order_id.trim().toUpperCase();
-        const codePart = item.myacg_item_code.trim().toUpperCase();
-        const variantPart = (item.variant_name || '').trim().toUpperCase();
-        const pricePart = Number(item.price || 0).toString();
-        const uniqueKey = `${orderIdPart}_${codePart}_${variantPart}_${pricePart}`;
-        const deterministicId = getDeterministicUuid(uniqueKey);
+      await this.applyCloudCollection('sales_order_items', currentItems, items, { deleteMissing: false });
 
-        return {
-          id: deterministicId,
-          order_id: getDeterministicUuid(orderIdPart),
-          product_variant_id: isValidUuid(item.product_variant_id) ? item.product_variant_id : null,
-          myacg_item_code: item.myacg_item_code,
-          product_name: item.product_name || null,
-          variant_name: item.variant_name || null,
-          quantity: item.quantity || 0,
-          price: item.price !== undefined ? Number(item.price) : 0,
-          amount: item.amount !== undefined ? Number(item.amount) : 0,
-          order_status: item.order_status || null,
-          local_id: item.id
-        };
-      });
-
-      await retrySupabase(() => supabase
-        .from('sales_order_items')
-        .upsert(upsertData));
-
-      console.log(`[Sync Push] sales_order_items upsert success: ${upsertData.length} rows`);
+      console.log(`[Sync Push] sales_order_items field mutation success: ${items.length} candidate rows`);
     } catch (err: any) {
       console.error(`[Cloud Push ERROR] Supabase error message: ${err.message || err}`);
-      await this.pullSalesOrderItems();
-      alert(`雲端同步訂單明細發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步訂單明細發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
 
-  async pullSalesOrders(): Promise<void> {
+  async pullSalesOrders(): Promise<number> {
     try {
       const data = await fetchAll<any>(async (from, to) =>
         supabase
@@ -1371,32 +1252,26 @@ export class SupabaseProvider implements IDataProvider {
           .range(from, to)
       );
 
-      const localOrders = await db.getSalesOrders();
-      const lso = localOrders.length;
       const rso = data?.length || 0;
 
-      console.log(`[Cloud Pull Guard] sales_orders - local count: ${lso}, remote count: ${rso}`);
-
-      if (lso > 0 && rso === 0) {
-        const msg = '[Cloud Pull Guard] Suspicious empty pull for sales_orders!';
-        console.warn(msg);
-        console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-        console.log('[Cloud Pull Guard] keep local cache');
-        throw new Error(msg);
-      }
+      console.log(`[Cloud Pull] sales_orders remote count: ${rso}`);
 
       const rows = data || [];
       const mappedOrders: SalesOrder[] = rows.map(r => ({
         id: r.local_id || r.id,
+        database_id: r.id,
         platform: r.platform,
         order_number: r.order_number,
         buyer_name: r.buyer_name,
-        created_at: r.created_at
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        version: r.version
       }));
 
       // Write directly to local DB
       await db.saveSalesOrders(mappedOrders);
       console.log(`[Sync Pull] sales_orders applied: ${mappedOrders.length} rows`);
+      return mappedOrders.length;
     } catch (err: any) {
       console.error(`[Sync Pull ERROR] sales_orders failed (Schema 缺失?): ${err.message || err}`);
       if (err.message && (err.message.includes('42P01') || err.message.toLowerCase().includes('relation') || err.message.toLowerCase().includes('could not find the table'))) {
@@ -1406,7 +1281,7 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
-  async pullSalesOrderItems(): Promise<void> {
+  async pullSalesOrderItems(): Promise<number> {
     try {
       const data = await fetchAll<any>(async (from, to) =>
         supabase
@@ -1417,19 +1292,9 @@ export class SupabaseProvider implements IDataProvider {
           .range(from, to)
       );
 
-      const localItems = await db.getSalesOrderItems();
-      const lsoi = localItems.length;
       const rsoi = data?.length || 0;
 
-      console.log(`[Cloud Pull Guard] sales_order_items - local count: ${lsoi}, remote count: ${rsoi}`);
-
-      if (lsoi > 0 && rsoi === 0) {
-        const msg = '[Cloud Pull Guard] Suspicious empty pull for sales_order_items!';
-        console.warn(msg);
-        console.log('[Cloud Pull Guard] abort sync to prevent pushing stale local cache');
-        console.log('[Cloud Pull Guard] keep local cache');
-        throw new Error(msg);
-      }
+      console.log(`[Cloud Pull] sales_order_items remote count: ${rsoi}`);
 
       const orders = await db.getSalesOrders();
       const orderUuidToLocalIdMap = new Map<string, string>();
@@ -1443,6 +1308,8 @@ export class SupabaseProvider implements IDataProvider {
         const localOrderId: string = orderUuidToLocalIdMap.get(r.order_id) || r.order_id;
         return {
           id: r.local_id || r.id,
+          database_id: r.id,
+          order_database_id: r.order_id,
           order_id: localOrderId,
           product_variant_id: r.product_variant_id || undefined,
           myacg_item_code: r.myacg_item_code,
@@ -1451,13 +1318,16 @@ export class SupabaseProvider implements IDataProvider {
           quantity: r.quantity,
           price: r.price !== null ? Number(r.price) : undefined,
           amount: r.amount !== null ? Number(r.amount) : undefined,
-          order_status: r.order_status || undefined
+          order_status: r.order_status || undefined,
+          updated_at: r.updated_at,
+          version: r.version
         };
       });
 
       // Write directly to local DB
       await db.saveSalesOrderItems(mappedItems);
       console.log(`[Sync Pull] sales_order_items applied: ${mappedItems.length} rows`);
+      return mappedItems.length;
     } catch (err: any) {
       console.error(`[Sync Pull ERROR] sales_order_items failed (Schema 缺失?): ${err.message || err}`);
       if (err.message && (err.message.includes('42P01') || err.message.toLowerCase().includes('relation') || err.message.toLowerCase().includes('could not find the table'))) {
@@ -1467,7 +1337,7 @@ export class SupabaseProvider implements IDataProvider {
     }
   }
 
-  async pullInventory(): Promise<void> {
+  async pullInventory(): Promise<number> {
     try {
       const data = await fetchAll<any>(async (from, to) =>
         supabase
@@ -1478,19 +1348,14 @@ export class SupabaseProvider implements IDataProvider {
           .range(from, to)
       );
 
-      const localInv = await db.getInventory();
-      const linv = localInv.length;
       const rinv = data?.length || 0;
 
       console.log(`[Inventory Sync] pulled count: ${rinv}`);
 
-      if (linv > 0 && rinv === 0) {
-        console.warn('[Inventory Sync] Suspicious empty pull for inventory_items, aborting save');
-        return;
-      }
-
       const rows = data || [];
       const mappedItems: InventoryItem[] = rows.map(r => ({
+        id: r.id,
+        database_id: r.id,
         inventory_key: r.inventory_key || `${normalizeProductTitle(r.product_title)}::${r.myacg_item_code}::${r.raw_variant_name || ''}`,
         myacg_item_code: r.myacg_item_code,
         product_id: r.product_id || undefined,
@@ -1505,7 +1370,9 @@ export class SupabaseProvider implements IDataProvider {
         myacg_listed_at: r.myacg_listed_at || '',
         import_sort_index: r.import_sort_index || undefined,
         latest_catalog_import_id: r.latest_catalog_import_id || undefined,
-        catalog_last_seen_at: r.catalog_last_seen_at || undefined
+        catalog_last_seen_at: r.catalog_last_seen_at || undefined,
+        updated_at: r.updated_at,
+        version: r.version
       }));
 
       await db.saveInventory(mappedItems);
@@ -1513,8 +1380,10 @@ export class SupabaseProvider implements IDataProvider {
       if (mappedItems.length > 0) {
         console.log(`[Inventory Sync] sample: ${JSON.stringify(mappedItems[0])}`);
       }
+      return mappedItems.length;
     } catch (err: any) {
       console.error(`[Inventory Sync ERROR] pull failed: ${err.message || err}`);
+      throw err;
     }
   }
 
@@ -1523,21 +1392,11 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePurchaseBatches(batches: PurchaseBatch[]): Promise<void> {
+    await this.requireCloudWritePermission();
     // 1. Identify deleted ones by comparing with current local storage records
     const currentLocal = await db.getPurchaseBatches();
     const incomingIds = new Set(batches.map(b => b.id));
     const removedBatches = currentLocal.filter(b => !incomingIds.has(b.id));
-
-    const canWrite = await this.canWriteCloud();
-    if (canWrite) await assertCloudRowsFresh('purchase_batches', changedExistingRows(currentLocal, batches));
-
-    // 2. Save locally
-    await db.savePurchaseBatches(batches);
-
-    if (!canWrite) {
-      console.log('[Sync Push] Skip purchase_batches cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
 
     // 3. Supabase Cloud Sync
     try {
@@ -1545,15 +1404,7 @@ export class SupabaseProvider implements IDataProvider {
       if (removedBatches.length > 0) {
         const removedIds = removedBatches.map(b => b.id).filter(isValidUuid);
         if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('purchase_batches', removedIds);
           console.log(`[Sync Push] purchase_batches marking deleted_at: ${removedIds.length} rows`);
-          await retrySupabase(() => supabase
-            .from('purchase_batches')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(delError => {
-            console.error('[Sync Push] purchase_batches delete update failed:', delError);
-          });
         }
       }
 
@@ -1561,25 +1412,11 @@ export class SupabaseProvider implements IDataProvider {
       const activeBatches = changedOrNewRows(currentLocal, batches).filter(b => isValidUuid(b.id) && isValidUuid(b.product_group_id));
       if (activeBatches.length > 0) {
         console.log(`[Sync Push] purchase_batches upserting: ${activeBatches.length} rows`);
-        const upsertData = activeBatches.map(b => ({
-          id: b.id,
-          local_id: cloudLocalIdOf(b as PurchaseBatch & { local_id?: string }),
-          product_group_id: b.product_group_id,
-          name: b.name,
-          date: b.date || null,
-          note: b.note || null,
-          currency: 'JPY'
-        }));
-
-        markLocalCloudWrite('purchase_batches', activeBatches.map(batch => batch.id));
-        await retrySupabase(() => supabase
-          .from('purchase_batches')
-          .upsert(upsertData));
       }
+      await this.applyCloudCollection('purchase_batches', currentLocal, batches);
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步採購批次發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步採購批次發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -1589,21 +1426,11 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void> {
+    await this.requireCloudWritePermission();
     // 1. Identify deleted ones by comparing with current local storage records
     const currentLocal = await db.getPurchaseBatchItems();
     const incomingIds = new Set(items.map(i => i.id));
     const removedItems = currentLocal.filter(i => !incomingIds.has(i.id));
-
-    const canWrite = await this.canWriteCloud();
-    if (canWrite) await assertCloudRowsFresh('purchase_batch_items', changedExistingRows(currentLocal, items));
-
-    // 2. Save locally (which also triggers auto recalculated quantities updates)
-    await db.savePurchaseBatchItems(items);
-
-    if (!canWrite) {
-      console.log('[Sync Push] Skip purchase_batch_items cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
 
     // 3. Supabase Cloud Sync
     try {
@@ -1611,15 +1438,7 @@ export class SupabaseProvider implements IDataProvider {
       if (removedItems.length > 0) {
         const removedIds = removedItems.map(i => i.id).filter(isValidUuid);
         if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('purchase_batch_items', removedIds);
           console.log(`[Sync Push] purchase_batch_items marking deleted_at: ${removedIds.length} rows`);
-          await retrySupabase(() => supabase
-            .from('purchase_batch_items')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(delError => {
-            console.error('[Sync Push] purchase_batch_items delete update failed:', delError);
-          });
         }
       }
 
@@ -1627,26 +1446,87 @@ export class SupabaseProvider implements IDataProvider {
       const activeItems = changedOrNewRows(currentLocal, items).filter(i => isValidUuid(i.id) && isValidUuid(i.purchase_batch_id) && isValidUuid(i.product_variant_id));
       if (activeItems.length > 0) {
         console.log(`[Sync Push] purchase_batch_items upserting: ${activeItems.length} rows`);
-        const upsertData = activeItems.map(i => ({
-          id: i.id,
-          local_id: cloudLocalIdOf(i as PurchaseBatchItem & { local_id?: string }),
-          purchase_batch_id: i.purchase_batch_id,
-          product_variant_id: i.product_variant_id,
-          quantity: i.quantity || 0,
-          cost: i.cost || 0,
-          note: i.note || null
-        }));
-
-        markLocalCloudWrite('purchase_batch_items', activeItems.map(item => item.id));
-        await retrySupabase(() => supabase
-          .from('purchase_batch_items')
-          .upsert(upsertData));
       }
+      await this.applyCloudCollection('purchase_batch_items', currentLocal, items);
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步採購批次明細發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步採購批次明細發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
+    }
+  }
+
+  async savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void> {
+    await this.requireCloudWritePermission();
+    assertCloudWriteAllowed();
+    const [currentBatches, currentItems] = await Promise.all([
+      db.getPurchaseBatches(),
+      db.getPurchaseBatchItems(),
+    ]);
+    const currentBatch = currentBatches.find(batch => batch.id === command.batch.id);
+    const scopedItems = currentItems.filter(item => item.purchase_batch_id === command.batch.id);
+    const request = readOrCreatePendingRpcRequest(
+      command,
+      () => buildPurchaseBatchTransactionRequest(currentBatch, scopedItems, command),
+    );
+    const batchIds = request.batchOperations.map(operation => operation.id);
+    const itemIds = request.itemOperations.map(operation => operation.id);
+    markLocalCloudWrite('purchase_batches', batchIds);
+    markLocalCloudWrite('purchase_batch_items', itemIds);
+
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(PURCHASE_BATCH_TRANSACTION_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_request: request,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      markCloudRequestFailed(caughtError);
+      throw caughtError;
+    }
+    if (error) {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
+
+    try {
+      const result = assertPurchaseBatchTransactionSucceeded(data);
+      const canonicalBatch = {
+        ...result.batch,
+        id: String(result.batch.id),
+        database_id: String(result.batch.id),
+        note: String(result.batch.note || ''),
+        date: String(result.batch.date || ''),
+      } as unknown as PurchaseBatch;
+      const canonicalItems = result.items.map(row => ({
+        ...row,
+        id: String(row.id),
+        database_id: String(row.id),
+        purchase_batch_id: String(row.purchase_batch_id),
+        product_variant_id: String(row.product_variant_id),
+        quantity: Number(row.quantity ?? 0),
+        cost: Number(row.cost ?? 0),
+        note: String(row.note || ''),
+      } as PurchaseBatchItem));
+      const nextBatches = [...currentBatches.filter(batch => batch.id !== canonicalBatch.id), canonicalBatch];
+      const nextItems = [
+        ...currentItems.filter(item => item.purchase_batch_id !== canonicalBatch.id),
+        ...canonicalItems,
+      ];
+      // The Server mutation commits before the two cache collections are replaced
+      // together; a failed/unknown RPC never reaches this cache transaction.
+      await db.savePurchaseBatchTransaction(nextBatches, nextItems);
+      clearPendingRpcRequest(command.idempotencyKey);
+    } catch (transactionError) {
+      clearLocalCloudWrites('purchase_batches', batchIds);
+      clearLocalCloudWrites('purchase_batch_items', itemIds);
+      if (isCloudFieldMutationError(transactionError)) notifyCloudFieldMutationConflict(transactionError);
+      throw transactionError;
     }
   }
 
@@ -1656,6 +1536,7 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {
+    await this.requireCloudWritePermission();
     // 1. Identify deleted ones by comparing with current local storage records (must read
     // BEFORE overwriting local storage below). Without this, a UI delete that just omits a
     // row from the array only ever removes it locally -- private_orders.deleted_at is never
@@ -1663,44 +1544,19 @@ export class SupabaseProvider implements IDataProvider {
     const currentLocal = await db.getPrivateOrders();
     const incomingIds = new Set(orders.map(o => o.id));
     const removedOrders = currentLocal.filter(o => !incomingIds.has(o.id));
-    const canWrite = await this.canWriteCloud();
-    if (canWrite) await assertCloudRowsFresh('private_orders', changedExistingRows(currentLocal, orders));
-
-    // 2. 本地儲存
-    await db.savePrivateOrders(orders);
-
-    // 3. 判斷是否為唯讀 Viewer/Helper
-    if (!canWrite) {
-      const mode = getProviderMode();
-      const role = await this.getRole();
-      const { data: { session } } = await supabase.auth.getSession();
-      const email = session?.user?.email || 'unknown';
-      const msg = `[Sync Push WARNING] Cannot push private_orders to cloud. User: ${email}, Role: ${role}, Provider Mode: ${mode}`;
-      console.warn(msg);
-      alert(`儲存失敗：您目前在雲端模式下是唯讀權限 (${role || '未登入'})，無法將私下登記紀錄存入雲端。`);
-      throw new Error(msg);
-    }
-
     try {
       // (A) Handle soft deletion of removed orders in Supabase
       if (removedOrders.length > 0) {
         const removedIds = removedOrders.map(o => o.id).filter(isValidUuid);
         if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('private_orders', removedIds);
           console.log(`[Sync Push] private_orders marking deleted_at: ${removedIds.length} rows`);
-          await retrySupabase(() => supabase
-            .from('private_orders')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(delError => {
-            console.error('[Sync Push] private_orders delete update failed:', delError);
-          });
         }
       }
 
       // (B) 防呆與空陣列檢查 (若 orders.length === 0，直接 skip 雲端 upsert)
       if (!orders || orders.length === 0) {
         console.log('[Private Order Sync] skip empty cloud upsert for private_orders');
+        await this.applyCloudCollection('private_orders', currentLocal, orders);
         return;
       }
 
@@ -1708,28 +1564,15 @@ export class SupabaseProvider implements IDataProvider {
       const activeOrders = changedOrNewRows(currentLocal, orders).filter(o => isValidUuid(o.id) && isValidUuid(o.product_group_id));
       if (activeOrders.length === 0) {
         console.log('[Private Order Sync] skip empty active cloud upsert for private_orders');
+        await this.refreshAcknowledgedCloudRows('private_orders', removedOrders.map(order => ({ databaseId: order.id, canonicalId: order.id })));
         return;
       }
 
       console.log(`[Private Order Sync] upsert orders count: ${activeOrders.length}`);
-      const upsertData = activeOrders.map(o => ({
-        id: o.id,
-        local_id: cloudLocalIdOf(o as PrivateOrder & { local_id?: string }),
-        product_group_id: o.product_group_id,
-        customer_name: o.customer_name,
-        contact: o.contact || null,
-        note: o.note || null,
-        status: 'pending'
-      }));
-
-      markLocalCloudWrite('private_orders', activeOrders.map(order => order.id));
-      await retrySupabase(() => supabase
-        .from('private_orders')
-        .upsert(upsertData));
+      await this.applyCloudCollection('private_orders', currentLocal, orders);
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
-      await this.pullCoreProductData(true); // 發生錯誤，將本地快取回滾至雲端最新狀態
-      alert(`雲端同步私下訂單發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步私下訂單發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -1740,25 +1583,8 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void> {
+    await this.requireCloudWritePermission();
     const currentLocal = await db.getPrivateOrderItems();
-    const canWrite = await this.canWriteCloud();
-    if (canWrite) await assertCloudRowsFresh('private_order_items', changedExistingRows(currentLocal, items));
-
-    // 1. 本地儲存
-    await db.savePrivateOrderItems(items);
-
-    // 2. 判斷是否為唯讀 Viewer/Helper
-    if (!canWrite) {
-      const mode = getProviderMode();
-      const role = await this.getRole();
-      const { data: { session } } = await supabase.auth.getSession();
-      const email = session?.user?.email || 'unknown';
-      const msg = `[Sync Push WARNING] Cannot push private_order_items to cloud. User: ${email}, Role: ${role}, Provider Mode: ${mode}`;
-      console.warn(msg);
-      alert(`儲存失敗：您目前在雲端模式下是唯讀權限 (${role || '未登入'})，無法將私下登記項目存入雲端。`);
-      throw new Error(msg);
-    }
-
     // 3. 防呆與空陣列檢查 (若 items.length === 0，直接 skip 雲端 upsert)
     if (!items || items.length === 0) {
       console.log('[Private Order Sync] skip empty cloud upsert for private_order_items');
@@ -1781,16 +1607,18 @@ export class SupabaseProvider implements IDataProvider {
         .in('id', parentOrderIds);
 
       if (checkError) {
+        markCloudRequestFailed(checkError);
         console.error('[Private Order Sync] failed to verify parent orders:', checkError);
         throw checkError;
       }
+      markCloudReachable();
 
       const existingParentSet = new Set(existingParentOrders?.map(o => o.id) || []);
       const readyItems = activeItems.filter(i => existingParentSet.has(i.private_order_id));
       const skippedCount = activeItems.length - readyItems.length;
 
       if (skippedCount > 0) {
-        console.warn(`[Private Order Sync] skipped ${skippedCount} items because their parent private_orders do not exist in Supabase yet`);
+        throw new Error(`[Private Order Sync] ${skippedCount} items have no parent private_orders in Supabase; cache commit refused.`);
       }
 
       if (readyItems.length === 0) {
@@ -1799,43 +1627,16 @@ export class SupabaseProvider implements IDataProvider {
       }
 
       console.log(`[Private Order Sync] upsert items count: ${readyItems.length}`);
-      const upsertData = readyItems.map(i => ({
-        id: i.id,
-        local_id: cloudLocalIdOf(i as PrivateOrderItem & { local_id?: string }),
-        private_order_id: i.private_order_id,
-        product_variant_id: i.product_variant_id,
-        quantity: i.quantity || 0,
-        amount: i.amount || 0,
-        note: i.note || null
-      }));
-
-      markLocalCloudWrite('private_order_items', readyItems.map(item => item.id));
-      await retrySupabase(() => supabase
-        .from('private_order_items')
-        .upsert(upsertData));
+      await this.applyCloudCollection('private_order_items', currentLocal, readyItems, { deleteMissing: false });
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步私下訂單項目發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步私下訂單項目發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
 
   async deletePrivateOrderItems(ids: string[]): Promise<void> {
-    // 1. 本地刪除
-    await db.deletePrivateOrderItems(ids);
-
-    // 2. 判斷是否為唯讀 Viewer/Helper
-    if (!(await this.canWriteCloud())) {
-      const mode = getProviderMode();
-      const role = await this.getRole();
-      const { data: { session } } = await supabase.auth.getSession();
-      const email = session?.user?.email || 'unknown';
-      const msg = `[Sync Push WARNING] Cannot delete private_order_items from cloud. User: ${email}, Role: ${role}, Provider Mode: ${mode}`;
-      console.warn(msg);
-      alert(`刪除失敗：您目前在雲端模式下是唯讀權限 (${role || '未登入'})，無法從雲端刪除私下登記項目。`);
-      throw new Error(msg);
-    }
+    await this.requireCloudWritePermission();
 
     // 3. 防呆與空陣列檢查
     if (!ids || ids.length === 0) {
@@ -1852,14 +1653,15 @@ export class SupabaseProvider implements IDataProvider {
       }
 
       console.log(`[Private Order Sync] delete items count: ${validIds.length}`);
-      await retrySupabase(() => supabase
-        .from('private_order_items')
-        .delete()
-        .in('id', validIds));
+      const currentItems = await db.getPrivateOrderItems();
+      await this.applyCloudCollection(
+        'private_order_items',
+        currentItems,
+        currentItems.filter(item => !validIds.includes(item.id)),
+      );
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase delete error message:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端刪除私下訂單項目發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端刪除私下訂單項目發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -1873,31 +1675,19 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveBundleComponents(components: BundleComponent[]): Promise<void> {
-    await db.saveBundleComponents(components);
-    
-    if (!(await this.canWriteCloud())) {
-      console.warn('[Sync Push WARNING] Cannot save bundle_components to cloud (Read-Only)');
-      return;
-    }
+    await this.requireCloudWritePermission();
 
     try {
-      markLocalCloudWrite('bundle_components', components.map(component => component.id));
-      await retrySupabase(() => supabase
-        .from('bundle_components')
-        .upsert(components.map(c => ({
-          id: c.id,
-          bundle_variant_id: c.bundle_variant_id,
-          component_variant_id: c.component_variant_id,
-          created_at: c.created_at || new Date().toISOString()
-        }))));
+      await this.applyCloudCollection('bundle_components', await db.getBundleComponents(), components, { deleteMissing: false });
     } catch (err: any) {
-      console.warn('[Cloud Push WARNING] bundle_components sync exception:', err.message || err);
+      console.error('[Cloud Push ERROR] bundle_components sync exception:', err.message || err);
+      throw err;
     }
   }
 
   async saveBundleComponentsForVariant(bundleVariantId: string, componentVariantIds: string[]): Promise<void> {
+    await this.requireCloudWritePermission();
     const all = await this.getBundleComponents();
-    const filtered = all.filter(c => c.bundle_variant_id !== bundleVariantId);
     const now = new Date().toISOString();
     const newItems: BundleComponent[] = componentVariantIds.map(cId => ({
       id: crypto.randomUUID(),
@@ -1905,73 +1695,31 @@ export class SupabaseProvider implements IDataProvider {
       component_variant_id: cId,
       created_at: now
     }));
-    const updated = [...filtered, ...newItems];
-
-    await db.saveBundleComponents(updated);
-
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip bundle_components cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
-
     try {
-      const { error: delError } = await supabase
-        .from('bundle_components')
-        .delete()
-        .eq('bundle_variant_id', bundleVariantId);
-
-      if (delError) {
-        console.warn('[Cloud Push WARNING] Supabase delete bundle_components error:', delError.message);
-      }
-
-      if (newItems.length > 0) {
-        markLocalCloudWrite('bundle_components', newItems.map(item => item.id));
-        const { error: insError } = await supabase
-          .from('bundle_components')
-          .insert(newItems.map(c => ({
-            id: c.id,
-            bundle_variant_id: c.bundle_variant_id,
-            component_variant_id: c.component_variant_id,
-            created_at: c.created_at
-          })));
-
-        if (insError) {
-          console.warn('[Cloud Push WARNING] Supabase insert bundle_components error:', insError.message);
-        }
-      }
+      const next = [
+        ...all.filter(component => component.bundle_variant_id !== bundleVariantId),
+        ...newItems,
+      ];
+      await this.applyCloudCollection('bundle_components', all, next);
     } catch (err: any) {
-      console.warn('[Cloud Push WARNING] Supabase sync error for bundle_components:', err.message || err);
+      console.error('[Cloud Push ERROR] Supabase sync error for bundle_components:', err.message || err);
+      throw err;
     }
   }
 
   async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    await this.requireCloudWritePermission();
     // 1. Identify deleted ones by comparing with current local storage records
     const currentLocal = await db.getJapanPackages();
     const incomingIds = new Set(packages.map(p => p.id));
     const removedPackages = currentLocal.filter(p => !incomingIds.has(p.id));
-
-    // 2. Save locally
-    await db.saveJapanPackages(packages);
-
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip japan_packages cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
 
     try {
       // (A) Handle soft deletion of removed packages in Supabase
       if (removedPackages.length > 0) {
         const removedIds = removedPackages.map(p => p.id).filter(isValidUuid);
         if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('japan_packages', removedIds);
           console.log(`[Sync Push] japan_packages marking deleted_at: ${removedIds.length} rows`);
-          await retrySupabase(() => supabase
-            .from('japan_packages')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(delError => {
-            console.error('[Sync Push] japan_packages delete update failed:', delError);
-          });
         }
       }
 
@@ -1979,28 +1727,11 @@ export class SupabaseProvider implements IDataProvider {
       const activePackages = packages.filter(p => isValidUuid(p.id));
       if (activePackages.length > 0) {
         console.log(`[Sync Push] japan_packages upserting: ${activePackages.length} rows`);
-        const upsertData = activePackages.map(p => ({
-          id: p.id,
-          title: p.title,
-          vendor_name: p.vendor_name || null,
-          carrier: p.carrier || null,
-          tracking_number: p.tracking_number || null,
-          shipped_at: p.shipped_at || null,
-          expected_arrival_at: p.expected_arrival_at || null,
-          arrived_at: p.arrived_at || null,
-          status: p.status || 'registered',
-          note: p.note || null
-        }));
-
-        markLocalCloudWrite('japan_packages', activePackages.map(pkg => pkg.id));
-        await retrySupabase(() => supabase
-          .from('japan_packages')
-          .upsert(upsertData));
       }
+      await this.applyCloudCollection('japan_packages', currentLocal, packages);
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步日本包裹發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步日本包裹發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -2010,33 +1741,18 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
+    await this.requireCloudWritePermission();
     // 1. Identify deleted ones by comparing with current local storage records
     const currentLocal = await db.getJapanPackageItems();
     const incomingIds = new Set(items.map(i => i.id));
     const removedItems = currentLocal.filter(i => !incomingIds.has(i.id));
-
-    // 2. Save locally
-    await db.saveJapanPackageItems(items);
-
-    if (!(await this.canWriteCloud())) {
-      console.log('[Sync Push] Skip japan_package_items cloud push (Read-Only Viewer/Helper)');
-      return;
-    }
 
     try {
       // (A) Handle soft deletion of removed items in Supabase
       if (removedItems.length > 0) {
         const removedIds = removedItems.map(i => i.id).filter(isValidUuid);
         if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('japan_package_items', removedIds);
           console.log(`[Sync Push] japan_package_items marking deleted_at: ${removedIds.length} rows`);
-          await retrySupabase(() => supabase
-            .from('japan_package_items')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(delError => {
-            console.error('[Sync Push] japan_package_items delete update failed:', delError);
-          });
         }
       }
 
@@ -2044,32 +1760,11 @@ export class SupabaseProvider implements IDataProvider {
       const activeItems = items.filter(i => isValidUuid(i.id) && isValidUuid(i.japan_package_id));
       if (activeItems.length > 0) {
         console.log(`[Sync Push] japan_package_items upserting: ${activeItems.length} rows`);
-        const upsertData = activeItems.map(i => ({
-          id: i.id,
-          japan_package_id: i.japan_package_id,
-          product_group_id: isValidUuid(i.product_group_id) ? i.product_group_id : null,
-          product_variant_id: isValidUuid(i.product_variant_id) ? i.product_variant_id : null,
-          purchase_batch_id: isValidUuid(i.purchase_batch_id) ? i.purchase_batch_id : null,
-          purchase_batch_item_id: isValidUuid(i.purchase_batch_item_id) ? i.purchase_batch_item_id : null,
-          product_title: i.product_title || null,
-          category_name: i.category_name || null,
-          variant_name: i.variant_name || null,
-          sku: i.sku || null,
-          quantity: i.quantity || 1,
-          note: i.note || null,
-          checked: i.checked || false,
-          checked_at: i.checked_at || null
-        }));
-
-        markLocalCloudWrite('japan_package_items', activeItems.map(item => item.id));
-        await retrySupabase(() => supabase
-          .from('japan_package_items')
-          .upsert(upsertData));
       }
+      await this.applyCloudCollection('japan_package_items', currentLocal, items);
     } catch (err: any) {
       console.error('[Cloud Push ERROR] Supabase error message:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步日本包裹明細發生異常：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步日本包裹明細發生異常：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -2083,108 +1778,31 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveOutboundShipments(shipments: OutboundShipment[]): Promise<void> {
+    await this.requireCloudWritePermission();
     const currentLocal = await db.getOutboundShipments();
-    const incomingIds = new Set(shipments.map(s => s.id));
-    const removedShipments = currentLocal.filter(s => !incomingIds.has(s.id));
-
-    await db.saveOutboundShipments(shipments);
-
-    if (!(await this.canWriteCloud())) {
-      return;
-    }
 
     try {
-      if (removedShipments.length > 0) {
-        const removedIds = removedShipments.map(s => s.id).filter(isValidUuid);
-        if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('outbound_shipments', removedIds);
-          await retrySupabase(() => supabase
-            .from('outbound_shipments')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(e => {
-            console.error('[Sync Push] outbound_shipments delete update failed:', e);
-          });
-        }
-      }
-
       const active = shipments.filter(s => isValidUuid(s.id));
-      if (active.length > 0) {
-        const upsertData = active.map(s => ({
-          id: s.id, title: s.title, status: s.status || 'draft',
-          carrier: s.carrier || null, tracking_number: s.tracking_number || null,
-          weight_kg: s.weight_kg ?? null, shipping_cost: s.shipping_cost ?? null,
-          shipped_at: s.shipped_at || null, received_at: s.received_at || null,
-          note: s.note || null
-        }));
-        markLocalCloudWrite('outbound_shipments', active.map(shipment => shipment.id));
-        await retrySupabase(() => supabase
-          .from('outbound_shipments')
-          .upsert(upsertData));
-      }
+      if (active.length > 0) console.log(`[Sync Push] outbound_shipments changed candidates: ${active.length}`);
+      await this.applyCloudCollection('outbound_shipments', currentLocal, shipments);
     } catch (err: any) {
-      if (isSchemaMissingError(err)) {
-        console.warn('[Cloud Push] outbound_shipments table not found, skipping cloud sync');
-        return;
-      }
       console.error('[Cloud Push ERROR] outbound_shipments:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步出庫單失敗：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步出庫單失敗：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
 
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
+    await this.requireCloudWritePermission();
     const currentLocal = await db.getOutboundShipmentItems();
-    const incomingIds = new Set(items.map(i => i.id));
-    const removedItems = currentLocal.filter(i => !incomingIds.has(i.id));
-
-    await db.saveOutboundShipmentItems(items);
-
-    if (!(await this.canWriteCloud())) {
-      return;
-    }
 
     try {
-      if (removedItems.length > 0) {
-        const removedIds = removedItems.map(i => i.id).filter(isValidUuid);
-        if (removedIds.length > 0) {
-          const nowStr = new Date().toISOString();
-          markLocalCloudWrite('outbound_shipment_items', removedIds);
-          await retrySupabase(() => supabase
-            .from('outbound_shipment_items')
-            .update({ deleted_at: nowStr })
-            .in('id', removedIds)).catch(e => {
-            console.error('[Sync Push] outbound_shipment_items delete update failed:', e);
-          });
-        }
-      }
-
       const active = items.filter(i => isValidUuid(i.id) && isValidUuid(i.outbound_shipment_id));
-      if (active.length > 0) {
-        const upsertData = active.map(i => ({
-          id: i.id, outbound_shipment_id: i.outbound_shipment_id,
-          japan_package_item_id: i.japan_package_item_id || null,
-          product_group_id: i.product_group_id || null,
-          product_variant_id: i.product_variant_id || null,
-          product_title: i.product_title || null, variant_name: i.variant_name || null,
-          sku: i.sku || null, quantity: i.quantity || 1,
-          checked: i.checked || false, checked_at: i.checked_at || null,
-          note: i.note || null
-        }));
-        markLocalCloudWrite('outbound_shipment_items', active.map(item => item.id));
-        await retrySupabase(() => supabase
-          .from('outbound_shipment_items')
-          .upsert(upsertData));
-      }
+      if (active.length > 0) console.log(`[Sync Push] outbound_shipment_items changed candidates: ${active.length}`);
+      await this.applyCloudCollection('outbound_shipment_items', currentLocal, items);
     } catch (err: any) {
-      if (isSchemaMissingError(err)) {
-        console.warn('[Cloud Push] outbound_shipment_items table not found, skipping cloud sync');
-        return;
-      }
       console.error('[Cloud Push ERROR] outbound_shipment_items:', err.message || err);
-      await this.pullCoreProductData(true);
-      alert(`雲端同步出庫明細失敗：${err.message || err}。已回復本地快取資料！`);
+      if (!isCloudFieldMutationError(err)) alert(`雲端同步出庫明細失敗：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
   }
@@ -2194,7 +1812,8 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveImportBatches(batches: ImportBatch[]): Promise<void> {
-    return db.saveImportBatches(batches);
+    void batches;
+    throw new Error('雲端匯入批次必須由 Server 完成；本機快取不接受獨立寫入。');
   }
 
   // === 資料庫管理與輔助方法 (完全委託本地 db) ===
@@ -2203,18 +1822,22 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async importData(jsonString: string): Promise<boolean> {
-    return db.importData(jsonString);
+    void jsonString;
+    throw new CloudRestoreDisabledError();
   }
 
   async clearData(): Promise<void> {
-    return db.clearData();
+    throw new Error('雲端模式禁止從瀏覽器清除 Cloud cache 或正式資料。');
   }
 
   async clearPurchaseRecords(): Promise<void> {
-    return db.clearPurchaseRecords();
+    throw new Error('雲端模式禁止從瀏覽器清除採購資料。');
   }
 
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
+    void itemCodes;
+    throw new Error('雲端建立訂購紀錄目前已安全停用：需先由 Server 完成正式 mutation，再更新 Cloud cache。');
+    /* Legacy local-first implementation intentionally unreachable in Cloud Mode.
     // 1. 先執行 db.createPurchaseRecordFromInventory(itemCodes)
     await db.createPurchaseRecordFromInventory(itemCodes);
     
@@ -2310,29 +1933,19 @@ export class SupabaseProvider implements IDataProvider {
         }
       }
     }
+    */
   }
 
   async reparseProductVariants(): Promise<void> {
-    await db.reparseProductVariants();
-    const categories = await db.getProductCategories();
-    const variants = await db.getProductVariants();
-    await this.saveProductCategories(categories);
-    await this.saveProductVariants(variants);
+    throw new Error('雲端重新解析規格已安全停用：不得先改 Cloud cache。');
   }
 
   async reparseProductTitles(): Promise<void> {
-    await db.reparseProductTitles();
-    const groups = await db.getProductGroups();
-    await this.saveProductGroups(groups);
+    throw new Error('雲端重新解析商品名稱已安全停用：不得先改 Cloud cache。');
   }
 
   async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount?: number }> {
-    const result = await db.syncProductGroupsWithInventory();
-    const categories = await db.getProductCategories();
-    const variants = await db.getProductVariants({ recalc: true });
-    await this.saveProductCategories(categories);
-    await this.saveProductVariants(variants);
-    return result;
+    throw new Error('雲端商品同步已安全停用：需先完成 Server authoritative mutation path。');
   }
 
   async deleteProductGroup(groupId: string): Promise<void> {
@@ -2340,34 +1953,7 @@ export class SupabaseProvider implements IDataProvider {
       throw new Error("無權限，viewer 不可刪除商品群組");
     }
 
-    const nowStr = new Date().toISOString();
-    await retrySupabase(() => supabase
-      .from('product_groups')
-      .update({ deleted_at: nowStr })
-      .eq('id', groupId));
-
-    await retrySupabase(() => supabase
-      .from('product_categories')
-      .update({ deleted_at: nowStr })
-      .eq('product_group_id', groupId));
-
-    await retrySupabase(() => supabase
-      .from('product_variants')
-      .update({ deleted_at: nowStr })
-      .eq('product_group_id', groupId));
-
-    // Only update local DB cache if Supabase soft delete succeeded
-    const groups = await db.getProductGroups();
-    const updatedGroups = groups.filter(g => g.id !== groupId);
-    await db.saveProductGroups(updatedGroups);
-
-    const categories = await db.getProductCategories();
-    const updatedCategories = categories.filter(c => c.product_group_id !== groupId);
-    await db.saveProductCategories(updatedCategories);
-
-    const variants = await db.getProductVariants();
-    const updatedVariants = variants.filter(v => v.product_group_id !== groupId);
-    await db.saveProductVariants(updatedVariants);
+    await this.deleteCloudProductGroupTrees([groupId]);
   }
 
   async deleteProductVariant(id: string): Promise<void> {
@@ -2375,13 +1961,8 @@ export class SupabaseProvider implements IDataProvider {
       throw new Error("無權限，viewer 不可刪除商品規格");
     }
 
-    const nowStr = new Date().toISOString();
-    await retrySupabase(() => supabase
-      .from('product_variants')
-      .update({ deleted_at: nowStr })
-      .eq('id', id));
-
-    await db.deleteProductVariant(id);
+    const current = await db.getProductVariants();
+    await this.applyCloudCollection('product_variants', current, current.filter(variant => variant.id !== id));
   }
 
   async deleteProductGroups(groupIds: string[]): Promise<void> {
@@ -2391,34 +1972,7 @@ export class SupabaseProvider implements IDataProvider {
 
     if (!groupIds || groupIds.length === 0) return;
 
-    const nowStr = new Date().toISOString();
-    await retrySupabase(() => supabase
-      .from('product_groups')
-      .update({ deleted_at: nowStr })
-      .in('id', groupIds));
-
-    await retrySupabase(() => supabase
-      .from('product_categories')
-      .update({ deleted_at: nowStr })
-      .in('product_group_id', groupIds));
-
-    await retrySupabase(() => supabase
-      .from('product_variants')
-      .update({ deleted_at: nowStr })
-      .in('product_group_id', groupIds));
-
-    // Only update local DB cache if Supabase soft delete succeeded
-    const groups = await db.getProductGroups();
-    const updatedGroups = groups.filter(g => !groupIds.includes(g.id));
-    await db.saveProductGroups(updatedGroups);
-
-    const categories = await db.getProductCategories();
-    const updatedCategories = categories.filter(c => !c.product_group_id || !groupIds.includes(c.product_group_id));
-    await db.saveProductCategories(updatedCategories);
-
-    const variants = await db.getProductVariants();
-    const updatedVariants = variants.filter(v => !v.product_group_id || !groupIds.includes(v.product_group_id));
-    await db.saveProductVariants(updatedVariants);
+    await this.deleteCloudProductGroupTrees(groupIds);
   }
 
   async pullDashboardCategoryImages(): Promise<void> {
@@ -2453,28 +2007,13 @@ export class SupabaseProvider implements IDataProvider {
       console.error('[Sync] 同步首頁大類圖片失敗:', err.message || err);
       if (isSchemaMissingError(err)) {
         alert('雲端資料表 dashboard_category_images 缺失，同步流程已中斷，請匯入 SQL Migration 建立表格！');
-        throw err;
       }
+      throw err;
     }
   }
 
   async saveDashboardCategoryImage(categoryKey: string, imageUrl: string | null, storagePath: string | null): Promise<void> {
-    // 1. 本地照舊保存
-    if (imageUrl) {
-      localStorage.setItem(`dashboard_cloud_img_${categoryKey}`, imageUrl);
-    } else {
-      localStorage.removeItem(`dashboard_cloud_img_${categoryKey}`);
-    }
-    if (storagePath) {
-      localStorage.setItem(`dashboard_cloud_path_${categoryKey}`, storagePath);
-    } else {
-      localStorage.removeItem(`dashboard_cloud_path_${categoryKey}`);
-    }
-
-    if (!(await this.canWriteCloud())) {
-      console.log(`[Sync Push] Skip dashboard_category_images cloud push for ${categoryKey} (Read-Only Viewer/Helper)`);
-      return;
-    }
+    await this.requireCloudWritePermission();
 
     try {
       await retrySupabase(() => supabase
@@ -2487,6 +2026,10 @@ export class SupabaseProvider implements IDataProvider {
         }, {
           onConflict: 'category_key'
         }));
+      if (imageUrl) localStorage.setItem(`dashboard_cloud_img_${categoryKey}`, imageUrl);
+      else localStorage.removeItem(`dashboard_cloud_img_${categoryKey}`);
+      if (storagePath) localStorage.setItem(`dashboard_cloud_path_${categoryKey}`, storagePath);
+      else localStorage.removeItem(`dashboard_cloud_path_${categoryKey}`);
       console.log(`[Sync Push] 首頁大類圖片已儲存並推送雲端: ${categoryKey}`);
     } catch (err: any) {
       console.error(`[Sync Push] 推送首頁大類圖片失敗 (${categoryKey}):`, err.message || err);
@@ -2499,6 +2042,7 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void> {
+    assertCloudWriteAllowed();
     return db.saveLastImportBackup(backup);
   }
 

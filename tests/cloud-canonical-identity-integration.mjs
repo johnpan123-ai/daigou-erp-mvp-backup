@@ -40,7 +40,7 @@ page.on('request', request => {
 try {
   await page.goto(BASE_URL, { waitUntil: 'networkidle' });
   const result = await page.evaluate(async () => {
-    const { db } = await import('/src/lib/db.ts');
+    const { cloudCacheDb: db } = await import('/src/lib/db.ts');
     const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');
     const { CloudSyncCoordinator, resolveCloudRowIdentity } = await import('/src/providers/cloud/cloudSyncDomain.ts');
     const { optimisticUpdate, CloudStaleWriteError } = await import('/src/providers/cloud/cloudOptimisticLock.ts');
