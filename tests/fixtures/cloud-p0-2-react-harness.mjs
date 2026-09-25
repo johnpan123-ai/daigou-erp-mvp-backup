@@ -1,7 +1,7 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { cloudCacheDb } from '/src/lib/db.ts';
-import { dataProvider } from '/src/providers/dataProvider.ts';
+import { dataProvider, StaleDataError } from '/src/providers/dataProvider.ts';
 import {
   getCloudConnectivitySnapshot,
   markCloudReadFresh,
@@ -195,11 +195,13 @@ dataProvider.savePurchaseBatchTransaction = async command => {
 
 dataProvider.canWriteCloud = async () => true;
 dataProvider.updateProductVariantPatch = async (id, patch) => {
+  if (dataProvider.checkIsStaleLive()) throw new StaleDataError();
   writes += 1;
   server.productVariants = server.productVariants.map(row => row.id === id ? { ...row, ...clone(patch) } : row);
   await cloudCacheDb.saveProductVariants(clone(server.productVariants));
 };
 dataProvider.updateProductVariantPatchBulk = async patches => {
+  if (dataProvider.checkIsStaleLive()) throw new StaleDataError();
   writes += 1;
   const byId = new Map(patches.map(entry => [entry.id, entry.patch]));
   server.productVariants = server.productVariants.map(row => byId.has(row.id) ? { ...row, ...clone(byId.get(row.id)) } : row);

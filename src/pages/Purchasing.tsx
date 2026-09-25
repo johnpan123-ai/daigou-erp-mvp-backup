@@ -393,7 +393,7 @@ export default function Purchasing() {
   }, []);
 
   useCloudResourceSync(
-    'purchasing-summary',
+    `purchasing-summary:${selectedGroupId ?? ''}`,
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
     showBatchModal,
     loadAllData,

@@ -2721,7 +2721,7 @@ export default function PurchaseRecords() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '18px' }}>⚠️</span>
-            <span style={{ color: '#92400e', fontWeight: 500 }}>資料已在其他分頁更新，請重新整理後再編輯。</span>
+            <span style={{ color: '#92400e', fontWeight: 500 }}>你正在編輯的資料已在其他 Client 變更；草稿已保留，請先處理衝突。</span>
           </div>
           <button
             onClick={handleReloadData}

@@ -113,7 +113,6 @@ export default function OutboundShipmentDetail() {
   const { isMobile } = useViewport();
 
   const [shipment, setShipment] = useState<OutboundShipment | null>(null);
-  const [allShipments, setAllShipments] = useState<OutboundShipment[]>([]);
   const [selectedItems, setSelectedItems] = useState<OutboundShipmentItem[]>([]);
   const [allShipmentItems, setAllShipmentItems] = useState<OutboundShipmentItem[]>([]);
   const [japanPackages, setJapanPackages] = useState<JapanPackage[]>([]);
@@ -188,7 +187,6 @@ export default function OutboundShipmentDetail() {
         dataProvider.getSalesOrderItems(),
         dataProvider.getBundleComponents(),
       ]);
-      setAllShipments(shipments);
       allShipmentItemsRef.current = items;
       setAllShipmentItems(items);
       setJapanPackages(jp);
@@ -619,7 +617,12 @@ export default function OutboundShipmentDetail() {
 
     const operation = itemSaveQueueRef.current.then(async () => {
       try {
-        await dataProvider.saveOutboundShipmentItems(allItems);
+        // Other shipments can converge while this shipment keeps an open draft.
+        // Never submit their old page snapshot as an intended modification.
+        const latestItems = await dataProvider.getOutboundShipmentItems();
+        await dataProvider.saveOutboundShipmentItems([
+          ...latestItems.filter(item => item.outbound_shipment_id !== id), ...items,
+        ]);
         return { ok: true as const };
       } catch (error) {
         console.error('[OutboundShipment] 出庫項目儲存失敗:', error);
@@ -997,10 +1000,10 @@ export default function OutboundShipmentDetail() {
       note: formNote || undefined,
       updated_at: new Date().toISOString(),
     };
-    const all = allShipments.map(s => s.id === id ? updated : s);
+    const latest = await dataProvider.getOutboundShipments();
+    const all = latest.map(s => s.id === id ? updated : s);
     await dataProvider.saveOutboundShipments(all);
     setShipment(updated);
-    setAllShipments(all);
     setShowHeaderEdit(false);
   };
 
@@ -1013,10 +1016,10 @@ export default function OutboundShipmentDetail() {
       received_at: newStatus === 'received' ? new Date().toISOString().slice(0, 10) : shipment.received_at,
       updated_at: new Date().toISOString(),
     };
-    const all = allShipments.map(s => s.id === id ? updated : s);
+    const latest = await dataProvider.getOutboundShipments();
+    const all = latest.map(s => s.id === id ? updated : s);
     await dataProvider.saveOutboundShipments(all);
     setShipment(updated);
-    setAllShipments(all);
   };
 
   const manualEditModal = editingManualItemId ? (

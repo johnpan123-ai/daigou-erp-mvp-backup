@@ -68,6 +68,8 @@ export interface CloudRefreshRequest {
   reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect';
   changes: CloudChange[];
   resources: CloudResource[];
+  /** Monotonic generation for a complete authoritative cache replacement. */
+  authoritativeEpoch?: number;
 }
 
 export interface CloudSyncMetrics {
@@ -82,12 +84,18 @@ export interface CloudSyncMetrics {
 }
 
 export interface CloudSyncCoordinatorOptions {
-  refresh: (request: CloudRefreshRequest, signal?: AbortSignal) => Promise<void>;
+  refresh: (request: CloudRefreshRequest, signal?: AbortSignal) => Promise<void | CloudRefreshResult>;
+  /** The production cache compares authoritative business values before deferring a draft. */
+  authoritativeDrafts?: boolean;
   isEditing: (resource: CloudResource) => boolean;
   onRefreshed: (resources: CloudResource[]) => void;
   onConflict: (resources: CloudResource[]) => void;
   coalesceMs?: number;
   now?: () => number;
+}
+
+export interface CloudRefreshResult {
+  conflicts: CloudChange[];
 }
 
 const uniqueResources = (resources: CloudResource[]): CloudResource[] => (
@@ -148,7 +156,7 @@ export class CloudSyncCoordinator {
     this.pending.clear();
     const resources = uniqueResources(changes.map(change => change.resource));
     const remoteResources = uniqueResources(changes.filter(change => change.origin !== 'local').map(change => change.resource));
-    const editing = remoteResources.filter(resource => this.options.isEditing(resource));
+    const editing = this.options.authoritativeDrafts ? [] : remoteResources.filter(resource => this.options.isEditing(resource));
     const refreshable = resources.filter(resource => !editing.includes(resource));
 
     if (editing.length > 0) {
@@ -168,7 +176,7 @@ export class CloudSyncCoordinator {
     const allowedChanges = changes.filter(change => refreshable.includes(change.resource));
     this.metrics.targetedRefreshes += 1;
     this.inFlight = this.options.refresh({ reason: 'realtime', changes: allowedChanges, resources: refreshable })
-      .then(() => this.options.onRefreshed(refreshable))
+      .then(result => this.completeRefresh(refreshable, result))
       .finally(() => { this.inFlight = null; });
     await this.inFlight;
   }
@@ -198,7 +206,7 @@ export class CloudSyncCoordinator {
       changes: needsResourceCatchUp ? [] : changes,
       resources: refreshedResources,
     })
-      .then(() => this.options.onRefreshed(refreshedResources))
+      .then(result => this.completeRefresh(refreshedResources, result))
       .catch(error => {
         changes.forEach(change => this.deferred.set(`${change.table}:${change.canonicalId}`, change));
         fallbackResources.forEach(resource => this.deferredFallbackResources.add(resource));
@@ -214,7 +222,7 @@ export class CloudSyncCoordinator {
     const now = this.now();
     if (reason !== 'reconnect' && now - this.lastFallbackAt < 15_000) return false;
     const unique = uniqueResources(resources);
-    const editing = unique.filter(resource => this.options.isEditing(resource));
+    const editing = this.options.authoritativeDrafts ? [] : unique.filter(resource => this.options.isEditing(resource));
     if (editing.length > 0) {
       editing.forEach(resource => this.deferredFallbackResources.add(resource));
       this.metrics.conflicts += 1;
@@ -224,14 +232,31 @@ export class CloudSyncCoordinator {
     if (refreshable.length === 0) return false;
     this.lastFallbackAt = now;
     this.metrics.fallbackRefreshes += 1;
-    await this.options.refresh({ reason, changes: [], resources: refreshable }, signal);
+    if (this.inFlight) await this.inFlight;
+    if (this.resumeInFlight) await this.resumeInFlight;
+    const result = await this.options.refresh({ reason, changes: [], resources: refreshable }, signal);
     signal?.throwIfAborted();
     [...this.deferred.entries()].forEach(([key, change]) => {
-      if (refreshable.includes(change.resource)) this.deferred.delete(key);
+      // An incremental catch-up may not return the conflicting record again.
+      // Absence from that response is not evidence that a protected draft resolved.
+      if (refreshable.includes(change.resource) && !this.options.isEditing(change.resource)) this.deferred.delete(key);
     });
     refreshable.forEach(resource => this.deferredFallbackResources.delete(resource));
-    this.options.onRefreshed(refreshable);
+    this.completeRefresh(refreshable, result);
     return true;
+  }
+
+  private completeRefresh(resources: CloudResource[], result: void | CloudRefreshResult): void {
+    if (this.disposed) return;
+    const conflicts = result?.conflicts ?? [];
+    for (const change of conflicts) this.deferred.set(`${change.table}:${change.canonicalId}`, change);
+    const blocked = uniqueResources([...conflicts, ...this.deferred.values()]
+      .filter(change => this.options.isEditing(change.resource)).map(change => change.resource));
+    this.options.onRefreshed(resources.filter(resource => !blocked.includes(resource)));
+    if (blocked.length > 0) {
+      this.metrics.conflicts += 1;
+      this.options.onConflict(blocked);
+    }
   }
 
   snapshotMetrics(): Readonly<CloudSyncMetrics> {

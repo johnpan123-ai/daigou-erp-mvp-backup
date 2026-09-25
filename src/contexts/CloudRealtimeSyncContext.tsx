@@ -55,7 +55,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   );
   const cloudMode = ['cloud', 'fallback'].includes(getProviderMode()) || Boolean(testBridge);
   const showCloudReadStatus = connectivity.status !== 'online'
-    || connectivity.readStatus === 'loading'
+    || (connectivity.readStatus === 'loading' && connectivity.reason !== 'cloud-background-read')
     || connectivity.readStatus === 'stale-cache'
     || connectivity.readStatus === 'read-error'
     || connectivity.readStatus === 'offline'
@@ -99,10 +99,36 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
 
   useEffect(() => {
     if (!enabled) return;
-    const cache = new CloudTargetedCache(testBridge ? { query: testBridge.query } : undefined);
+    const cache = new CloudTargetedCache({
+      ...(testBridge ? { query: testBridge.query } : {}),
+      protectsDraft: (table, before, after) => [...editingOwners.current.entries()].some(([owner, scope]) => {
+        if (!scope.editing || !scope.resources.has(CLOUD_TABLE_RESOURCE[table])) return false;
+        const rows = [before, after].filter((row): row is NonNullable<typeof row> => Boolean(row));
+        if (rows.length === 0) return true;
+        // Detail pages edit one aggregate; changes to other aggregates do not conflict.
+        const [page, id] = owner.split(':');
+        if (page === 'japan-package-detail') {
+          return rows.some(row => table === 'japan_packages' ? row.id === id
+            : table === 'japan_package_items' && row.japan_package_id === id);
+        }
+        if (page === 'outbound-shipment-detail') {
+          return rows.some(row => table === 'outbound_shipments' ? row.id === id
+            : table === 'outbound_shipment_items' && row.outbound_shipment_id === id);
+        }
+        if (['purchase-management', 'purchasing-summary'].includes(page) && id
+          && ['product_groups', 'product_categories', 'product_variants', 'private_orders', 'purchase_batches', 'purchase_batch_items'].includes(table)) {
+          // Unknown aggregate membership remains protected; never infer safety
+          // from a missing optional FK (e.g. a category-linked variant).
+          return rows.some(row => table === 'product_groups' ? row.id === id
+            : !row.product_group_id || row.product_group_id === id);
+        }
+        return true;
+      }),
+    });
     cache.initializeCursor();
     const coordinator = new CloudSyncCoordinator({
-      refresh: (request, signal) => cache.refresh(request, signal),
+      refresh: (request, signal) => cache.refreshWithResult(request, signal),
+      authoritativeDrafts: true,
       isEditing,
       onRefreshed: notifyRefreshed,
       onConflict: notifyConflict,
@@ -198,11 +224,13 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       void reconnect.request('online', activeResources());
     };
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('cloud-cross-tab-change', handleFocus);
     window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('cloud-cross-tab-change', handleFocus);
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
