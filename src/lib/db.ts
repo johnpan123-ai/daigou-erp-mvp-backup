@@ -128,6 +128,7 @@ export interface OutboundShipment {
   shipping_cost?: number;
   shipped_at?: string;
   received_at?: string;
+  status_changed_at?: string;
   note?: string;
   created_at?: string;
   updated_at?: string;
@@ -553,11 +554,13 @@ export interface DatabaseAdapter {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+  saveJapanPackageTransaction(packages: JapanPackage[], items: JapanPackageItem[]): Promise<void>;
 
   getOutboundShipments(): Promise<OutboundShipment[]>;
   saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;
   getOutboundShipmentItems(): Promise<OutboundShipmentItem[]>;
   saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void>;
+  saveOutboundShipmentTransaction(shipments: OutboundShipment[], items: OutboundShipmentItem[]): Promise<void>;
 
   getBundleComponents(): Promise<BundleComponent[]>;
   saveBundleComponents(components: BundleComponent[]): Promise<void>;
@@ -1878,6 +1881,21 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     saveData('erp_japan_package_items', items);
   }
 
+  async saveJapanPackageTransaction(packages: JapanPackage[], items: JapanPackageItem[]): Promise<void> {
+    const beforePackages = localStorage.getItem('erp_japan_packages');
+    const beforeItems = localStorage.getItem('erp_japan_package_items');
+    try {
+      saveData('erp_japan_packages', packages);
+      saveData('erp_japan_package_items', items);
+    } catch (error) {
+      if (beforePackages === null) localStorage.removeItem('erp_japan_packages');
+      else localStorage.setItem('erp_japan_packages', beforePackages);
+      if (beforeItems === null) localStorage.removeItem('erp_japan_package_items');
+      else localStorage.setItem('erp_japan_package_items', beforeItems);
+      throw error;
+    }
+  }
+
   async getOutboundShipments(): Promise<OutboundShipment[]> {
     return loadData<OutboundShipment[]>('erp_outbound_shipments', []);
   }
@@ -1892,6 +1910,21 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     saveData('erp_outbound_shipment_items', items);
+  }
+
+  async saveOutboundShipmentTransaction(shipments: OutboundShipment[], items: OutboundShipmentItem[]): Promise<void> {
+    const beforeShipments = localStorage.getItem('erp_outbound_shipments');
+    const beforeItems = localStorage.getItem('erp_outbound_shipment_items');
+    try {
+      saveData('erp_outbound_shipments', shipments);
+      saveData('erp_outbound_shipment_items', items);
+    } catch (error) {
+      if (beforeShipments === null) localStorage.removeItem('erp_outbound_shipments');
+      else localStorage.setItem('erp_outbound_shipments', beforeShipments);
+      if (beforeItems === null) localStorage.removeItem('erp_outbound_shipment_items');
+      else localStorage.setItem('erp_outbound_shipment_items', beforeItems);
+      throw error;
+    }
   }
 
   async getBundleComponents(): Promise<BundleComponent[]> {
@@ -3890,6 +3923,19 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     await this.set('erp_japan_package_items', items);
   }
 
+  async saveJapanPackageTransaction(packages: JapanPackage[], items: JapanPackageItem[]): Promise<void> {
+    const database = await this.dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      store.put(packages, 'erp_japan_packages');
+      store.put(items, 'erp_japan_package_items');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Japan Package cache transaction failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Japan Package cache transaction aborted'));
+    });
+  }
+
   async getOutboundShipments(): Promise<OutboundShipment[]> {
     return this.get<OutboundShipment[]>('erp_outbound_shipments', []);
   }
@@ -3904,6 +3950,19 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     await this.set('erp_outbound_shipment_items', items);
+  }
+
+  async saveOutboundShipmentTransaction(shipments: OutboundShipment[], items: OutboundShipmentItem[]): Promise<void> {
+    const database = await this.dbPromise;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      store.put(shipments, 'erp_outbound_shipments');
+      store.put(items, 'erp_outbound_shipment_items');
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Outbound shipment cache transaction failed'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Outbound shipment cache transaction aborted'));
+    });
   }
 
   async getLastImportBackup(): Promise<{ data: string; timestamp: string } | null> {

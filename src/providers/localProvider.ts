@@ -1,5 +1,7 @@
 import type { IDataProvider } from './types';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
+import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
 import type { 
   InventoryItem, 
@@ -123,6 +125,53 @@ export class LocalProvider implements IDataProvider {
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     return db.saveJapanPackageItems(items);
   }
+  async applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess> {
+    const [packages, items] = await Promise.all([this.getJapanPackages(), this.getJapanPackageItems()]);
+    let nextPackages: JapanPackage[];
+    let nextItems = [...items];
+    if (command.transactionType === 'create-package') {
+      nextPackages = [...packages.filter(pkg => pkg.id !== command.package.id), command.package];
+    } else if (command.transactionType === 'attach-items') {
+      nextItems = [...items, ...command.items];
+      nextPackages = packages.map(pkg => pkg.id === command.packageId && pkg.status === 'confirmed'
+        ? { ...pkg, status: 'arrived', updated_at: new Date().toISOString() }
+        : pkg);
+    } else {
+      const updates = new Map(command.updates.map(update => [update.itemId, update]));
+      nextItems = items.map(item => {
+        const update = updates.get(item.id);
+        return update ? {
+          ...item,
+          checked: update.checked,
+          checked_at: update.checked ? (update.checkedAt ?? new Date().toISOString()) : undefined,
+          updated_at: new Date().toISOString(),
+        } : item;
+      });
+      const packageItems = nextItems.filter(item => item.japan_package_id === command.packageId);
+      const allChecked = packageItems.length > 0 && packageItems.every(item => item.checked);
+      nextPackages = packages.map(pkg => {
+        if (pkg.id !== command.packageId || pkg.status === 'problem') return pkg;
+        const status = allChecked ? 'confirmed' : pkg.status === 'confirmed' ? 'arrived' : pkg.status;
+        return status === pkg.status ? pkg : {
+          ...pkg,
+          status,
+          arrived_at: pkg.arrived_at || (status === 'arrived' || status === 'confirmed' ? new Date().toISOString().slice(0, 10) : undefined),
+          updated_at: new Date().toISOString(),
+        };
+      });
+    }
+    await db.saveJapanPackageTransaction(nextPackages, nextItems);
+    const canonicalPackage = nextPackages.find(pkg => pkg.id === (command.transactionType === 'create-package' ? command.package.id : command.packageId));
+    if (!canonicalPackage) throw new Error('JAPAN_PACKAGE_LOCAL_RESULT_MISSING');
+    return {
+      ok: true,
+      transactionType: command.transactionType,
+      idempotencyKey: command.idempotencyKey,
+      replayed: false,
+      package: canonicalPackage as unknown as Record<string, unknown>,
+      items: nextItems.filter(item => item.japan_package_id === canonicalPackage.id) as unknown as Array<Record<string, unknown>>,
+    };
+  }
   async getOutboundShipments(): Promise<OutboundShipment[]> {
     return db.getOutboundShipments();
   }
@@ -134,6 +183,24 @@ export class LocalProvider implements IDataProvider {
   }
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     return db.saveOutboundShipmentItems(items);
+  }
+  async deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess> {
+    const [shipments, items] = await Promise.all([db.getOutboundShipments(), db.getOutboundShipmentItems()]);
+    const shipment = shipments.find(entry => entry.id === command.shipmentId);
+    if (!shipment) throw new Error('OUTBOUND_LOCAL_SHIPMENT_MISSING');
+    const itemIds = items.filter(item => item.outbound_shipment_id === command.shipmentId).map(item => item.id).sort();
+    await db.saveOutboundShipmentTransaction(
+      shipments.filter(entry => entry.id !== command.shipmentId),
+      items.filter(item => item.outbound_shipment_id !== command.shipmentId),
+    );
+    return {
+      ok: true,
+      transactionType: 'delete-shipment',
+      idempotencyKey: command.idempotencyKey,
+      replayed: false,
+      shipmentId: command.shipmentId,
+      itemIds,
+    };
   }
   async getBundleComponents(): Promise<BundleComponent[]> {
     return db.getBundleComponents();

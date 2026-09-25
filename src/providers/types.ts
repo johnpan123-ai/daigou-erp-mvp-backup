@@ -18,6 +18,8 @@ import type {
   OutboundShipmentItem
 } from '../lib/db';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
+import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 
 export interface IDataProvider {
   getInventory(): Promise<InventoryItem[]>;
@@ -54,11 +56,13 @@ export interface IDataProvider {
   saveJapanPackages(packages: JapanPackage[]): Promise<void>;
   getJapanPackageItems(): Promise<JapanPackageItem[]>;
   saveJapanPackageItems(items: JapanPackageItem[]): Promise<void>;
+  applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess>;
 
   getOutboundShipments(): Promise<OutboundShipment[]>;
   saveOutboundShipments(shipments: OutboundShipment[]): Promise<void>;
   getOutboundShipmentItems(): Promise<OutboundShipmentItem[]>;
   saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void>;
+  deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess>;
 
   getBundleComponents(): Promise<BundleComponent[]>;
   saveBundleComponents(components: BundleComponent[]): Promise<void>;

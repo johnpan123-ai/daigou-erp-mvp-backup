@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, ExternalLink, Check } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
@@ -25,6 +25,11 @@ import {
   copyOutboundGroupNameToClipboard,
   copyOutboundGroupNameAndOpenMyacg,
 } from '../lib/outboundGroupQuickActions';
+import {
+  OutboundShipmentDeleteBoundaryError,
+  outboundShipmentDeleteIntentCoordinator,
+} from '../providers/cloud/outboundShipmentTransaction';
+import { getAvailableJapanPackageItems } from '../lib/outboundPoolAvailability';
 
 const cleanProductTitle = (title: string) =>
   title
@@ -104,6 +109,7 @@ interface ReceivedSkuDisplayRow {
 export default function OutboundShipmentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { isMobile } = useViewport();
 
   const [shipment, setShipment] = useState<OutboundShipment | null>(null);
@@ -141,6 +147,8 @@ export default function OutboundShipmentDetail() {
   const [pendingItemSaveCount, setPendingItemSaveCount] = useState(0);
   const [itemSaveError, setItemSaveError] = useState<string | null>(null);
   const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
+  const [deleteStatus, setDeleteStatus] = useState<'idle' | 'submitting' | 'unknown' | 'sync-pending'>('idle');
+  const deleteInFlightRef = useRef(false);
   const selectedItemsRef = useRef<OutboundShipmentItem[]>([]);
   const allShipmentItemsRef = useRef<OutboundShipmentItem[]>([]);
   const itemSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -273,33 +281,17 @@ export default function OutboundShipmentDetail() {
     };
   }, []);
 
-  // Build pool: items from arrived packages with available quantity > 0
+  // A package arrival makes receiving possible, while each item's own checked
+  // state independently controls downstream outbound eligibility.
   const poolItems = useMemo<PoolItem[]>(() => {
-    const arrivedPackageIds = new Set(
-      japanPackages.filter(p => p.status === 'arrived' || p.status === 'confirmed' || p.arrived_at).map(p => p.id)
-    );
-
-    // Compute shipped quantities across ALL shipments (except current one for available calc)
-    const shippedMap = new Map<string, number>();
-    for (const si of allShipmentItems) {
-      if (si.japan_package_item_id && si.outbound_shipment_id !== id) {
-        shippedMap.set(si.japan_package_item_id, (shippedMap.get(si.japan_package_item_id) || 0) + si.quantity);
-      }
-    }
-
-    const items: PoolItem[] = [];
-    for (const jpi of japanPackageItems) {
-      if (!arrivedPackageIds.has(jpi.japan_package_id)) continue;
-      const pkg = japanPackages.find(p => p.id === jpi.japan_package_id);
-      const shippedQty = shippedMap.get(jpi.id) || 0;
-      const availableQty = jpi.quantity - shippedQty;
-      if (availableQty <= 0) continue;
+    return getAvailableJapanPackageItems(japanPackages, japanPackageItems, allShipmentItems, id)
+      .map(({ item: jpi, packageRow: pkg, shippedQuantity: shippedQty, availableQuantity: availableQty }) => {
 
       const catName = jpi.category_name || '';
       const varName = jpi.variant_name || '';
       const displayName = [catName, varName].filter(Boolean).join(' — ') || '預設規格';
 
-      items.push({
+      return {
         japanPackageItemId: jpi.id,
         productTitle: cleanProductTitle(jpi.product_title || '未命名商品') || jpi.product_title || '未命名商品',
         categoryName: catName,
@@ -310,11 +302,10 @@ export default function OutboundShipmentDetail() {
         arrivedQty: jpi.quantity,
         shippedQty,
         availableQty,
-        packageTitle: pkg?.title || '',
+        packageTitle: pkg.title || '',
         productGroupId: jpi.product_group_id,
-      });
-    }
-    return items;
+      };
+    });
   }, [japanPackages, japanPackageItems, allShipmentItems, id]);
 
   // Group pool items by product title
@@ -885,20 +876,38 @@ export default function OutboundShipmentDetail() {
       alert('點收狀態仍在儲存中，請稍候完成後再離開。');
       return;
     }
-    navigate('/outbound-shipments');
-  }, [navigate]);
+    navigate({ pathname: '/outbound-shipments', search: location.search });
+  }, [location.search, navigate]);
 
   const deleteShipment = async () => {
+    if (!shipment || deleteInFlightRef.current || deleteStatus !== 'idle') return;
     if (pendingItemSaveCountRef.current > 0) {
       alert('出庫項目仍在儲存中，請稍候完成後再刪除出庫單。');
       return;
     }
-    if (!confirm(`確認刪除出庫單「${shipment?.title}」？此操作無法復原。`)) return;
-    const updated = allShipments.filter(s => s.id !== id);
-    await dataProvider.saveOutboundShipments(updated);
-    const updatedItems = allShipmentItems.filter(i => i.outbound_shipment_id !== id);
-    await dataProvider.saveOutboundShipmentItems(updatedItems);
-    navigate('/outbound-shipments');
+    if (!confirm(`確認刪除出庫單「${shipment.title}」？此操作無法復原。`)) return;
+    const command = outboundShipmentDeleteIntentCoordinator.resolve(shipment.id);
+    deleteInFlightRef.current = true;
+    setDeleteStatus('submitting');
+    try {
+      const result = await dataProvider.deleteOutboundShipmentTransaction(command);
+      outboundShipmentDeleteIntentCoordinator.complete(command);
+      if (result.syncPending) {
+        setDeleteStatus('sync-pending');
+        return;
+      }
+      navigate({ pathname: '/outbound-shipments', search: location.search });
+    } catch (error) {
+      if (error instanceof OutboundShipmentDeleteBoundaryError && error.kind === 'result-unknown') {
+        setDeleteStatus('unknown');
+      } else {
+        setDeleteStatus('idle');
+      }
+      if (error instanceof Error) alert(error.message);
+      else alert('刪除出庫單失敗，畫面資料未標記為成功。');
+    } finally {
+      deleteInFlightRef.current = false;
+    }
   };
 
   const inventoryBySku = useMemo(() => {
@@ -988,10 +997,10 @@ export default function OutboundShipmentDetail() {
       note: formNote || undefined,
       updated_at: new Date().toISOString(),
     };
-    setShipment(updated);
     const all = allShipments.map(s => s.id === id ? updated : s);
-    setAllShipments(all);
     await dataProvider.saveOutboundShipments(all);
+    setShipment(updated);
+    setAllShipments(all);
     setShowHeaderEdit(false);
   };
 
@@ -1004,10 +1013,10 @@ export default function OutboundShipmentDetail() {
       received_at: newStatus === 'received' ? new Date().toISOString().slice(0, 10) : shipment.received_at,
       updated_at: new Date().toISOString(),
     };
-    setShipment(updated);
     const all = allShipments.map(s => s.id === id ? updated : s);
-    setAllShipments(all);
     await dataProvider.saveOutboundShipments(all);
+    setShipment(updated);
+    setAllShipments(all);
   };
 
   const manualEditModal = editingManualItemId ? (
@@ -1406,12 +1415,18 @@ export default function OutboundShipmentDetail() {
               whiteSpace: 'nowrap', flexShrink: 0,
             }}>清空全部</button>
           )}
-          <button onClick={deleteShipment} style={{
+          <button onClick={deleteShipment} disabled={deleteStatus !== 'idle'} style={{
             padding: '8px 12px', background: '#fff', color: '#dc2626',
             border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer',
             whiteSpace: 'nowrap', flexShrink: 0,
             marginLeft: isMobile ? 0 : 'auto',
-          }}>刪除出庫單</button>
+          }}>{deleteStatus === 'submitting' ? '刪除中…' : '刪除出庫單'}</button>
+          {deleteStatus === 'unknown' && (
+            <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>
+          )}
+          {deleteStatus === 'sync-pending' && (
+            <span role="status" style={{ color: '#b45309', fontWeight: 700 }}>出庫單已刪除，畫面同步尚未完成，請勿重複操作。</span>
+          )}
         </div>
       </div>
 

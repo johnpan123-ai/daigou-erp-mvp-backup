@@ -26,6 +26,8 @@ import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
+import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -260,6 +262,9 @@ class DynamicDataProvider implements IDataProvider {
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     await this.guardedWrite(() => this.getActiveProvider().saveJapanPackageItems(items));
   }
+  async applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess> {
+    return this.guardedWrite(() => this.getActiveProvider().applyJapanPackageTransaction(command));
+  }
   async getOutboundShipments(): Promise<OutboundShipment[]> {
     return this.getActiveProvider().getOutboundShipments();
   }
@@ -271,6 +276,9 @@ class DynamicDataProvider implements IDataProvider {
   }
   async saveOutboundShipmentItems(items: OutboundShipmentItem[]): Promise<void> {
     await this.guardedWrite(() => this.getActiveProvider().saveOutboundShipmentItems(items));
+  }
+  async deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess> {
+    return this.guardedWrite(() => this.getActiveProvider().deleteOutboundShipmentTransaction(command));
   }
   async getBundleComponents(): Promise<BundleComponent[]> {
     return this.getActiveProvider().getBundleComponents();

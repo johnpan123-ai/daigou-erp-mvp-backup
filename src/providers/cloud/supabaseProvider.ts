@@ -82,7 +82,7 @@
   }
 })();
 
-import { supabase } from './supabaseClient';
+import { supabase, supabaseEnvironment } from './supabaseClient';
 import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
@@ -118,6 +118,26 @@ import {
   readOrCreatePendingRpcRequest,
   type PurchaseBatchTransactionCommand,
 } from './purchaseBatchTransaction';
+import {
+  JAPAN_PACKAGE_TRANSACTION_RPC,
+  JapanPackageSubmitBoundaryError,
+  assertJapanPackageTransactionSucceeded,
+  buildJapanPackageTransactionRequest,
+  clearPendingJapanPackageRequest,
+  readOrCreatePendingJapanPackageRequest,
+  type JapanPackageTransactionCommand,
+  type JapanPackageTransactionSuccess,
+} from './japanPackageTransaction';
+import {
+  OUTBOUND_SHIPMENT_TRANSACTION_RPC,
+  OutboundShipmentDeleteBoundaryError,
+  assertOutboundShipmentDeleteSucceeded,
+  buildOutboundShipmentDeleteRequest,
+  clearPendingOutboundDeleteRequest,
+  readOrCreatePendingOutboundDeleteRequest,
+  type OutboundShipmentDeleteCommand,
+  type OutboundShipmentDeleteSuccess,
+} from './outboundShipmentTransaction';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -692,6 +712,7 @@ export class SupabaseProvider implements IDataProvider {
             weight_kg: r.weight_kg ? Number(r.weight_kg) : undefined,
             shipping_cost: r.shipping_cost ? Number(r.shipping_cost) : undefined,
             shipped_at: r.shipped_at || '', received_at: r.received_at || '',
+            status_changed_at: r.status_changed_at || undefined,
             note: r.note || '', created_at: r.created_at, updated_at: r.updated_at, version: r.version
           }));
           const mappedShipmentItems: OutboundShipmentItem[] = osiData.map(r => ({
@@ -1783,6 +1804,97 @@ export class SupabaseProvider implements IDataProvider {
     return db.getJapanPackageItems();
   }
 
+  async applyJapanPackageTransaction(command: JapanPackageTransactionCommand): Promise<JapanPackageTransactionSuccess> {
+    await this.requireCloudWritePermission();
+    const [currentPackages, currentItems] = await Promise.all([
+      db.getJapanPackages(),
+      db.getJapanPackageItems(),
+    ]);
+    const packageId = command.transactionType === 'create-package' ? command.package.id : command.packageId;
+    const currentPackage = currentPackages.find(pkg => pkg.id === packageId);
+    const scopedItems = currentItems.filter(item => item.japan_package_id === packageId);
+    const request = readOrCreatePendingJapanPackageRequest(
+      command,
+      () => buildJapanPackageTransactionRequest(currentPackage, scopedItems, command, supabaseEnvironment.projectRef),
+    );
+    const packageIds = [request.packageId];
+    const itemIds = request.itemOperations.map(operation => operation.id);
+    markLocalCloudWrite('japan_packages', packageIds);
+    markLocalCloudWrite('japan_package_items', itemIds);
+
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(JAPAN_PACKAGE_TRANSACTION_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_request: request,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      markCloudRequestFailed(caughtError);
+      throw new JapanPackageSubmitBoundaryError('result-unknown');
+    }
+    if (error) {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      markCloudRequestFailed(error);
+      throw new JapanPackageSubmitBoundaryError('server-rejected');
+    }
+    markCloudReachable();
+
+    let result: JapanPackageTransactionSuccess;
+    try {
+      result = assertJapanPackageTransactionSucceeded(data);
+    } catch {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      throw new JapanPackageSubmitBoundaryError('server-rejected');
+    }
+
+    const canonicalPackage = {
+      ...result.package,
+      id: String(result.package.id),
+      database_id: String(result.package.id),
+      title: String(result.package.title || ''),
+      status: String(result.package.status || 'registered'),
+      note: String(result.package.note || ''),
+      version: Number(result.package.version ?? 1),
+    } as unknown as JapanPackage;
+    const canonicalItems = result.items.map(row => ({
+      ...row,
+      id: String(row.id),
+      database_id: String(row.id),
+      japan_package_id: String(row.japan_package_id),
+      quantity: Number(row.quantity ?? 0),
+      checked: Boolean(row.checked),
+      version: Number(row.version ?? 1),
+    } as JapanPackageItem));
+    const nextPackages = [...currentPackages.filter(pkg => pkg.id !== canonicalPackage.id), canonicalPackage];
+    const nextItems = [
+      ...currentItems.filter(item => item.japan_package_id !== canonicalPackage.id),
+      ...canonicalItems,
+    ];
+    try {
+      await db.saveJapanPackageTransaction(nextPackages, nextItems);
+      clearPendingJapanPackageRequest(command.idempotencyKey);
+    } catch {
+      clearLocalCloudWrites('japan_packages', packageIds);
+      clearLocalCloudWrites('japan_package_items', itemIds);
+      return {
+        ...result,
+        package: canonicalPackage as unknown as Record<string, unknown>,
+        items: canonicalItems as unknown as Array<Record<string, unknown>>,
+        syncPending: true,
+      };
+    }
+    return {
+      ...result,
+      package: canonicalPackage as unknown as Record<string, unknown>,
+      items: canonicalItems as unknown as Array<Record<string, unknown>>,
+    };
+  }
+
   async saveJapanPackageItems(items: JapanPackageItem[]): Promise<void> {
     await this.requireCloudWritePermission();
     // 1. Identify deleted ones by comparing with current local storage records
@@ -1848,6 +1960,65 @@ export class SupabaseProvider implements IDataProvider {
       if (!isCloudFieldMutationError(err)) alert(`雲端同步出庫明細失敗：${err.message || err}。雲端快取未變更。`);
       throw err;
     }
+  }
+
+  async deleteOutboundShipmentTransaction(command: OutboundShipmentDeleteCommand): Promise<OutboundShipmentDeleteSuccess> {
+    await this.requireCloudWritePermission();
+    const [currentShipments, currentItems] = await Promise.all([
+      db.getOutboundShipments(),
+      db.getOutboundShipmentItems(),
+    ]);
+    const shipment = currentShipments.find(entry => entry.id === command.shipmentId);
+    if (!shipment) throw new OutboundShipmentDeleteBoundaryError('server-rejected');
+    const scopedItems = currentItems.filter(item => item.outbound_shipment_id === command.shipmentId);
+    const request = readOrCreatePendingOutboundDeleteRequest(
+      command,
+      () => buildOutboundShipmentDeleteRequest(shipment, scopedItems, supabaseEnvironment.projectRef),
+    );
+    const shipmentIds = [command.shipmentId];
+    const itemIds = request.itemOperations.map(operation => operation.id);
+    markLocalCloudWrite('outbound_shipments', shipmentIds);
+    markLocalCloudWrite('outbound_shipment_items', itemIds);
+
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc(OUTBOUND_SHIPMENT_TRANSACTION_RPC, {
+        p_idempotency_key: command.idempotencyKey,
+        p_request: request,
+      }));
+    } catch (caughtError) {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      markCloudRequestFailed(caughtError);
+      throw new OutboundShipmentDeleteBoundaryError('result-unknown');
+    }
+    if (error) {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      markCloudRequestFailed(error);
+      throw new OutboundShipmentDeleteBoundaryError('server-rejected');
+    }
+    markCloudReachable();
+    let result: OutboundShipmentDeleteSuccess;
+    try {
+      result = assertOutboundShipmentDeleteSucceeded(data);
+    } catch {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      throw new OutboundShipmentDeleteBoundaryError('server-rejected');
+    }
+    const nextShipments = currentShipments.filter(entry => entry.id !== command.shipmentId);
+    const nextItems = currentItems.filter(item => item.outbound_shipment_id !== command.shipmentId);
+    try {
+      await db.saveOutboundShipmentTransaction(nextShipments, nextItems);
+      clearPendingOutboundDeleteRequest(command.idempotencyKey);
+    } catch {
+      clearLocalCloudWrites('outbound_shipments', shipmentIds);
+      clearLocalCloudWrites('outbound_shipment_items', itemIds);
+      return { ...result, syncPending: true };
+    }
+    return result;
   }
 
   async getImportBatches(): Promise<ImportBatch[]> {

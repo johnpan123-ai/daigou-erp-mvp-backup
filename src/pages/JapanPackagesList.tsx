@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, CheckCircle2, Pencil, Eye, AlertTriangle, ChevronRight } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { isJapanPackageSubmitBoundaryError, japanPackageIntentCoordinator } from '../providers/cloud/japanPackageTransaction';
 
 const CARRIERS_LIST = [
   { name: 'ヤマト運輸 (Yamato)', keyword: 'yamato' },
@@ -40,6 +41,8 @@ export default function JapanPackagesList() {
   const [packages, setPackages] = useState<JapanPackage[]>([]);
   const [packageItems, setPackageItems] = useState<JapanPackageItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const createInFlightRef = useRef(false);
+  const createOutcomeUnknownRef = useRef(false);
 
   // Filters & Search
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -333,10 +336,25 @@ export default function JapanPackagesList() {
         updated_at: new Date().toISOString()
       };
 
+      if (createInFlightRef.current) return;
+      if (createOutcomeUnknownRef.current) {
+        alert('日本包裹操作結果待查證，請勿重複操作。');
+        return;
+      }
+      const intentScope = 'japan-package-create';
+      const command = japanPackageIntentCoordinator.resolve(
+        intentScope,
+        { ...newPackageForm, carrier: carrierName.trim(), status: statusVal, arrived_at: arrivedAtVal || null },
+        idempotencyKey => ({ idempotencyKey, transactionType: 'create-package', package: newPkg }),
+      );
+      createInFlightRef.current = true;
       try {
-        const updatedList = [...packages, newPkg];
-        await dataProvider.saveJapanPackages(updatedList);
+        const result = await dataProvider.applyJapanPackageTransaction(command);
+        const canonicalPackage = result.package as unknown as JapanPackage;
+        const updatedList = [...packages.filter(item => item.id !== canonicalPackage.id), canonicalPackage];
         setPackages(updatedList);
+        japanPackageIntentCoordinator.complete(intentScope, command.idempotencyKey);
+        if (result.syncPending) alert('日本包裹操作已提交，畫面同步尚未完成，請勿重複操作。');
         closeAddModal();
         // Reset form
         setNewPackageForm({
@@ -355,9 +373,14 @@ export default function JapanPackagesList() {
         if (err instanceof StaleDataError) {
           alert(err.message);
           await loadData();
+        } else if (isJapanPackageSubmitBoundaryError(err)) {
+          if (err.kind === 'result-unknown') createOutcomeUnknownRef.current = true;
+          alert(err.message);
         } else {
           alert('儲存失敗，請重試！');
         }
+      } finally {
+        createInFlightRef.current = false;
       }
     }
   };

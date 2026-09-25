@@ -12,7 +12,9 @@ import { installCloudRealtimeTestBridge } from '/src/contexts/cloudRealtimeTestB
 import '/src/index.css';
 
 localStorage.setItem('erp_provider_mode', 'experimental');
-const requestedRoute = new URL(location.href).searchParams.get('route') || '/dashboard';
+const fixtureParams = new URL(location.href).searchParams;
+const requestedRoute = fixtureParams.get('route') || '/dashboard';
+const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
 history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
 
 const clone = value => structuredClone(value);
@@ -75,6 +77,15 @@ server.japanPackageItems = [{
   created_at: '2026-09-07T00:00:00.000Z',
   updated_at: '2026-09-07T00:00:00.000Z',
 }];
+if (partialReceivingScenario) {
+  server.japanPackageItems.push({
+    ...server.japanPackageItems[0],
+    id: 'jpi-react-2',
+    purchase_batch_item_id: 'bi-react-2',
+    variant_name: 'B',
+    sku: 'SKU-HOLO-B',
+  });
+}
 server.outboundShipments = [{
   id: 'out-react-1',
   title: 'React Outbound A',
@@ -100,6 +111,7 @@ server.outboundShipmentItems = [{
   created_at: '2026-09-07T00:00:00.000Z',
   updated_at: '2026-09-07T00:00:00.000Z',
 }];
+if (partialReceivingScenario) server.outboundShipmentItems = [];
 
 const tableToCollection = {
   inventory_items: 'inventory',
@@ -213,6 +225,51 @@ const targetedQueriesByTable = {};
 let failNextQuery = false;
 const targetedReadFailures = new Map();
 let idempotentReplays = 0;
+let japanPackageTransactionCalls = 0;
+
+const applyReceivingState = (itemId, checked, checkedAt = new Date().toISOString()) => {
+  server.japanPackageItems = server.japanPackageItems.map(item => item.id === itemId ? {
+    ...item,
+    checked,
+    checked_at: checked ? checkedAt : undefined,
+    version: Number(item.version || 1) + 1,
+    updated_at: checkedAt,
+  } : item);
+  const activeItems = server.japanPackageItems.filter(item => item.japan_package_id === 'jp-react-1' && !item.deleted_at);
+  const currentPackage = server.japanPackages.find(pkg => pkg.id === 'jp-react-1');
+  let status = currentPackage.status;
+  if (status !== 'problem') {
+    if (activeItems.length > 0 && activeItems.every(item => item.checked)) status = 'confirmed';
+    else if (activeItems.some(item => item.checked) || status === 'arrived' || status === 'confirmed') status = 'arrived';
+  }
+  server.japanPackages = server.japanPackages.map(pkg => pkg.id === 'jp-react-1' ? {
+    ...pkg,
+    status,
+    arrived_at: status === 'arrived' || status === 'confirmed' ? (pkg.arrived_at || '2026-09-20') : pkg.arrived_at,
+    version: Number(pkg.version || 1) + (status !== pkg.status ? 1 : 0),
+    updated_at: checkedAt,
+  } : pkg);
+};
+
+if (partialReceivingScenario) {
+  dataProvider.applyJapanPackageTransaction = async command => {
+    japanPackageTransactionCalls += 1;
+    if (command.transactionType !== 'set-receiving') throw new Error('PARTIAL_RECEIVING_FIXTURE_EXPECTED_SET_RECEIVING');
+    for (const update of command.updates) applyReceivingState(update.itemId, update.checked, update.checkedAt);
+    await cloudCacheDb.saveJapanPackageTransaction(
+      clone(server.japanPackages),
+      clone(server.japanPackageItems),
+    );
+    return {
+      ok: true,
+      transactionType: command.transactionType,
+      idempotencyKey: command.idempotencyKey,
+      replayed: false,
+      package: clone(server.japanPackages.find(pkg => pkg.id === command.packageId)),
+      items: clone(server.japanPackageItems.filter(item => item.japan_package_id === command.packageId)),
+    };
+  };
+}
 
 installCloudRealtimeTestBridge({
   query: async request => {
@@ -313,6 +370,28 @@ window.__P0_REACT_HARNESS__ = {
       { table, payload: clone(payload) },
     ]);
   },
+  navigate(path) {
+    history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  },
+  async remoteReceiving(itemId, checked) {
+    if (!partialReceivingScenario) throw new Error('PARTIAL_RECEIVING_SCENARIO_REQUIRED');
+    const changedAt = new Date().toISOString();
+    applyReceivingState(itemId, checked, changedAt);
+    const packageRow = clone(server.japanPackages.find(pkg => pkg.id === 'jp-react-1'));
+    const itemRow = clone(server.japanPackageItems.find(item => item.id === itemId));
+    const activeController = controller || await controllerReady;
+    await activeController.emitMany([
+      {
+        table: 'japan_package_items',
+        payload: { eventType: 'UPDATE', new: itemRow, old: {}, commit_timestamp: changedAt },
+      },
+      {
+        table: 'japan_packages',
+        payload: { eventType: 'UPDATE', new: packageRow, old: {}, commit_timestamp: changedAt },
+      },
+    ]);
+  },
   setServerRows(table, rows) {
     server[tableToCollection[table]] = clone(rows);
   },
@@ -363,6 +442,7 @@ window.__P0_REACT_HARNESS__ = {
       pageLoads: clone(pageLoads),
       writes,
       idempotentReplays,
+      japanPackageTransactionCalls,
       connectivity: getCloudConnectivitySnapshot(),
       reconnectDiagnostics: controller?.reconnectDiagnostics() || [],
     };

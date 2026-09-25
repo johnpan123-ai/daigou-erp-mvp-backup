@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const SQL = await readFile(new URL('../supabase/sql/032_outbound_shipment_atomic_delete.sql', import.meta.url), 'utf8');
+assert.match(SQL, /BEGIN;[\s\S]+COMMIT;\s*$/u);
+assert.match(SQL, /to_regprocedure\('public\.erp_apply_outbound_shipment_transaction\(uuid,jsonb\)'\)/u);
+assert.match(SQL, /F4_OUTBOUND_RPC_ALREADY_EXISTS/u);
+assert.match(SQL, /SECURITY DEFINER[\s\S]+SET search_path = ''[\s\S]+SET statement_timeout = '15s'/u);
+assert.match(SQL, /NOT public\.is_editor\(v_actor\)/u);
+assert.match(SQL, /current_setting\('request\.headers', true\)/u);
+assert.match(SQL, /v_request_host IS DISTINCT FROM \(p_request->>'targetProjectRef'\) \|\| '\.supabase\.co'/u);
+assert.doesNotMatch(SQL, /rhfdjsklfrgpoqsaqpkn|twzpqyesbtnfxdkorluf|service_role/u);
+assert.match(SQL, /v_requested_item_ids IS DISTINCT FROM v_active_item_ids/u);
+assert.match(SQL, /erp_apply_field_mutations\('outbound_shipment_items'/u);
+assert.match(SQL, /erp_apply_field_mutations\('outbound_shipments'/u);
+assert.ok(SQL.indexOf("erp_apply_field_mutations('outbound_shipment_items'") < SQL.indexOf("erp_apply_field_mutations('outbound_shipments'"));
+assert.match(SQL, /ON CONFLICT \(actor_id, idempotency_key\) DO NOTHING/u);
+assert.match(SQL, /request_payload IS DISTINCT FROM p_request/u);
+assert.match(SQL, /canonical_result/u);
+assert.match(SQL, /REVOKE ALL ON FUNCTION public\.erp_apply_outbound_shipment_transaction\(uuid, jsonb\) FROM PUBLIC/u);
+assert.match(SQL, /GRANT EXECUTE ON FUNCTION public\.erp_apply_outbound_shipment_transaction\(uuid, jsonb\) TO authenticated/u);
+assert.match(SQL, /pg_get_function_identity_arguments\(v_function_oid\)/u);
+assert.match(SQL, /v_identity_args IS DISTINCT FROM 'uuid, jsonb'/u);
+assert.match(SQL, /v_security_definer IS DISTINCT FROM true/u);
+assert.match(SQL, /v_public_execute/u);
+assert.doesNotMatch(SQL, /ALTER TABLE public\.(?:outbound_shipments|outbound_shipment_items)|DISABLE TRIGGER|DROP POLICY/u);
+console.log('PASS 032 transaction, owner, target, exact-child-scope, CAS/idempotency and ACL artifact contract');
+console.log('NOTE static SQL validation only; PostgreSQL apply remains pending');

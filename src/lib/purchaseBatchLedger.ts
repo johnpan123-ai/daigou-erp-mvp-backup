@@ -22,7 +22,7 @@ export const formatPurchaseBatchLedger = ({
   getDisplayProductName,
 }: PurchaseBatchLedgerContext): string => {
   const variantById = new Map(variants.map(variant => [variant.id, variant]));
-  const ledgerRows = new Map<string, { name: string; quantity: number }>();
+  const ledgerRows = new Map<string, { name: string; quantity: number; unitPrice?: number }>();
 
   for (const item of batchItems) {
     if (item.purchase_batch_id !== batchId) continue;
@@ -41,17 +41,20 @@ export const formatPurchaseBatchLedger = ({
       ? `${categoryTitle} - ${displayedProductName}`
       : displayedProductName;
     const name = `${groupTitle} - ${restName}`.replace(/\s*-\s*/g, '-');
-    const existing = ledgerRows.get(name);
+    const parsedCost = Number(item.cost);
+    const unitPrice = Number.isFinite(parsedCost) ? parsedCost : undefined;
+    const rowKey = `${name}\u0000${unitPrice === undefined ? 'missing' : String(unitPrice)}`;
+    const existing = ledgerRows.get(rowKey);
 
     if (existing) {
       existing.quantity += item.quantity;
     } else {
-      ledgerRows.set(name, { name, quantity: item.quantity });
+      ledgerRows.set(rowKey, { name, quantity: item.quantity, unitPrice });
     }
   }
 
   return Array.from(ledgerRows.values())
-    .map(row => `${row.name}\t${row.quantity}`)
+    .map(row => `${row.name}\t${row.quantity}\t${row.unitPrice === undefined ? '—' : row.unitPrice}`)
     .join('\n');
 };
 

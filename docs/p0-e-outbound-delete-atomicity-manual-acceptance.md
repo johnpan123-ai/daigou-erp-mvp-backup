@@ -1,6 +1,6 @@
 # P0-E 出庫單＋明細刪除人工驗收 SOP
 
-目前狀態：**Design Gate / Blocked；此 SOP 尚不可執行，也不能標 Accepted。**
+目前狀態：**Implementation Candidate；032 Staging apply/postflight 前不可執行，也不能標 Accepted。**
 
 只有真正 atomic 的 Local／Cloud 刪除入口獲准並完成後，才在 Test Sandbox 執行。
 

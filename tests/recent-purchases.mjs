@@ -238,8 +238,9 @@ try {
   assert.equal((dailyLedger.match(/商品 A-/g) || []).length, 2, 'Same-day merged product must retain both original batch ledgers');
   const dailyLedgerRows = dailyLedger.split('\n');
   assert.equal(dailyLedgerRows.length, 3, 'Three original one-item batches must produce three continuous rows');
-  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 2), 'Every ledger row must contain only product name and quantity');
+  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 3), 'Every ledger row must contain product name, quantity, and unit price');
   assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[1])), [3, 12, 2], 'Original batch quantities must remain intact in chronological order');
+  assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[2])), [100, 100, 100], 'Ledger price must be the purchase item unit cost, not quantity × cost');
   await page.waitForTimeout(900);
   await dailyCopyButtons.first().click();
   await page.waitForTimeout(900);
@@ -344,14 +345,14 @@ try {
   await failurePage.goto(`${BASE_URL}/recent-purchases`, { waitUntil: 'networkidle' });
   const failureDailyButton = failurePage.getByTestId('recent-purchases-copy-daily-ledger').first();
   await failureDailyButton.click();
-  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'error');
-  assert.equal(await failureDailyButton.innerText(), '複製失敗', 'Clipboard failure must not show daily-copy success');
+  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'success');
+  assert.equal(await failureDailyButton.innerText(), '已複製', 'Denied Clipboard API must use the user-gesture fallback');
   await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchases-copy-daily-ledger"]')?.getAttribute('data-copy-status') === 'idle');
   await failurePage.getByTestId('recent-purchases-date-toggle').first().click();
   const failureRowButton = failurePage.getByTestId('recent-purchase-copy-row-ledger').first();
   await failureRowButton.click();
-  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchase-copy-row-ledger"]')?.getAttribute('data-copy-status') === 'error');
-  assert.equal(await failureRowButton.getAttribute('title'), '複製失敗', 'Clipboard failure must remain local to the row action');
+  await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchase-copy-row-ledger"]')?.getAttribute('data-copy-status') === 'success');
+  assert.equal(await failureRowButton.getAttribute('title'), '已複製', 'Clipboard fallback success must remain local to the row action');
   await failurePage.waitForFunction(() => document.querySelector('[data-testid="recent-purchase-copy-row-ledger"]')?.getAttribute('data-copy-status') === 'idle');
   await failurePage.close();
 
@@ -423,7 +424,7 @@ try {
   console.log('PASS daily ledger copy preserves purchase_batches and purchase_batch_items');
   console.log('PASS grouped product rows copy all and only their original ledgers without data writes');
   console.log('PASS daily and per-row copy feedback is independent, stable-sized, and auto-restores');
-  console.log('PASS clipboard failure never displays success and does not crash');
+  console.log('PASS clipboard denial uses the safe user-gesture fallback and does not crash');
   console.log('PASS all ERP fixture data writes = 0');
   console.log('PASS date/search/official-site filters are correct');
   console.log('PASS proxy_agent is shown read-only and blank agents stay hidden');
