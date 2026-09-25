@@ -1175,10 +1175,12 @@ export default function OutboundShipmentDetail() {
             )}
           </div>
           <span style={{
-            flexShrink: 0, padding: '3px 7px', borderRadius: 999,
+            flexShrink: 0, width: isMobile ? 72 : 96, minHeight: 22, padding: '3px 7px', borderRadius: 999,
             background: allChecked ? '#dcfce7' : partiallyChecked ? '#fef3c7' : '#f1f5f9',
             color: allChecked ? '#166534' : partiallyChecked ? '#92400e' : '#64748b',
-            fontSize: 11, fontWeight: 700,
+            fontSize: 11, fontWeight: 700, lineHeight: '16px',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {rowPending ? '確認中…' : allChecked ? '完成' : partiallyChecked ? `部分完成 ${checkedQuantity}/${row.totalQuantity}` : '未完成'}
           </span>
@@ -1300,6 +1302,11 @@ export default function OutboundShipmentDetail() {
   const badge = getStatusBadge(shipment.status);
   const checkedCount = selectedItems.filter(i => i.checked).length;
   const totalQty = selectedItems.reduce((sum, i) => sum + i.quantity, 0);
+  const itemSaveStatusText = pendingItemSaveCount > 0
+    ? `儲存中（${pendingItemSaveCount}）…請勿離開`
+    : !itemSaveError && lastItemsSavedAt
+      ? `已儲存 ${lastItemsSavedAt}`
+      : '';
 
   return (
     <div data-testid="outbound-shipment-detail-root" style={{ padding: isMobile ? '12px' : '20px 28px', maxWidth: 1400, margin: '0 auto' }}>
@@ -1351,14 +1358,22 @@ export default function OutboundShipmentDetail() {
           {shipment.status === 'received' && (
             <span>✅ 點收進度 {checkedCount}/{selectedItems.length} ({selectedItems.length > 0 ? Math.round((checkedCount / selectedItems.length) * 100) : 0}%)</span>
           )}
-          {pendingItemSaveCount > 0 && (
-            <span role="status" aria-live="polite" style={{ color: '#b45309', fontWeight: 700 }}>
-              儲存中（{pendingItemSaveCount}）…請勿離開
-            </span>
-          )}
-          {pendingItemSaveCount === 0 && !itemSaveError && lastItemsSavedAt && (
-            <span style={{ color: '#15803d', fontWeight: 600 }}>已儲存 {lastItemsSavedAt}</span>
-          )}
+          <span
+            data-testid="outbound-save-status-slot"
+            role="status"
+            aria-live="polite"
+            aria-hidden={itemSaveStatusText ? undefined : true}
+            style={{
+              flex: isMobile ? '1 0 100%' : '0 0 210px', minWidth: 0,
+              height: 18, lineHeight: '18px',
+              color: pendingItemSaveCount > 0 ? '#b45309' : '#15803d',
+              fontWeight: pendingItemSaveCount > 0 ? 700 : 600,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              visibility: itemSaveStatusText ? 'visible' : 'hidden',
+            }}
+          >
+            {itemSaveStatusText || '\u00a0'}
+          </span>
         </div>
         {itemSaveError && (
           <div role="alert" style={{
@@ -1443,11 +1458,21 @@ export default function OutboundShipmentDetail() {
             whiteSpace: 'nowrap', flexShrink: 0,
             marginLeft: isMobile ? 0 : 'auto',
           }}>{deleteStatus === 'submitting' ? '刪除中…' : '刪除出庫單'}</button>
+          <span
+            data-testid="outbound-background-status-slot"
+            role="status"
+            aria-live="polite"
+            aria-hidden={pendingItemSaveCount === 0 && isRefreshing ? undefined : true}
+            style={{
+              flex: '0 0 132px', height: 18, lineHeight: '18px', color: '#64748b', fontWeight: 600,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              visibility: pendingItemSaveCount === 0 && isRefreshing ? 'visible' : 'hidden',
+            }}
+          >
+            {pendingItemSaveCount === 0 && isRefreshing ? '同步最新資料中…' : '\u00a0'}
+          </span>
           {deleteStatus === 'unknown' && (
             <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>
-          )}
-          {pendingItemSaveCount === 0 && isRefreshing && (
-            <span role="status" style={{ color: '#64748b', fontWeight: 600 }}>同步最新資料中…</span>
           )}
           {deleteStatus === 'sync-pending' && (
             <span role="status" style={{ color: '#b45309', fontWeight: 700 }}>出庫單已刪除，畫面同步尚未完成，請勿重複操作。</span>

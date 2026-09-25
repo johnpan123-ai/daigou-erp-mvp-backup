@@ -334,7 +334,7 @@ export default function DuplicateVariants() {
           className="btn"
           onClick={loadData}
           disabled={isInitialLoading || isRefreshing}
-          style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '6px 12px' }}
+          style={{ marginLeft: 'auto', minWidth: '104px', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', padding: '6px 12px' }}
         >
           <RefreshCw size={14} className={isInitialLoading || isRefreshing ? 'spin' : undefined} />
           {isRefreshing ? '同步中…' : '重新整理'}

@@ -103,8 +103,28 @@ try {
     {
       const { page, modal } = await openModal(context, 'pending');
       const save = modal.getByRole('button', { name: '儲存', exact: true });
+      const total = page.getByTestId('purchase-batch-total');
+      const statusSlot = page.getByTestId('purchase-batch-submit-status');
+      const before = {
+        total: await total.boundingBox(),
+        status: await statusSlot.boundingBox(),
+        save: await save.boundingBox(),
+        scrollTop: await modal.evaluate(element => element.scrollTop),
+      };
       await save.dblclick();
       await page.waitForFunction(() => window.__PURCHASE_BATCH_SUBMIT_TEST__.snapshot().rpcCalls === 1);
+      const pendingSave = modal.getByRole('button', { name: '儲存中…', exact: true });
+      const during = {
+        total: await total.boundingBox(),
+        status: await statusSlot.boundingBox(),
+        save: await pendingSave.boundingBox(),
+        scrollTop: await modal.evaluate(element => element.scrollTop),
+      };
+      assert.ok(before.total && before.status && before.save && during.total && during.status && during.save);
+      assert.ok(Math.abs(during.total.y - before.total.y) <= 1, 'Purchasing total moved while save was pending');
+      assert.equal(during.status.height, before.status.height, 'Purchasing status slot changed height');
+      assert.equal(during.save.height, before.save.height, 'Purchasing save button changed height');
+      assert.equal(during.scrollTop, before.scrollTop, 'Purchasing modal scrolled while save was pending');
       let result = await page.evaluate(() => window.__PURCHASE_BATCH_SUBMIT_TEST__.snapshot());
       assert.equal(result.saveCalls, 1);
       assert.equal(result.rpcCalls, 1);

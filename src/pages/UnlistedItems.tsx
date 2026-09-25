@@ -699,7 +699,9 @@ export default function UnlistedItems() {
                 ? new Date(catalogImportTime).toLocaleString('zh-TW', { hour12: false })
                 : '無暫存匯入記錄 (比對全部快取)'
               }
-              {isRefreshing && <span role="status"> · 同步最新資料中…</span>}
+              <span role="status" aria-live="polite" aria-hidden={isRefreshing ? undefined : true} style={{ display: 'inline-block', width: '128px', whiteSpace: 'nowrap', visibility: isRefreshing ? 'visible' : 'hidden' }}>
+                · 同步最新資料中…
+              </span>
             </span>
           </p>
         </div>

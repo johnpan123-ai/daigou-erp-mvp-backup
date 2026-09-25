@@ -2483,13 +2483,21 @@ export default function PurchaseRecords() {
 
   return (
     <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '180px' : '0px' }}>
-      {isSyncing && (
-        <div style={{
+      <div
+        data-testid="purchase-records-sync-slot"
+        role="status"
+        aria-live="polite"
+        aria-hidden={isSyncing ? undefined : true}
+        style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
+          height: '18px',
+          minHeight: '18px',
           fontSize: '12px',
-          color: '#64748b'
+          lineHeight: '18px',
+          color: '#64748b',
+          visibility: isSyncing ? 'visible' : 'hidden',
         }}>
           <div style={{
             width: '12px',
@@ -2501,8 +2509,7 @@ export default function PurchaseRecords() {
           }} />
           <span>同步中，顯示的是上次載入的資料...</span>
           <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      )}
+      </div>
       <style>{`
         .erp-table th {
           padding: 0 !important;
