@@ -71,11 +71,32 @@ try {
       return builder;
     };
     const rows = await supabaseProvider.getProductGroups();
-    return { rows, cached: await cloudCacheDb.getProductGroups(), state: getCloudConnectivitySnapshot() };
+    const duplicateVariants = [
+      {
+        id: '81000000-0000-4000-8000-000000000002', product_group_id: serverGroup.id,
+        myacg_item_code: 'RAW-COUNT-SKU', product_title: 'Raw count product', variant_name: 'A', raw_variant_name: 'A',
+      },
+      {
+        id: '81000000-0000-4000-8000-000000000003', product_group_id: serverGroup.id,
+        myacg_item_code: 'RAW-COUNT-SKU', product_title: 'Raw count product', variant_name: 'A', raw_variant_name: 'A',
+      },
+    ];
+    await cloudCacheDb.replaceProductVariantsFromAuthoritativeCloud(duplicateVariants);
+    const rawVariants = await supabaseProvider.getProductVariants({ raw: true });
+    const canonicalVariants = await supabaseProvider.getProductVariants();
+    return {
+      rows,
+      cached: await cloudCacheDb.getProductGroups(),
+      rawVariantCount: rawVariants.length,
+      canonicalVariantCount: canonicalVariants.length,
+      state: getCloudConnectivitySnapshot(),
+    };
   });
   await freshRowsFixture.context.close();
   assert.equal(freshRows.rows[0].title, 'Server fresh row');
   assert.equal(freshRows.cached[0].title, 'Server fresh row');
+  assert.equal(freshRows.rawVariantCount, 2, 'Settings raw statistics must retain every authoritative Variant row');
+  assert.equal(freshRows.canonicalVariantCount, 1, 'Business consumers must retain the existing Variant dedupe view');
   assert.equal(freshRows.state.readStatus, 'fresh-online');
 
   const slowBootstrapFixture = await openFixturePage();
@@ -98,10 +119,10 @@ try {
       myacg_available_quantity: 2, myacg_sold_quantity: 0, myacg_listed_at: '',
     }];
     const serverGroups = [{ id: '88000000-0000-4000-8000-000000000002', title: 'Server group', priority: 'Medium' }];
-    await cloudCacheDb.replaceAuthoritativeCloudCollections([
-      { storageKey: 'erp_inventory', value: staleInventory },
-      { storageKey: 'erp_product_groups', value: staleGroups },
-    ]);
+    // Fixture setup uses the public collection APIs. The reconciled NEXT core
+    // intentionally excludes the Restore-only multi-collection replacement helper.
+    await cloudCacheDb.saveInventory(staleInventory);
+    await cloudCacheDb.saveProductGroups(staleGroups);
     localStorage.setItem('erp_cloud_cache_sync_version', 'v2_pagination');
     supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-user', email: 'fixture@example.test' } } }, error: null });
     supabase.from = table => {

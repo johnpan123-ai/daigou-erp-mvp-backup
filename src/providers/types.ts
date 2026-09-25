@@ -34,7 +34,7 @@ export interface IDataProvider {
   saveProductGroups(groups: ProductGroup[]): Promise<void>;
   getProductCategories(): Promise<ProductCategory[]>;
   saveProductCategories(categories: ProductCategory[]): Promise<void>;
-  getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
+  getProductVariants(options?: { recalc?: boolean; raw?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
   deleteProductVariant(id: string): Promise<void>;
   updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void>;

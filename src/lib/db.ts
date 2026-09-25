@@ -533,7 +533,7 @@ export interface DatabaseAdapter {
   saveProductGroups(groups: ProductGroup[]): Promise<void>;
   getProductCategories(): Promise<ProductCategory[]>;
   saveProductCategories(categories: ProductCategory[]): Promise<void>;
-  getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]>;
+  getProductVariants(options?: { recalc?: boolean; raw?: boolean }): Promise<ProductVariant[]>;
   saveProductVariants(variants: ProductVariant[]): Promise<void>;
   updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void>;
   updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void>;
@@ -1615,10 +1615,14 @@ export class LocalStorageAdapter implements DatabaseAdapter {
 
 
 
-  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
+  async getProductVariants(options?: { recalc?: boolean; raw?: boolean }): Promise<ProductVariant[]> {
     const variants = loadData<ProductVariant[]>('erp_product_variants', []);
     console.log(`[IndexedDB Read Variants] count: ${variants.length}`);
     console.log('[IndexedDB Read Variants] sample:', variants.length > 0 ? JSON.stringify(variants[0]) : 'empty');
+
+    // Settings database statistics describe the stored collection, not the
+    // business-facing deduped/canonical view used by catalog pages.
+    if (options?.raw) return variants;
     
     const recalc = options?.recalc ?? false;
     const inventory = await this.getInventory();
@@ -3455,10 +3459,14 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     return report;
   }
 
-  async getProductVariants(options?: { recalc?: boolean }): Promise<ProductVariant[]> {
+  async getProductVariants(options?: { recalc?: boolean; raw?: boolean }): Promise<ProductVariant[]> {
     const rawVariants = await this.get<ProductVariant[]>('erp_product_variants', []);
     console.log(`[IndexedDB Read Variants] count: ${rawVariants.length}`);
     console.log('[IndexedDB Read Variants] sample:', rawVariants.length > 0 ? JSON.stringify(rawVariants[0]) : 'empty');
+
+    // Keep the raw collection available for database-level statistics. All
+    // existing callers retain the canonical/deduped view by default.
+    if (options?.raw) return rawVariants;
 
     const recalc = options?.recalc ?? false;
     const inventory = await this.getInventory();

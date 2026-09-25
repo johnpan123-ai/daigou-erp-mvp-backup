@@ -6,6 +6,7 @@ const settings = readFileSync(new URL('../src/pages/Settings.tsx', import.meta.u
 
 assert.match(settings, /SettingsCountLoadGate/u, 'Settings must use the latest-request-wins count loader');
 assert.match(settings, /void loadCounts\(\)/u, 'Settings must load counts on mount');
+assert.match(settings, /getProductVariants\(\{ raw: true \}\)/u, 'Settings must count the stored variant collection rather than the deduped business view');
 assert.match(settings, /countLoadGate\.invalidate\(\)/u, 'Settings must invalidate late reads on unmount');
 
 const vite = await createServer({
