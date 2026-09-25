@@ -42,6 +42,8 @@ export default function JapanPackagesList() {
   const [packages, setPackages] = useState<JapanPackage[]>([]);
   const [packageItems, setPackageItems] = useState<JapanPackageItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const hasLoadedDataRef = useRef(false);
+  const loadGenerationRef = useRef(0);
   const createInFlightRef = useRef(false);
   const createOutcomeUnknownRef = useRef(false);
 
@@ -218,16 +220,24 @@ export default function JapanPackagesList() {
   }, [showAddModal, showCarrierDrawer]);
 
   const loadData = async () => {
-    setIsLoading(true);
+    const generation = ++loadGenerationRef.current;
+    const isInitialLoad = !hasLoadedDataRef.current;
+    if (isInitialLoad) setIsLoading(true);
     try {
-      const fetchedPkgs = await dataProvider.getJapanPackages();
-      const fetchedItems = await dataProvider.getJapanPackageItems();
+      const [fetchedPkgs, fetchedItems] = await Promise.all([
+        dataProvider.getJapanPackages(),
+        dataProvider.getJapanPackageItems(),
+      ]);
+      if (generation !== loadGenerationRef.current) return;
       setPackages(fetchedPkgs || []);
       setPackageItems(fetchedItems || []);
+      hasLoadedDataRef.current = true;
     } catch (e) {
-      console.error('Failed to load Japan packages:', e);
+      if (generation === loadGenerationRef.current) {
+        console.error('Failed to load Japan packages:', e);
+      }
     } finally {
-      setIsLoading(false);
+      if (generation === loadGenerationRef.current) setIsLoading(false);
     }
   };
 
@@ -535,7 +545,7 @@ export default function JapanPackagesList() {
   );
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1800px', width: '100%', margin: '0 auto' }}>
+    <div data-testid="japan-packages-list-root" style={{ padding: '24px', maxWidth: '1800px', width: '100%', margin: '0 auto' }}>
       <style>{`
         .header-section {
           display: flex;
