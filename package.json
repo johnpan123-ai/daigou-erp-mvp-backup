@@ -97,6 +97,7 @@
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs",
     "test:purchase-records-edit-view": "node tests/purchase-records-edit-view.mjs",
+    "test:agency-order-quantity-patch": "node tests/agency-order-quantity-patch.mjs",
     "test:data-size-advisory": "node tests/data-size-advisory.mjs",
     "test:supabase-environment-boundary": "node tests/supabase-environment-boundary.mjs",
     "test:staging-refresh-tooling": "node tests/staging-refresh-tooling.mjs",

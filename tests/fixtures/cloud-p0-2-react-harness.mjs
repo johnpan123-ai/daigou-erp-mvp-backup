@@ -16,6 +16,7 @@ const fixtureParams = new URL(location.href).searchParams;
 const requestedRoute = fixtureParams.get('route') || '/dashboard';
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
 const outboundReceivingScenario = fixtureParams.get('outboundReceiving') === '1';
+const proxyDemandScenario = fixtureParams.get('proxyDemand') === '1';
 const realProviderReads = fixtureParams.get('realReads') === '1';
 const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
 history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
@@ -33,6 +34,25 @@ if (fixtureParams.get('bootstrapVariant')) {
 server.productGroups = server.productGroups.map(group => group.id === 'g-holo'
   ? { ...group, show_in_purchase_list: true }
   : group);
+if (proxyDemandScenario) {
+  server.productGroups.push({
+    ...server.productGroups.find(group => group.id === 'g-proxy'),
+    id: 'g-proxy-b', title: 'Second Proxy Product', normalized_title: 'second proxy product',
+  });
+  server.productCategories.push({
+    ...server.productCategories.find(category => category.id === 'c-proxy'),
+    id: 'c-proxy-b', product_group_id: 'g-proxy-b',
+  });
+  server.productVariants = server.productVariants.map(variant => variant.id === 'v-proxy'
+    ? { ...variant, version: 7, updated_at: '2026-09-23T00:00:00.000Z', purchased_manual_adjustment: 2 }
+    : variant);
+  server.productVariants.push({
+    ...server.productVariants.find(variant => variant.id === 'v-proxy'),
+    id: 'v-proxy-b', product_group_id: 'g-proxy-b', product_category_id: 'c-proxy-b',
+    myacg_item_code: 'SKU-PROXY-B', product_title: 'Second Proxy Product', version: 4,
+    updated_at: '2026-09-23T00:00:00.000Z', purchased_manual_adjustment: 6,
+  });
+}
 server.purchaseBatches = server.purchaseBatches.map(batch => batch.id === 'b-holo'
   ? { ...batch, name: 'React Batch A', date: '2026-09-07', created_at: '2026-09-07T00:00:00.000Z', updated_at: '2026-09-07T00:00:00.000Z' }
   : batch);
@@ -190,6 +210,9 @@ let heldPageRead, releasePageRead, pageReadHeld = false;
 let holdAllPageReads = false;
 let heldOutboundSave, releaseOutboundSave, outboundSaveHeld = false;
 let failNextOutboundSave = false;
+let heldVariantPatch, releaseVariantPatch, variantPatchHeld = false;
+let nextVariantPatchFailure = null;
+const variantPatchCalls = [];
 if (fixtureParams.get('holdInitialPageRead') === '1') {
   holdAllPageReads = true;
   heldPageRead = new Promise(resolve => { releasePageRead = resolve; });
@@ -246,8 +269,31 @@ dataProvider.savePurchaseBatchTransaction = async command => {
 dataProvider.canWriteCloud = async () => true;
 dataProvider.updateProductVariantPatch = async (id, patch) => {
   if (dataProvider.checkIsStaleLive()) throw new StaleDataError();
+  const capturedPatch = clone(patch);
+  variantPatchCalls.push({ id, patch: capturedPatch });
+  const forbiddenField = Object.keys(capturedPatch).find(field => [
+    'id', 'created_at', 'updated_at', 'updated_by', 'version', 'deleted_at', 'sync_status',
+  ].includes(field));
+  if (forbiddenField) throw new Error(`CLOUD_MUTATION_FIELD_NOT_ALLOWED:${forbiddenField}`);
+  if (heldVariantPatch) {
+    const gate = heldVariantPatch;
+    heldVariantPatch = null;
+    variantPatchHeld = true;
+    await gate;
+    variantPatchHeld = false;
+  }
+  if (nextVariantPatchFailure) {
+    const failure = nextVariantPatchFailure;
+    nextVariantPatchFailure = null;
+    throw new Error(failure);
+  }
   writes += 1;
-  server.productVariants = server.productVariants.map(row => row.id === id ? { ...row, ...clone(patch) } : row);
+  server.productVariants = server.productVariants.map(row => row.id === id ? {
+    ...row,
+    ...capturedPatch,
+    version: Number(row.version || 1) + 1,
+    updated_at: '2026-09-23T00:00:01.000Z',
+  } : row);
   await cloudCacheDb.saveProductVariants(clone(server.productVariants));
 };
 dataProvider.updateProductVariantPatchBulk = async patches => {
@@ -504,6 +550,8 @@ window.__P0_REACT_HARNESS__ = {
   holdNextTargetedRead() { heldTargetedRead = new Promise(resolve => { releaseTargetedRead = resolve; }); },
   holdNextPageRead() { heldPageRead = new Promise(resolve => { releasePageRead = resolve; }); },
   holdNextOutboundSave() { heldOutboundSave = new Promise(resolve => { releaseOutboundSave = resolve; }); },
+  holdNextVariantPatch() { heldVariantPatch = new Promise(resolve => { releaseVariantPatch = resolve; }); },
+  failNextVariantPatch(message = 'simulated product variant patch failure') { nextVariantPatchFailure = message; },
   failNextOutboundSave() { failNextOutboundSave = true; },
   releasePageRead() {
     holdAllPageReads = false;
@@ -511,6 +559,7 @@ window.__P0_REACT_HARNESS__ = {
     releasePageRead?.();
   },
   releaseOutboundSave() { releaseOutboundSave?.(); },
+  releaseVariantPatch() { releaseVariantPatch?.(); },
   releaseTargetedRead() { releaseTargetedRead?.(); },
   failTargetedTableRead(table, count = 1) { targetedReadFailures.set(table, count); },
   replaySameKey(canonicalResult) {
@@ -542,6 +591,8 @@ window.__P0_REACT_HARNESS__ = {
       targetedReadHeld,
       pageReadHeld,
       outboundSaveHeld,
+      variantPatchHeld,
+      variantPatchCalls: clone(variantPatchCalls),
       targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,
