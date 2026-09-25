@@ -35,7 +35,8 @@ const [contextSource, coordinatorSource, cacheSource, coverageSource] = await Pr
 
 assert.match(contextSource, /event: '\*'/u, 'Realtime subscription must include INSERT/UPDATE/DELETE');
 assert.match(contextSource, /coordinatorRef\.current\?\.resume\(resources\)/u, 'Editing end must resume deferred resources');
-assert.match(contextSource, /registerEditing\?\.\(owner, resourcesRef\.current, editing\)/u);
+assert.match(contextSource, /registerEditing\?\.\(owner, resourcesRef\.current, editing, draftScopeKey/u);
+assert.match(contextSource, /\[editing, owner, registerEditing, resourceKey, draftScopeKey\]/u);
 assert.match(contextSource, /if \(!editing && changed\.some/u, 'Refreshed resources must notify the React consumer');
 assert.doesNotMatch(contextSource, /setInterval\s*\(/u, 'P0-2 must not add polling');
 assert.match(coordinatorSource, /private deferred = new Map/u);

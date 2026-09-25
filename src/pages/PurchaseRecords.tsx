@@ -1501,6 +1501,14 @@ export default function PurchaseRecords() {
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
     editMode || showWacaDialog || showClosingDateWorkbench,
     loadFreshData,
+    showWacaDialog || showClosingDateWorkbench ? undefined : {
+      kind: 'groups',
+      ids: [...new Set([
+        ...Object.keys(draftDemands).map(key => key.replace(/_(myacg|waca|purchased)$/, '')),
+        ...Object.keys(draftClosingDates),
+        ...selectedGroupIds,
+      ])],
+    },
   );
 
   const handleUpdateWacaMeta = async (updatedBy: string) => {

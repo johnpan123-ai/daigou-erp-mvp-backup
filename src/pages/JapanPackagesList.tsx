@@ -235,6 +235,7 @@ export default function JapanPackagesList() {
     ['japanPackages'],
     showAddModal || Boolean(editingPackageId),
     loadData,
+    { kind: 'package', ids: editingPackageId ? [editingPackageId] : [] },
   );
 
   const getTrackingUrl = (carrier: string, trackingNumber: string) => {

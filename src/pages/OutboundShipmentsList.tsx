@@ -117,6 +117,7 @@ export default function OutboundShipmentsList() {
     ['outboundShipments', 'japanPackages', 'products', 'bundles'],
     showCreateForm,
     loadData,
+    { kind: 'shipment', ids: [] },
   );
 
   const productSearchIndex = useMemo(
