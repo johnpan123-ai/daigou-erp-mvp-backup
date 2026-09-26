@@ -654,13 +654,13 @@ export default function CloudAtomicRestorePanel({
       </div>
 
       {!recoveryReady && cloudMode && owner && user && (
-        <p data-testid="cloud-restore-recovery-gate" role={recovery.error ? 'alert' : 'status'} style={{ minHeight: 24 }}>
+        <p data-testid="cloud-restore-recovery-gate" role={recovery.error ? 'alert' : 'status'}>
           {recovery.error ? '目前無法確認既有還原狀態，新還原已暫停。' : '正在確認還原狀態…'}
           {recovery.error && <button type="button" className="btn btn-outline" onClick={refreshRecovery}>重新確認</button>}
         </p>
       )}
 
-      <div data-testid="cloud-restore-workflow-slot" style={{ minHeight: 250, overflowWrap: 'anywhere' }}>
+      <div data-testid="cloud-restore-workflow-slot" style={{ overflowWrap: 'anywhere' }}>
       {status === 'idle' && !unresolvedAttempt && (
         <div style={{ marginTop: 14 }}>
           <button type="button" className="btn btn-primary" data-testid="cloud-restore-file-button" disabled={!canChooseFile} onClick={() => fileRef.current?.click()}>
@@ -671,7 +671,7 @@ export default function CloudAtomicRestorePanel({
       <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={event => void selectFile(event.target.files?.[0])} />
 
       {status === 'preflighting' && (
-        <div data-testid="cloud-restore-preflight-progress" role="status" style={{ marginTop: 14, minHeight: 72 }}>
+        <div data-testid="cloud-restore-preflight-progress" role="status" style={{ marginTop: 14 }}>
           <strong>正在準備備份</strong>
           <p style={{ margin: '6px 0' }}>系統正在自動完成安全檢查，尚未修改雲端資料。</p>
         </div>
@@ -692,17 +692,17 @@ export default function CloudAtomicRestorePanel({
         </div>
       )}
       {status === 'ready' && candidate && !proofCurrent && (
-        <p role="alert" style={{ minHeight: 24 }}>安全檢查已失效，請重新選擇備份。</p>
+        <p role="alert">安全檢查已失效，請重新選擇備份。</p>
       )}
 
       {(status === 'restoring' || status === 'checking' || status === 'success' || (status === 'error' && Boolean(result))) && (
-        <div data-testid="cloud-restore-progress" style={{ marginTop: 14, minHeight: 106 }}>
+        <div data-testid="cloud-restore-progress" style={{ marginTop: 14 }}>
           <strong>{status === 'success' ? '還原完成' : '正在安全還原資料…'}</strong>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6, marginTop: 10 }}>
             {progressLabels.map(([step, label], index) => {
               const done = status === 'success' || index < activeProgressIndex;
               const current = index === activeProgressIndex && status !== 'success';
-              return <div key={step} style={{ minHeight: 40, padding: '7px 4px', borderRadius: 6, textAlign: 'center', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: done ? '#dcfce7' : current ? '#dbeafe' : '#f1f5f9', color: '#334155' }}>
+              return <div key={step} style={{ padding: '7px 4px', borderRadius: 6, textAlign: 'center', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', background: done ? '#dcfce7' : current ? '#dbeafe' : '#f1f5f9', color: '#334155' }}>
                 {done && <CheckCircle2 size={14} aria-hidden="true" style={{ verticalAlign: 'text-bottom', marginRight: 3 }} />}
                 {label}
               </div>;
@@ -712,7 +712,7 @@ export default function CloudAtomicRestorePanel({
       )}
 
       {mainStatus && status !== 'ready' && (
-        <p data-testid="cloud-restore-status" role={status === 'error' || status === 'unknown' ? 'alert' : 'status'} style={{ minHeight: 24, whiteSpace: 'pre-line', marginBottom: 0 }}>
+        <p data-testid="cloud-restore-status" role={status === 'error' || status === 'unknown' ? 'alert' : 'status'} style={{ whiteSpace: 'pre-line', marginBottom: 0 }}>
           {mainStatus}
           {traceId && (status === 'error' || status === 'unknown') && <><br />追蹤編號：<code>{traceId}</code></>}
         </p>

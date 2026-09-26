@@ -518,7 +518,7 @@ try {
     page.on('request', request => { if (/\.supabase\.co\//u.test(request.url())) cloudRequests.push(request.url()); });
     page.on('console', message => { applicationLogs.push(message.text()); });
     const snapshot = () => page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    const mountAndUpload = async ({ behavior = 'success', proofBehavior = 'success', document = validDocument } = {}) => {
+    const mountHarness = async ({ behavior = 'success', proofBehavior = 'success' } = {}) => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.getByTestId('staging-cloud-restore-harness').waitFor();
       const previous = await page.evaluate(({ nextBehavior, nextProof }) => {
@@ -533,6 +533,9 @@ try {
       }, { nextBehavior: behavior, nextProof: proofBehavior });
       await page.waitForFunction(before => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > before, previous);
       await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
+    };
+    const mountAndUpload = async ({ behavior = 'success', proofBehavior = 'success', document = validDocument } = {}) => {
+      await mountHarness({ behavior, proofBehavior });
       await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
     };
     const openReady = async options => {
@@ -704,24 +707,98 @@ try {
     assert.doesNotMatch(JSON.stringify(state.diagnostics), /must-not-render|fake-|owner@example|private-business/u);
     assert.doesNotMatch(applicationLogs.join('\n'), /must-not-render|fake-|owner@example|private-business/u);
 
-    // Stable workflow slot keeps Settings content anchored throughout the lifecycle.
+    const measureRestoreGeometry = () => page.getByTestId('cloud-atomic-restore').evaluate(card => {
+      const workflow = card.querySelector('[data-testid="cloud-restore-workflow-slot"]');
+      const cta = card.querySelector('[data-testid="cloud-restore-file-button"]');
+      const technical = card.querySelector('[data-testid="cloud-restore-technical-details"]');
+      const advanced = card.querySelector('[data-testid="cloud-restore-advanced-tools"]');
+      const cardRect = card.getBoundingClientRect();
+      const workflowRect = workflow.getBoundingClientRect();
+      const ctaRect = cta?.getBoundingClientRect();
+      const technicalRect = technical.getBoundingClientRect();
+      const advancedRect = advanced.getBoundingClientRect();
+      const visibleWorkflowChildren = [...workflow.children]
+        .map(node => ({ node, rect: node.getBoundingClientRect(), style: getComputedStyle(node) }))
+        .filter(({ rect, style }) => rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden');
+      const visibleCardChildren = [...card.children]
+        .map(node => ({ node, rect: node.getBoundingClientRect(), style: getComputedStyle(node) }))
+        .filter(({ rect, style }) => rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden');
+      const workflowContentBottom = visibleWorkflowChildren.length > 0
+        ? Math.max(...visibleWorkflowChildren.map(({ rect }) => rect.bottom))
+        : workflowRect.top;
+      const cardContentBottom = Math.max(...visibleCardChildren.map(({ rect }) => rect.bottom));
+      return {
+        viewportWidth: window.innerWidth,
+        cardHeight: cardRect.height,
+        cardBottom: cardRect.bottom,
+        workflowHeight: workflowRect.height,
+        ctaBottom: ctaRect?.bottom ?? null,
+        technicalTop: technicalRect.top,
+        advancedBottom: advancedRect.bottom,
+        ctaToTechnicalGap: ctaRect ? technicalRect.top - ctaRect.bottom : null,
+        workflowToTechnicalGap: technicalRect.top - workflowContentBottom,
+        cardBottomGap: cardRect.bottom - cardContentBottom,
+        horizontalOverflow: card.scrollWidth > card.clientWidth,
+        documentHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    });
+    const assertContentDrivenGeometry = (geometry, width, stateName) => {
+      assert.ok(geometry.workflowToTechnicalGap >= 0 && geometry.workflowToTechnicalGap <= 40,
+        `${width}px ${stateName} workflow-to-technical gap was ${geometry.workflowToTechnicalGap}px`);
+      assert.ok(geometry.cardBottomGap >= 0 && geometry.cardBottomGap <= 32,
+        `${width}px ${stateName} card bottom gap was ${geometry.cardBottomGap}px`);
+      assert.equal(geometry.horizontalOverflow, false, `${width}px ${stateName} Restore card must not overflow horizontally`);
+    };
+    const geometryEvidence = [];
+
+    // Restore height follows real content: idle is compact; visible workflow states grow naturally.
     for (const width of [1366, 1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
+
+      await mountHarness();
+      await page.getByTestId('cloud-restore-file-button').waitFor();
+      const idle = await measureRestoreGeometry();
+      assert.ok(idle.ctaToTechnicalGap >= 0 && idle.ctaToTechnicalGap <= 40,
+        `${width}px idle CTA-to-technical gap was ${idle.ctaToTechnicalGap}px`);
+      assertContentDrivenGeometry(idle, width, 'idle');
+      const collapsedHeight = idle.cardHeight;
+      await page.getByTestId('cloud-restore-technical-details').locator('summary').click();
+      const expanded = await measureRestoreGeometry();
+      assert.ok(expanded.cardHeight > collapsedHeight, `${width}px expanded technical content must grow the card`);
+      await page.getByTestId('cloud-restore-technical-details').locator('summary').click();
+      const collapsedAgain = await measureRestoreGeometry();
+      assert.ok(Math.abs(collapsedAgain.cardHeight - collapsedHeight) <= 1,
+        `${width}px collapsed technical content did not return to natural height`);
+
+      await mountAndUpload({ proofBehavior: 'deferred-success' });
+      await page.getByTestId('cloud-restore-preflight-progress').waitFor();
+      const preflighting = await measureRestoreGeometry();
+      assertContentDrivenGeometry(preflighting, width, 'preflighting');
+      await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseProofDeferred());
+      await page.getByTestId('cloud-restore-preflight').waitFor();
+      const ready = await measureRestoreGeometry();
+      assert.ok(ready.cardHeight > idle.cardHeight, `${width}px ready summary must naturally grow the card`);
+      assertContentDrivenGeometry(ready, width, 'ready');
+
       await openReady({ behavior: 'deferred-success' });
-      const before = await page.getByTestId('cloud-restore-technical-details').evaluate(node => node.getBoundingClientRect().top);
       await confirm();
       await page.waitForFunction(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().calls === 1);
-      const pending = await page.getByTestId('cloud-restore-technical-details').evaluate(node => node.getBoundingClientRect().top);
-      const scrollBefore = await page.evaluate(() => window.scrollX);
-      assert.ok(Math.abs(pending - before) <= 1, `${width}px pending anchor shifted by ${pending - before}px`);
-      assert.equal(scrollBefore, 0);
+      const executing = await measureRestoreGeometry();
+      assertContentDrivenGeometry(executing, width, 'executing');
       await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseDeferred());
       await page.getByTestId('cloud-restore-result').waitFor();
-      const after = await page.getByTestId('cloud-restore-technical-details').evaluate(node => node.getBoundingClientRect().top);
-      assert.ok(Math.abs(after - before) <= 1, `${width}px success anchor shifted by ${after - before}px`);
-      assert.equal(await page.getByTestId('cloud-atomic-restore').evaluate(node => node.scrollWidth <= node.clientWidth), true,
-        `${width}px Restore card must not overflow horizontally`);
+      const success = await measureRestoreGeometry();
+      assertContentDrivenGeometry(success, width, 'success');
+
+      await openReady({ behavior: 'durable-failure' });
+      await confirm();
+      await page.getByTestId('cloud-restore-new-intent').waitFor();
+      const failure = await measureRestoreGeometry();
+      assertContentDrivenGeometry(failure, width, 'failure');
+
+      geometryEvidence.push({ width, idle, preflighting, ready, executing, success, failure });
     }
+    console.log(`RESTORE_LAYOUT_GEOMETRY ${JSON.stringify(geometryEvidence)}`);
 
     if (realSnapshotDocument) {
       await openReady({ document: realSnapshotDocument });
