@@ -1778,7 +1778,7 @@ export default function PurchaseRecords() {
       const cached = catalogQueryCache.get(normalizedQuery);
       if (cached) return cached;
       const request = fetchReadonlyCatalogJson<{ products?: any[] }>(
-        `/api/catalog/search?q=${encodeURIComponent(normalizedQuery)}&pageSize=8`,
+        `/api/catalog/search?q=${encodeURIComponent(normalizedQuery)}&limit=8`,
       );
       catalogQueryCache.set(normalizedQuery, request);
       try {

@@ -20,11 +20,12 @@ assert.doesNotMatch(cloudApplySource, /location\.reload|window\.location/u);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--mode', 'experimental', '--host', '127.0.0.1', '--port', PORT, '--strictPort',
+  '--mode', 'staging', '--host', '127.0.0.1', '--port', PORT, '--strictPort',
 ], {
   cwd: ROOT,
   env: {
     ...process.env,
+    VITE_DEPLOYMENT_ENV: 'staging',
     VITE_SUPABASE_URL: 'https://rhfdjsklfrgpoqsaqpkn.supabase.co',
     VITE_SUPABASE_ANON_KEY: 'local-test-no-network',
   },
@@ -70,7 +71,7 @@ try {
   page.on('console', message => {
     if (message.type() === 'error') pageErrors.push(message.text());
   });
-  await page.route('**/api/catalog/search**', async route => {
+  await page.route('**/api/catalog/deadline-candidates**', async route => {
     const query = new URL(route.request().url()).searchParams.get('q') || '';
     if (query.includes('查詢失敗')) {
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'CATALOG_UNAVAILABLE' }) });
@@ -89,7 +90,30 @@ try {
     } else if (query.includes('單一候選')) {
       products = [candidate('candidate-single', '黏土人 單一候選商品', '2026-11-11T08:00:00.000Z', 'SINGLE-A')];
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ products }) });
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schemaVersion: 'deadline-v1',
+        status: products.length > 0 ? 'AMBIGUOUS' : 'NOT_FOUND',
+        reason: products.length > 0 ? 'FIXTURE_CANDIDATES' : 'NO_MATCH',
+        query,
+        candidates: products.map(product => ({
+          catalogProductId: product.id,
+          productName: product.name,
+          catalogId: '00000000-0000-4000-8000-000000000999',
+          supplierCode: product.catalog?.supplier?.code ?? 'unknown',
+          supplierProductId: product.sku ?? product.id,
+          deadlineAt: product.catalog?.deadlineAt ?? null,
+          sourceUpdatedAt: '2026-08-21T00:00:00.000Z',
+          matchEvidence: {
+            originalName: product.name,
+            brandName: product.brand?.name ?? null,
+            catalogName: 'Fixture',
+          },
+        })),
+      }),
+    });
   });
 
   await page.goto(
@@ -125,7 +149,7 @@ try {
   });
   assert.deepEqual(access, {
     cloud: 'cloud', next: 'next', nextDisabled: null, local: null,
-    actualProvider: 'cloud', actualBuild: 'experimental', actualMode: 'cloud',
+    actualProvider: 'cloud', actualBuild: null, actualMode: 'cloud',
   });
 
   const selected = new Set();

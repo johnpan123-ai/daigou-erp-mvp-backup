@@ -102,7 +102,19 @@ const metricSummary = (metrics: ClosingDateBatchGatewayMetrics | null): string =
     `upstream ${metrics.upstreamRequestCount}`,
     `cache ${Math.round(metrics.cacheHitRatio * 100)}%`,
     `dedupe ${Math.round(metrics.dedupeRatio * 100)}%`,
+    `direct ${metrics.directBatchRequestCount}/${metrics.directUniqueProductCount}/${metrics.directLookupItemCount}`,
+    `candidate ${metrics.candidateSearchRequestCount}`,
   ].join('・');
+};
+
+const catalogLookupStatusLabel = (result: ResolutionResult): string | null => {
+  switch (result.catalogLookupStatus) {
+    case 'DIRECT_MATCHED': return '已確認商品';
+    case 'DIRECT_NO_DEADLINE': return '已確認商品，但來源尚無結單日';
+    case 'DIRECT_TEMPORARY_ERROR': return '目錄查詢暫時失敗，可重新查詢';
+    case 'STALE_MAPPING': return '原商品對應已失效，請重新確認';
+    default: return null;
+  }
 };
 
 const bestNativeQueryHit = (candidate: RankedResolutionCandidate) => (
@@ -136,6 +148,7 @@ const ResultCard = ({
 }) => {
   const colors = classificationColors[result.classification];
   const reviewCandidates = orderClosingDateReviewCandidates(result.candidates);
+  const lookupStatus = catalogLookupStatusLabel(result);
   return (
     <article
       data-testid={`closing-date-result-${result.erpProductGroupId}`}
@@ -153,6 +166,12 @@ const ResultCard = ({
       {result.serviceError && (
         <div style={{ marginTop: 8, color: '#991b1b', fontSize: 12 }}>
           {result.serviceError.message}（{result.serviceError.retryable ? '可重試' : '不可重試'}）
+        </div>
+      )}
+
+      {lookupStatus && !result.serviceError && (
+        <div style={{ marginTop: 8, color: colors.text, fontSize: 12 }}>
+          {lookupStatus}
         </div>
       )}
 
@@ -253,6 +272,11 @@ const ResultCard = ({
                       {candidate.identifiers?.modelCode && (
                         <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
                           型號：{candidate.identifiers.modelCode}
+                        </span>
+                      )}
+                      {candidate.identifiers?.supplierProductId && (
+                        <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
+                          供應商商品編號：{candidate.identifiers.supplierProductId}
                         </span>
                       )}
                       <span style={{ display: 'block', color: '#475569', fontSize: 12, marginTop: 2 }}>
@@ -379,6 +403,7 @@ export default function ClosingDateResolutionWorkbench({
           ruleVersion: result.ruleVersion,
           snapshotVersion: result.snapshotVersion,
           serviceError: result.serviceError,
+          catalogLookupStatus: result.catalogLookupStatus,
           analyzedAt: result.analyzedAt,
         });
       });
@@ -543,6 +568,14 @@ export default function ClosingDateResolutionWorkbench({
         resolutionBatchId: result.batchId,
         resolutionResultId: result.id,
         candidateId: candidate.id,
+        catalogProductId: candidate.source.sourceProductId,
+        ...(candidate.source.sourceCatalogId
+          ? { catalogId: candidate.source.sourceCatalogId }
+          : {}),
+        supplierCode: candidate.source.sourceSupplier,
+        ...(candidate.identifiers?.supplierProductId
+          ? { supplierProductId: candidate.identifiers.supplierProductId }
+          : {}),
       },
       sourceTitleAtVerification: candidate.catalogTitle,
       erpTitleFingerprint: result.erpTitleAtAnalysis,

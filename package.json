@@ -116,6 +116,8 @@
     "benchmark:closing-date-analysis-performance-parity": "node tests/closing-date-analysis-performance-parity.mjs",
     "test:closing-date-workbench-ui": "node tests/closing-date-workbench-ui.mjs",
     "test:closing-date-cloud-parity": "node tests/closing-date-cloud-parity.mjs",
+    "test:closing-date-deadline-v1": "node tests/closing-date-deadline-v1-integration.mjs",
+    "test:erp2-deadline-canonical-preservation": "node tests/erp2-deadline-canonical-preservation.mjs",
     "test:closing-date-wanrong-priority": "node tests/closing-date-wanrong-priority.mjs",
     "test:next-bulk-closing-date-clear": "node tests/next-bulk-closing-date-clear.mjs",
     "diagnose:core": "node tests/core-diagnostics.mjs",

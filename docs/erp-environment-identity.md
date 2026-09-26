@@ -36,7 +36,25 @@ Before any ERP upload, run the guard with the exact candidate identity and the G
 npm run verify:erp-deployment-identity -- --role erp2 --profile hippo-erp --project hippo-erp-realtime-preview --supabase-project rhfdjsklfrgpoqsaqpkn --runtime-marker STAGING --fingerprint D9EA6B7BB6524517 --source-head 80469b966bc27999f55c804cfa374721773b55a4 --remote-branch codex/atomic-restore-durable-failure-recovery-v1 --checkpoint-tag checkpoint-20260927-erp-identity-guard-windows-safe-v1
 ```
 
-For every later candidate, replace `--source-head` and `--checkpoint-tag` together; the supplied checkpoint tag must peel to that exact candidate SHA.
+For every later candidate, replace `--source-head`, `--remote-branch` and `--checkpoint-tag` together; the supplied checkpoint tag must peel to that exact candidate SHA. The remote branch must also match the explicitly approved branch in the identity configuration.
+
+### Deadline V1 integration candidate (2026-09-27; not deployed)
+
+The approved candidate branch is now `codex/erp2-deadline-v1-canonical-integration`.
+Its pre-task recovery tag is `backup-20260927-before-erp2-deadline-v1-integration`,
+which peels to canonical source `346e41ea19f92d1374452c8bec53dd706762dda0`.
+The delivery checkpoint is `checkpoint-20260927-erp2-deadline-v1-canonical-integration`.
+Use the candidate's verified full SHA with that branch/checkpoint in the guard.
+The accepted LIVE deployment and source above remain unchanged until a separately authorized release.
+The previous command example is historical, not the current candidate command.
+
+Before source edits: accepted canonical baseline → task recovery tag → GitHub push →
+remote peeled-SHA verification. Before deployment: tests/build → commit/checkpoint →
+push branch AND checkpoint → remote SHA verification. Both gates are mandatory.
+
+Git-connected Pages projects can deploy on a branch push. Candidate delivery commits use
+`[CF-Pages-Skip]` at the start of the commit subject to prevent GitHub backup from initiating
+a Pages deployment. This does not authorize CLI deployment or bypass the deployment guard.
 
 The guard fails closed unless all of these match:
 

@@ -24,11 +24,15 @@ export interface ProxyCatalogCandidate {
   url?: string | null;
   slug?: string | null;
   sku?: string | null;
+  supplierProductId?: string | null;
   janCode?: string | null;
   manufacturer?: string | null;
   brand?: { name?: string | null } | null;
   catalog?: {
+    id?: string | null;
+    name?: string | null;
     deadlineAt?: string | null;
+    sourceUpdatedAt?: string | null;
     supplier?: { code?: string | null } | null;
   } | null;
 }

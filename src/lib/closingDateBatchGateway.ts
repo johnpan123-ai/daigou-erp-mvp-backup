@@ -24,12 +24,16 @@ import type {
 } from './closingDateResolutionDomain';
 import type { ClosingDateResolutionSidecarRepository } from './closingDateResolutionSidecarRepository';
 import {
+  CATALOG_DEADLINE_BATCH_MAX,
+  CatalogDeadlineDirectCache,
   CatalogSnapshotQueryCache,
   ClosingDateCatalogGatewayError,
+  LimitedConcurrencyGate,
   createReadonlyCatalogHttpClient,
 } from './closingDateCatalogBatchCache';
 import type {
   CatalogCacheLookupResult,
+  CatalogDeadlineLookupRecord,
   CatalogSnapshotDescriptor,
   ReadonlyCatalogClient,
 } from './closingDateCatalogBatchCache';
@@ -123,6 +127,10 @@ export interface ClosingDateBatchGatewayMetrics {
   maxUpstreamConcurrency: number;
   cancellationCount: number;
   serviceErrorCount: number;
+  directLookupItemCount: number;
+  directUniqueProductCount: number;
+  directBatchRequestCount: number;
+  candidateSearchRequestCount: number;
 }
 
 export interface ClosingDateBatchPollResponse extends ResolutionJobResponse {
@@ -138,7 +146,10 @@ export interface RetryClosingDateBatchOptions {
 }
 
 export interface ClosingDateBatchSearch {
-  (query: string, options?: { limit?: number }): Promise<readonly ProxyCatalogCandidate[]>;
+  (
+    query: string,
+    options?: { limit?: number; catalogId?: string | null },
+  ): Promise<readonly ProxyCatalogCandidate[]>;
 }
 
 export interface ClosingDateBatchAnalysisContext {
@@ -148,6 +159,7 @@ export interface ClosingDateBatchAnalysisContext {
   snapshot: CatalogSnapshotDescriptor;
   activeMappings: readonly VerifiedMappingRegistryEntry[];
   search: ClosingDateBatchSearch;
+  candidateCatalogId?: string | null;
   signal: AbortSignal;
   analyzedAt: string;
 }
@@ -167,6 +179,16 @@ interface MutableMetrics {
   singleFlightHitCount: number;
   maxUpstreamConcurrency: number;
   cancellationCount: number;
+  directLookupItemCount: number;
+  directUniqueProductCount: number;
+  directBatchRequestCount: number;
+  candidateSearchRequestCount: number;
+}
+
+interface DirectLookupState {
+  mapping: VerifiedMappingRegistryEntry;
+  result?: CatalogDeadlineLookupRecord;
+  error?: ClosingDateCatalogGatewayError;
 }
 
 interface InternalResolutionJob {
@@ -175,6 +197,7 @@ interface InternalResolutionJob {
   results: ResolutionResult[];
   snapshot: CatalogSnapshotDescriptor;
   activeMappingsByProduct: ReadonlyMap<string, readonly VerifiedMappingRegistryEntry[]>;
+  directLookupByProduct: Map<string, DirectLookupState>;
   controller: AbortController;
   completion: Promise<void>;
   persistence: Promise<void>;
@@ -193,6 +216,10 @@ const createMutableMetrics = (startedAtMs: number): MutableMetrics => ({
   singleFlightHitCount: 0,
   maxUpstreamConcurrency: 0,
   cancellationCount: 0,
+  directLookupItemCount: 0,
+  directUniqueProductCount: 0,
+  directBatchRequestCount: 0,
+  candidateSearchRequestCount: 0,
 });
 
 const percentile = (values: readonly number[], quantile: number): number => {
@@ -210,7 +237,14 @@ const toMetrics = (
   results: readonly ResolutionResult[],
 ): ClosingDateBatchGatewayMetrics => {
   const totalTimeMs = (mutable.finishedAtMs ?? nowMs) - mutable.startedAtMs;
-  const dedupedRequestCount = mutable.cacheHitCount + mutable.singleFlightHitCount;
+  const directFanoutDedupeCount = Math.max(
+    0,
+    mutable.directLookupItemCount - mutable.directUniqueProductCount,
+  );
+  const dedupedRequestCount = mutable.cacheHitCount
+    + mutable.singleFlightHitCount
+    + directFanoutDedupeCount;
+  const logicalLookupCount = mutable.logicalQueryCount + mutable.directLookupItemCount;
   return {
     totalTimeMs: roundMetric(Math.max(0, totalTimeMs)),
     itemLatencyP50Ms: roundMetric(percentile(mutable.itemLatenciesMs, 0.5)),
@@ -219,17 +253,21 @@ const toMetrics = (
     uniqueQueryCount: mutable.uniqueQueryKeys.size,
     upstreamRequestCount: mutable.upstreamRequestCount,
     dedupedRequestCount,
-    dedupeRatio: mutable.logicalQueryCount === 0
+    dedupeRatio: logicalLookupCount === 0
       ? 0
-      : roundMetric(dedupedRequestCount / mutable.logicalQueryCount),
+      : roundMetric(dedupedRequestCount / logicalLookupCount),
     cacheHitCount: mutable.cacheHitCount,
-    cacheHitRatio: mutable.logicalQueryCount === 0
+    cacheHitRatio: logicalLookupCount === 0
       ? 0
-      : roundMetric(mutable.cacheHitCount / mutable.logicalQueryCount),
+      : roundMetric(mutable.cacheHitCount / logicalLookupCount),
     singleFlightHitCount: mutable.singleFlightHitCount,
     maxUpstreamConcurrency: mutable.maxUpstreamConcurrency,
     cancellationCount: mutable.cancellationCount,
     serviceErrorCount: results.filter(result => Boolean(result.serviceError)).length,
+    directLookupItemCount: mutable.directLookupItemCount,
+    directUniqueProductCount: mutable.directUniqueProductCount,
+    directBatchRequestCount: mutable.directBatchRequestCount,
+    candidateSearchRequestCount: mutable.candidateSearchRequestCount,
   };
 };
 
@@ -257,16 +295,114 @@ const sourceReferenceForCandidate = (
   return {
     sourceSupplier: candidateSupplier(candidate),
     sourceProductId,
-    sourceCatalogId: snapshotVersion,
+    sourceCatalogId: candidate.catalog?.id?.trim() || snapshotVersion,
   };
 };
 
 const suggestedClosingDate = (rawDeadline: string | null | undefined): string | null => {
   if (!rawDeadline) return null;
-  const deadline = new Date(rawDeadline);
+  const calendarDate = rawDeadline.match(/^(\d{4})-(\d{2})-(\d{2})/u);
+  if (!calendarDate) return null;
+  const deadline = new Date(Date.UTC(
+    Number(calendarDate[1]),
+    Number(calendarDate[2]) - 1,
+    Number(calendarDate[3]),
+  ));
   if (!Number.isFinite(deadline.getTime())) return null;
   deadline.setUTCDate(deadline.getUTCDate() - 2);
   return deadline.toISOString().slice(0, 10);
+};
+
+const CATALOG_PUBLIC_ORIGIN = 'https://hippotoycatalog.com';
+const PUBLIC_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+const catalogProductIdForMapping = (
+  mapping: VerifiedMappingRegistryEntry,
+): string | null => {
+  const evidenceId = mapping.verificationEvidence?.catalogProductId?.trim();
+  const sourceId = mapping.source.sourceProductId.trim();
+  const catalogProductId = evidenceId || sourceId;
+  return PUBLIC_UUID_PATTERN.test(catalogProductId) ? catalogProductId : null;
+};
+
+const directMappingForProduct = (
+  mappings: readonly VerifiedMappingRegistryEntry[],
+): VerifiedMappingRegistryEntry | null => {
+  const eligible = mappings
+    .filter(isActiveVerifiedMapping)
+    .flatMap(mapping => {
+      const catalogProductId = catalogProductIdForMapping(mapping);
+      return catalogProductId ? [{ mapping, catalogProductId }] : [];
+    });
+  const uniqueIds = new Set(eligible.map(entry => entry.catalogProductId));
+  if (uniqueIds.size !== 1) return null;
+  return [...eligible]
+    .sort((left, right) => right.mapping.verifiedAt.localeCompare(left.mapping.verifiedAt))[0]
+    ?.mapping ?? null;
+};
+
+const directCatalogUrl = (
+  catalogProductId: string,
+  value: string | null,
+): string => {
+  try {
+    return new URL(value || `/product/${catalogProductId}`, CATALOG_PUBLIC_ORIGIN).toString();
+  } catch {
+    return `${CATALOG_PUBLIC_ORIGIN}/product/${encodeURIComponent(catalogProductId)}`;
+  }
+};
+
+const createDirectResolutionResult = (input: {
+  item: CreateResolutionJobRequest['items'][number];
+  batchId: string;
+  ruleVersion: string;
+  snapshot: CatalogSnapshotDescriptor;
+  mapping: VerifiedMappingRegistryEntry;
+  direct: CatalogDeadlineLookupRecord;
+  analyzedAt: string;
+}): ResolutionResult => {
+  const source: SourceProductReference = {
+    sourceSupplier: input.direct.supplierCode?.trim().toLocaleLowerCase()
+      || input.mapping.source.sourceSupplier,
+    sourceProductId: input.direct.catalogProductId,
+    sourceCatalogId: input.direct.catalogId,
+  };
+  const rawDeadline = input.direct.deadlineAt;
+  return createResolutionResult({
+    id: `${input.batchId}:${input.item.clientItemId}`,
+    batchId: input.batchId,
+    erpProductGroupId: input.item.erpProductGroupId,
+    erpTitleAtAnalysis: input.item.title,
+    productUpdatedAtAtAnalysis: input.item.updatedAt,
+    closingDateAtAnalysis: input.item.currentClosingDate,
+    candidates: [{
+      id: `${input.batchId}:${input.item.clientItemId}:direct:${input.direct.catalogProductId}`,
+      source,
+      catalogTitle: input.direct.productName?.trim() || input.item.title,
+      catalogUrl: directCatalogUrl(
+        input.direct.catalogProductId,
+        input.direct.catalogProductUrl,
+      ),
+      identifiers: {
+        jan: null,
+        modelCode: null,
+        supplierProductId: input.direct.supplierProductId,
+      },
+      rawDeadline,
+      suggestedClosingDate: suggestedClosingDate(rawDeadline),
+      ruleVersion: input.ruleVersion,
+      snapshotVersion: input.snapshot.version,
+      confidence: 1,
+      matchMethod: 'ACTIVE_VERIFIED_MAPPING',
+    }],
+    activeVerifiedMapping: input.mapping,
+    catalogLookupStatus: input.direct.status === 'MATCHED'
+      ? 'DIRECT_MATCHED'
+      : 'DIRECT_NO_DEADLINE',
+    ruleVersion: input.ruleVersion,
+    snapshotVersion: input.snapshot.version,
+    analyzedAt: input.analyzedAt,
+  });
 };
 
 const compactIdentifier = (value: string | null | undefined): string => (
@@ -555,7 +691,10 @@ export const createProxyClosingDateBatchAnalyzer = (
           try {
             return {
               query,
-              products: await context.search(query.text, { limit: query.limit }),
+              products: await context.search(query.text, {
+                limit: query.limit,
+                catalogId: context.candidateCatalogId,
+              }),
               error: null,
             };
           } catch (error) {
@@ -687,6 +826,7 @@ export const createProxyClosingDateBatchAnalyzer = (
         identifiers: {
           jan: candidate.janCode ?? null,
           modelCode: candidate.sku ?? null,
+          supplierProductId: candidate.supplierProductId ?? null,
         },
         rawDeadline,
         suggestedClosingDate: suggestedClosingDate(rawDeadline),
@@ -787,6 +927,7 @@ export interface CreateClosingDateBatchGatewayOptions {
   repository: ClosingDateResolutionSidecarRepository;
   catalogClient?: ReadonlyCatalogClient;
   queryCache?: CatalogSnapshotQueryCache;
+  directCache?: CatalogDeadlineDirectCache;
   analyzer?: ClosingDateBatchItemAnalyzer;
   maxItemConcurrency?: number;
   maxUpstreamConcurrency?: number;
@@ -811,6 +952,7 @@ export interface ClosingDateBatchGateway {
 class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
   private readonly repository: ClosingDateResolutionSidecarRepository;
   private readonly queryCache: CatalogSnapshotQueryCache;
+  private readonly directCache: CatalogDeadlineDirectCache;
   private readonly analyzer: ClosingDateBatchItemAnalyzer;
   private readonly maxItemConcurrency: number;
   private readonly clock: () => string;
@@ -820,7 +962,16 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
   constructor(options: CreateClosingDateBatchGatewayOptions) {
     this.repository = options.repository;
     const catalogClient = options.catalogClient ?? createReadonlyCatalogHttpClient();
+    // Candidate and direct jobs share one physical upstream budget.
+    const concurrencyGate = new LimitedConcurrencyGate(options.maxUpstreamConcurrency ?? 6);
     this.queryCache = options.queryCache ?? new CatalogSnapshotQueryCache(catalogClient, {
+      concurrencyGate,
+      ttlMs: options.cacheTtlMs,
+      maxConcurrency: options.maxUpstreamConcurrency ?? 6,
+      nowMs: options.monotonicNow,
+    });
+    this.directCache = options.directCache ?? new CatalogDeadlineDirectCache(catalogClient, {
+      concurrencyGate,
       ttlMs: options.cacheTtlMs,
       maxConcurrency: options.maxUpstreamConcurrency ?? 6,
       nowMs: options.monotonicNow,
@@ -957,6 +1108,7 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
 
   clearCatalogCache(): void {
     this.queryCache.clear();
+    this.directCache.clear();
   }
 
   private async createJobAttempt(
@@ -1023,6 +1175,7 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
       results: [],
       snapshot,
       activeMappingsByProduct,
+      directLookupByProduct: new Map(),
       controller: new AbortController(),
       completion: Promise.resolve(),
       persistence: Promise.resolve(),
@@ -1044,6 +1197,7 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
     try {
       job.batch = transitionResolutionBatch(job.batch, 'RUNNING', this.clock());
       await this.enqueuePersistence(job, () => this.repository.updateResolutionJob(job.batch));
+      await this.prepareDirectLookups(job);
       let nextIndex = 0;
       const worker = async (): Promise<void> => {
         while (!job.controller.signal.aborted) {
@@ -1132,16 +1286,108 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
     job: InternalResolutionJob,
     item: CreateResolutionJobRequest['items'][number],
   ): Promise<ResolutionResult> {
+    const direct = job.directLookupByProduct.get(item.erpProductGroupId);
+    if (direct?.error) {
+      return createResolutionResult({
+        id: `${job.batch.id}:${item.clientItemId}`,
+        batchId: job.batch.id,
+        erpProductGroupId: item.erpProductGroupId,
+        erpTitleAtAnalysis: item.title,
+        productUpdatedAtAtAnalysis: item.updatedAt,
+        closingDateAtAnalysis: item.currentClosingDate,
+        serviceError: {
+          code: direct.error.code,
+          message: '目錄查詢暫時失敗，可重新查詢。',
+          retryable: direct.error.retryable,
+        },
+        catalogLookupStatus: 'DIRECT_TEMPORARY_ERROR',
+        ruleVersion: job.batch.ruleVersion,
+        snapshotVersion: job.batch.snapshotVersion,
+        analyzedAt: this.clock(),
+      });
+    }
+    if (direct?.result) {
+      const result = direct.result;
+      if (result.status === 'MATCHED' || result.status === 'NO_DEADLINE') {
+        const mappedSupplier = direct.mapping.source.sourceSupplier.trim().toLocaleLowerCase();
+        const actualSupplier = result.supplierCode?.trim().toLocaleLowerCase() || mappedSupplier;
+        if (actualSupplier === mappedSupplier) {
+          return createDirectResolutionResult({
+            item,
+            batchId: job.batch.id,
+            ruleVersion: job.batch.ruleVersion,
+            snapshot: job.snapshot,
+            mapping: direct.mapping,
+            direct: result,
+            analyzedAt: this.clock(),
+          });
+        }
+      }
+      if (result.status === 'TEMPORARY_ERROR') {
+        return createResolutionResult({
+          id: `${job.batch.id}:${item.clientItemId}`,
+          batchId: job.batch.id,
+          erpProductGroupId: item.erpProductGroupId,
+          erpTitleAtAnalysis: item.title,
+          productUpdatedAtAtAnalysis: item.updatedAt,
+          closingDateAtAnalysis: item.currentClosingDate,
+          serviceError: {
+            code: 'CATALOG_DIRECT_TEMPORARY_ERROR',
+            message: '目錄查詢暫時失敗，可重新查詢。',
+            retryable: true,
+          },
+          catalogLookupStatus: 'DIRECT_TEMPORARY_ERROR',
+          ruleVersion: job.batch.ruleVersion,
+          snapshotVersion: job.batch.snapshotVersion,
+          analyzedAt: this.clock(),
+        });
+      }
+      await this.repository.revokeVerifiedMapping(
+        direct.mapping.id,
+        this.clock(),
+        result.status === 'NOT_FOUND'
+          ? 'CATALOG_PRODUCT_NOT_FOUND'
+          : 'CATALOG_PRODUCT_IDENTITY_CHANGED',
+      );
+      const fallback = await this.analyzeCandidateItem(
+        job,
+        item,
+        [],
+        direct.mapping.source.sourceCatalogId,
+      );
+      return { ...fallback, catalogLookupStatus: 'STALE_MAPPING' };
+    }
+    return this.analyzeCandidateItem(
+      job,
+      item,
+      job.activeMappingsByProduct.get(item.erpProductGroupId) ?? [],
+      null,
+    );
+  }
+
+  private async analyzeCandidateItem(
+    job: InternalResolutionJob,
+    item: CreateResolutionJobRequest['items'][number],
+    activeMappings: readonly VerifiedMappingRegistryEntry[],
+    requestedCatalogId: string | null | undefined,
+  ): Promise<ResolutionResult> {
+    const candidateCatalogId = requestedCatalogId && PUBLIC_UUID_PATTERN.test(requestedCatalogId)
+      ? requestedCatalogId
+      : null;
     const search: ClosingDateBatchSearch = async (query, options) => {
       job.metrics.logicalQueryCount += 1;
       const lookup: CatalogCacheLookupResult = await this.queryCache.lookup({
         snapshot: job.snapshot,
         query,
+        catalogId: options?.catalogId ?? candidateCatalogId,
         limit: options?.limit ?? CLOSING_DATE_CATALOG_NATIVE_LIMIT,
         signal: job.controller.signal,
       });
       job.metrics.uniqueQueryKeys.add(lookup.cacheKey);
-      if (lookup.source === 'UPSTREAM') job.metrics.upstreamRequestCount += 1;
+      if (lookup.source === 'UPSTREAM') {
+        job.metrics.upstreamRequestCount += 1;
+        job.metrics.candidateSearchRequestCount += 1;
+      }
       if (lookup.source === 'CACHE') job.metrics.cacheHitCount += 1;
       if (lookup.source === 'SINGLE_FLIGHT') job.metrics.singleFlightHitCount += 1;
       job.metrics.maxUpstreamConcurrency = Math.max(
@@ -1155,11 +1401,81 @@ class NextClosingDateBatchGateway implements ClosingDateBatchGateway {
       batchId: job.batch.id,
       ruleVersion: job.batch.ruleVersion,
       snapshot: job.snapshot,
-      activeMappings: job.activeMappingsByProduct.get(item.erpProductGroupId) ?? [],
+      activeMappings,
       search,
+      candidateCatalogId,
       signal: job.controller.signal,
       analyzedAt: this.clock(),
     });
+  }
+
+  private async prepareDirectLookups(job: InternalResolutionJob): Promise<void> {
+    const mappingsByCatalogProductId = new Map<string, Array<{
+      erpProductGroupId: string;
+      mapping: VerifiedMappingRegistryEntry;
+    }>>();
+    for (const item of job.request.items) {
+      const mapping = directMappingForProduct(
+        job.activeMappingsByProduct.get(item.erpProductGroupId) ?? [],
+      );
+      if (!mapping) continue;
+      const catalogProductId = catalogProductIdForMapping(mapping);
+      if (!catalogProductId) continue;
+      const references = mappingsByCatalogProductId.get(catalogProductId) ?? [];
+      references.push({ erpProductGroupId: item.erpProductGroupId, mapping });
+      mappingsByCatalogProductId.set(catalogProductId, references);
+    }
+
+    const catalogProductIds = [...mappingsByCatalogProductId.keys()];
+    job.metrics.directLookupItemCount += [...mappingsByCatalogProductId.values()]
+      .reduce((sum, references) => sum + references.length, 0);
+    job.metrics.directUniqueProductCount += catalogProductIds.length;
+    for (let offset = 0; offset < catalogProductIds.length; offset += CATALOG_DEADLINE_BATCH_MAX) {
+      if (job.controller.signal.aborted) throw new DOMException('Batch cancelled', 'AbortError');
+      const chunk = catalogProductIds.slice(offset, offset + CATALOG_DEADLINE_BATCH_MAX);
+      try {
+        const lookup = await this.directCache.lookup({
+          snapshot: job.snapshot,
+          catalogProductIds: chunk,
+          signal: job.controller.signal,
+        });
+        job.metrics.upstreamRequestCount += lookup.upstreamRequestCount;
+        job.metrics.directBatchRequestCount += lookup.upstreamRequestCount;
+        job.metrics.cacheHitCount += lookup.cacheHitCount;
+        job.metrics.singleFlightHitCount += lookup.singleFlightHitCount;
+        job.metrics.maxUpstreamConcurrency = Math.max(
+          job.metrics.maxUpstreamConcurrency,
+          lookup.observedUpstreamConcurrency,
+        );
+        for (const entry of lookup.entries) {
+          job.metrics.uniqueQueryKeys.add(entry.cacheKey);
+          for (const reference of mappingsByCatalogProductId.get(entry.catalogProductId) ?? []) {
+            job.directLookupByProduct.set(reference.erpProductGroupId, {
+              mapping: reference.mapping,
+              result: entry.result,
+            });
+          }
+        }
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        const gatewayError = error instanceof ClosingDateCatalogGatewayError
+          ? error
+          : new ClosingDateCatalogGatewayError({
+            code: 'CATALOG_DIRECT_LOOKUP_ERROR',
+            message: error instanceof Error ? error.message : String(error),
+            retryable: false,
+            cause: error,
+          });
+        for (const catalogProductId of chunk) {
+          for (const reference of mappingsByCatalogProductId.get(catalogProductId) ?? []) {
+            job.directLookupByProduct.set(reference.erpProductGroupId, {
+              mapping: reference.mapping,
+              error: gatewayError,
+            });
+          }
+        }
+      }
+    }
   }
 
   private progressFor(

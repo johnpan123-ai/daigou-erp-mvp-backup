@@ -12,7 +12,7 @@
   "githubPreDeployGate": {
     "repository": "johnpan123-ai/daigou-erp-mvp-backup",
     "remote": "origin",
-    "branch": "codex/atomic-restore-durable-failure-recovery-v1",
+    "branch": "codex/erp2-deadline-v1-canonical-integration",
     "checkpointTag": "checkpoint-20260926-atomic-restore-execute-dispatch-boundary-v3",
     "acceptedHead": "3089fbcec9e44323522c758059689bb7641d20eb",
     "recoveryTag": "backup-20260926-erp2-live-restore-accepted-before-cloudflare-rename"

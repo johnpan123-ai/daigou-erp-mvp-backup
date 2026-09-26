@@ -1,9 +1,29 @@
 export const DEFAULT_CATALOG_PROXY_TIMEOUT_MS = 30_000;
+export const CATALOG_WORKER_ORIGIN = 'https://xiaohebo-catalog-beta.comiindex-hippo.workers.dev';
 const MIN_CATALOG_PROXY_TIMEOUT_MS = 1_000;
 const MAX_CATALOG_PROXY_TIMEOUT_MS = 120_000;
+const CATALOG_PREFIXED_ROUTES = new Set([
+  'deadline',
+  'deadlines',
+  'deadline-candidates',
+]);
 
 type ProxyAbortCategory = 'CLIENT_ABORT' | 'TIMEOUT' | null;
 type ProxyLog = Record<string, string | number | boolean | null>;
+
+export function resolveCatalogUpstreamUrl(
+  incomingUrl: string,
+  pathSegments: readonly string[],
+): string {
+  return `${CATALOG_WORKER_ORIGIN}${resolveCatalogUpstreamPath(pathSegments)}${new URL(incomingUrl).search}`;
+}
+
+export function resolveCatalogUpstreamPath(pathSegments: readonly string[]): string {
+  const path = pathSegments.join('/');
+  return CATALOG_PREFIXED_ROUTES.has(path)
+    ? `/api/catalog/${path}`
+    : `/api/${path}`;
+}
 
 export function resolveCatalogProxyTimeoutMs(raw: unknown): number {
   if (typeof raw !== 'string' || raw.trim() === '') return DEFAULT_CATALOG_PROXY_TIMEOUT_MS;

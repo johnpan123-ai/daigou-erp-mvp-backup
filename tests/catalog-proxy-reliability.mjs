@@ -12,10 +12,62 @@ const compiled = ts.transpileModule(source, {
 }).outputText;
 const runtime = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const {
+  CATALOG_WORKER_ORIGIN,
   DEFAULT_CATALOG_PROXY_TIMEOUT_MS,
   proxyCatalogRequest,
+  resolveCatalogUpstreamPath,
+  resolveCatalogUpstreamUrl,
   resolveCatalogProxyTimeoutMs,
 } = runtime;
+
+const productIdA = '11111111-1111-4111-8111-111111111111';
+const productIdB = '22222222-2222-4222-8222-222222222222';
+const catalogId = '33333333-3333-4333-8333-333333333333';
+const upstreamCases = [
+  {
+    browserUrl: 'https://erp.example/api/catalog/deadline-candidates?q=test&limit=5',
+    path: ['deadline-candidates'],
+    expected: `${CATALOG_WORKER_ORIGIN}/api/catalog/deadline-candidates?q=test&limit=5`,
+  },
+  {
+    browserUrl: `https://erp.example/api/catalog/deadline?catalogProductId=${productIdA}`,
+    path: ['deadline'],
+    expected: `${CATALOG_WORKER_ORIGIN}/api/catalog/deadline?catalogProductId=${productIdA}`,
+  },
+  {
+    browserUrl: `https://erp.example/api/catalog/deadlines?catalogProductId=${productIdA}&catalogProductId=${productIdB}`,
+    path: ['deadlines'],
+    expected: `${CATALOG_WORKER_ORIGIN}/api/catalog/deadlines?catalogProductId=${productIdA}&catalogProductId=${productIdB}`,
+  },
+  {
+    browserUrl: `https://erp.example/api/catalog/deadline-candidates?q=${encodeURIComponent('超像可動 空條承太郎')}&limit=5&catalogId=${catalogId}`,
+    path: ['deadline-candidates'],
+    expected: `${CATALOG_WORKER_ORIGIN}/api/catalog/deadline-candidates?q=${encodeURIComponent('超像可動 空條承太郎')}&limit=5&catalogId=${catalogId}`,
+  },
+  {
+    browserUrl: 'https://erp.example/api/catalog/search?q=test&limit=8',
+    path: ['search'],
+    expected: `${CATALOG_WORKER_ORIGIN}/api/search?q=test&limit=8`,
+  },
+  {
+    browserUrl: 'https://erp.example/api/catalog/catalog/deadline-candidates?q=test&limit=1',
+    path: ['catalog', 'deadline-candidates'],
+    expected: `${CATALOG_WORKER_ORIGIN}/api/catalog/deadline-candidates?q=test&limit=1`,
+  },
+];
+
+for (const testCase of upstreamCases) {
+  const browserUrl = new URL(testCase.browserUrl);
+  const expectedUrl = new URL(testCase.expected);
+  assert.equal(
+    resolveCatalogUpstreamUrl(testCase.browserUrl, testCase.path),
+    testCase.expected,
+  );
+  assert.equal(
+    `${resolveCatalogUpstreamPath(testCase.path)}${browserUrl.search}`,
+    `${expectedUrl.pathname}${expectedUrl.search}`,
+  );
+}
 
 const logs = [];
 let successCalls = 0;
@@ -45,6 +97,31 @@ assert.equal(success.headers.get('X-Request-ID'), 'trace-proxy-1');
 assert.equal(success.headers.get('Server-Timing'), 'db;dur=8.0');
 assert.equal(success.headers.get('X-Search-Query-Count'), '2');
 assert.equal(logs.some(entry => JSON.stringify(entry).includes('safe-query')), false);
+
+for (const path of ['deadline', 'deadlines', 'deadline-candidates']) {
+  const incomingUrl = `https://erp.test/api/catalog/${path}?q=safe`;
+  const response = await proxyCatalogRequest({
+    incoming: new Request(incomingUrl),
+    upstreamUrl: resolveCatalogUpstreamUrl(incomingUrl, [path]),
+    timeoutMs: 1_000,
+    log: () => undefined,
+    fetcher: async input => Response.json({ path: String(input) }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).path, `${CATALOG_WORKER_ORIGIN}/api/catalog/${path}?q=safe`);
+}
+
+for (const status of [400, 404, 429, 503]) {
+  const response = await proxyCatalogRequest({
+    incoming: new Request(`https://erp.test/api/catalog/deadline?status=${status}`),
+    upstreamUrl: `https://catalog.test/api/deadline?status=${status}`,
+    timeoutMs: 1_000,
+    log: () => undefined,
+    fetcher: async () => Response.json({ error: { code: `UPSTREAM_${status}` } }, { status }),
+  });
+  assert.equal(response.status, status, `Catalog ${status} must be preserved`);
+  assert.equal((await response.json()).error.code, `UPSTREAM_${status}`);
+}
 
 let serverFailureCalls = 0;
 const serverFailure = await proxyCatalogRequest({

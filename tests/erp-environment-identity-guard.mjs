@@ -19,6 +19,7 @@ assert.equal(identity.environments.erp2.publicFingerprint, 'D9EA6B7BB6524517');
 assert.equal(identity.environments.next.cloudflareProject, null);
 assert.equal(identity.environments.experimental.cloudflareProject, null);
 assert.equal(identity.githubPreDeployGate.acceptedHead, '3089fbcec9e44323522c758059689bb7641d20eb');
+assert.equal(identity.githubPreDeployGate.branch, 'codex/erp2-deadline-v1-canonical-integration');
 assert.match(guard, /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
 assert.match(guard, /wrangler.*whoami/u);
 assert.match(guard, /shell: process\.platform === 'win32'/u);
