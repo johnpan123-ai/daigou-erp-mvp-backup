@@ -33,8 +33,10 @@ Cloudflare's read-only Pages inventory showed the ERP 2.0 project on branch `iso
 Before any ERP upload, run the guard with the exact candidate identity and the GitHub gate values:
 
 ```text
-npm run verify:erp-deployment-identity -- --role erp2 --profile hippo-erp --project hippo-erp-realtime-preview --supabase-project rhfdjsklfrgpoqsaqpkn --runtime-marker STAGING --fingerprint D9EA6B7BB6524517 --source-head 3089fbcec9e44323522c758059689bb7641d20eb --remote-branch codex/atomic-restore-durable-failure-recovery-v1 --checkpoint-tag checkpoint-20260926-atomic-restore-execute-dispatch-boundary-v3
+npm run verify:erp-deployment-identity -- --role erp2 --profile hippo-erp --project hippo-erp-realtime-preview --supabase-project rhfdjsklfrgpoqsaqpkn --runtime-marker STAGING --fingerprint D9EA6B7BB6524517 --source-head 80469b966bc27999f55c804cfa374721773b55a4 --remote-branch codex/atomic-restore-durable-failure-recovery-v1 --checkpoint-tag checkpoint-20260927-erp-identity-guard-windows-safe-v1
 ```
+
+For every later candidate, replace `--source-head` and `--checkpoint-tag` together; the supplied checkpoint tag must peel to that exact candidate SHA.
 
 The guard fails closed unless all of these match:
 
