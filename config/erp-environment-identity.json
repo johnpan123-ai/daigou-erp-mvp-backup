@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "renameDecision": {
+    "mode": "KEEP_PHYSICAL_SLUG_FIX_CANONICAL_LABELS",
+    "reason": [
+      "Wrangler Pages CLI 4.141.0 has no project rename command.",
+      "Cloudflare Pages documentation states the project name is used for the pages.dev hostname.",
+      "The available API PATCH name operation does not document preservation of the old hostname, deployment aliases, bindings, or rollback behavior.",
+      "Changing a live slug would therefore create an avoidable domain and rollback risk."
+    ]
+  },
+  "githubPreDeployGate": {
+    "repository": "johnpan123-ai/daigou-erp-mvp-backup",
+    "remote": "origin",
+    "branch": "codex/atomic-restore-durable-failure-recovery-v1",
+    "checkpointTag": "checkpoint-20260926-atomic-restore-execute-dispatch-boundary-v3",
+    "acceptedHead": "3089fbcec9e44323522c758059689bb7641d20eb",
+    "recoveryTag": "backup-20260926-erp2-live-restore-accepted-before-cloudflare-rename"
+  },
+  "accounts": {
+    "erp": {
+      "profile": "hippo-erp",
+      "accountId": "e0a58431cd5bcf0e01ec3438d531461a",
+      "accountName": "Johnpan123.com's Account"
+    },
+    "catalog": {
+      "profile": "hippo-catalog",
+      "accountId": "f543371d2e71d3f9d81dc5863b1f16c9",
+      "accountName": "Sevana3459.com's Account"
+    }
+  },
+  "environments": {
+    "erp1": {
+      "role": "ERP_1_PRODUCTION",
+      "humanName": "小河馬訂購紀錄表 1.0",
+      "cloudflareAccountId": "e0a58431cd5bcf0e01ec3438d531461a",
+      "cloudflareProject": "daigou-erp-mvp-backup",
+      "domain": "https://daigou-erp-mvp-backup.pages.dev/",
+      "branch": "main",
+      "runtimeMarker": "PRODUCTION",
+      "supabaseProject": "twzpqyesbtnfxdkorluf",
+      "publicFingerprint": null,
+      "currentDeployment": {
+        "id": "7f07bc9f-7ca5-4cfd-af62-e993974d6169",
+        "source": "0906fdf",
+        "sourceShaStatus": "SHORT_METADATA_ONLY_NOT_PROVEN"
+      },
+      "deploymentAllowed": false,
+      "status": "IDENTITY_LOCKED_BASELINE_SOURCE_NOT_FULLY_PROVEN"
+    },
+    "erp2": {
+      "role": "ERP_2_PRODUCTION",
+      "humanName": "小河馬訂購紀錄表 2.0",
+      "cloudflareAccountId": "e0a58431cd5bcf0e01ec3438d531461a",
+      "cloudflareProject": "hippo-erp-realtime-preview",
+      "domain": "https://hippo-erp-realtime-preview.pages.dev/",
+      "branch": "isolated-preview",
+      "runtimeMarker": "STAGING",
+      "runtimeLabel": "STAGING / 測試雲端",
+      "supabaseProject": "rhfdjsklfrgpoqsaqpkn",
+      "publicFingerprint": "D9EA6B7BB6524517",
+      "currentDeployment": {
+        "id": "43e4076c-e347-4fff-b4f1-8b472ed174bd",
+        "source": "3089fbcec9e44323522c758059689bb7641d20eb",
+        "entry": "assets/index-Bo2YCBoE.js",
+        "provider": "assets/dataProvider-DnirxCMa.js",
+        "atomicRestore": "LIVE ACCEPTANCE PASS",
+        "epoch": 8
+      },
+      "deploymentAllowed": true,
+      "status": "ACCEPTED_LIVE_BASELINE"
+    },
+    "next": {
+      "role": "ERP_NEXT_LOCAL_SANDBOX",
+      "humanName": "ERP NEXT",
+      "cloudflareAccountId": null,
+      "cloudflareProject": null,
+      "domain": "http://127.0.0.1:4192",
+      "branch": null,
+      "runtimeMarker": "NEXT",
+      "supabaseProject": "rhfdjsklfrgpoqsaqpkn",
+      "publicFingerprint": null,
+      "deploymentAllowed": false,
+      "status": "LOCAL_ONLY_TARGET_NOT_PROVEN"
+    },
+    "experimental": {
+      "role": "ERP_EXPERIMENTAL_LOCAL_SANDBOX",
+      "humanName": "ERP Experimental / 高風險環境",
+      "cloudflareAccountId": null,
+      "cloudflareProject": null,
+      "domain": "http://127.0.0.1:4193",
+      "branch": null,
+      "runtimeMarker": "EXPERIMENTAL",
+      "supabaseProject": "rhfdjsklfrgpoqsaqpkn",
+      "publicFingerprint": null,
+      "deploymentAllowed": false,
+      "status": "LOCAL_ONLY_TARGET_NOT_PROVEN"
+    },
+    "catalog": {
+      "role": "CATALOG_WORKER",
+      "humanName": "Catalog Worker",
+      "cloudflareAccountId": "f543371d2e71d3f9d81dc5863b1f16c9",
+      "cloudflareProject": "xiaohebo-catalog-beta",
+      "domain": "https://xiaohebo-catalog-beta.comiindex-hippo.workers.dev",
+      "branch": null,
+      "runtimeMarker": "CATALOG",
+      "supabaseProject": null,
+      "publicFingerprint": null,
+      "deploymentAllowed": false,
+      "status": "CATALOG_SEPARATE_RELEASE_PROCESS"
+    }
+  }
+}

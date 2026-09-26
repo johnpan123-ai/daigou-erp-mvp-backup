@@ -11,6 +11,7 @@
     "build:next": "tsc -b && vite build --mode next",
     "build:experimental": "tsc -b && vite build --mode experimental",
     "build:staging": "node scripts/staging-release-build.mjs",
+    "verify:erp-deployment-identity": "node scripts/verify-erp-deployment-identity.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
@@ -125,7 +126,8 @@
     "test:staging-refresh-tooling": "node tests/staging-refresh-tooling.mjs",
     "test:staging-schema-parity": "node tests/staging-schema-parity-migration.mjs",
     "test:staging-sidecar-refresh": "node tests/staging-sidecar-refresh.mjs",
-    "test:staging-release-build": "node tests/staging-release-build.mjs"
+    "test:staging-release-build": "node tests/staging-release-build.mjs",
+    "test:erp-environment-identity": "node tests/erp-environment-identity-guard.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
