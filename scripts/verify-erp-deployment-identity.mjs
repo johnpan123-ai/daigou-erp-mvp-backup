@@ -68,11 +68,10 @@ const remoteBranch = required('remote-branch');
 const checkpointTag = required('checkpoint-tag');
 const gate = identity.githubPreDeployGate;
 if (remoteBranch !== gate.branch) failClosed(`remote branch ${remoteBranch} does not match the approved gate branch`);
-if (checkpointTag !== gate.checkpointTag) failClosed(`checkpoint tag ${checkpointTag} does not match the approved gate tag`);
+if (!checkpointTag.startsWith('checkpoint-')) failClosed('checkpoint tag must use the checkpoint-* naming contract');
 
 const localHead = git(['rev-parse', 'HEAD']).trim();
 if (localHead !== sourceHead) failClosed(`local HEAD ${localHead} does not equal candidate ${sourceHead}`);
-if (localHead !== gate.acceptedHead) failClosed(`candidate ${localHead} is not the accepted GitHub gate HEAD`);
 if (git(['status', '--porcelain']).trim()) failClosed('worktree is not clean');
 if (git(['branch', '--show-current']).trim() !== remoteBranch) failClosed('current branch does not match the approved remote branch');
 

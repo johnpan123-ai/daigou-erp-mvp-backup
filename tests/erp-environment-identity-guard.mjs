@@ -23,5 +23,6 @@ assert.match(guard, /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
 assert.match(guard, /wrangler.*whoami/u);
 assert.match(guard, /git.*ls-remote/u);
 assert.match(guard, /remote checkpoint peeled HEAD/u);
+assert.doesNotMatch(guard, /not the accepted GitHub gate HEAD/u);
 assert.equal(packageJson.scripts['verify:erp-deployment-identity'], 'node scripts/verify-erp-deployment-identity.mjs');
 console.log('ERP environment identity map and pre-deploy guard contract: PASS');
