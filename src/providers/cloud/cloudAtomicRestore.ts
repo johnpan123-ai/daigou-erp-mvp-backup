@@ -5,9 +5,11 @@ import {
   LEGACY_CLOUD_RESTORE_IDENTITY_CONTRACT,
   verifyLegacyCloudRestoreSnapshot,
 } from './cloudRestoreLegacySnapshot';
+import { parseCloudRestoreFailure, type CloudRestoreFailure } from './cloudRestoreFailure';
 
 export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
 export const CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION = 'inventory-id-v2' as const;
+
 export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_attempt' as const;
 export const CLOUD_RESTORE_LEGACY_RPC = 'erp_restore_cloud_snapshot' as const;
 export const CLOUD_RESTORE_SNAPSHOT_RPC = 'erp_export_cloud_restore_snapshot' as const;
@@ -131,6 +133,7 @@ export interface CloudRestoreAttemptOutcome extends CloudRestoreAttemptCommand {
   resultEpoch?: number;
   restoreResult?: CloudRestoreResult;
   reason?: string;
+  failure?: CloudRestoreFailure;
 }
 
 export interface CloudRestoreResult {
@@ -559,6 +562,11 @@ export function assertCloudRestoreAttemptOutcome(value: unknown): CloudRestoreAt
     throw new CloudRestoreServerError('CLOUD_RESTORE_ATTEMPT_RESULT_INVALID', 'Restore attempt execution 格式無效。');
   }
   let restoreResult: CloudRestoreResult | undefined;
+  let failure: CloudRestoreFailure | undefined;
+  if (value.failure !== undefined) {
+    if (status !== 'not_committed') throw new CloudRestoreServerError('CLOUD_RESTORE_ATTEMPT_RESULT_INVALID', 'Restore failure 狀態無效。');
+    failure = parseCloudRestoreFailure(value.failure);
+  }
   if (status === 'completed') {
     restoreResult = assertCloudRestoreServerResult(value.restoreResult);
     if (typeof value.resultEpoch !== 'number' || !Number.isSafeInteger(value.resultEpoch)
@@ -576,6 +584,7 @@ export function assertCloudRestoreAttemptOutcome(value: unknown): CloudRestoreAt
     ...(typeof value.executionId === 'string' ? { executionId: value.executionId } : {}),
     ...(typeof value.resultEpoch === 'number' ? { resultEpoch: value.resultEpoch } : {}),
     ...(restoreResult ? { restoreResult } : {}),
+    ...(failure ? { failure } : {}),
     ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
   };
 }

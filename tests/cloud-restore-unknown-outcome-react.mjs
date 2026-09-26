@@ -45,12 +45,11 @@ try {
       await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
       await page.getByTestId('cloud-restore-submit').click();
       await page.getByTestId('cloud-restore-final-submit').click();
-      await page.getByTestId('cloud-restore-check-outcome').waitFor();
-      assert.match(await page.getByTestId('cloud-restore-status').innerText(), /待確認|待查證/u);
+      await page.waitForFunction(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().reconcileCalls === 1);
       let snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
       assert.equal(snapshot.prepareCalls, 1);
       assert.equal(snapshot.calls, 1);
-      assert.equal(snapshot.reconcileCalls, 0);
+      assert.equal(snapshot.reconcileCalls, 1, 'Automatic outcome check must never repeat execute');
       return snapshot;
     };
 
@@ -60,12 +59,10 @@ try {
       attemptId: snapshot.idempotencyKeys[0],
       traceId: snapshot.traceIds[0],
     };
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
-    await page.getByTestId('cloud-restore-check-outcome').waitFor();
+    await page.getByTestId('cloud-restore-result').waitFor();
     snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(snapshot.prepareCalls, 1, 'Remount must not PREPARE an unresolved attempt again');
     assert.equal(snapshot.calls, 1, 'Remount must not EXECUTE an unresolved attempt again');
-    await page.getByTestId('cloud-restore-check-outcome').click();
     await page.getByTestId('cloud-restore-result').waitFor();
     assert.match(await page.getByTestId('cloud-restore-status').innerText(), /Cloud Restore 完成/u);
     snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
@@ -78,7 +75,6 @@ try {
     );
 
     await runUntilUnknown('lost-response-failure');
-    await page.getByTestId('cloud-restore-check-outcome').click();
     await page.getByTestId('cloud-restore-status').getByText(/已確認本次未提交/u).waitFor();
     await page.getByTestId('cloud-restore-check-outcome').waitFor({ state: 'detached' });
     assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);

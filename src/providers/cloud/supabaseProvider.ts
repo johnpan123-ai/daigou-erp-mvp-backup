@@ -84,6 +84,7 @@
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
+import { isCloudRestoreFailureCode } from './cloudRestoreFailure';
 import { readCloudRestoreIntegrityAudit } from './cloudRestoreIntegrityAudit';
 import {
   CLOUD_RESTORE_CANDIDATE_PROOF_RPC,
@@ -414,7 +415,7 @@ export class SupabaseProvider implements IDataProvider {
       const outcome = await this.reconcileCloudRestoreAttempt(command);
       if (outcome.status === 'completed') return outcome;
       if (outcome.status === 'not_committed') {
-        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+        throw createCloudRestoreSafeSubmitError({ code: outcome.failure?.code ?? 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
       }
       throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'transport');
     } catch (error) {
@@ -425,7 +426,7 @@ export class SupabaseProvider implements IDataProvider {
         // A destructive call cannot start without a committed envelope row.
         throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
       }
-      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') throw error;
+      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' || isCloudRestoreFailureCode(visible.code)) throw error;
       throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'transport');
     }
   }
@@ -437,13 +438,13 @@ export class SupabaseProvider implements IDataProvider {
       const outcome = await this.reconcileCloudRestoreAttempt(command);
       if (outcome.status === 'completed' && outcome.restoreResult) return outcome.restoreResult;
       if (outcome.status === 'not_committed') {
-        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+        throw createCloudRestoreSafeSubmitError({ code: outcome.failure?.code ?? 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
       }
     } catch (error) {
       const visible = normalizeCloudRestoreSubmitError(error, 'rpc', {
         source: 'post-dispatch', attemptCorrelationId: command.traceId,
       });
-      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') throw error;
+      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' || isCloudRestoreFailureCode(visible.code)) throw error;
     }
     // Once the destructive RPC may have started, missing/failed reconciliation
     // is never evidence of rollback. Keep the attempt locked as UNKNOWN.
@@ -628,19 +629,28 @@ export class SupabaseProvider implements IDataProvider {
         const outcome = await this.reconcileCloudRestoreAttempt(command.attempt);
         if (outcome.status === 'completed' && outcome.restoreResult) return outcome.restoreResult;
         if (outcome.status === 'not_committed') {
-          throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
+          throw createCloudRestoreSafeSubmitError({ code: outcome.failure?.code ?? 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' }, 'server-response');
         }
       } catch (reconcileError) {
         const visible = normalizeCloudRestoreSubmitError(reconcileError, 'rpc', {
           source: 'post-dispatch', attemptCorrelationId: command.attempt.traceId,
         });
-        if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') throw reconcileError;
+        if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED' || isCloudRestoreFailureCode(visible.code)) throw reconcileError;
       }
       // Preserve a known PostgreSQL/PostgREST category while the durable
       // envelope remains locked for explicit reconciliation after grace.
       throw createCloudRestoreSafeSubmitError(error, 'server-response');
     }
     markCloudReachable();
+    if (data && typeof data === 'object' && 'ok' in data && data.ok === false) {
+      const failure = this.assertAttemptIdentity(assertCloudRestoreAttemptOutcome(data), command.attempt,
+        command.candidate.manifest.snapshotFingerprint);
+      if (failure.status !== 'not_committed' || !failure.failure
+        || failure.executionId !== command.attempt.executionId) {
+        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_RESULT_INVALID' }, 'server-response');
+      }
+      throw createCloudRestoreSafeSubmitError({ code: failure.failure.code }, 'server-response');
+    }
     const result = assertCloudRestoreServerResult(data);
     recordCloudRestoreSubmitDiagnostic({
       event: 'rpc-response', phase: 'rpc', outcome: 'success',

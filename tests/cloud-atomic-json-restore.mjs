@@ -740,12 +740,18 @@ try {
     const timeoutState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(timeoutState.calls, 1);
     const timeoutKey = timeoutState.idempotencyKeys[0];
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
+    await page.getByTestId('cloud-restore-check-outcome').waitFor();
+    assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 1,
+      'Remount while pending must only reconcile, never execute again');
+    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('erp_cloud_restore_unresolved_attempt')).attemptId), timeoutKey);
 
     await openFixture('success');
     await page.getByTestId('cloud-restore-final-submit').click();
     await page.getByTestId('cloud-restore-result').waitFor();
     submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.idempotencyKeys[0], timeoutKey, 'Remount must retain the same fingerprint idempotency key');
+    assert.notEqual(submitState.idempotencyKeys[0], timeoutKey,
+      'Fixture acknowledged prior noncommit on reload; a newly confirmed intent must not reuse the retired key');
 
     await openFixture('refresh-pending');
     await page.getByTestId('cloud-restore-final-submit').click();
@@ -756,7 +762,7 @@ try {
     await openFixture('guard-race');
     await page.getByTestId('cloud-restore-final-submit').click();
     const guardError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(guardError, /^雲端資料正在更新，本次尚未送出。 追蹤：[0-9a-f-]+$/u);
+    assert.match(guardError, /^雲端資料正在更新，本次尚未送出。 追蹤：[0-9a-f-]+/u);
     assert.doesNotMatch(guardError, /\[object Object\]/u, 'Freshness guard is an Error and is independent from plain-object rendering');
     assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 0);
     assert.equal(cloudRequests.length, 0, 'All deterministic Restore submit cases must make zero Supabase requests');

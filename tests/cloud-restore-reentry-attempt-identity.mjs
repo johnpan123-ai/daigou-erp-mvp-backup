@@ -151,14 +151,10 @@ try {
       window.__CLOUD_RESTORE_SUBMIT_TEST__.setRecovery([row]);
       window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
     }, legacy);
-    await page.getByTestId('cloud-restore-recovered-attempt').waitFor();
-    assert.match(await page.getByTestId('cloud-restore-recovered-attempt').innerText(), new RegExp(legacy.traceId));
+    await page.getByTestId('cloud-restore-new-intent').waitFor();
     assert.equal(await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).isDisabled(), true);
     let recovered = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(recovered.prepareCalls + recovered.calls + recovered.reconcileCalls, 0);
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
-    await page.getByTestId('cloud-restore-recovered-attempt').waitFor();
-    await page.getByTestId('cloud-restore-check-outcome').click();
+    assert.equal(recovered.prepareCalls + recovered.calls, 0);
     await page.getByTestId('cloud-restore-new-intent').waitFor();
     recovered = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(recovered.reconcileCalls, 1);

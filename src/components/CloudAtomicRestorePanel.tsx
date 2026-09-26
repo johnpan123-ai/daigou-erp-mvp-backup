@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from 'react';
+import { isCloudRestoreFailureCode } from '../providers/cloud/cloudRestoreFailure';
+import { CloudRestoreReconcileSchedule } from '../providers/cloud/cloudRestoreReconcileSchedule';
 import CloudRestoreIntegrityAudit from './CloudRestoreIntegrityAudit';
 import type { CloudRestoreRecoveryAttempt } from '../providers/cloud/cloudRestoreRecovery';
 import { AlertTriangle, FileCheck2, RotateCcw } from 'lucide-react';
@@ -119,6 +121,8 @@ export default function CloudAtomicRestorePanel({
     : '');
   const [result, setResult] = useState<CloudRestoreResult | null>(null);
   const [attemptClosed, setAttemptClosed] = useState(false);
+  const [reconcileAfter, setReconcileAfter] = useState<string | null>(null);
+  const reconcileSchedule = useRef(new CloudRestoreReconcileSchedule());
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [recovery, setRecovery] = useState<{ userId: string; ready: boolean; error: boolean }>({ userId: '', ready: false, error: false });
   const [recoveryVersion, setRecoveryVersion] = useState(0);
@@ -434,7 +438,7 @@ export default function CloudAtomicRestorePanel({
     if (!unresolvedAttempt || inFlightRef.current || !cloudMode || !user || !owner || !online || !recoveryReady) return;
     inFlightRef.current = true;
     setStatus('checking');
-    setMessage('正在查證伺服器結果；不會重新執行 Restore。');
+    setMessage(previous => previous.includes('追蹤：') ? previous : '正在查證伺服器結果；不會重新執行 Restore。');
     try {
       const outcome = await (checkRestoreOutcome ?? (command => dataProvider.reconcileCloudRestoreAttempt(command)))(unresolvedAttempt);
       if (outcome.status === 'completed' && outcome.restoreResult) {
@@ -451,12 +455,18 @@ export default function CloudAtomicRestorePanel({
         setAttemptClosed(true);
         setStatus('error');
         submissionLockedRef.current = true;
-        setMessage('伺服器已確認本次未提交。如需再次還原，必須重新取得人工授權。');
+        const detail = outcome.failure ? formatCloudRestoreSubmitError(normalizeCloudRestoreSubmitError(
+          createCloudRestoreSafeSubmitError({ code: outcome.failure.code }, 'server-response'), 'rpc',
+          { source: 'server-response', attemptCorrelationId: unresolvedAttempt.traceId },
+        )) : '伺服器已確認本次未提交。';
+        setMessage(previous => `${!outcome.failure && previous.includes('追蹤：') ? `${previous} ` : ''}${detail} 如需再次還原，必須重新取得人工授權。`);
         refreshRecovery();
       } else {
+        setReconcileAfter(outcome.reconcileAfter ?? null);
         setStatus('unknown');
         submissionLockedRef.current = true;
-        setMessage('伺服器執行結果仍待確認；請勿重複送出，可稍後再次查證結果。');
+        setMessage(previous => previous.includes('追蹤：') ? previous
+          : '伺服器執行結果仍待確認；請勿重複送出，可稍後再次查證結果。');
       }
     } catch (error) {
       const visible = normalizeCloudRestoreSubmitError(error, 'rpc', {
@@ -469,6 +479,20 @@ export default function CloudAtomicRestorePanel({
       inFlightRef.current = false;
     }
   };
+
+  const runScheduledReconcile = useEffectEvent(() => {
+    if (inFlightRef.current || !unresolvedAttempt) return;
+    reconcileSchedule.current.mark(unresolvedAttempt.traceId);
+    void checkOutcome();
+  });
+  useEffect(() => {
+    if (!unresolvedAttempt || !cloudMode || !owner || !user?.id || !online || !recoveryReady
+      || status === 'restoring' || status === 'checking') return;
+    const delay = reconcileSchedule.current.delay(unresolvedAttempt.traceId, reconcileAfter, Date.now());
+    if (delay === null) return;
+    const timer = window.setTimeout(runScheduledReconcile, delay);
+    return () => window.clearTimeout(timer);
+  }, [unresolvedAttempt, cloudMode, owner, user?.id, online, recoveryReady, status, reconcileAfter]);
 
   const execute = async () => {
     const pending = pendingAttemptRef.current;
@@ -638,7 +662,8 @@ export default function CloudAtomicRestorePanel({
         attemptCorrelationId: pending.correlationId,
       });
       const unknown = visible.outcome === 'unknown';
-      const requiresOutcomeCheck = attemptPrepareStarted && (unknown || restoreDispatched);
+      const durableFailure = isCloudRestoreFailureCode(visible.code);
+      const requiresOutcomeCheck = !durableFailure && attemptPrepareStarted && (unknown || restoreDispatched);
       if (requiresOutcomeCheck) {
         const unresolved = {
           attemptId: durableAttempt?.attemptId ?? pending.idempotencyKey,
@@ -647,6 +672,7 @@ export default function CloudAtomicRestorePanel({
         setUnresolvedAttempt(unresolved);
         persistCloudRestoreUnresolvedAttempt(unresolved);
       } else if (attemptPrepareStarted) {
+        setUnresolvedAttempt(null);
         clearCloudRestoreUnresolvedAttempt();
       }
       if (!restoreDispatched && candidate.portability) {
@@ -672,7 +698,8 @@ export default function CloudAtomicRestorePanel({
         });
       }
       submissionLockedRef.current = requiresOutcomeCheck || visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED';
-      if (visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') {
+      if (durableFailure || visible.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED') {
+        submissionLockedRef.current = true;
         retireCloudRestoreIntentIdentity({
           attemptId: pending.idempotencyKey,
           traceId: pending.correlationId,

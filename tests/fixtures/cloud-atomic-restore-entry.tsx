@@ -222,7 +222,8 @@ dataProvider.reconcileCloudRestoreAttempt = async command => {
     };
   }
   return {
-    status: 'not_committed', attemptId: command.attemptId, traceId: command.traceId,
+    status: ['timeout', 'plain-error', 'plain-error-variant'].includes(behavior) ? 'pending' : 'not_committed',
+    attemptId: command.attemptId, traceId: command.traceId,
     expectedEpoch: 0, effectiveFingerprint: fingerprint,
   };
 };

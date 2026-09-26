@@ -88,6 +88,19 @@ const definition = (
 ): SafeErrorDefinition => Object.freeze({ code, classification, message, outcome });
 
 const safeDefinitions = new Map<string, SafeErrorDefinition>();
+for (const [category, message] of Object.entries({
+  TIMEOUT: '還原執行已取消（逾時或查詢取消），業務交易已回滾。',
+  VALIDATION: '還原資料未通過伺服器驗證，業務交易已回滾。',
+  PORTABILITY: '跨環境還原檢查失敗，業務交易已回滾。',
+  CONSTRAINT: '還原資料不符合資料庫約束，業務交易已回滾。',
+  AUTHORIZATION: '還原權限驗證失敗，業務交易已回滾。',
+  STALE: '還原基準版本已變更，本次未提交。',
+  INTERNAL: '伺服器內部處理失敗，業務交易已回滾；請提供追蹤編號。',
+  UNKNOWN: '伺服器已確認本次未提交；原始錯誤原因未取得，請提供追蹤編號。',
+})) {
+  const code = `CLOUD_RESTORE_FAILURE_${category}`;
+  safeDefinitions.set(code, definition(code, 'server', message, 'failed'));
+}
 const addDefinitions = (
   codes: readonly string[],
   classification: CloudRestoreErrorClassification,
