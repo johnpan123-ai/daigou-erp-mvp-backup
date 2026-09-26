@@ -121,14 +121,18 @@ const wrapper = SQL.slice(wrapperStart, SQL.indexOf('do $effective_path_postflig
 assert.doesNotMatch(builder, /\b(?:delete|insert|update|truncate)\s+(?:from|into|public\.)/iu, 'Builder must be read/transform only');
 assert.ok(wrapper.indexOf('erp_cloud_restore_build_effective_snapshot') < wrapper.indexOf('return public.erp_restore_cloud_snapshot'));
 
-assert.match(DOMAIN, /CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_attempt'/u);
+assert.match(DOMAIN, /CLOUD_RESTORE_RPC = 'erp_restore_proven_cloud_snapshot_attempt'/u);
+assert.match(DOMAIN, /CLOUD_RESTORE_LEGACY_ATTEMPT_RPC = 'erp_restore_cloud_snapshot_attempt'/u);
 assert.match(DOMAIN, /CLOUD_RESTORE_ATTEMPT_PREPARE_RPC = 'erp_prepare_cloud_restore_attempt'/u);
 assert.match(DOMAIN, /CLOUD_RESTORE_ATTEMPT_RECONCILE_RPC = 'erp_reconcile_cloud_restore_attempt'/u);
 assert.match(PORTABILITY, /assertCloudRestoreEffectiveCandidate/u);
 assert.match(PORTABILITY, /sourceData: verifiedSource\.data/u);
-assert.match(PROVIDER, /p_source_snapshot: effective\.sourceData/u);
-assert.match(PROVIDER, /p_restore_mode: effective\.mode/u);
-assert.doesNotMatch(PROVIDER.slice(PROVIDER.indexOf('async restoreCloudSnapshot('), PROVIDER.indexOf('private async applyCloudFieldMutations')), /p_snapshot:\s*command\.candidate\.data/u);
+const proofMethod = PROVIDER.slice(PROVIDER.indexOf('async proveCloudRestoreCandidate('), PROVIDER.indexOf('async validateCloudRestoreTarget('));
+const restoreMethod = PROVIDER.slice(PROVIDER.indexOf('async restoreCloudSnapshot('), PROVIDER.indexOf('private async applyCloudFieldMutations'));
+assert.match(proofMethod, /p_source_snapshot: effective\.sourceData/u);
+assert.match(proofMethod, /p_restore_mode: effective\.mode/u);
+assert.match(restoreMethod, /p_proof_id: command\.proofId/u);
+assert.doesNotMatch(restoreMethod, /p_source_snapshot|p_manifest|p_snapshot:\s*command\.candidate\.data/u);
 
 console.log('PASS cross-environment effective candidate, 15-table coverage, raw immutability, canonical/business FK preservation, and 23503 regression');
 console.log('PASS strict preservation, pre-destructive fail-closed matrix, direct legacy RPC revocation, and atomic rollback model');

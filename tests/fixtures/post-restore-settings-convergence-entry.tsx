@@ -83,6 +83,9 @@ dataProvider.proveCloudRestoreCandidate = async candidate => ({
     missingInventoryKeyCount: 0,
   },
   elapsedMs: 1,
+  proofId: '00000000-0000-4000-8000-000000000096',
+  proofExpiresAt: '2099-01-01T00:00:00.000Z',
+  requestId: '00000000-0000-4000-8000-000000000095',
 });
 dataProvider.prepareCloudRestoreAttempt = async command => ({
   status: 'prepared',

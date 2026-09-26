@@ -177,6 +177,7 @@ import {
   preserveCloudRestoreSuccessThroughRefresh,
   recordCloudRestoreSubmitDiagnostic,
 } from './cloudRestoreSubmit';
+import { recordCloudRestoreRpcIntent } from './cloudRestoreRpcTransport';
 import type { IDataProvider } from '../types';
 import type { 
   InventoryItem, 
@@ -343,13 +344,17 @@ export class SupabaseProvider implements IDataProvider {
 
   async proveCloudRestoreCandidate(candidate: CloudRestoreCandidate): Promise<CloudRestoreCandidateProofResult> {
     const effective = await assertCloudRestoreEffectiveCandidate(candidate);
+    const requestId = crypto.randomUUID();
+    recordCloudRestoreRpcIntent({ requestId, rpcName: CLOUD_RESTORE_CANDIDATE_PROOF_RPC });
     let data: unknown;
     let error: unknown;
     try {
       ({ data, error } = await supabase.rpc(CLOUD_RESTORE_CANDIDATE_PROOF_RPC, {
+        p_request_id: requestId,
         p_source_snapshot: effective.sourceData,
         p_manifest: candidate.manifest,
         p_restore_mode: effective.mode,
+        p_source_environment: candidate.sourceEnvironment,
       }));
     } catch (caughtError) {
       try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe transport error authoritative. */ }
@@ -585,11 +590,17 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   async restoreCloudSnapshot(command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult> {
-    assertCloudWriteAllowed();
     if (command.confirmation !== 'OVERWRITE CLOUD DATA') {
       throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_EXPLICIT_CONFIRMATION_REQUIRED' }, 'pre-dispatch');
     }
-    const effective = await assertCloudRestoreEffectiveCandidate(command.candidate);
+    const requestId = crypto.randomUUID();
+    recordCloudRestoreRpcIntent({
+      requestId,
+      rpcName: CLOUD_RESTORE_RPC,
+      traceId: command.attempt.traceId,
+      attemptId: command.attempt.attemptId,
+      executionId: command.attempt.executionId,
+    });
     let data: unknown;
     let error: unknown;
     try {
@@ -597,11 +608,8 @@ export class SupabaseProvider implements IDataProvider {
         p_attempt_id: command.attempt.attemptId,
         p_trace_id: command.attempt.traceId,
         p_execution_id: command.attempt.executionId,
-        p_snapshot_fingerprint: command.candidate.manifest.snapshotFingerprint,
-        p_source_snapshot: effective.sourceData,
-        p_manifest: command.candidate.manifest,
-        p_source_environment: command.candidate.sourceEnvironment,
-        p_restore_mode: effective.mode,
+        p_proof_id: command.proofId,
+        p_request_id: requestId,
       }));
     } catch (caughtError) {
       try { markCloudRequestFailed(caughtError); } catch { /* Keep safe error authoritative. */ }

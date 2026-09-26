@@ -152,6 +152,9 @@ try {
       missing_inventory_key_count: 0,
     },
     elapsed_ms: 1,
+    proof_id: '00000000-0000-4000-8000-000000000096',
+    proof_expires_at: '2099-01-01T00:00:00.000Z',
+    request_id: '00000000-0000-4000-8000-000000000095',
   };
   assert.equal(proofDomain.assertCloudRestoreCandidateProofResult(validProofSummary, candidate).candidateValid, true);
   for (const mutate of [
@@ -568,11 +571,11 @@ try {
     await page.getByTestId('cloud-restore-new-intent').click();
     await page.getByTestId('cloud-restore-file-button').waitFor();
 
-    await mountAndUpload({ behavior: 'target-fail', document: portableDocument });
-    await page.getByTestId('cloud-restore-status').waitFor();
+    await openReady({ behavior: 'target-fail', document: portableDocument });
     state = await snapshot();
-    assert.equal(state.targetValidationCalls, 1);
-    assert.equal(state.prepareCalls + state.calls, 0, 'Portability failure must stop before durable PREPARE');
+    assert.equal(state.targetValidationCalls, 0,
+      'The OWNER proof is the single authoritative target/portability validation; no duplicate 13MB validation upload');
+    assert.equal(state.prepareCalls + state.calls, 0, 'Preflight must remain non-destructive');
 
     // Normal one-click orchestration: one confirmation, one attempt, audit, refresh, success.
     await openReady();
@@ -588,13 +591,21 @@ try {
       'submit-start', 'confirmation-complete', 'readiness-check-pass', 'rpc-invocation', 'submit-finish',
     ]);
 
+    // Once PREPARE commits, a background connectivity refresh cannot suppress EXECUTE dispatch.
+    await openReady({ behavior: 'guard-race' });
+    await confirm();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    state = await snapshot();
+    assert.equal(state.prepareCalls, 1);
+    assert.equal(state.calls, 1, 'A PREPARE -> loading-state race must still dispatch EXECUTE exactly once');
+
     // Cross-environment transformation is automatic; compatibility is rechecked before write.
     await openReady({ document: portableDocument });
     assert.equal(await page.getByTestId('cloud-restore-portability-summary').count(), 1);
     await confirm();
     await page.getByTestId('cloud-restore-result').waitFor();
     state = await snapshot();
-    assert.equal(state.targetValidationCalls, 2);
+    assert.equal(state.targetValidationCalls, 0);
     assert.equal(state.calls, 1);
     assert.equal(state.candidates[0].portability.policyVersion, 'cross-environment-audit-null-v1');
     assert.equal(state.candidates[0].allUpdatedByNull, true);

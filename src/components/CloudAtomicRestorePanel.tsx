@@ -96,7 +96,6 @@ export default function CloudAtomicRestorePanel({
   prepareRestoreAttempt,
   checkRestoreOutcome,
   executeRestore,
-  validateRestoreTarget,
   readRestoreIntegrityAudit,
   onAuthoritativeRefreshComplete,
 }: CloudAtomicRestorePanelProps = {}) {
@@ -299,14 +298,6 @@ export default function CloudAtomicRestorePanel({
       if (!readiness.allowed) throw createCloudRestoreSafeSubmitError({ code: readiness.code }, 'pre-dispatch');
       const portable = await prepareCrossEnvironmentCloudRestoreCandidate(source, supabaseEnvironment.projectRef);
       const prepared = portable.portability && portable.portability.totalTransformedRows > 0 ? portable : source;
-      if (prepared.portability) {
-        await (validateRestoreTarget ?? (command => dataProvider.validateCloudRestoreTarget(command)))({
-          attemptCorrelationId: crypto.randomUUID(),
-          idempotencyKey: crypto.randomUUID(),
-          candidate: prepared,
-          confirmation: CONFIRMATION_TEXT,
-        });
-      }
       const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(prepared);
       if (candidateGenerationRef.current !== generation || proofRequestTokenRef.current !== proofToken) return;
       const currentUserId = user?.id ?? '';
@@ -522,20 +513,9 @@ export default function CloudAtomicRestorePanel({
     let durableAttempt: CloudRestoreAttemptOutcome | null = null;
     let attemptPrepareStarted = false;
     try {
-      if (activeCandidate.portability) {
-        await (validateRestoreTarget ?? (command => dataProvider.validateCloudRestoreTarget(command)))({
-          attemptCorrelationId: pending.correlationId,
-          idempotencyKey: pending.idempotencyKey,
-          candidate: activeCandidate,
-          confirmation: CONFIRMATION_TEXT,
-        });
-        recordCloudRestoreSubmitDiagnostic({
-          event: 'target-compatibility', phase: 'readiness', outcome: 'success',
-          attemptCorrelationId: pending.correlationId, idempotencyKey: pending.idempotencyKey,
-          readStatus: getCloudConnectivitySnapshot().readStatus,
-        });
-      }
       if (!hasCurrentProof()) throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_PROOF_REQUIRED' }, 'pre-dispatch');
+      const activeProof = proofRecordRef.current?.result;
+      if (!activeProof) throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_PROOF_REQUIRED' }, 'pre-dispatch');
       await assertCloudRestoreEffectiveCandidate(activeCandidate);
       attemptPrepareStarted = true;
       persistCloudRestoreUnresolvedAttempt({ attemptId: pending.idempotencyKey, traceId: pending.correlationId });
@@ -570,6 +550,7 @@ export default function CloudAtomicRestorePanel({
         attemptCorrelationId: pending.correlationId,
         idempotencyKey: pending.idempotencyKey,
         candidate: activeCandidate,
+        proofId: activeProof.proofId,
         confirmation: CONFIRMATION_TEXT,
         attempt: {
           status: durableAttempt.status,

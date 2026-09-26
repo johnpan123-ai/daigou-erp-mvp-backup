@@ -86,9 +86,12 @@ assert.match(builder036, /jsonb_array_elements\(p_source_snapshot->v_table\)/u);
 assert.doesNotMatch(builder036, /jsonb_array_elements_text|jsonb_each_text|row_value::text|row_value->>/u);
 assert.match(builder036, /else public\.erp_cloud_restore_reject_invalid_portable_row\(v_table\)/u);
 
+const proofMethod = PROVIDER.slice(PROVIDER.indexOf('async proveCloudRestoreCandidate('), PROVIDER.indexOf('async validateCloudRestoreTarget('));
 const restoreMethod = PROVIDER.slice(PROVIDER.indexOf('async restoreCloudSnapshot('), PROVIDER.indexOf('private async applyCloudFieldMutations'));
-assert.match(restoreMethod, /p_source_snapshot: effective\.sourceData/u);
-assert.doesNotMatch(restoreMethod, /JSON\.stringify\s*\(/u, 'RPC jsonb must receive a JS object, not a second JSON string');
+assert.match(proofMethod, /p_source_snapshot: effective\.sourceData/u);
+assert.doesNotMatch(proofMethod, /JSON\.stringify\s*\(/u, 'RPC jsonb must receive a JS object, not a second JSON string');
+assert.match(restoreMethod, /p_proof_id: command\.proofId/u);
+assert.doesNotMatch(restoreMethod, /p_source_snapshot|p_manifest/u);
 assert.equal((restoreMethod.match(/supabase\.rpc\(CLOUD_RESTORE_RPC/gu) || []).length, 1);
 assert.doesNotMatch(restoreMethod, /\bretry\b|\bwhile\s*\(|\bfor\s*\(/iu);
 

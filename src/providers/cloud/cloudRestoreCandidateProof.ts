@@ -6,7 +6,7 @@ import {
   type CloudRestoreTable,
 } from './cloudAtomicRestore';
 
-export const CLOUD_RESTORE_CANDIDATE_PROOF_RPC = 'erp_prove_cloud_restore_candidate' as const;
+export const CLOUD_RESTORE_CANDIDATE_PROOF_RPC = 'erp_prove_cloud_restore_candidate_v2' as const;
 export const CLOUD_RESTORE_CANDIDATE_PROOF_SCHEMA = 'cloud-restore-candidate-proof-v1' as const;
 
 export type CloudRestoreCandidateProofPolicy = 'strict' | 'cross-environment-audit-null-v1';
@@ -38,6 +38,9 @@ export interface CloudRestoreCandidateProofResult {
   relationshipHash: string;
   integrity: CloudRestoreCandidateProofIntegrity;
   elapsedMs: number;
+  proofId: string;
+  proofExpiresAt: string;
+  requestId: string;
 }
 
 export interface CloudRestoreCandidateProofBinding {
@@ -58,6 +61,7 @@ export interface CloudRestoreCandidateProofRecord {
 }
 
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu;
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
@@ -72,6 +76,20 @@ const requireInteger = (value: unknown, code: string): number => {
 const requireHash = (value: unknown, code: string): string => {
   if (typeof value !== 'string' || !HASH_PATTERN.test(value)) {
     throw new CloudRestoreValidationError(code, 'Restore proof 回應包含無效 fingerprint。');
+  }
+  return value;
+};
+
+const requireUuid = (value: unknown, code: string): string => {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+    throw new CloudRestoreValidationError(code, 'Restore proof 回應包含無效識別碼。');
+  }
+  return value.toLowerCase();
+};
+
+const requireFutureTimestamp = (value: unknown, code: string): string => {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value)) || Date.parse(value) <= Date.now()) {
+    throw new CloudRestoreValidationError(code, 'Restore proof 已過期或時間格式無效。');
   }
   return value;
 };
@@ -169,6 +187,9 @@ export function assertCloudRestoreCandidateProofResult(
   const sourceFingerprint = requireHash(value.source_fingerprint, 'CLOUD_RESTORE_PROOF_RESULT_INVALID');
   const effectiveFingerprint = requireHash(value.effective_fingerprint, 'CLOUD_RESTORE_PROOF_RESULT_INVALID');
   const relationshipHash = requireHash(value.relationship_hash, 'CLOUD_RESTORE_PROOF_RESULT_INVALID');
+  const proofId = requireUuid(value.proof_id, 'CLOUD_RESTORE_PROOF_RESULT_INVALID');
+  const proofExpiresAt = requireFutureTimestamp(value.proof_expires_at, 'CLOUD_RESTORE_PROOF_RESULT_INVALID');
+  const requestId = requireUuid(value.request_id, 'CLOUD_RESTORE_PROOF_RESULT_INVALID');
   const tableCounts = parseTableCounts(value.table_counts, candidate);
   const integrity = parseIntegrity(value.integrity, candidate);
   if (resourceCount !== candidate.manifest.resourceCount
@@ -196,6 +217,9 @@ export function assertCloudRestoreCandidateProofResult(
     relationshipHash,
     integrity,
     elapsedMs,
+    proofId,
+    proofExpiresAt,
+    requestId,
   };
 }
 
@@ -226,6 +250,7 @@ export function isCloudRestoreCandidateProofCurrent(
   if (!record || !candidate || !context.userId) return false;
   const binding = record.binding;
   return record.result.candidateValid === true
+    && Date.parse(record.result.proofExpiresAt) > Date.now()
     && binding.candidateGeneration === context.candidateGeneration
     && binding.userId === context.userId
     && binding.targetProjectRef === context.targetProjectRef

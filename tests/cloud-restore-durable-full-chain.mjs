@@ -51,7 +51,7 @@ try {
     add foreign key(${r.field}) references public.${r.parentTable}(id)`);
   // 028 is the incompatible inventory_key-PK candidate, not a predecessor for
   // the canonical-id 029 baseline. Use the actual 027 -> 029 supported path.
-  for (const number of [23,24,25,26,27,29,30,35,36,37,38,39,40,41,42]) {
+  for (const number of [23,24,25,26,27,29,30,35,36,37,38,39,40,41,42,43]) {
     const file = readdirSync('supabase/sql').find(file => file.startsWith(String(number).padStart(3,'0')+'_'));
     await db.exec(readFileSync(resolve('supabase/sql', file), 'utf8'));
     console.log('PASS migration', file);
@@ -63,19 +63,21 @@ try {
   await db.query("select set_config('request.jwt.claim.sub',$1,false),set_config('request.headers',$2,false)",
     [OWNER, JSON.stringify({host:'rhfdjsklfrgpoqsaqpkn.supabase.co'})]);
   await db.exec('set role authenticated');
-  const proof = await scalar('select public.erp_prove_cloud_restore_candidate($1,$2,$3) as value',
-    [JSON.stringify(effective.sourceData),JSON.stringify(portable.manifest),effective.mode]);
-  assert.equal(proof.ok, true);
   for (const fail of [true, false]) {
+    const proofRequest = randomUUID();
+    const proof = await scalar('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) as value',
+      [JSON.stringify(effective.sourceData),JSON.stringify(portable.manifest),effective.mode,
+        'http://isolated-restore.test',proofRequest]);
+    assert.equal(proof.ok, true);
+    assert.equal(proof.request_id, proofRequest);
     const attempt = randomUUID(), trace = randomUUID();
     await scalar('select public.erp_prepare_cloud_restore_attempt($1,$2,$3,$4,$5,$6,120000,$7) as value',
       [attempt, trace, candidate.manifest.snapshotFingerprint, portable.manifest.snapshotFingerprint,
         'cross-environment-audit-null-v1','rhfdjsklfrgpoqsaqpkn','postgresql-statement-timeout-v1']);
-    const execution = randomUUID();
+    const execution = randomUUID(), executeRequest = randomUUID();
     await db.query("select set_config('fixture.fail',$1,false)",[fail ? 'on':'off']);
-    const result = await scalar('select public.erp_restore_cloud_snapshot_attempt($1,$2,$3,$4,$5,$6,$7,$8) as value',
-      [attempt,trace,execution,portable.manifest.snapshotFingerprint,JSON.stringify(effective.sourceData),
-        JSON.stringify(portable.manifest),'synthetic-fixture',effective.mode]);
+    const result = await scalar('select public.erp_restore_proven_cloud_snapshot_attempt($1,$2,$3,$4,$5) as value',
+      [attempt,trace,execution,proof.proof_id,executeRequest]);
     if (fail) {
       assert.equal(result.ok,false); assert.equal(result.failure.category,'CONSTRAINT');
       assert.equal(result.failure.phase,'atomic-restore');

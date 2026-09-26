@@ -2,7 +2,6 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthContext } from '../../src/auth/authContext';
 import {
-  assertCloudWriteAllowed,
   markCloudReadFresh,
   markCloudReadLoading,
   markCloudReachable,
@@ -172,6 +171,9 @@ dataProvider.proveCloudRestoreCandidate = async candidate => {
       missing_inventory_key_count: 0,
     },
     elapsed_ms: 42,
+    proof_id: '00000000-0000-4000-8000-000000000096',
+    proof_expires_at: '2099-01-01T00:00:00.000Z',
+    request_id: '00000000-0000-4000-8000-000000000095',
   };
   return assertCloudRestoreCandidateProofResult(proof, candidate);
 };
@@ -277,7 +279,6 @@ dataProvider.validateCloudRestoreTarget = async command => {
 dataProvider.restoreCloudSnapshot = async command => {
   latestCommand = command;
   if (behavior === 'guard-race') markCloudReadLoading();
-  assertCloudWriteAllowed();
   calls += 1;
   idempotencyKeys.push(command.idempotencyKey);
   candidates.push({

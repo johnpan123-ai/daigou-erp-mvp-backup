@@ -10,7 +10,8 @@ import { parseCloudRestoreFailure, type CloudRestoreFailure } from './cloudResto
 export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
 export const CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION = 'inventory-id-v2' as const;
 
-export const CLOUD_RESTORE_RPC = 'erp_restore_cloud_snapshot_attempt' as const;
+export const CLOUD_RESTORE_RPC = 'erp_restore_proven_cloud_snapshot_attempt' as const;
+export const CLOUD_RESTORE_LEGACY_ATTEMPT_RPC = 'erp_restore_cloud_snapshot_attempt' as const;
 export const CLOUD_RESTORE_LEGACY_RPC = 'erp_restore_cloud_snapshot' as const;
 export const CLOUD_RESTORE_SNAPSHOT_RPC = 'erp_export_cloud_restore_snapshot' as const;
 export const CLOUD_RESTORE_ATTEMPT_PREPARE_RPC = 'erp_prepare_cloud_restore_attempt' as const;
@@ -120,6 +121,7 @@ export interface CloudRestoreAttemptExecution extends CloudRestoreAttemptCommand
 
 export interface CloudRestoreExecutionCommand extends CloudRestoreCommand {
   attempt: CloudRestoreAttemptExecution;
+  proofId: string;
 }
 
 export type CloudRestoreAttemptOutcomeStatus = 'prepared' | 'executing' | 'pending' | 'completed' | 'not_committed';

@@ -166,6 +166,15 @@ class DynamicDataProvider implements IDataProvider {
     }
   }
 
+  private async committedRestoreWrite<T>(write: () => Promise<T>): Promise<T> {
+    // PREPARE has already committed a durable OWNER-only envelope. A later
+    // Realtime/focus/connectivity transition must not suppress EXECUTE before
+    // it reaches fetch; transport uncertainty is closed by durable reconcile.
+    const result = await write();
+    this.registerWrite();
+    return result;
+  }
+
   private registerWrite() {
     const now = Date.now();
     this.lastLoadedTime = now;
@@ -381,7 +390,7 @@ class DynamicDataProvider implements IDataProvider {
   }
   async restoreCloudSnapshot(command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
-    return this.guardedWrite(() => this.supabaseProvider.restoreCloudSnapshot(command));
+    return this.committedRestoreWrite(() => this.supabaseProvider.restoreCloudSnapshot(command));
   }
 
   private getActiveProvider(): IDataProvider {

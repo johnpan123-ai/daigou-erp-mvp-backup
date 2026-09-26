@@ -1,4 +1,5 @@
 import { getProviderMode, isSandboxProviderMode } from '../providers/providerMode';
+import { fetchWithCloudRestoreRpcObservation } from '../providers/cloud/cloudRestoreRpcTransport';
 
 export class TestSandboxCloudWriteBlockedError extends Error {
   constructor(method: string, url: string) {
@@ -43,6 +44,6 @@ export function createGuardedSupabaseFetch(
       console.error('[Test Sandbox Guard]', error.message);
       throw error;
     }
-    return fetchImplementation(input, init);
+    return fetchWithCloudRestoreRpcObservation(fetchImplementation, input, init);
   };
 }
