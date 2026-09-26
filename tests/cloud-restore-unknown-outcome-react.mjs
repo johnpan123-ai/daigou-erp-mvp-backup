@@ -40,11 +40,7 @@ try {
       }, behavior);
       await page.locator('input[type=file]').setInputFiles(SNAPSHOT);
       await page.getByTestId('cloud-restore-preflight').waitFor({ timeout: 30_000 });
-      await page.getByTestId('cloud-restore-proof-button').click();
-      await page.getByTestId('cloud-restore-proof-summary').waitFor({ timeout: 30_000 });
-      await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
-      await page.getByTestId('cloud-restore-submit').click();
-      await page.getByTestId('cloud-restore-final-submit').click();
+      await page.getByTestId('cloud-restore-confirm').click();
       await page.waitForFunction(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().reconcileCalls === 1);
       let snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
       assert.equal(snapshot.prepareCalls, 1);
@@ -64,7 +60,7 @@ try {
     assert.equal(snapshot.prepareCalls, 1, 'Remount must not PREPARE an unresolved attempt again');
     assert.equal(snapshot.calls, 1, 'Remount must not EXECUTE an unresolved attempt again');
     await page.getByTestId('cloud-restore-result').waitFor();
-    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /Cloud Restore 完成/u);
+    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原完成/u);
     snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(snapshot.calls, 1, 'Outcome reconciliation must not dispatch Restore again');
     assert.equal(snapshot.reconcileCalls, 1);
@@ -75,9 +71,10 @@ try {
     );
 
     await runUntilUnknown('lost-response-failure');
-    await page.getByTestId('cloud-restore-status').getByText(/已確認本次未提交/u).waitFor();
+    await page.getByTestId('cloud-restore-status').getByText(/此備份目前無法安全還原/u).waitFor();
     await page.getByTestId('cloud-restore-check-outcome').waitFor({ state: 'detached' });
-    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
+    assert.equal(await page.getByTestId('cloud-restore-confirm').count(), 0);
+    assert.equal(await page.getByTestId('cloud-restore-new-intent').count(), 1);
     snapshot = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(snapshot.calls, 1, 'Confirmed rollback must not auto-retry Restore');
     assert.equal(snapshot.reconcileCalls, 1);

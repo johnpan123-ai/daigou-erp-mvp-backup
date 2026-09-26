@@ -65,7 +65,13 @@ try {
   });
   await page.goto('http://127.0.0.1:4278/tests/fixtures/cloud-restore-integrity-audit.html');
   const audit=page.getByTestId('restore-integrity-audit');
-  await audit.waitFor();
+  const openAdvancedAudit=async()=>{
+    const advanced=page.getByTestId('cloud-restore-advanced-tools');
+    await advanced.waitFor();
+    if (!(await advanced.evaluate(node=>node.open))) await advanced.locator('summary').click();
+    await audit.waitFor();
+  };
+  await openAdvancedAudit();
   assert.equal(rpc.length,0,'Manual-only: mounting Settings must not audit');
   const countText=()=>page.locator('.kpi-grid > .card:first-child .font-semibold').allTextContents();
   const logical=await countText();
@@ -93,7 +99,7 @@ try {
   await page.evaluate(()=>window.__RESTORE_AUDIT__.render('owner','local'));
   assert.equal(await audit.count(),0,'Local mode must not expose Cloud audit');
   await page.evaluate(()=>window.__RESTORE_AUDIT__.render('owner'));
-  await audit.waitFor();
+  await openAdvancedAudit();
   fail=true;
   await page.getByRole('button',{name:'Restore Integrity Audit',exact:true}).click();
   await audit.getByRole('alert').waitFor();
@@ -107,7 +113,7 @@ try {
   await audit.waitFor({state:'detached'});
   release();hold=null;
   await page.evaluate(()=>window.__RESTORE_AUDIT__.render('owner'));
-  await audit.waitFor();
+  await openAdvancedAudit();
   assert.equal(await page.getByTestId('restore-integrity-result').count(),0,'Old response must not leak into new user/mount');
   assert.equal(await page.evaluate(()=>window.__RESTORE_AUDIT__.writes()),0);
   assert.deepEqual(unexpected,[]);

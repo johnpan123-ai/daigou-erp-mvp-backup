@@ -56,8 +56,8 @@ assert.match(restoreMethod, /reconcileDestructiveUncertainty\(command\.attempt\)
 assert.match(PROVIDER, /reconcileDestructiveUncertainty[\s\S]+missing\/failed reconciliation[\s\S]+CLOUD_RESTORE_ATTEMPT_PENDING/u);
 assert.match(PROVIDER, /async prepareCloudRestoreAttempt\([\s\S]+CLOUD_RESTORE_ATTEMPT_PREPARE_RPC[\s\S]+CLOUD_RESTORE_ATTEMPT_BEGIN_RPC/u);
 assert.match(PANEL, /cloud-restore-check-outcome/u);
-assert.match(PANEL, /查證伺服器結果（不會重跑 Restore）/u);
-assert.match(PANEL, /submissionLockedRef\.current = requiresOutcomeCheck \|\| visible\.code === 'CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED'/u);
+assert.match(PANEL, /再次查證結果（不會重新還原）/u);
+assert.match(PANEL, /submissionLockedRef\.current = requiresOutcomeCheck \|\| durableFailure/u);
 assert.match(PROVIDER, /Preserve a known PostgreSQL\/PostgREST category[\s\S]+createCloudRestoreSafeSubmitError\(error, 'server-response'\)/u);
 assert.match(SUBMIT, /CLOUD_RESTORE_ATTEMPT_PENDING/u);
 assert.match(SUBMIT, /CLOUD_RESTORE_ATTEMPT_NOT_COMMITTED/u);

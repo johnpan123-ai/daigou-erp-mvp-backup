@@ -49,6 +49,10 @@ export default function StagingCloudRestoreHarness() {
       <CloudAtomicRestorePanel
         executeRestore={command => controller.execute(command)}
         validateRestoreTarget={command => controller.validateTarget(command)}
+        onAuthoritativeRefreshComplete={async () => {
+          const fixture = window as Window & { __CLOUD_RESTORE_SUBMIT_TEST__?: { markAuthoritativeRefresh?: () => void } };
+          fixture.__CLOUD_RESTORE_SUBMIT_TEST__?.markAuthoritativeRefresh?.();
+        }}
       />
     </main>
   );

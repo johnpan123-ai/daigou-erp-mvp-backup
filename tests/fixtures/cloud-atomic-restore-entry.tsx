@@ -36,6 +36,8 @@ declare global {
         mountVersion: number;
         calls: number;
         proofCalls: number;
+        auditCalls: number;
+        authoritativeRefreshCalls: number;
         prepareCalls: number;
         prepareAttemptIds: string[];
         reconcileCalls: number;
@@ -46,13 +48,14 @@ declare global {
         diagnostics: ReturnType<typeof getCloudRestoreSubmitDiagnostics>;
       };
       remount: () => void;
+      markAuthoritativeRefresh: () => void;
       setUserId: (userId: string) => void;
       setRecovery: (attempts: CloudRestoreRecoveryAttempt[] | 'error') => void;
     };
   }
 }
 
-type RestoreFixtureBehavior = 'success' | 'completed-replay' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail';
+type RestoreFixtureBehavior = 'success' | 'completed-replay' | 'plain-error' | 'plain-error-variant' | 'timeout' | 'lost-response-success' | 'lost-response-failure' | 'refresh-pending' | 'deferred-success' | 'guard-race' | 'target-fail' | 'prepare-failure' | 'begin-failure' | 'durable-failure' | 'statement-timeout' | 'final-validator-failure' | 'integrity-audit-failure';
 type ProofFixtureBehavior = 'success' | 'error' | 'fingerprint-mismatch' | 'deferred-success';
 
 let behavior: RestoreFixtureBehavior = 'success';
@@ -60,6 +63,8 @@ let proofBehavior: ProofFixtureBehavior = 'success';
 let serverPending: CloudRestoreRecoveryAttempt[] | 'error' = [];
 let calls = 0;
 let proofCalls = 0;
+let auditCalls = 0;
+let authoritativeRefreshCalls = 0;
 let prepareCalls = 0;
 let prepareAttemptIds: string[] = [];
 let reconcileCalls = 0;
@@ -74,6 +79,7 @@ let completedEnvelope: {
   attemptId: string;
   traceId: string;
   effectiveFingerprint: string;
+  candidate: Parameters<typeof dataProvider.restoreCloudSnapshot>[0]['candidate'];
   result: ReturnType<typeof restoreResult> & { authoritativeRefresh: { status: 'complete' } };
 } | null = null;
 
@@ -83,6 +89,7 @@ window.__CLOUD_RESTORE_CONNECTIVITY_TEST__ = {
 };
 
 window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
+  markAuthoritativeRefresh: () => { authoritativeRefreshCalls += 1; },
   setUserId: userId => { currentUserId = userId; renderFixture(false); },
   setRecovery: attempts => { serverPending = attempts; },
   setBehavior: next => { behavior = next; },
@@ -93,6 +100,8 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     proofBehavior = 'success';
     calls = 0;
     proofCalls = 0;
+    auditCalls = 0;
+    authoritativeRefreshCalls = 0;
     prepareCalls = 0;
     prepareAttemptIds = [];
     reconcileCalls = 0;
@@ -111,6 +120,8 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     mountVersion,
     calls,
     proofCalls,
+    auditCalls,
+    authoritativeRefreshCalls,
     prepareCalls,
     prepareAttemptIds: [...prepareAttemptIds],
     reconcileCalls,
@@ -183,6 +194,8 @@ dataProvider.prepareCloudRestoreAttempt = async command => {
   prepareCalls += 1;
   prepareAttemptIds.push(command.idempotencyKey);
   traceIds.push(command.attemptCorrelationId);
+  if (behavior === 'prepare-failure') throw { code: 'CLOUD_RESTORE_REQUEST_INVALID' };
+  if (behavior === 'begin-failure') throw { code: 'CLOUD_RESTORE_ATTEMPT_EPOCH_MISMATCH' };
   if (behavior === 'completed-replay' && completedEnvelope) {
     if (completedEnvelope.attemptId !== command.idempotencyKey
       || completedEnvelope.traceId !== command.attemptCorrelationId
@@ -219,6 +232,21 @@ dataProvider.reconcileCloudRestoreAttempt = async command => {
       status: 'completed', attemptId: command.attemptId, traceId: command.traceId,
       expectedEpoch: 0, effectiveFingerprint: fingerprint, resultEpoch: 1,
       restoreResult: restoreResult(latestCommand),
+    };
+  }
+  if (['durable-failure', 'statement-timeout', 'final-validator-failure'].includes(behavior)) {
+    const category = behavior === 'statement-timeout' ? 'TIMEOUT' : 'VALIDATION';
+    return {
+      status: 'not_committed', attemptId: command.attemptId, traceId: command.traceId,
+      executionId: '00000000-0000-4000-8000-000000000097', expectedEpoch: 0,
+      effectiveFingerprint: fingerprint,
+      failure: {
+        phase: behavior === 'final-validator-failure' ? 'canonical-result' : 'atomic-restore',
+        category, code: `CLOUD_RESTORE_FAILURE_${category}`,
+        sqlstate: behavior === 'statement-timeout' ? '57014' : '23503',
+        timeoutClassification: behavior === 'statement-timeout' ? 'query-canceled' : 'not-timeout',
+        evidence: 'caught-subtransaction', failedAt: '2026-09-26T00:00:00.000Z',
+      },
     };
   }
   return {
@@ -271,6 +299,12 @@ dataProvider.restoreCloudSnapshot = async command => {
   if (behavior === 'timeout' || behavior === 'lost-response-success' || behavior === 'lost-response-failure') {
     throw { code: 'ETIMEDOUT', message: 'Network timed out', details: 'access_token=must-not-render' };
   }
+  if (behavior === 'durable-failure' || behavior === 'final-validator-failure') {
+    throw { code: 'CLOUD_RESTORE_FAILURE_VALIDATION', message: 'must-not-render raw database failure' };
+  }
+  if (behavior === 'statement-timeout') {
+    throw { code: 'CLOUD_RESTORE_FAILURE_TIMEOUT', message: 'must-not-render raw timeout' };
+  }
   if (behavior === 'deferred-success') {
     await new Promise<void>(resolve => { deferredRelease = resolve; });
   }
@@ -283,10 +317,69 @@ dataProvider.restoreCloudSnapshot = async command => {
       attemptId: command.idempotencyKey,
       traceId: command.attemptCorrelationId,
       effectiveFingerprint: command.candidate.manifest.snapshotFingerprint,
+      candidate: structuredClone(command.candidate),
       result: response,
     };
   }
   return response;
+};
+
+dataProvider.readCloudRestoreIntegrityAudit = async () => {
+  auditCalls += 1;
+  const auditCandidate = latestCommand?.candidate ?? completedEnvelope?.candidate;
+  const auditAttemptId = latestCommand?.idempotencyKey ?? completedEnvelope?.attemptId;
+  if (!auditCandidate || !auditAttemptId) throw new Error('no completed restore');
+  const manifest = auditCandidate.manifest;
+  const totalRows = manifest.totalRows;
+  const integrity = {
+    orphan_count: behavior === 'integrity-audit-failure' ? 1 : 0,
+    optional_metadata_missing_reference_count: 0,
+    duplicate_variant_id_count: 0,
+    duplicate_variant_local_id_count: 0,
+    duplicate_canonical_id_count: 0,
+    canonical_identity_anomaly_count: 0,
+    unknown_product_count: 0,
+    duplicate_inventory_key_count: 0,
+    missing_inventory_key_count: 0,
+  };
+  return {
+    schema_version: 'cloud-restore-integrity-audit-v1',
+    audited_at: '2026-09-26T00:00:01.000Z',
+    epoch: 1,
+    table_counts: manifest.counts,
+    total_rows: totalRows,
+    relationship_hash: manifest.relationshipHash,
+    integrity,
+    audit_policy: {
+      policy: auditCandidate.portability?.policyVersion ?? 'strict',
+      covered_updated_by_non_null_count: 0,
+      covered_updated_by_null_count: totalRows,
+    },
+    expected_manifest: {
+      counts: manifest.counts,
+      total_rows: totalRows,
+      relationship_hash: manifest.relationshipHash,
+    },
+    comparison: { counts_match: true, relationship_hash_match: true },
+    restore_state: {
+      latest_completed: {
+        attempt_id: auditAttemptId,
+        status: 'completed',
+        result_epoch: 1,
+        replayed: false,
+        source_fingerprint: auditCandidate.portability?.sourceSnapshotFingerprint ?? manifest.snapshotFingerprint,
+        effective_fingerprint: manifest.snapshotFingerprint,
+        completed_at: '2026-09-26T00:00:00.000Z',
+        source_transformed_updated_by_count: auditCandidate.portability?.totalTransformedRows ?? 0,
+      },
+      pending_count: 0,
+      executing_count: 0,
+      processing_request_count: 0,
+      active_lock_count: 0,
+      metadata_inconsistency_count: 0,
+      partial_state: 'not_detected',
+    },
+  };
 };
 
 const { default: StagingCloudRestoreHarness } = await import('../../src/pages/StagingCloudRestoreHarness');

@@ -31,6 +31,7 @@ let dataset: Dataset = 'old';
 let restoreCalls = 0;
 let countGetterCalls = 0;
 let completionEvents = 0;
+let latestRestoreCommand: Parameters<typeof dataProvider.restoreCloudSnapshot>[0] | null = null;
 let root: Root | null = null;
 let bootstrapPending = behavior === 'bootstrap-variant-convergence' || behavior === 'bootstrap-all-convergence';
 let resolveBootstrap: ((converged: boolean) => void) | null = null;
@@ -57,6 +58,32 @@ dataProvider.waitForCloudBootstrapConvergence = () => (
   bootstrapPending ? bootstrapPromise : Promise.resolve(false)
 );
 dataProvider.getPendingCloudRestoreAttempts = async () => [];
+dataProvider.proveCloudRestoreCandidate = async candidate => ({
+  ok: true,
+  candidateValid: true,
+  schemaVersion: 'cloud-restore-candidate-proof-v1',
+  policy: candidate.portability?.policyVersion ?? 'strict',
+  resourceCount: candidate.manifest.resourceCount,
+  coverageCount: 15,
+  totalRows: candidate.manifest.totalRows,
+  tableCounts: candidate.manifest.counts,
+  transformedUpdatedByCount: candidate.portability?.totalTransformedRows ?? 0,
+  sourceFingerprint: candidate.portability?.sourceSnapshotFingerprint ?? candidate.manifest.snapshotFingerprint,
+  effectiveFingerprint: candidate.manifest.snapshotFingerprint,
+  relationshipHash: candidate.manifest.relationshipHash,
+  integrity: {
+    orphanCount: candidate.manifest.orphanCount,
+    duplicateVariantIdCount: candidate.manifest.duplicateVariantIdCount,
+    duplicateVariantLocalIdCount: candidate.manifest.duplicateVariantLocalIdCount,
+    duplicateCanonicalIdCount: candidate.manifest.duplicateCanonicalIdCount,
+    canonicalIdentityAnomalyCount: candidate.manifest.canonicalIdentityAnomalyCount,
+    unknownProductCount: candidate.manifest.unknownProductCount,
+    optionalMetadataMissingReferenceCount: candidate.manifest.optionalMetadataMissingReferenceCount,
+    duplicateInventoryKeyCount: 0,
+    missingInventoryKeyCount: 0,
+  },
+  elapsedMs: 1,
+});
 dataProvider.prepareCloudRestoreAttempt = async command => ({
   status: 'executing',
   attemptId: command.idempotencyKey,
@@ -68,6 +95,7 @@ dataProvider.prepareCloudRestoreAttempt = async command => ({
 });
 dataProvider.restoreCloudSnapshot = async command => {
   restoreCalls += 1;
+  latestRestoreCommand = command;
   dataset = behavior === 'count-read-failure' ? 'failure' : 'restored';
   return {
     ok: true,
@@ -78,6 +106,42 @@ dataProvider.restoreCloudSnapshot = async command => {
     restoreEpoch: 2,
     manifest: command.candidate.manifest,
     authoritativeRefresh: { status: 'complete' },
+  };
+};
+dataProvider.readCloudRestoreIntegrityAudit = async () => {
+  if (!latestRestoreCommand) throw new Error('missing completed Restore');
+  const candidate = latestRestoreCommand.candidate;
+  const manifest = candidate.manifest;
+  return {
+    schema_version: 'cloud-restore-integrity-audit-v1',
+    audited_at: '2026-09-26T00:00:01.000Z',
+    epoch: 2,
+    table_counts: manifest.counts,
+    total_rows: manifest.totalRows,
+    relationship_hash: manifest.relationshipHash,
+    integrity: {
+      orphan_count: 0, optional_metadata_missing_reference_count: 0,
+      duplicate_variant_id_count: 0, duplicate_variant_local_id_count: 0,
+      duplicate_canonical_id_count: 0, canonical_identity_anomaly_count: 0,
+      unknown_product_count: 0, duplicate_inventory_key_count: 0, missing_inventory_key_count: 0,
+    },
+    audit_policy: {
+      policy: candidate.portability?.policyVersion ?? 'strict',
+      covered_updated_by_non_null_count: 0,
+      covered_updated_by_null_count: manifest.totalRows,
+    },
+    expected_manifest: { counts: manifest.counts, total_rows: manifest.totalRows, relationship_hash: manifest.relationshipHash },
+    comparison: { counts_match: true, relationship_hash_match: true },
+    restore_state: {
+      latest_completed: {
+        attempt_id: latestRestoreCommand.idempotencyKey, status: 'completed' as const, result_epoch: 2, replayed: false,
+        source_fingerprint: candidate.portability?.sourceSnapshotFingerprint ?? manifest.snapshotFingerprint,
+        effective_fingerprint: manifest.snapshotFingerprint, completed_at: '2026-09-26T00:00:00.000Z',
+        source_transformed_updated_by_count: candidate.portability?.totalTransformedRows ?? 0,
+      },
+      pending_count: 0, executing_count: 0, processing_request_count: 0,
+      active_lock_count: 0, metadata_inconsistency_count: 0, partial_state: 'not_detected' as const,
+    },
   };
 };
 

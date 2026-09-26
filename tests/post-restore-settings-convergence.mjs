@@ -81,17 +81,10 @@ try {
       } catch {
         throw new Error(`Fixture preflight failed: ${await page.getByTestId('cloud-restore-status').innerText()}`);
       }
-      await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
-      await page.getByTestId('cloud-restore-submit').click();
-      await page.getByTestId('cloud-restore-final-confirmation').waitFor();
       if (duplicate) {
-        await page.evaluate(() => {
-          const form = document.querySelector('[data-testid="cloud-restore-final-confirmation"] form');
-          form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-          form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        });
+        await page.getByTestId('cloud-restore-confirm').evaluate(button => { button.click(); button.click(); });
       } else {
-        await page.getByTestId('cloud-restore-final-submit').click();
+        await page.getByTestId('cloud-restore-confirm').click();
       }
       await page.getByTestId('cloud-restore-result').waitFor();
     };
@@ -99,7 +92,7 @@ try {
     await open('success');
     await submit(true);
     await page.waitForFunction(({ selector, expected }) => [...document.querySelectorAll(selector)].map(node => node.textContent).join('|') === expected, { selector: COUNT_SELECTOR, expected: NEW_COUNTS });
-    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /authoritative refresh 已完成/u);
+    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原完成/u);
     assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
       restoreCalls: 1, countGetterCalls: 12, completionEvents: 1, dataset: 'restored', readStatus: 'fresh-online',
     });
@@ -143,12 +136,12 @@ try {
 
     await open('count-read-failure');
     await submit();
-    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原已完成，畫面同步待完成；請勿再次還原/u);
+    assert.match(await page.getByTestId('cloud-restore-result').innerText(), /畫面正在同步最新資料，請勿再次還原/u);
     assert.equal(await page.getByTestId('cloud-restore-result').count(), 1, 'Server success must remain visible');
     assert.deepEqual(await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.snapshot()), {
       restoreCalls: 1, countGetterCalls: 12, completionEvents: 0, dataset: 'failure', readStatus: 'fresh-online',
     });
-    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true, 'A successful Restore may not become dispatchable after UI sync failure');
+    assert.equal(await page.getByTestId('cloud-restore-confirm').count(), 0, 'A successful Restore may not become dispatchable after UI sync failure');
 
     await page.evaluate(() => window.__POST_RESTORE_SETTINGS_TEST__.unmount());
     assert.equal(await page.locator('[data-testid="cloud-atomic-restore"]').count(), 0, 'Unmount must remove the live component tree');

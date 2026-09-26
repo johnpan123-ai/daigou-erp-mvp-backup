@@ -82,6 +82,7 @@ const vite = await createServer({ configFile: false, server: { middlewareMode: t
 let candidateTables;
 let validDocument;
 let alternateDocument;
+let portableDocument;
 try {
   const domain = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
   const proofDomain = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreCandidateProof.ts');
@@ -117,6 +118,10 @@ try {
   validDocument = await makeDocument();
   alternateDocument = clone(validDocument);
   alternateDocument.sourceEnvironment = 'fixture-alternate-candidate';
+  portableDocument = clone(validDocument);
+  portableDocument.sourceEnvironment = 'fixture-cross-environment';
+  portableDocument.data.productGroups[0].updated_by = uuid(500);
+  portableDocument.manifest = (await domain.buildCloudRestoreManifest(portableDocument.data)).manifest;
   const candidate = await domain.prepareCloudRestoreSnapshot(JSON.stringify(validDocument));
   assert.equal(candidate.manifest.resourceCount, 15);
   assert.equal(candidate.manifest.orphanCount, 0);
@@ -458,8 +463,12 @@ assert.match(proofProviderMethod, /p_manifest:\s*candidate\.manifest/u);
 assert.match(proofProviderMethod, /p_restore_mode:\s*effective\.mode/u);
 assert.doesNotMatch(proofProviderMethod, /JSON\.stringify|service[_-]?role/iu);
 assert.match(PROOF_CONTRACT, /candidateGeneration[\s\S]+userId[\s\S]+targetProjectRef[\s\S]+executionFingerprint[\s\S]+sourceFingerprint[\s\S]+effectiveFingerprint[\s\S]+policy/u);
-assert.match(PANEL, /isCloudRestoreCandidateProofCurrent\(proofRecordRef\.current, candidate/u);
-assert.ok((PANEL.match(/isCloudRestoreCandidateProofCurrent\(proofRecordRef\.current, candidate/gu) || []).length >= 2, 'Proof must gate confirmation and the submit handler');
+assert.match(PANEL, /isCloudRestoreCandidateProofCurrent\(proofRecord/u);
+assert.match(PANEL, /isCloudRestoreCandidateProofCurrent\(proofRecordRef\.current, activeCandidate/u);
+assert.match(PANEL, /data-testid="cloud-restore-confirm"/u, 'One visible confirmation action must drive the safe orchestration');
+assert.doesNotMatch(PANEL, /data-testid="cloud-restore-(?:proof-button|confirmation|final-confirmation|final-submit)"/u,
+  'Engineering proof and multi-confirmation controls must not remain in the primary workflow');
+assert.match(PANEL, /readCloudRestoreIntegrityAudit/u, 'A successful Restore must run the final integrity audit automatically');
 assert.match(PROVIDER, /event: 'rpc-response'/u);
 assert.match(SUBMIT, /event: 'authoritative-refresh'[\s\S]+outcome: 'sync-pending'/u);
 assert.match(CONTEXT, /erp_cloud_restore_epoch[\s\S]+reconnect\.request/u);
@@ -504,269 +513,224 @@ try {
   for (let attempt = 0; attempt < 80; attempt += 1) { try { if ((await fetch(url)).ok) break; } catch {} await sleep(250); if (attempt === 79) throw new Error(output); }
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   try {
-    const page = await browser.newPage(); const cloudRequests = []; const applicationLogs = [];
+    const page = await browser.newPage();
+    const cloudRequests = []; const applicationLogs = [];
     page.on('request', request => { if (/\.supabase\.co\//u.test(request.url())) cloudRequests.push(request.url()); });
     page.on('console', message => { applicationLogs.push(message.text()); });
-    const openFixture = async (behavior, portabilityMode = 'strict') => {
+    const snapshot = () => page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
+    const mountAndUpload = async ({ behavior = 'success', proofBehavior = 'success', document = validDocument } = {}) => {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.getByTestId('staging-cloud-restore-harness').waitFor();
-      await page.getByText('STAGING TEST ONLY — CLOUD ATOMIC RESTORE').waitFor();
-      await page.getByTestId('cloud-restore-harness-auth').getByText('true').waitFor();
-      const mountVersion = await page.evaluate(next => {
-        const previous = window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion;
+      const previous = await page.evaluate(({ nextBehavior, nextProof }) => {
+        const before = window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion;
         window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
-        window.__CLOUD_RESTORE_SUBMIT_TEST__.setBehavior(next);
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.setBehavior(nextBehavior);
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.setProofBehavior(nextProof);
+        window.__CLOUD_RESTORE_SUBMIT_TEST__.setUserId('00000000-0000-4000-8000-000000000099');
         window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
         window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
-        return previous;
-      }, behavior);
-      await page.waitForFunction(previous => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > previous, mountVersion);
-      await page.getByTestId('cloud-restore-access').getByText('Owner / authoritative fresh', { exact: false }).waitFor();
-      await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
-      await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
-      await page.getByTestId('cloud-restore-preflight').waitFor();
-      if (portabilityMode !== 'strict') {
-        await page.getByTestId('cloud-restore-portability-mode').selectOption(portabilityMode);
-        await page.getByTestId('cloud-restore-portability-summary').waitFor();
-      }
-      await page.getByTestId('cloud-restore-proof-button').click();
-      await page.getByTestId('cloud-restore-proof-summary').waitFor();
-      await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
-      await page.getByTestId('cloud-restore-submit').click();
-      await page.getByTestId('cloud-restore-final-confirmation').waitFor();
-    };
-    const openProofCandidate = async (proofBehavior = 'success', document = validDocument) => {
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
-      await page.getByTestId('staging-cloud-restore-harness').waitFor();
-      const mountVersion = await page.evaluate(next => {
-        const previous = window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion;
-        window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
-        window.__CLOUD_RESTORE_SUBMIT_TEST__.setProofBehavior(next);
-        window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
-        window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
-        return previous;
-      }, proofBehavior);
-      await page.waitForFunction(previous => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > previous, mountVersion);
+        return before;
+      }, { nextBehavior: behavior, nextProof: proofBehavior });
+      await page.waitForFunction(before => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > before, previous);
       await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
       await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
-      await page.getByTestId('cloud-restore-preflight').waitFor();
     };
-    let submitState;
+    const openReady = async options => {
+      await mountAndUpload(options);
+      await page.getByTestId('cloud-restore-preflight').waitFor({ timeout: 30_000 });
+    };
+    const confirm = async () => page.getByTestId('cloud-restore-confirm').click();
 
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await page.getByTestId('staging-cloud-restore-harness').waitFor();
-    await page.evaluate(() => window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.loading());
-    await page.getByTestId('cloud-restore-access').getByText('等待重新讀取雲端最新資料，完成後才能還原', { exact: true }).waitFor();
-    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
-    await page.getByTestId('cloud-restore-preflight').waitFor();
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
-    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
+    // Automatic preflight/proof, simple summary, and cancel with zero writes.
+    await openReady();
+    assert.match(await page.getByTestId('cloud-restore-preflight').innerText(), /準備還原.*備份資料：15 筆.*資料類別：15 個.*安全檢查：已通過/su);
+    let state = await snapshot();
+    assert.equal(state.proofCalls, 1);
+    assert.equal(state.prepareCalls + state.calls, 0);
+    assert.equal(await page.getByTestId('cloud-restore-confirmation').count(), 0);
+    assert.equal(await page.getByTestId('cloud-restore-proof-button').count(), 0);
+    await page.getByTestId('cloud-restore-cancel').click();
+    await page.getByTestId('cloud-restore-file-button').waitFor();
+    state = await snapshot();
+    assert.equal(state.prepareCalls + state.calls, 0, 'Cancel must create no attempt and make no business write');
 
-    await openProofCandidate();
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true, 'Restore must stay locked before proof');
-    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.proofCalls, 0);
-    assert.equal(submitState.prepareCalls, 0);
-    assert.equal(submitState.calls, 0);
+    // Preflight failures stop before PREPARE/EXECUTE and expose only safe details.
+    await mountAndUpload({ proofBehavior: 'fingerprint-mismatch' });
+    await page.getByTestId('cloud-restore-status').getByText('此備份目前無法安全還原。', { exact: true }).waitFor();
+    state = await snapshot();
+    assert.equal(state.prepareCalls + state.calls, 0);
+    await page.getByTestId('cloud-restore-technical-details').click();
+    const safePreflightText = await page.getByTestId('cloud-restore-technical-details').innerText();
+    assert.doesNotMatch(safePreflightText, /must-not-render|access_token|password|Bearer/u);
+    await page.getByTestId('cloud-restore-new-intent').click();
+    await page.getByTestId('cloud-restore-file-button').waitFor();
 
-    await page.getByTestId('cloud-restore-proof-button').click();
-    await page.getByTestId('cloud-restore-proof-summary').waitFor();
-    assert.match(await page.getByTestId('cloud-restore-proof-status').innerText(), /伺服器驗證通過/u);
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), false);
+    await mountAndUpload({ behavior: 'target-fail', document: portableDocument });
+    await page.getByTestId('cloud-restore-status').waitFor();
+    state = await snapshot();
+    assert.equal(state.targetValidationCalls, 1);
+    assert.equal(state.prepareCalls + state.calls, 0, 'Portability failure must stop before durable PREPARE');
 
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.setUserId('00000000-0000-4000-8000-000000000100'));
-    await page.getByTestId('cloud-restore-proof-status').getByText('登入身分已變更', { exact: false }).waitFor();
-    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'A session identity change must invalidate proof');
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
-
-    await openProofCandidate();
-    await page.getByTestId('cloud-restore-proof-button').click();
-    await page.getByTestId('cloud-restore-proof-summary').waitFor();
-
-    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot-2.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(alternateDocument)) });
-    await page.getByTestId('cloud-restore-preflight').waitFor();
-    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'Selecting another candidate must invalidate proof');
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
-
-    await page.getByTestId('cloud-restore-proof-button').click();
-    await page.getByTestId('cloud-restore-proof-summary').waitFor();
-    await page.getByTestId('cloud-restore-portability-mode').selectOption('cross-environment');
-    await page.getByTestId('cloud-restore-portability-summary').waitFor();
-    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'Policy changes must invalidate proof');
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
-
-    await openProofCandidate('fingerprint-mismatch');
-    await page.getByTestId('cloud-restore-proof-button').click();
-    await page.getByTestId('cloud-restore-proof-status').getByText('伺服器驗證失敗，已阻止還原', { exact: false }).waitFor();
-    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0);
-    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true);
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.calls, 0);
-    assert.equal(submitState.prepareCalls, 0);
-
-    await openProofCandidate('deferred-success');
-    await page.getByTestId('cloud-restore-proof-button').evaluate(button => {
-      button.click();
-      button.click();
-    });
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.proofCalls, 1, 'Proof double click must be single-flight');
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseProofDeferred());
-    await page.getByTestId('cloud-restore-proof-summary').waitFor();
-
-    await openProofCandidate('deferred-success');
-    await page.getByTestId('cloud-restore-proof-button').click();
-    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot-late.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(alternateDocument)) });
-    await page.getByTestId('cloud-restore-preflight').waitFor();
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseProofDeferred());
-    await page.waitForTimeout(50);
-    assert.equal(await page.getByTestId('cloud-restore-proof-summary').count(), 0, 'Late proof must not validate a newer candidate');
-    assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), true);
-
-    await openProofCandidate('error');
-    await page.getByTestId('cloud-restore-proof-button').click();
-    await page.getByTestId('cloud-restore-proof-status').getByText('伺服器驗證失敗，已阻止還原', { exact: false }).waitFor();
-    assert.doesNotMatch(await page.getByTestId('cloud-restore-proof-status').innerText(), /owner identity/u);
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.calls, 0);
-    assert.equal(submitState.prepareCalls, 0);
-
-    if (realSnapshotDocument) {
-      await openProofCandidate('success', realSnapshotDocument);
-      await page.getByTestId('cloud-restore-proof-button').click();
-      await page.getByTestId('cloud-restore-proof-summary').getByText('總筆數：17658', { exact: false }).waitFor();
-      assert.equal(await page.getByTestId('cloud-restore-confirmation').isDisabled(), false, 'Real 17,658-row candidate proof must unlock confirmation without starting Restore');
-      submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-      assert.equal(submitState.proofCalls, 1);
-      assert.equal(submitState.prepareCalls, 0);
-      assert.equal(submitState.calls, 0);
-    }
-
-    await openFixture('success');
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.setUserId('00000000-0000-4000-8000-000000000100'));
-    await page.getByTestId('cloud-restore-proof-status').getByText('登入身分已變更', { exact: false }).waitFor();
-    await page.evaluate(() => {
-      document.querySelector('[data-testid="cloud-restore-final-confirmation"] form')
-        ?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    });
-    await page.getByTestId('cloud-restore-status').getByText('尚未送出：必須先完成', { exact: false }).waitFor();
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.prepareCalls, 0, 'Submit-handler proof gate must block PREPARE after proof invalidation');
-    assert.equal(submitState.calls, 0, 'Submit-handler proof gate must block Restore after proof invalidation');
-
-    await openFixture('success');
-    await page.getByTestId('cloud-restore-final-submit').click();
+    // Normal one-click orchestration: one confirmation, one attempt, audit, refresh, success.
+    await openReady();
+    await confirm();
     await page.getByTestId('cloud-restore-result').waitFor();
-    assert.match(await page.getByTestId('cloud-restore-result').innerText(), /replayed=false.*epoch=1/u);
-    assert.match(await page.getByTestId('cloud-restore-timings').locator('pre').textContent(), /"total": 27/u);
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.calls, 1, 'Fresh explicit confirmation must dispatch exactly once');
-    assert.deepEqual(submitState.diagnostics.map(entry => entry.event), [
+    assert.match(await page.getByTestId('cloud-restore-result').innerText(), /15 筆資料已恢復.*畫面已更新為最新資料/su);
+    state = await snapshot();
+    assert.equal(state.prepareCalls, 1);
+    assert.equal(state.calls, 1);
+    assert.equal(state.auditCalls, 1);
+    assert.equal(state.authoritativeRefreshCalls, 1);
+    assert.deepEqual(state.diagnostics.map(entry => entry.event), [
       'submit-start', 'confirmation-complete', 'readiness-check-pass', 'rpc-invocation', 'submit-finish',
     ]);
-    assert.equal(submitState.targetValidationCalls, 0, 'Strict Restore must not call portability validation');
 
-    await openFixture('success', 'cross-environment');
-    await page.getByTestId('cloud-restore-final-submit').click();
+    // Cross-environment transformation is automatic; compatibility is rechecked before write.
+    await openReady({ document: portableDocument });
+    assert.equal(await page.getByTestId('cloud-restore-portability-summary').count(), 1);
+    await confirm();
     await page.getByTestId('cloud-restore-result').waitFor();
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.targetValidationCalls, 1, 'Portable Restore must validate the target exactly once');
-    assert.equal(submitState.calls, 1, 'Portable Restore must dispatch exactly once after target validation');
-    assert.equal(submitState.candidates[0].portability.policyVersion, 'cross-environment-audit-null-v1');
-    assert.equal(submitState.candidates[0].portability.targetProjectRef, 'rhfdjsklfrgpoqsaqpkn');
-    assert.equal(submitState.candidates[0].allUpdatedByNull, true);
-    assert.notEqual(submitState.candidates[0].executionFingerprint, submitState.candidates[0].fingerprint, 'Execution identity must bind portability semantics');
-    assert.deepEqual(submitState.diagnostics.map(entry => entry.event), [
-      'submit-start', 'confirmation-complete', 'readiness-check-pass', 'target-compatibility', 'rpc-invocation', 'submit-finish',
-    ]);
+    state = await snapshot();
+    assert.equal(state.targetValidationCalls, 2);
+    assert.equal(state.calls, 1);
+    assert.equal(state.candidates[0].portability.policyVersion, 'cross-environment-audit-null-v1');
+    assert.equal(state.candidates[0].allUpdatedByNull, true);
 
-    await openFixture('target-fail', 'cross-environment');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    await page.getByTestId('cloud-restore-status').getByText('目標環境不符合跨環境還原政策，本次尚未送出', { exact: false }).waitFor();
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.targetValidationCalls, 1);
-    assert.equal(submitState.calls, 0, 'Target incompatibility must fail before the Restore RPC');
-    assert.equal(submitState.diagnostics.some(entry => entry.event === 'rpc-invocation'), false);
-    assert.ok(submitState.diagnostics.some(entry => entry.event === 'target-compatibility' && entry.outcome === 'not-submitted'));
-    assert.doesNotMatch(JSON.stringify(submitState.diagnostics), /must-not-render raw target detail/u);
-
-    await openFixture('success');
-    await page.evaluate(() => {
-      window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.loading();
-      window.dispatchEvent(new Event('focus'));
-      document.querySelector('[data-testid="cloud-restore-final-confirmation"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    });
-    await page.getByTestId('cloud-restore-status').getByText('雲端資料正在更新，本次尚未送出。', { exact: true }).waitFor();
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.calls, 0, 'Freshness loss during confirmation must stay before RPC');
-    assert.ok(submitState.diagnostics.some(entry => entry.event === 'readiness-check-blocked' && entry.outcome === 'not-submitted'));
-
-    await openFixture('deferred-success');
-    await page.evaluate(() => {
-      const form = document.querySelector('[data-testid="cloud-restore-final-confirmation"] form');
-      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    });
+    // A synchronous lock prevents double dispatch while execute is pending.
+    await openReady({ behavior: 'deferred-success' });
+    await page.getByTestId('cloud-restore-confirm').evaluate(button => { button.click(); button.click(); });
     await page.waitForFunction(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().calls === 1);
+    state = await snapshot();
+    assert.equal(state.prepareCalls, 1);
+    assert.equal(state.calls, 1);
     await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseDeferred());
     await page.getByTestId('cloud-restore-result').waitFor();
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(submitState.calls, 1, 'Synchronous in-flight ref must block duplicate submit handlers');
 
-    await openFixture('plain-error');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    const plainError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(plainError, /\[23505\].*伺服器已回覆還原錯誤.*階段：rpc.*追蹤/u);
-    assert.doesNotMatch(plainError, /\[object Object\]|must-not-render|access_token|fake-project|fake-public-key|fake-db|fake-user|fake-password|fake-database/u);
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.doesNotMatch(JSON.stringify(submitState.diagnostics), /must-not-render|fake-|owner@example|private-business/u);
+    for (const [behavior, expectedCalls] of [['prepare-failure', 0], ['begin-failure', 0]]) {
+      await openReady({ behavior });
+      await confirm();
+      await page.getByTestId('cloud-restore-status').waitFor();
+      state = await snapshot();
+      assert.equal(state.prepareCalls, 1, `${behavior} must attempt the durable prepare boundary once`);
+      assert.equal(state.calls, expectedCalls, `${behavior} must not execute Restore`);
+      assert.equal(await page.getByTestId('cloud-restore-new-intent').count(), 1);
+    }
+
+    for (const behavior of ['durable-failure', 'statement-timeout', 'final-validator-failure']) {
+      await openReady({ behavior });
+      await confirm();
+      await page.getByTestId('cloud-restore-new-intent').waitFor();
+      const failureText = await page.getByTestId('cloud-restore-status').innerText();
+      assert.match(failureText, /還原失敗.*資料沒有被部分寫入.*追蹤編號/su);
+      state = await snapshot();
+      assert.equal(state.prepareCalls, 1);
+      assert.equal(state.calls, 1);
+      assert.equal(state.reconcileCalls, 1, `${behavior} must read durable failure evidence once`);
+    }
+
+    // Lost response reconciles the original attempt; it never executes twice.
+    await openReady({ behavior: 'lost-response-success' });
+    await confirm();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    state = await snapshot();
+    assert.equal(state.prepareCalls, 1);
+    assert.equal(state.calls, 1);
+    assert.equal(state.reconcileCalls, 1);
+    assert.equal(state.auditCalls, 1);
+
+    await openReady({ behavior: 'timeout' });
+    await confirm();
+    await page.getByTestId('cloud-restore-status').getByText('還原結果需要查證，資料不會自動再次還原。', { exact: false }).waitFor();
+    state = await snapshot();
+    const pendingAttemptId = state.idempotencyKeys[0];
+    assert.equal(state.calls, 1);
+    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
+    await page.waitForTimeout(150);
+    state = await snapshot();
+    assert.equal(state.calls, 1, 'Remount may reconcile but must never execute a second time');
+    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('erp_cloud_restore_unresolved_attempt')).attemptId), pendingAttemptId);
+
+    // Completed canonical replay reuses the stable envelope and skips execute.
+    await openReady();
+    await confirm();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    const completed = await snapshot();
+    const completedEnvelope = { attemptId: completed.idempotencyKeys[0], traceId: completed.traceIds[0] };
+    const replayMount = await page.evaluate(() => {
+      const before = window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion;
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.reset();
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.setBehavior('completed-replay');
+      window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
+      window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
+      return before;
+    });
+    await page.waitForFunction(before => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().mountVersion > before, replayMount);
+    await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
+    await page.locator('input[type=file]').setInputFiles({ name: 'snapshot.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(validDocument)) });
+    await page.getByTestId('cloud-restore-preflight').waitFor();
+    await confirm();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    state = await snapshot();
+    assert.equal(state.prepareCalls, 1);
+    assert.equal(state.calls, 0);
+    assert.deepEqual({ attemptId: state.prepareAttemptIds[0], traceId: state.traceIds[0] }, completedEnvelope);
+    assert.equal(state.auditCalls, 1);
+
+    for (const behavior of ['integrity-audit-failure']) {
+      await openReady({ behavior });
+      await confirm();
+      await page.getByTestId('cloud-restore-status').waitFor();
+      assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原已提交，但結果驗證尚未通過/u);
+      state = await snapshot();
+      assert.equal(state.calls, 1);
+      assert.equal(state.auditCalls, 1);
+      assert.equal(state.authoritativeRefreshCalls, 0, 'Failed audit must stop before same-page refresh');
+    }
+
+    await openReady({ behavior: 'refresh-pending' });
+    await confirm();
+    await page.getByTestId('cloud-restore-result').waitFor();
+    assert.match(await page.getByTestId('cloud-restore-result').innerText(), /畫面正在同步最新資料/u);
+    assert.doesNotMatch(await page.getByTestId('cloud-restore-result').innerText(), /畫面已更新為最新資料/u);
+
+    // Safe rendering never leaks the raw provider exception or payload material.
+    await openReady({ behavior: 'plain-error' });
+    await confirm();
+    await page.getByTestId('cloud-restore-status').waitFor();
+    await page.getByTestId('cloud-restore-technical-details').click();
+    const pageText = await page.getByTestId('cloud-atomic-restore').innerText();
+    assert.doesNotMatch(pageText, /must-not-render|access_token|fake-project|fake-public-key|fake-db|fake-user|fake-password|fake-database|owner@example|private-business/u);
+    state = await snapshot();
+    assert.doesNotMatch(JSON.stringify(state.diagnostics), /must-not-render|fake-|owner@example|private-business/u);
     assert.doesNotMatch(applicationLogs.join('\n'), /must-not-render|fake-|owner@example|private-business/u);
 
-    await openFixture('plain-error-variant');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    const plainErrorVariant = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(plainErrorVariant, /\[23505\].*伺服器已回覆還原錯誤.*階段：rpc.*追蹤/u);
-    assert.doesNotMatch(plainErrorVariant, /other-user|other-password|other-db|other-database|外部錯誤/u);
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.doesNotMatch(JSON.stringify(submitState.diagnostics), /other-user|other-password|other-db|other-database|外部錯誤/u);
-    assert.doesNotMatch(applicationLogs.join('\n'), /other-user|other-password|other-db|other-database|外部錯誤/u);
+    // Stable workflow slot keeps Settings content anchored throughout the lifecycle.
+    for (const width of [1366, 1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await openReady({ behavior: 'deferred-success' });
+      const before = await page.getByTestId('cloud-restore-technical-details').evaluate(node => node.getBoundingClientRect().top);
+      await confirm();
+      await page.waitForFunction(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot().calls === 1);
+      const pending = await page.getByTestId('cloud-restore-technical-details').evaluate(node => node.getBoundingClientRect().top);
+      const scrollBefore = await page.evaluate(() => window.scrollX);
+      assert.ok(Math.abs(pending - before) <= 1, `${width}px pending anchor shifted by ${pending - before}px`);
+      assert.equal(scrollBefore, 0);
+      await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.releaseDeferred());
+      await page.getByTestId('cloud-restore-result').waitFor();
+      const after = await page.getByTestId('cloud-restore-technical-details').evaluate(node => node.getBoundingClientRect().top);
+      assert.ok(Math.abs(after - before) <= 1, `${width}px success anchor shifted by ${after - before}px`);
+      assert.equal(await page.getByTestId('cloud-atomic-restore').evaluate(node => node.scrollWidth <= node.clientWidth), true,
+        `${width}px Restore card must not overflow horizontally`);
+    }
 
-    await openFixture('timeout');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    const timeoutError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(timeoutError, /\[ETIMEDOUT\].*還原結果待查證.*階段：rpc.*追蹤/u);
-    assert.equal(await page.getByTestId('cloud-restore-submit').isDisabled(), true, 'Unknown result must lock repeat submit');
-    const timeoutState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.equal(timeoutState.calls, 1);
-    const timeoutKey = timeoutState.idempotencyKeys[0];
-    await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.remount());
-    await page.getByTestId('cloud-restore-check-outcome').waitFor();
-    assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 1,
-      'Remount while pending must only reconcile, never execute again');
-    assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('erp_cloud_restore_unresolved_attempt')).attemptId), timeoutKey);
-
-    await openFixture('success');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    await page.getByTestId('cloud-restore-result').waitFor();
-    submitState = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
-    assert.notEqual(submitState.idempotencyKeys[0], timeoutKey,
-      'Fixture acknowledged prior noncommit on reload; a newly confirmed intent must not reuse the retired key');
-
-    await openFixture('refresh-pending');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    await page.getByTestId('cloud-restore-result').waitFor();
-    assert.match(await page.getByTestId('cloud-restore-status').innerText(), /還原已完成，畫面同步待完成；請勿再次還原/u);
-    assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 1);
-
-    await openFixture('guard-race');
-    await page.getByTestId('cloud-restore-final-submit').click();
-    const guardError = await page.getByTestId('cloud-restore-status').innerText();
-    assert.match(guardError, /^雲端資料正在更新，本次尚未送出。 追蹤：[0-9a-f-]+/u);
-    assert.doesNotMatch(guardError, /\[object Object\]/u, 'Freshness guard is an Error and is independent from plain-object rendering');
-    assert.equal((await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot())).calls, 0);
-    assert.equal(cloudRequests.length, 0, 'All deterministic Restore submit cases must make zero Supabase requests');
+    if (realSnapshotDocument) {
+      await openReady({ document: realSnapshotDocument });
+      state = await snapshot();
+      assert.equal(state.proofCalls, 1);
+      assert.equal(state.prepareCalls + state.calls, 0, 'A realistic candidate must remain read-only until the one confirmation');
+    }
+    assert.equal(cloudRequests.length, 0, 'Deterministic UI fixtures must make zero real Supabase requests');
   } finally { await browser.close(); }
 } finally { processVite.kill(); }
 
-console.log('PASS Cloud Atomic Restore: preflight, bounded execution SQL contract, 210-round deterministic soak, and submit readiness/error/idempotency React regressions');
+console.log('PASS Cloud Atomic Restore one-click UX: automatic safety gates, single confirmation, durable outcomes, audit/refresh, safe errors, and 1366/1280/390 layout');

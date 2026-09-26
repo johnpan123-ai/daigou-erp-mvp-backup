@@ -100,18 +100,10 @@ try {
     const submit = async (doubleSubmit = false) => {
       await page.locator('input[type=file]').setInputFiles(SNAPSHOT);
       await page.getByTestId('cloud-restore-preflight').waitFor({ timeout: 30_000 });
-      await page.getByTestId('cloud-restore-proof-button').click();
-      await page.getByTestId('cloud-restore-proof-summary').waitFor({ timeout: 30_000 });
-      await page.getByTestId('cloud-restore-confirmation').fill('OVERWRITE CLOUD DATA');
-      await page.getByTestId('cloud-restore-submit').click();
       if (doubleSubmit) {
-        await page.evaluate(() => {
-          const form = document.querySelector('[data-testid="cloud-restore-final-confirmation"] form');
-          form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-          form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        });
+        await page.getByTestId('cloud-restore-confirm').evaluate(button => { button.click(); button.click(); });
       } else {
-        await page.getByTestId('cloud-restore-final-submit').click();
+        await page.getByTestId('cloud-restore-confirm').click();
       }
       await page.getByTestId('cloud-restore-result').waitFor();
     };
@@ -120,7 +112,10 @@ try {
     const firstRun = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(firstRun.prepareCalls, 1, 'Double submit must PREPARE one stable intent');
     assert.equal(firstRun.calls, 1, 'Double submit must dispatch the destructive RPC at most once');
-    assert.equal(firstRun.candidates[0].fingerprint, snapshotDocument.manifest.snapshotFingerprint);
+    assert.equal(firstRun.candidates[0].portability.sourceSnapshotFingerprint, snapshotDocument.manifest.snapshotFingerprint,
+      'Automatic cross-environment preparation must retain the source snapshot identity');
+    assert.notEqual(firstRun.candidates[0].fingerprint, snapshotDocument.manifest.snapshotFingerprint,
+      'The effective fingerprint must bind the automatic updated_by transformation');
     const firstEnvelope = { attemptId: firstRun.idempotencyKeys[0], traceId: firstRun.traceIds[0] };
 
     await page.evaluate(() => {
@@ -129,7 +124,7 @@ try {
       window.__CLOUD_RESTORE_CONNECTIVITY_TEST__.fresh(1);
       window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
     });
-    await page.getByTestId('cloud-restore-access').waitFor();
+    await page.getByTestId('cloud-restore-recovery-gate').waitFor({ state: 'detached' });
     await submit();
     const replay = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(replay.prepareCalls, 1, 'Completed replay may PREPARE the exact same envelope once');
@@ -152,7 +147,8 @@ try {
       window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
     }, legacy);
     await page.getByTestId('cloud-restore-new-intent').waitFor();
-    assert.equal(await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '選擇備份並還原' }).count(), 0,
+      'An unresolved server attempt must hide the new-Restore entry point');
     let recovered = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(recovered.prepareCalls + recovered.calls, 0);
     await page.getByTestId('cloud-restore-new-intent').waitFor();
@@ -160,7 +156,7 @@ try {
     assert.equal(recovered.reconcileCalls, 1);
     assert.equal(recovered.prepareCalls + recovered.calls, 0);
     await page.getByTestId('cloud-restore-new-intent').click();
-    await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).waitFor();
+    await page.getByRole('button', { name: '選擇備份並還原' }).waitFor();
     await submit(true);
     const newRun = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(newRun.prepareCalls, 1);
@@ -174,8 +170,8 @@ try {
       window.__CLOUD_RESTORE_SUBMIT_TEST__.setRecovery('error');
       window.__CLOUD_RESTORE_SUBMIT_TEST__.remount();
     });
-    await page.getByText('未決還原查詢失敗；新還原已暫停。', { exact: false }).waitFor();
-    assert.equal(await page.getByRole('button', { name: '選擇 JSON 並 Preflight' }).isDisabled(), true);
+    await page.getByText('目前無法確認既有還原狀態，新還原已暫停。', { exact: false }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '選擇備份並還原' }).isDisabled(), true);
     const failure = await page.evaluate(() => window.__CLOUD_RESTORE_SUBMIT_TEST__.snapshot());
     assert.equal(failure.prepareCalls + failure.calls + failure.reconcileCalls, 0);
   } finally {
