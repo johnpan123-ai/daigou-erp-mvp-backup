@@ -34,9 +34,9 @@ const parseJson = (text, label) => {
     failClosed(`${label} returned invalid JSON`);
   }
 };
-const run = (command, args) => {
+const run = (command, args, options = {}) => {
   try {
-    return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options });
   } catch (error) {
     const detail = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim().replaceAll(/\s+/gu, ' ').slice(-500);
     failClosed(`${command} ${args.join(' ')} failed${detail ? `: ${detail}` : ''}`);
@@ -83,12 +83,12 @@ if (refs.get(`refs/heads/${remoteBranch}`) !== localHead) failClosed('remote bra
 if (refs.get(`refs/tags/${checkpointTag}^{}`) !== localHead) failClosed('remote checkpoint peeled HEAD does not equal local HEAD');
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const whoami = parseJson(run(npx, ['wrangler', 'whoami', '--json']), 'wrangler whoami');
+const whoami = parseJson(run(npx, ['wrangler', 'whoami', '--json'], { shell: process.platform === 'win32' }), 'wrangler whoami');
 const accountIds = Array.isArray(whoami.accounts) ? whoami.accounts.map(account => account.id) : [];
 if (!whoami.loggedIn || !accountIds.includes(expectedAccount.accountId)) {
   failClosed(`active Wrangler account does not include ${expectedAccount.accountId}`);
 }
-const pages = parseJson(run(npx, ['wrangler', 'pages', 'project', 'list', '--profile', profile, '--json']), 'Pages project list');
+const pages = parseJson(run(npx, ['wrangler', 'pages', 'project', 'list', '--profile', profile, '--json'], { shell: process.platform === 'win32' }), 'Pages project list');
 const visibleProjects = Array.isArray(pages) ? pages.map(item => item['Project Name']) : [];
 if (!visibleProjects.includes(project)) failClosed(`project ${project} is not visible under profile ${profile}`);
 

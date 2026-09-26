@@ -21,6 +21,7 @@ assert.equal(identity.environments.experimental.cloudflareProject, null);
 assert.equal(identity.githubPreDeployGate.acceptedHead, '3089fbcec9e44323522c758059689bb7641d20eb');
 assert.match(guard, /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
 assert.match(guard, /wrangler.*whoami/u);
+assert.match(guard, /shell: process\.platform === 'win32'/u);
 assert.match(guard, /git.*ls-remote/u);
 assert.match(guard, /remote checkpoint peeled HEAD/u);
 assert.doesNotMatch(guard, /not the accepted GitHub gate HEAD/u);
