@@ -151,7 +151,6 @@ import {
   CLOUD_RESTORE_SNAPSHOT_RPC,
   CLOUD_RESTORE_SCHEMA_VERSION,
   CLOUD_RESTORE_TABLES,
-  CLOUD_RESTORE_ATTEMPT_BEGIN_RPC,
   CLOUD_RESTORE_ATTEMPT_PREPARE_RPC,
   CLOUD_RESTORE_ATTEMPT_RECONCILE_RPC,
   CLOUD_RESTORE_TIMEOUT_BUDGET_MS,
@@ -369,12 +368,23 @@ export class SupabaseProvider implements IDataProvider {
   async getPendingCloudRestoreAttempts() {
     // This uses the current authenticated client, never a service-role client.
     // 038 RLS restricts rows to is_owner(auth.uid()) and the caller's actor hash.
-    const { data, error } = await supabase.from('erp_cloud_restore_attempts')
-      .select(CLOUD_RESTORE_RECOVERY_COLUMNS)
-      .eq('target_environment', supabaseEnvironment.projectRef)
-      .in('status', ['prepared', 'executing'])
-      .order('submitted_at', { ascending: true });
-    if (error) throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.from('erp_cloud_restore_attempts')
+        .select(CLOUD_RESTORE_RECOVERY_COLUMNS)
+        .eq('target_environment', supabaseEnvironment.projectRef)
+        .in('status', ['prepared', 'executing'])
+        .order('submitted_at', { ascending: true }));
+    } catch (caughtError) {
+      try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe transport error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
+    }
+    if (error) {
+      try { markCloudRequestFailed(error); } catch { /* Keep the safe server error authoritative. */ }
+      throw createCloudRestoreSafeSubmitError(error, 'server-response');
+    }
+    markCloudReachable();
     return parseCloudRestoreRecoveryRows(data, supabaseEnvironment.projectRef);
   }
 
@@ -529,7 +539,7 @@ export class SupabaseProvider implements IDataProvider {
       throw createCloudRestoreSafeSubmitError(error, 'server-response');
     }
     markCloudReachable();
-    let outcome = this.assertAttemptIdentity(
+    const outcome = this.assertAttemptIdentity(
       assertCloudRestoreAttemptOutcome(data),
       { attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId },
       command.candidate.manifest.snapshotFingerprint,
@@ -540,39 +550,13 @@ export class SupabaseProvider implements IDataProvider {
         idempotencyKey: command.idempotencyKey,
       });
     }
-    if (outcome.status !== 'prepared') {
+    if (outcome.status !== 'prepared' || !outcome.reconcileAfter) {
       throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_PENDING' }, 'server-response');
     }
-    try {
-      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_ATTEMPT_BEGIN_RPC, {
-        p_attempt_id: command.idempotencyKey,
-        p_trace_id: command.attemptCorrelationId,
-      }));
-    } catch (caughtError) {
-      try { markCloudRequestFailed(caughtError); } catch { /* Keep safe error authoritative. */ }
-      return this.reconcileAttemptBoundaryUncertainty({
-        attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId,
-      });
-    }
-    if (error) {
-      try { markCloudRequestFailed(error); } catch { /* Keep safe error authoritative. */ }
-      throw createCloudRestoreSafeSubmitError(error, 'server-response');
-    }
-    markCloudReachable();
-    outcome = this.assertAttemptIdentity(
-      assertCloudRestoreAttemptOutcome(data),
-      { attemptId: command.idempotencyKey, traceId: command.attemptCorrelationId },
-      command.candidate.manifest.snapshotFingerprint,
-    );
-    if (outcome.status === 'completed') {
-      return this.preserveCompletedAttempt(outcome, {
-        attemptCorrelationId: command.attemptCorrelationId,
-        idempotencyKey: command.idempotencyKey,
-      });
-    }
-    if (outcome.status !== 'executing' || !outcome.executionId) {
-      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_RESULT_INVALID' }, 'server-response');
-    }
+    // 042 intentionally does not call the legacy BEGIN RPC. The client-created
+    // execution id is committed together with the destructive transaction, so
+    // an HTTP/PostgREST/whole-transaction cancel leaves this envelope prepared
+    // instead of stranding a separately committed `executing` row.
     return outcome;
   }
 

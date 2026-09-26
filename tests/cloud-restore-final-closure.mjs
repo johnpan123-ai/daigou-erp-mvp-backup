@@ -97,7 +97,10 @@ const restoreMethod = PROVIDER.slice(PROVIDER.indexOf('async restoreCloudSnapsho
 assert.doesNotMatch(restoreMethod, /AbortController|Promise\.race|setTimeout/u, 'Restore write must not reuse the 4-second read fallback');
 assert.equal((restoreMethod.match(/supabase\.rpc\(CLOUD_RESTORE_RPC/gu) || []).length, 1, 'Restore provider must dispatch exactly once');
 assert.doesNotMatch(restoreMethod, /\bretry\b|\bwhile\s*\(|\bfor\s*\(/iu, 'Restore provider must not auto-retry');
-assert.match(PROVIDER, /async prepareCloudRestoreAttempt[\s\S]+CLOUD_RESTORE_ATTEMPT_PREPARE_RPC[\s\S]+CLOUD_RESTORE_ATTEMPT_BEGIN_RPC/u);
+const prepareAttemptMethod = PROVIDER.slice(PROVIDER.indexOf('async prepareCloudRestoreAttempt('), PROVIDER.indexOf('async reconcileCloudRestoreAttempt('));
+assert.match(prepareAttemptMethod, /CLOUD_RESTORE_ATTEMPT_PREPARE_RPC/u);
+assert.doesNotMatch(prepareAttemptMethod, /CLOUD_RESTORE_ATTEMPT_BEGIN_RPC/u,
+  '042 keeps the durable envelope prepared until execute and must not strand a separately committed executing row');
 assert.match(restoreMethod, /catch \(caughtError\)[\s\S]+reconcileDestructiveUncertainty\(command\.attempt\)/u);
 assert.doesNotMatch(PROVIDER, /readCompletedCloudRestoreAfterTransportUncertainty/u);
 assert.match(SUBMIT, /'57014'/u);

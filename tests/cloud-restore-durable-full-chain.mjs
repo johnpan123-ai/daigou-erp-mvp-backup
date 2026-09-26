@@ -51,7 +51,7 @@ try {
     add foreign key(${r.field}) references public.${r.parentTable}(id)`);
   // 028 is the incompatible inventory_key-PK candidate, not a predecessor for
   // the canonical-id 029 baseline. Use the actual 027 -> 029 supported path.
-  for (const number of [23,24,25,26,27,29,30,35,36,37,38,39,40,41]) {
+  for (const number of [23,24,25,26,27,29,30,35,36,37,38,39,40,41,42]) {
     const file = readdirSync('supabase/sql').find(file => file.startsWith(String(number).padStart(3,'0')+'_'));
     await db.exec(readFileSync(resolve('supabase/sql', file), 'utf8'));
     console.log('PASS migration', file);
@@ -71,10 +71,10 @@ try {
     await scalar('select public.erp_prepare_cloud_restore_attempt($1,$2,$3,$4,$5,$6,120000,$7) as value',
       [attempt, trace, candidate.manifest.snapshotFingerprint, portable.manifest.snapshotFingerprint,
         'cross-environment-audit-null-v1','rhfdjsklfrgpoqsaqpkn','postgresql-statement-timeout-v1']);
-    const begin = await scalar('select public.erp_begin_cloud_restore_attempt($1,$2) as value',[attempt,trace]);
+    const execution = randomUUID();
     await db.query("select set_config('fixture.fail',$1,false)",[fail ? 'on':'off']);
     const result = await scalar('select public.erp_restore_cloud_snapshot_attempt($1,$2,$3,$4,$5,$6,$7,$8) as value',
-      [attempt,trace,begin.executionId,portable.manifest.snapshotFingerprint,JSON.stringify(effective.sourceData),
+      [attempt,trace,execution,portable.manifest.snapshotFingerprint,JSON.stringify(effective.sourceData),
         JSON.stringify(portable.manifest),'synthetic-fixture',effective.mode]);
     if (fail) {
       assert.equal(result.ok,false); assert.equal(result.failure.category,'CONSTRAINT');
@@ -93,7 +93,7 @@ try {
       assert(audit && typeof audit === 'object');
     }
     console.log(fail ? 'PASS actual atomic restore late insert failure: all 15 tables/snapshot/epoch rolled back, failure durable'
-      : 'PASS actual 037/038/040/041 portable restore: OWNER proof, 15 rows, updated_by null, final validation, epoch, integrity audit');
+      : 'PASS actual 037/038/040/041/042 prepared-direct portable restore: OWNER proof, 15 rows, updated_by null, final validation, epoch, integrity audit');
   }
 } catch (error) {
   console.error('FAIL full-chain fixture', error.code, error.message, error.where ?? '');

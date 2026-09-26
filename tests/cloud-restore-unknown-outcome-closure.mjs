@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const SQL = readFileSync(new URL('../supabase/sql/038_cloud_restore_durable_attempt_envelope.sql', import.meta.url), 'utf8');
+const SQL_042 = readFileSync(new URL('../supabase/sql/042_cloud_restore_durable_execution_closure.sql', import.meta.url), 'utf8');
 const PROVIDER = readFileSync(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url), 'utf8');
 const PANEL = readFileSync(new URL('../src/components/CloudAtomicRestorePanel.tsx', import.meta.url), 'utf8');
 const SUBMIT = readFileSync(new URL('../src/providers/cloud/cloudRestoreSubmit.ts', import.meta.url), 'utf8');
@@ -54,7 +55,10 @@ assert.equal((restoreMethod.match(/supabase\.rpc\(CLOUD_RESTORE_RPC/gu) || []).l
 assert.doesNotMatch(restoreMethod, /\bretry\b|\bwhile\s*\(|\bsetInterval\b|\bsetTimeout\b|\bPromise\.race\b/u);
 assert.match(restoreMethod, /reconcileDestructiveUncertainty\(command\.attempt\)/u);
 assert.match(PROVIDER, /reconcileDestructiveUncertainty[\s\S]+missing\/failed reconciliation[\s\S]+CLOUD_RESTORE_ATTEMPT_PENDING/u);
-assert.match(PROVIDER, /async prepareCloudRestoreAttempt\([\s\S]+CLOUD_RESTORE_ATTEMPT_PREPARE_RPC[\s\S]+CLOUD_RESTORE_ATTEMPT_BEGIN_RPC/u);
+const prepareAttemptMethod = PROVIDER.slice(PROVIDER.indexOf('async prepareCloudRestoreAttempt('), PROVIDER.indexOf('async reconcileCloudRestoreAttempt('));
+assert.match(prepareAttemptMethod, /CLOUD_RESTORE_ATTEMPT_PREPARE_RPC/u);
+assert.doesNotMatch(prepareAttemptMethod, /CLOUD_RESTORE_ATTEMPT_BEGIN_RPC/u);
+assert.match(SQL_042, /status='prepared'[\s\S]+set status='executing',execution_id=p_execution_id/u);
 assert.match(PANEL, /cloud-restore-check-outcome/u);
 assert.match(PANEL, /再次查證結果（不會重新還原）/u);
 assert.match(PANEL, /submissionLockedRef\.current = requiresOutcomeCheck \|\| durableFailure/u);
@@ -77,22 +81,19 @@ class DurableAttemptModel {
     return this.outcome();
   }
 
-  begin() {
-    if (this.attempt.status !== 'prepared') throw new Error('CLOUD_RESTORE_ATTEMPT_PENDING');
-    this.attempt.status = 'executing';
-    this.attempt.executionId = crypto.randomUUID();
-    return this.outcome();
-  }
-
-  execute({ fail = null, responseLost = false } = {}) {
-    if (this.attempt.status !== 'executing') throw new Error('CLOUD_RESTORE_ATTEMPT_NOT_EXECUTABLE');
+  execute({ fail = null, responseLost = false, wholeTransactionCancel = false } = {}) {
+    if (this.attempt.status !== 'prepared' && this.attempt.status !== 'executing') throw new Error('CLOUD_RESTORE_ATTEMPT_NOT_EXECUTABLE');
     this.dispatches += 1;
+    const beforeAttempt = structuredClone(this.attempt);
     const before = structuredClone(this.business);
     const beforeEpoch = this.epoch;
     const beforeFingerprint = this.fingerprint;
     this.lock = true;
     try {
+      this.attempt.status = 'executing';
+      this.attempt.executionId ??= crypto.randomUUID();
       this.business = { marker: 'candidate' };
+      if (wholeTransactionCancel) throw Object.assign(new Error('WHOLE_TRANSACTION_CANCELED'), { wholeTransactionCancel: true });
       if (fail) throw new Error(fail);
       this.epoch += 1;
       this.fingerprint = this.attempt.fingerprint;
@@ -106,6 +107,7 @@ class DurableAttemptModel {
       this.business = before;
       this.epoch = beforeEpoch;
       this.fingerprint = beforeFingerprint;
+      if (error.wholeTransactionCancel) this.attempt = beforeAttempt;
       throw error;
     } finally {
       this.lock = false;
@@ -128,7 +130,6 @@ class DurableAttemptModel {
 // A/B: durable evidence exists before destructive work and success is atomic with epoch/data.
 const success = new DurableAttemptModel();
 assert.equal(success.prepare().status, 'prepared');
-assert.equal(success.begin().status, 'executing');
 assert.equal(success.execute().status, 'completed');
 assert.equal(success.epoch, 4);
 assert.deepEqual(success.business, { marker: 'candidate' });
@@ -136,7 +137,6 @@ assert.deepEqual(success.business, { marker: 'candidate' });
 // C: response lost after commit reconciles to completed without a second dispatch.
 const lostSuccess = new DurableAttemptModel();
 lostSuccess.prepare();
-lostSuccess.begin();
 assert.throws(() => lostSuccess.execute({ responseLost: true }), /RESPONSE_LOST_AFTER_COMMIT/u);
 assert.equal(lostSuccess.reconcile().status, 'completed');
 assert.equal(lostSuccess.dispatches, 1);
@@ -146,7 +146,6 @@ assert.equal(lostSuccess.epoch, 4);
 for (const code of ['23503', '57014']) {
   const rolledBack = new DurableAttemptModel();
   rolledBack.prepare();
-  rolledBack.begin();
   assert.throws(() => rolledBack.execute({ fail: code }), new RegExp(code, 'u'));
   assert.equal(rolledBack.attempt.status, 'executing');
   assert.equal(rolledBack.epoch, 3);
@@ -159,7 +158,8 @@ for (const code of ['23503', '57014']) {
 // E/F/G: active lock and changed epoch stay fail-closed; duplicate active intent is rejected.
 const active = new DurableAttemptModel();
 active.prepare();
-active.begin();
+active.attempt.status = 'executing';
+active.attempt.executionId = crypto.randomUUID();
 active.lock = true;
 assert.equal(active.reconcile().status, 'pending');
 active.lock = false;
@@ -170,11 +170,17 @@ assert.throws(() => active.prepare(), /CLOUD_RESTORE_ATTEMPT_PENDING/u);
 // H: a completed fingerprint is replay evidence, not a second destructive dispatch.
 const replay = new DurableAttemptModel();
 replay.prepare({ fingerprint: 'target' });
-replay.begin();
 replay.execute();
 assert.equal(replay.prepare({ fingerprint: 'target' }).status, 'completed');
 assert.equal(replay.dispatches, 1);
 
-console.log('PASS durable PREPARE/BEGIN/EXECUTE/RECONCILE lifecycle, rollback, response-loss, pending, duplicate, and replay matrix');
+const wholeCancel = new DurableAttemptModel();
+wholeCancel.prepare();
+assert.throws(() => wholeCancel.execute({ wholeTransactionCancel: true }), /WHOLE_TRANSACTION_CANCELED/u);
+assert.equal(wholeCancel.attempt.status, 'prepared', 'Whole-transaction cancellation must not strand executing state');
+assert.equal(wholeCancel.reconcile().status, 'not_committed');
+assert.equal(wholeCancel.dispatches, 1);
+
+console.log('PASS durable PREPARE/EXECUTE/RECONCILE lifecycle, whole-transaction cancel closure, rollback, response-loss, pending, duplicate, and replay matrix');
 console.log('PASS 038 fail-closed static contract, 120s+15s reconciliation boundary, hashed actor identity, RLS/ACL, and legacy bypass closure');
 console.log('PENDING real PostgreSQL 038 apply/postflight: Staging SQL apply is forbidden in this turn');

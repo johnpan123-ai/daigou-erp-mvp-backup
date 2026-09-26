@@ -40,6 +40,7 @@ declare global {
         authoritativeRefreshCalls: number;
         prepareCalls: number;
         prepareAttemptIds: string[];
+        recoveryLookupCalls: number;
         reconcileCalls: number;
         targetValidationCalls: number;
         idempotencyKeys: string[];
@@ -67,6 +68,7 @@ let auditCalls = 0;
 let authoritativeRefreshCalls = 0;
 let prepareCalls = 0;
 let prepareAttemptIds: string[] = [];
+let recoveryLookupCalls = 0;
 let reconcileCalls = 0;
 let targetValidationCalls = 0;
 let idempotencyKeys: string[] = [];
@@ -104,6 +106,7 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     authoritativeRefreshCalls = 0;
     prepareCalls = 0;
     prepareAttemptIds = [];
+    recoveryLookupCalls = 0;
     reconcileCalls = 0;
     targetValidationCalls = 0;
     idempotencyKeys = [];
@@ -124,6 +127,7 @@ window.__CLOUD_RESTORE_SUBMIT_TEST__ = {
     authoritativeRefreshCalls,
     prepareCalls,
     prepareAttemptIds: [...prepareAttemptIds],
+    recoveryLookupCalls,
     reconcileCalls,
     targetValidationCalls,
     idempotencyKeys: [...idempotencyKeys],
@@ -186,6 +190,7 @@ const restoreResult = (command: Parameters<typeof dataProvider.restoreCloudSnaps
 let latestCommand: Parameters<typeof dataProvider.restoreCloudSnapshot>[0] | null = null;
 
 dataProvider.getPendingCloudRestoreAttempts = async () => {
+  recoveryLookupCalls += 1;
   if (serverPending === 'error') throw new Error('lookup failed');
   return structuredClone(serverPending);
 };
@@ -213,10 +218,9 @@ dataProvider.prepareCloudRestoreAttempt = async command => {
     };
   }
   return {
-    status: 'executing',
+    status: 'prepared',
     attemptId: command.idempotencyKey,
     traceId: command.attemptCorrelationId,
-    executionId: '00000000-0000-4000-8000-000000000097',
     expectedEpoch: 0,
     effectiveFingerprint: command.candidate.manifest.snapshotFingerprint,
     reconcileAfter: '2026-09-21T00:02:15.000Z',

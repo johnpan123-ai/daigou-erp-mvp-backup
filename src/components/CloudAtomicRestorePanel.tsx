@@ -128,6 +128,8 @@ export default function CloudAtomicRestorePanel({
   const [screenRefreshPending, setScreenRefreshPending] = useState(false);
   const [attemptClosed, setAttemptClosed] = useState(false);
   const [reconcileAfter, setReconcileAfter] = useState<string | null>(null);
+  const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
+  const [reconcileWakeVersion, setReconcileWakeVersion] = useState(0);
   const [recovery, setRecovery] = useState<{ userId: string; ready: boolean; error: boolean }>({ userId: '', ready: false, error: false });
   const [recoveryVersion, setRecoveryVersion] = useState(0);
   const [recoveredAttempt, setRecoveredAttempt] = useState<CloudRestoreRecoveryAttempt | null>(null);
@@ -140,7 +142,6 @@ export default function CloudAtomicRestorePanel({
     getCloudConnectivitySnapshot,
     getCloudConnectivitySnapshot,
   );
-  const browserOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
   const online = browserOnline && connectivity.status === 'online';
   const fresh = connectivity.readStatus === 'fresh-online' || connectivity.readStatus === 'fresh-empty';
   const recoveryReady = recovery.ready && recovery.userId === user?.id;
@@ -173,7 +174,7 @@ export default function CloudAtomicRestorePanel({
   }, [invalidateProof, user?.id]);
 
   useEffect(() => {
-    if (!cloudMode || !owner || !user?.id || !online) return;
+    if (!cloudMode || !owner || !user?.id || !browserOnline) return;
     let active = true;
     const userId = user.id;
     void dataProvider.getPendingCloudRestoreAttempts().then(attempts => {
@@ -202,7 +203,26 @@ export default function CloudAtomicRestorePanel({
       if (active) setRecovery({ userId, ready: false, error: true });
     });
     return () => { active = false; };
-  }, [cloudMode, owner, user?.id, online, recoveryVersion, invalidateProof]);
+  }, [cloudMode, owner, user?.id, browserOnline, recoveryVersion, invalidateProof]);
+
+  useEffect(() => {
+    const wake = () => {
+      setBrowserOnline(navigator.onLine !== false);
+      if (navigator.onLine !== false) setReconcileWakeVersion(version => version + 1);
+    };
+    const sleep = () => setBrowserOnline(false);
+    const visible = () => { if (document.visibilityState === 'visible') wake(); };
+    window.addEventListener('online', wake);
+    window.addEventListener('offline', sleep);
+    window.addEventListener('focus', wake);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.removeEventListener('online', wake);
+      window.removeEventListener('offline', sleep);
+      window.removeEventListener('focus', wake);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, []);
 
   const refreshRecovery = () => {
     setRecovery({ userId: '', ready: false, error: false });
@@ -374,7 +394,7 @@ export default function CloudAtomicRestorePanel({
   };
 
   const checkOutcome = async () => {
-    if (!unresolvedAttempt || inFlightRef.current || !cloudMode || !user || !owner || !online || !recoveryReady) return;
+    if (!unresolvedAttempt || inFlightRef.current || !cloudMode || !user || !owner || !browserOnline || !recoveryReady) return;
     inFlightRef.current = true;
     setStatus('checking');
     setProgressStep('validate');
@@ -433,18 +453,19 @@ export default function CloudAtomicRestorePanel({
   };
 
   const runScheduledReconcile = useEffectEvent(() => {
-    if (inFlightRef.current || !unresolvedAttempt) return;
+    if (inFlightRef.current || !unresolvedAttempt || !browserOnline || !recoveryReady) return;
     reconcileSchedule.current.mark(unresolvedAttempt.traceId);
     void checkOutcome();
   });
   useEffect(() => {
-    if (!unresolvedAttempt || !cloudMode || !owner || !user?.id || !online || !recoveryReady
+    if (!unresolvedAttempt || !cloudMode || !owner || !user?.id || !browserOnline || !recoveryReady
       || status === 'restoring' || status === 'checking') return;
     const delay = reconcileSchedule.current.delay(unresolvedAttempt.traceId, reconcileAfter, Date.now());
     if (delay === null) return;
     const timer = window.setTimeout(runScheduledReconcile, delay);
     return () => window.clearTimeout(timer);
-  }, [unresolvedAttempt, cloudMode, owner, user?.id, online, recoveryReady, status, reconcileAfter]);
+  }, [unresolvedAttempt, cloudMode, owner, user?.id, browserOnline, recoveryReady, status, reconcileAfter,
+    reconcileWakeVersion, connectivity.lastFreshReadAt]);
 
   const execute = async (pending: PendingRestoreAttempt) => {
     const activeCandidate = candidate;
@@ -533,9 +554,11 @@ export default function CloudAtomicRestorePanel({
         await completeRestore(durableAttempt.restoreResult, pending);
         return;
       }
-      if (durableAttempt.status !== 'executing' || !durableAttempt.executionId || !durableAttempt.reconcileAfter) {
+      if ((durableAttempt.status !== 'prepared' && durableAttempt.status !== 'executing') || !durableAttempt.reconcileAfter) {
         throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_RESULT_INVALID' }, 'server-response');
       }
+      const executionId = durableAttempt.executionId ?? crypto.randomUUID();
+      setLastAttempt(previous => previous ? { ...previous, executionId } : previous);
       setProgressStep('restore');
       recordCloudRestoreSubmitDiagnostic({
         event: 'rpc-invocation', phase: 'rpc',
@@ -549,10 +572,10 @@ export default function CloudAtomicRestorePanel({
         candidate: activeCandidate,
         confirmation: CONFIRMATION_TEXT,
         attempt: {
-          status: 'executing',
+          status: durableAttempt.status,
           attemptId: durableAttempt.attemptId,
           traceId: durableAttempt.traceId,
-          executionId: durableAttempt.executionId,
+          executionId,
           expectedEpoch: durableAttempt.expectedEpoch,
           effectiveFingerprint: durableAttempt.effectiveFingerprint,
           reconcileAfter: durableAttempt.reconcileAfter,

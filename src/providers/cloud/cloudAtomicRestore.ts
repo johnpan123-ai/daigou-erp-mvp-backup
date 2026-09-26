@@ -111,7 +111,7 @@ export interface CloudRestoreAttemptCommand {
 }
 
 export interface CloudRestoreAttemptExecution extends CloudRestoreAttemptCommand {
-  status: 'executing';
+  status: 'prepared' | 'executing';
   executionId: string;
   expectedEpoch: number;
   effectiveFingerprint: string;

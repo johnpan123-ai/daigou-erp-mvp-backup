@@ -42,6 +42,8 @@
     "test:cloud-restore-portability": "node tests/cloud-restore-cross-environment-portability.mjs",
     "test:cloud-restore-effective-path": "node tests/cloud-restore-effective-path.mjs",
     "test:cloud-restore-final-closure": "node tests/cloud-restore-final-closure.mjs",
+    "test:cloud-restore-durable-execution-closure": "node tests/cloud-restore-durable-execution-closure.mjs",
+    "test:cloud-restore-offline-reconcile": "node tests/cloud-restore-offline-reconcile-react.mjs",
     "test:cloud-restore-execution-cost": "node tests/cloud-restore-execution-cost.mjs",
     "test:cloud-restore-guarded-delete": "node tests/cloud-restore-guarded-full-delete.mjs",
     "test:cloud-restore-safeupdate-delete": "node tests/cloud-restore-schema-aware-safeupdate-delete.mjs",

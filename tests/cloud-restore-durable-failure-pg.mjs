@@ -25,6 +25,7 @@ if (native) {
 }
 const sql038 = readFileSync(new URL('../supabase/sql/038_cloud_restore_durable_attempt_envelope.sql', import.meta.url), 'utf8');
 const sql041 = readFileSync(new URL('../supabase/sql/041_cloud_restore_durable_failure_recovery.sql', import.meta.url), 'utf8');
+const sql042 = readFileSync(new URL('../supabase/sql/042_cloud_restore_durable_execution_closure.sql', import.meta.url), 'utf8');
 const OWNER = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
 const source = 'a'.repeat(64);
@@ -68,9 +69,13 @@ try {
     create function public.erp_restore_cloud_snapshot(uuid,text,jsonb,jsonb,text) returns jsonb
       language plpgsql security definer set search_path=pg_catalog,public,extensions set statement_timeout='120s' as $$
       declare n bigint; fault text:=$3->>'fault'; begin
+        raise log 'CLOUD_RESTORE_TIMING phase=input_validation event=start';
         insert into public.erp_cloud_restore_requests values($1,'processing',null);
+        raise log 'CLOUD_RESTORE_TIMING phase=before_snapshot event=start';
         insert into public.erp_cloud_restore_snapshots values($1);
+        raise log 'CLOUD_RESTORE_TIMING phase=delete event=start';
         delete from public.fixture_business;
+        raise log 'CLOUD_RESTORE_TIMING phase=insert event=start';
         insert into public.fixture_business values(2,'replacement');
         if fault='CONSTRAINT' then insert into public.fixture_business values(2,'duplicate-sensitive-value'); end if;
         if fault='VALIDATION' then raise exception using errcode='22023',message='fixture raw sensitive validation'; end if;
@@ -82,6 +87,8 @@ try {
         if fault='AUTHORIZATION' then raise insufficient_privilege; end if;
         -- Simulates an inner final validator after destructive writes.
         if fault='FINAL_VALIDATOR' then raise exception using errcode='22023',message='CLOUD_RESTORE_FINAL_VALIDATION_FAILED'; end if;
+        raise log 'CLOUD_RESTORE_TIMING phase=integrity event=start';
+        raise log 'CLOUD_RESTORE_TIMING phase=epoch_idempotency event=start';
         update public.erp_cloud_restore_epoch set epoch=epoch+1,snapshot_fingerprint=$2 returning epoch into n;
         update public.erp_cloud_restore_requests set status='completed',canonical_result=jsonb_build_object('ok',true,'restoreEpoch',n) where idempotency_key=$1;
         if fault='BAD_CANONICAL' then return jsonb_build_object('ok',false); end if;
@@ -95,20 +102,24 @@ try {
   `);
   await db.exec(sql038.slice(from, to));
   await db.exec(sql041); // Exact complete candidate migration, NOT extracted body.
-  pass('complete 041 migration on isolated PostgreSQL with real 038 envelope/RLS');
+  await db.exec(sql042); // Exact complete 042 migration, including pre/postflight and ACL.
+  pass('complete 041 + 042 migrations on isolated PostgreSQL with real 038 envelope/RLS');
   const login = async (id = OWNER, role = 'authenticated') => {
     await db.exec('reset role');
     await db.query("select set_config('request.jwt.claim.sub',$1,false),set_config('request.headers',$2,false)",
       [id, JSON.stringify({ host: 'rhfdjsklfrgpoqsaqpkn.supabase.co' })]);
     await db.exec(`set role ${role}`);
   };
-  const prepare = async () => {
+  const prepare = async ({ legacyBegin = false } = {}) => {
     const attempt = randomUUID(), trace = randomUUID();
     const prepared = await scalar('select public.erp_prepare_cloud_restore_attempt($1,$2,$3,$4,$5,$6,120000,$7) as value',
       [attempt, trace, source, effective, 'cross-environment-audit-null-v1', 'rhfdjsklfrgpoqsaqpkn', 'postgresql-statement-timeout-v1']);
     assert.equal(prepared.status, 'prepared');
-    const begin = await scalar('select public.erp_begin_cloud_restore_attempt($1,$2) as value', [attempt, trace]);
-    return { attempt, trace, execution: begin.executionId };
+    if (legacyBegin) {
+      const begin = await scalar('select public.erp_begin_cloud_restore_attempt($1,$2) as value', [attempt, trace]);
+      return { attempt, trace, execution: begin.executionId, initialStatus: 'executing' };
+    }
+    return { attempt, trace, execution: randomUUID(), initialStatus: 'prepared' };
   };
   const execute = (a, fault = '', m = manifest) => scalar('select public.erp_restore_cloud_snapshot_attempt($1,$2,$3,$4,$5,$6,$7,$8) as value',
     [a.attempt, a.trace, a.execution, effective, JSON.stringify({ fault }), JSON.stringify(m), 'fixture', 'cross-environment-audit-null-v1']);
@@ -155,7 +166,7 @@ try {
   const expired = await prepare();
   assert.equal((await reconcile(expired)).reason, 'timeout-grace-active');
   await db.exec('reset role');
-  await db.query("update public.erp_cloud_restore_attempts set execution_started_at=now()-interval '10 minutes' where attempt_id=$1", [expired.attempt]);
+  await db.query("update public.erp_cloud_restore_attempts set submitted_at=now()-interval '10 minutes' where attempt_id=$1", [expired.attempt]);
   await login();
   await assert.rejects(() => execute(expired), /CLOUD_RESTORE_ATTEMPT_PENDING/);
   const closed = await reconcile(expired);
@@ -163,10 +174,20 @@ try {
   assert.equal(closed.failure.evidence, 'reconciled-noncommit');
   assert.equal(closed.failure.sqlstate, null);
   await unchanged();
-  pass('expired executing: no reexecute, reconcile closes with UNKNOWN cause and proven noncommit');
+  pass('expired prepared: no execute, reconcile closes with UNKNOWN cause and proven noncommit');
+  const legacyExpired = await prepare({ legacyBegin: true });
+  await db.exec('reset role');
+  await db.query("update public.erp_cloud_restore_attempts set execution_started_at=now()-interval '10 minutes' where attempt_id=$1", [legacyExpired.attempt]);
+  await login();
+  await assert.rejects(() => execute(legacyExpired), /CLOUD_RESTORE_ATTEMPT_PENDING/);
+  const legacyClosed = await reconcile(legacyExpired);
+  assert.equal(legacyClosed.status, 'not_committed');
+  assert.equal(legacyClosed.failure.category, 'UNKNOWN');
+  await unchanged();
+  pass('expired legacy executing: no reexecute, reconcile closes with UNKNOWN cause and proven noncommit');
   const ambiguous = await prepare();
   await db.exec('reset role');
-  await db.query("update public.erp_cloud_restore_attempts set execution_started_at=now()-interval '10 minutes' where attempt_id=$1", [ambiguous.attempt]);
+  await db.query("update public.erp_cloud_restore_attempts set submitted_at=now()-interval '10 minutes' where attempt_id=$1", [ambiguous.attempt]);
   await db.exec('update public.erp_cloud_restore_epoch set epoch=8');
   await login();
   assert.equal((await reconcile(ambiguous)).status, 'pending');
@@ -196,6 +217,78 @@ try {
   await assert.rejects(() => db.query('delete from public.erp_cloud_restore_failures'), /permission denied/);
   await assert.rejects(() => scalar('select public.erp_cloud_restore_failure_result($1) as value', [expired.attempt]), /permission denied/);
   pass('OWNER RLS read; non-owner invisible; anon denied; direct writes/private helper denied');
+  if (native) {
+    const { Client } = await import('pg');
+    const cancelled = await prepare();
+    const peer = new Client({ connectionString: native, application_name: 'restore_transport_cancel_fixture' });
+    await peer.connect();
+    await peer.query("select set_config('request.jwt.claim.sub',$1,false)", [OWNER]);
+    await peer.query('set role authenticated');
+    const inFlight = peer.query('select public.erp_restore_cloud_snapshot_attempt($1,$2,$3,$4,$5,$6,$7,$8) as value',
+      [cancelled.attempt, cancelled.trace, cancelled.execution, effective, JSON.stringify({ fault: 'SLOW_SUCCESS' }), JSON.stringify(manifest), 'fixture', 'cross-environment-audit-null-v1']);
+    void inFlight.catch(() => undefined);
+    await db.exec('reset role');
+    for (let n=0; n<200; n++) {
+      if (await scalar("select exists(select 1 from pg_stat_activity where application_name='restore_transport_cancel_fixture' and wait_event='PgSleep') as value")) break;
+      if (n===199) throw new Error('transport cancel fixture did not enter pg_sleep');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    await peer.end().catch(() => undefined);
+    peer.connection.stream.destroy(new Error('isolated-client-transport-disconnect'));
+    await assert.rejects(() => inFlight);
+    for (let n=0; n<200; n++) {
+      if (!await scalar("select exists(select 1 from pg_stat_activity where application_name='restore_transport_cancel_fixture') as value")) break;
+      if (n===199) throw new Error('cancelled PostgreSQL backend did not release');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    const cancelledRow = (await db.query('select status,execution_id,result_epoch from public.erp_cloud_restore_attempts where attempt_id=$1', [cancelled.attempt])).rows[0];
+    assert.equal(cancelledRow.status, 'completed');
+    assert.equal(cancelledRow.execution_id, cancelled.execution);
+    assert.equal(Number(cancelledRow.result_epoch), 8);
+    assert.equal(await scalar('select count(*)::integer as value from public.erp_cloud_restore_failures where attempt_id=$1', [cancelled.attempt]), 0);
+    await login();
+    assert.equal((await reconcile(cancelled)).status, 'completed');
+    pass('real PostgreSQL client transport disconnect: backend may finish and commit; canonical reconcile distinguishes committed without re-execute');
+
+    await db.exec('reset role');
+    await db.exec("update public.erp_cloud_restore_epoch set epoch=7,snapshot_fingerprint='" + 'c'.repeat(64) + "'; delete from public.erp_cloud_restore_requests; delete from public.erp_cloud_restore_snapshots; delete from public.erp_cloud_restore_failures; delete from public.erp_cloud_restore_attempts; delete from public.fixture_business; insert into public.fixture_business values(1,'before')");
+    await login();
+    const terminated = await prepare();
+    const killedPeer = new Client({ connectionString: native, application_name: 'restore_backend_termination_fixture' });
+    await killedPeer.connect();
+    const killedPid = Number((await killedPeer.query('select pg_backend_pid() as pid')).rows[0].pid);
+    await killedPeer.query("select set_config('request.jwt.claim.sub',$1,false)", [OWNER]);
+    await killedPeer.query('set role authenticated');
+    const killedQuery = killedPeer.query('select public.erp_restore_cloud_snapshot_attempt($1,$2,$3,$4,$5,$6,$7,$8) as value',
+      [terminated.attempt, terminated.trace, terminated.execution, effective, JSON.stringify({ fault: 'SLOW_SUCCESS' }), JSON.stringify(manifest), 'fixture', 'cross-environment-audit-null-v1']);
+    void killedQuery.catch(() => undefined);
+    await db.exec('reset role');
+    for (let n=0; n<200; n++) {
+      if (await scalar("select exists(select 1 from pg_stat_activity where pid=$1 and wait_event='PgSleep') as value", [killedPid])) break;
+      if (n===199) throw new Error('backend termination fixture did not enter pg_sleep');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal(await scalar('select pg_terminate_backend($1) as value', [killedPid]), true);
+    await assert.rejects(() => killedQuery);
+    await killedPeer.end().catch(() => undefined);
+    const terminatedRow = (await db.query('select status,execution_id from public.erp_cloud_restore_attempts where attempt_id=$1', [terminated.attempt])).rows[0];
+    assert.deepEqual(terminatedRow, { status: 'prepared', execution_id: null });
+    assert.equal(await scalar('select count(*)::integer as value from public.erp_cloud_restore_failures where attempt_id=$1', [terminated.attempt]), 0);
+    await login(); await unchanged();
+    await db.exec('reset role');
+    await db.query("update public.erp_cloud_restore_attempts set submitted_at=now()-interval '10 minutes' where attempt_id=$1", [terminated.attempt]);
+    await login();
+    assert.equal((await reconcile(terminated)).status, 'not_committed');
+    await unchanged();
+    pass('real PostgreSQL backend termination: whole execute transaction rolls back to prepared; bounded reconcile terminalizes without re-execute');
+  }
+  const legacy = await prepare({ legacyBegin: true });
+  assert.equal((await execute(legacy)).ok, true);
+  assert.equal((await reconcile(legacy)).status, 'completed');
+  pass('legacy 038/041 client executing envelope remains compatible with 042 server');
+  await db.exec('reset role');
+  await db.exec("update public.erp_cloud_restore_epoch set epoch=7,snapshot_fingerprint='" + 'c'.repeat(64) + "'; delete from public.erp_cloud_restore_requests; delete from public.erp_cloud_restore_snapshots; delete from public.erp_cloud_restore_failures; delete from public.erp_cloud_restore_attempts; delete from public.fixture_business; insert into public.fixture_business values(1,'before')");
+  await login();
   const success = await prepare();
   let good;
   if (native) {

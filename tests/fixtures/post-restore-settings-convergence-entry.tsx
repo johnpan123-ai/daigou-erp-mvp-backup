@@ -85,10 +85,9 @@ dataProvider.proveCloudRestoreCandidate = async candidate => ({
   elapsedMs: 1,
 });
 dataProvider.prepareCloudRestoreAttempt = async command => ({
-  status: 'executing',
+  status: 'prepared',
   attemptId: command.idempotencyKey,
   traceId: command.attemptCorrelationId,
-  executionId: '00000000-0000-4000-8000-000000000097',
   expectedEpoch: 1,
   effectiveFingerprint: command.candidate.manifest.snapshotFingerprint,
   reconcileAfter: '2026-09-21T00:02:15.000Z',
