@@ -62,27 +62,35 @@ try {
     await page.goto(origin + '/tests/fixtures/cloud-p0-2-react-harness.html?workflowQuickWins=1&route=/unlisted-items', { waitUntil: 'networkidle' });
     await page.waitForFunction(() => !!window.__P0_REACT_HARNESS__);
     const expected = await page.evaluate(() => window.__P0_REACT_HARNESS__.server.productGroups.find(g => g.id === 'g-holo').normalized_title);
-    const link = page.locator('a[href="/purchase-records?productGroup=g-holo"]:visible');
+    const link = page.locator('a[href="/purchase-records/g-holo"]:visible');
     await link.waitFor();
     assert.match(await link.innerText(), /查看訂購紀錄/u);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'Pending delist must not overflow');
     await link.click();
-    await page.getByTestId('purchase-records-group-scope').waitFor();
-    const title = page.locator('[data-testid="purchase-record-product-title"]:visible');
-    await title.first().waitFor();
-    assert.deepEqual(await title.allTextContents(), [expected]);
+    const title = page.getByTestId('purchase-group-detail-title');
+    await title.waitFor();
+    assert.ok((await title.textContent()).includes(expected));
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'Purchase Records must not overflow');
-    assert.equal(new URL(page.url()).searchParams.get('productGroup'), 'g-holo');
+    assert.equal(new URL(page.url()).pathname, '/purchase-records/g-holo');
     // Real reload, while serving the isolated App fixture at the same URL.
     await page.reload({ waitUntil: 'networkidle' });
-    await page.locator('[data-testid="purchase-record-product-title"]:visible').waitFor();
-    assert.deepEqual(await page.locator('[data-testid="purchase-record-product-title"]:visible').allTextContents(), [expected]);
+    await title.waitFor();
+    assert.ok((await title.textContent()).includes(expected));
     await page.goBack({ waitUntil: 'domcontentloaded' });
-    await page.locator('a[href="/purchase-records?productGroup=g-holo"]:visible').waitFor();
+    await page.locator('a[href="/purchase-records/g-holo"]:visible').waitFor();
     assert.equal(new URL(page.url()).pathname, '/unlisted-items');
     await page.goForward({ waitUntil: 'domcontentloaded' });
+    await title.waitFor();
+    assert.ok((await title.textContent()).includes(expected));
+    assert.equal(await page.getByRole('button', { name: '重新載入最新資料', exact: true }).count(), width < 768 ? 1 : 0);
+    await page.evaluate(() => window.__P0_REACT_HARNESS__.navigate('/purchase-records/missing'));
+    await page.getByTestId('purchase-group-not-found').waitFor();
+    assert.equal(await page.getByTestId('purchase-group-detail-title').count(), 0);
+    assert.equal(new URL(page.url()).pathname, '/purchase-records/missing');
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByTestId('purchase-group-not-found').waitFor();
+    await page.evaluate(() => window.__P0_REACT_HARNESS__.navigate('/purchase-records?productGroup=g-holo'));
     await page.getByTestId('purchase-records-group-scope').waitFor();
-    assert.deepEqual(await page.locator('[data-testid="purchase-record-product-title"]:visible').allTextContents(), [expected]);
     // Cloud-only Workbench entry, still backed exclusively by isolated provider.
     await page.evaluate(() => localStorage.setItem('erp_provider_mode', 'cloud'));
     await page.getByTestId('purchase-record-select-g-holo').locator('visible=true').check();
@@ -134,9 +142,10 @@ try {
         preserved: m.productGroupDisplayName({ title: 'raw', normalized_title: '【保留】 預購' }),
         id: m.purchaseRecordsGroupScope('?productGroup=A%2FB%20%26C'),
         url: m.purchaseRecordsGroupUrl('A/B &C'),
+        detailUrl: m.purchaseRecordsDetailUrl('A/B &C'),
       };
     });
-    assert.deepEqual(helper, { fallback: '原始名稱', preserved: '【保留】 預購', id: 'A/B &C', url: '/purchase-records?productGroup=A%2FB+%26C' });
+    assert.deepEqual(helper, { fallback: '原始名稱', preserved: '【保留】 預購', id: 'A/B &C', url: '/purchase-records?productGroup=A%2FB+%26C', detailUrl: '/purchase-records/A%2FB%20%26C' });
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ width, titleParity: 'PASS', reload: 'PASS', backForward: 'PASS', invalidId: 'PASS', clipboard: 'success/failure PASS', touchHeight: box.height, overflow: false, analysisWrites: 0, fixtureCatalogQueries: upstream.length }));
     await context.close();

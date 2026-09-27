@@ -499,6 +499,7 @@ export default function PurchaseManagement() {
   };
 
   const [group, setGroup] = useState<ProductGroup | null>(null);
+  const [notFoundId, setNotFoundId] = useState<string | null>(null);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [platformDemandDrafts, setPlatformDemandDrafts] = useState<Record<string, string>>({});
@@ -1009,9 +1010,11 @@ export default function PurchaseManagement() {
     if (!current()) return;
     const g = allGroups.find(x => x.id === id);
     if (!g) {
-      navigate(fromPath);
+      setGroup(null);
+      setNotFoundId(id);
       return;
     }
+    setNotFoundId(null);
     setGroup(g);
     setGroups(allGroups);
 
@@ -1584,7 +1587,9 @@ export default function PurchaseManagement() {
     }
   };
 
-  if (!group) return <div className="p-xl text-center text-muted">載入中...</div>;
+  if (!group || group.id !== id) return <div className="p-xl text-center text-muted" role={notFoundId === id ? 'status' : undefined} data-testid={notFoundId === id ? 'purchase-group-not-found' : undefined}>
+    {notFoundId === id ? '找不到指定商品，或目前無權讀取；未改用其他商品。' : '載入中...'}
+  </div>;
 
   // Grouping Variants by Category or Single Item
   // KPI Calculations
@@ -1980,7 +1985,7 @@ export default function PurchaseManagement() {
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <h1 data-testid="purchase-group-detail-title" style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             {isDaili ? cleanDailiTitle(group.normalized_title || group.title) : (group.normalized_title || group.title)}
             {group.listing_type && (
               <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
@@ -2013,12 +2018,11 @@ export default function PurchaseManagement() {
       </div>
 
       <div style={{ padding: '24px', paddingBottom: isMobile ? '80px' : '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
-        
-        <CloudRefreshButton
+        {isMobile && <CloudRefreshButton
           refresh={refreshAuthoritative}
           resources={['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders', 'japanPackages']}
           onLocalRefresh={() => loadData({ readOnly: true })}
-        />
+        />}
         {isStale && (
           <div style={{
             backgroundColor: '#fef3c7',

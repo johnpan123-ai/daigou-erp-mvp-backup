@@ -23,8 +23,8 @@ try {
   let discardDrafts = false;
   page.on('dialog', dialog => discardDrafts && dialog.type() === 'confirm' && dialog.message().startsWith('鎖定將放棄') ? dialog.accept() : dialog.dismiss());
   await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1`);
-  let reload = () => page.getByRole('button', { name: '重新載入最新資料', exact: true });
-  let busyLabel = '正在更新…';
+  let reload = () => page.getByRole('button', { name: '同步資料', exact: true });
+  let busyLabel = '同步中…';
   const refreshed = async () => {
     await reload().click();
     await page.getByRole('button', { name: busyLabel, exact: true }).waitFor({ state: 'hidden' });
@@ -50,7 +50,7 @@ try {
   await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).waitFor();
   assert.equal(await rootNode.evaluate(e => e.isConnected), true, 'same mounted route');
   assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0);
-  console.log('PASS A: actual purchase-management button → paged Cloud read → atomic cache commit → same mounted UI');
+  console.log('PASS A: global authoritative refresh → paged Cloud read → atomic cache commit → same mounted UI');
 
   // A separate fresh client exercises the actual bootstrap/getter path; the
   // manual-refresh client stays mounted throughout this equivalence assertion.
@@ -72,7 +72,7 @@ try {
   await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextPageRead());
   await reload().click();
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().pageReadHeld);
-  assert.equal(await page.getByRole('button', { name: '正在更新…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: busyLabel }).isDisabled(), true);
   assert.equal(await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).count(), 0);
   await page.evaluate(() => window.__P0_REACT_HARNESS__.releasePageRead());
   await page.getByText('Consumer completion awaited', { exact: false }).filter({ visible: true }).first().waitFor();
@@ -83,7 +83,7 @@ try {
   await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextTargetedRead());
   await reload().evaluate(e => { e.click(); e.click(); });
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().targetedReadHeld);
-  assert.equal(await page.getByRole('button', { name: '正在更新…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: busyLabel }).isDisabled(), true);
   await page.evaluate(() => window.__P0_REACT_HARNESS__.releaseTargetedRead());
   await reload().waitFor();
   const after = await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot());

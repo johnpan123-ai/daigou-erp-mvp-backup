@@ -7,6 +7,10 @@ export const productGroupDisplayName = (group: Pick<ProductGroup, 'normalized_ti
 export const purchaseRecordsGroupUrl = (groupId: string): string =>
   `/purchase-records?${new URLSearchParams({ productGroup: groupId })}`;
 
+/** Existing second-level detail route, addressed only by canonical ProductGroup ID. */
+export const purchaseRecordsDetailUrl = (groupId: string): string =>
+  `/purchase-records/${encodeURIComponent(groupId)}`;
+
 /** null means no scope; empty/duplicate parameters deliberately match no product. */
 export const purchaseRecordsGroupScope = (search: string): string | null => {
   const values = new URLSearchParams(search).getAll('productGroup');

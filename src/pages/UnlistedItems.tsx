@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 import { calculateGroupDemandAndPurchased } from '../lib/db';
-import { productGroupDisplayName, purchaseRecordsGroupUrl } from '../lib/productGroupDisplayName';
+import { productGroupDisplayName, purchaseRecordsDetailUrl } from '../lib/productGroupDisplayName';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
@@ -885,7 +885,8 @@ export default function UnlistedItems() {
                         {copiedItemId === item.id ? <Check size={12} /> : <Copy size={12} />}
                       </button>
                       <Link
-                        to={purchaseRecordsGroupUrl(item.id)}
+                        to={purchaseRecordsDetailUrl(item.id)}
+                        state={{ from: '/unlisted-items' }}
                         title="查看訂購紀錄"
                         style={{
                           color: '#3b82f6',
@@ -1017,7 +1018,8 @@ export default function UnlistedItems() {
                               {copiedItemId === item.id ? <Check size={14} /> : <Copy size={14} />}
                             </button>
                             <Link
-                              to={purchaseRecordsGroupUrl(item.id)}
+                              to={purchaseRecordsDetailUrl(item.id)}
+                              state={{ from: '/unlisted-items' }}
                               title="查看訂購紀錄"
                               style={{
                                 color: '#3b82f6',
