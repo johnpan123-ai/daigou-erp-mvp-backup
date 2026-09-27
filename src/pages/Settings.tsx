@@ -23,6 +23,8 @@ import CloudAtomicRestorePanel from '../components/CloudAtomicRestorePanel';
 import { SettingsCountLoadGate } from './settingsCountLoadGate';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
+import { SystemInformation } from '../components/layout/SystemInformation';
 import './Settings.css';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
@@ -324,16 +326,16 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex-col gap-lg" style={{ padding: '0 24px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div className="flex items-center gap-sm" style={{ padding: '16px 0', borderBottom: '1px solid var(--color-border)' }}>
+    <PageShell className="settings-page flex-col gap-lg" mobileStyle={{ padding: '0 24px', maxWidth: '1200px', margin: '0 auto' }}>
+      <PageHeader className="flex items-center gap-sm" mobileStyle={{ padding: '16px 0', borderBottom: '1px solid var(--color-border)' }}>
         <SettingsIcon size={24} className="text-primary" />
         <div>
           <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>系統設定</h1>
           <p className="text-muted text-sm" style={{ margin: 0, marginTop: '4px' }}>資料庫管理、備份與還原</p>
         </div>
-      </div>
+      </PageHeader>
 
-      <div className="kpi-grid settings-data-grid">
+      <div className="kpi-grid settings-data-grid workspace-content" data-workspace-content>
         <div className="card flex-col">
           <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Database size={18} className="text-primary" /> 
@@ -433,6 +435,13 @@ export default function Settings() {
               />
             </div> : <CloudAtomicRestorePanel onAuthoritativeRefreshComplete={loadCounts} />}
 
+          </div>
+        </div>
+
+        <div className="card flex-col" style={{ gridColumn: 'span 3' }}>
+          <h3 style={{ margin: '0 0 16px 0' }}>維護工具</h3>
+          <div className="flex-col gap-md">
+
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新解析商品規格</div>
@@ -493,7 +502,11 @@ export default function Settings() {
                 <Trash2 size={16} /> 清空紀錄
               </button>
             </div>
+          </div>
+        </div>
 
+        <div className="card flex-col settings-danger-section" style={{ gridColumn: 'span 3' }}>
+          <h3 style={{ margin: '0 0 16px 0', color: 'var(--color-danger)' }}>危險區域</h3>
             <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-danger)', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-danger" style={{ marginBottom: '4px' }}>危險操作：清空全部資料</div>
@@ -503,7 +516,6 @@ export default function Settings() {
                 <Trash2 size={16} /> 清空 Reset
               </button>
             </div>
-          </div>
         </div>
 
         {/* 資料來源模式 */}
@@ -711,6 +723,8 @@ export default function Settings() {
           )}
         </div>
 
+        <SystemInformation />
+
         {/* Supabase 連線測試 */}
         {(() => {
           let statusBg = '#f7fafc';
@@ -912,6 +926,6 @@ export default function Settings() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

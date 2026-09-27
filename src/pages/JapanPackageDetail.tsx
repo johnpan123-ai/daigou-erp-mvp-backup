@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3 } from 'lucide-react';
 import { productGroupDisplayName } from '../lib/productGroupDisplayName';
 import { CopyProductNameButton } from '../components/CopyProductNameButton';
+import { sortJapanPackageDisplayGroups, type JapanPackageDisplaySort } from '../components/japanPackageDisplaySort';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
@@ -96,6 +97,8 @@ export default function JapanPackageDetail() {
   // Batches for import
   const [batches, setBatches] = useState<PurchaseBatch[]>([]);
   const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
+  const [contentSortSelection, setContentSortSelection] = useState<{ packageId?: string; mode: JapanPackageDisplaySort }>({ packageId: id, mode: 'sku' });
+  const contentSort = contentSortSelection.packageId === id ? contentSortSelection.mode : 'sku';
   
   // Existing package item batch item IDs to prevent duplicate import
   const existingBatchItemIds = useMemo(() => {
@@ -506,6 +509,13 @@ export default function JapanPackageDetail() {
 
     return Object.values(groups).sort((a, b) => a.title.localeCompare(b.title));
   }, [packageItems, productGroups, variants, batches]);
+
+  const displayGroups = useMemo(() => sortJapanPackageDisplayGroups(
+    groupedItems,
+    contentSort,
+    batches,
+    new Map(variants.map(variant => [variant.id, variant.myacg_item_code || ''])),
+  ), [groupedItems, contentSort, batches, variants]);
 
   useEffect(() => {
     if (id) {
@@ -1921,23 +1931,6 @@ export default function JapanPackageDetail() {
           </div>
         </div>
         {manualEditModal}
-        <div 
-          style={{ 
-            position: 'fixed', 
-            bottom: '10px', 
-            right: '10px', 
-            background: 'rgba(15, 23, 42, 0.8)', 
-            color: '#ffffff', 
-            padding: '4px 8px', 
-            borderRadius: '4px', 
-            fontSize: '11px', 
-            zIndex: 99999,
-            pointerEvents: 'none',
-            fontFamily: 'monospace'
-          }}
-        >
-          JapanDetail UI v2.2
-        </div>
       </div>
     );
   }
@@ -3195,6 +3188,23 @@ export default function JapanPackageDetail() {
             </div>
             {packageItems.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                {!isMobile && (
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#475569', fontWeight: 600 }}>
+                    包裹內容排序
+                    <select
+                      aria-label="包裹內容排序"
+                      value={contentSort}
+                      onChange={event => setContentSortSelection({ packageId: id, mode: event.target.value as JapanPackageDisplaySort })}
+                      style={{ minHeight: '36px', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#fff', color: '#0f172a' }}
+                    >
+                      <option value="sku">SKU 順序</option>
+                      <option value="similar-name">相似名稱</option>
+                      <option value="order">下單順序</option>
+                      <option value="name">商品名稱</option>
+                      <option value="original">原始順序</option>
+                    </select>
+                  </label>
+                )}
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#475569', fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}>
                   <input
                     type="checkbox"
@@ -3377,7 +3387,7 @@ export default function JapanPackageDetail() {
           ) : (
             // Grouped Checklist Desktop View
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {groupedItems.map(g => {
+              {displayGroups.map(g => {
                 const isCollapsed = collapsedGroups.has(g.id);
                 const totalGroupItems = g.items.length;
                 const checkedGroupItems = g.items.filter(item => item.checked).length;
@@ -3615,23 +3625,6 @@ export default function JapanPackageDetail() {
         </div>
       </div>
       {manualEditModal}
-      <div 
-        style={{ 
-          position: 'fixed', 
-          bottom: '10px', 
-          right: '10px', 
-          background: 'rgba(15, 23, 42, 0.8)', 
-          color: '#ffffff', 
-          padding: '4px 8px', 
-          borderRadius: '4px', 
-          fontSize: '11px', 
-          zIndex: 99999,
-          pointerEvents: 'none',
-          fontFamily: 'monospace'
-        }}
-      >
-        JapanDetail UI v2.2
-      </div>
     </div>
   );
 }

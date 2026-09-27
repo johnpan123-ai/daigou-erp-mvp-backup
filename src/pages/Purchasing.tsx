@@ -1687,23 +1687,6 @@ export default function Purchasing() {
         />
       )}
 
-      {/* Version Tag */}
-      <div className="purchasing-version-tag" style={{
-        position: 'fixed',
-        bottom: '16px',
-        right: '16px',
-        backgroundColor: '#1e293b',
-        color: '#ffffff',
-        padding: '6px 12px',
-        borderRadius: '6px',
-        fontSize: '12px',
-        fontWeight: 'bold',
-        zIndex: 9999,
-        pointerEvents: 'none',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-      }}>
-        Purchasing UI width fix v1
-      </div>
     </PageShell>
   );
 }

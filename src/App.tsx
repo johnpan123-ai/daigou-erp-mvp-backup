@@ -40,9 +40,6 @@ function App({ authClient, navigateAuth }: AppProps = {}) {
           <CloudRealtimeSyncBoundary>
           <StorageWarningBanner />
           <AppLayout>
-            <div style={{ position: 'fixed', bottom: 10, right: 10, fontSize: '12px', color: '#64748b', zIndex: 9999, pointerEvents: 'none' }}>
-              Hotfix H-2 display v2
-            </div>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/dashboard" element={<Dashboard />} />

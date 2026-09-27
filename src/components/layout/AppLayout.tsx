@@ -7,10 +7,11 @@ import { useAuth } from '../../auth/authContext';
 import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
+import { ERP_SYSTEM_SHORT_NAME, ERP_SYSTEM_VERSION } from './erpSystemIdentity';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 import '../../styles/workspace.css';
 
-const workspaceRoutes = new Set(['/', '/dashboard', '/inventory', '/purchase-records', '/recent-purchases', '/purchasing', '/japan-packages', '/outbound-shipments', '/unlisted-items', '/duplicate-variants']);
+const workspaceRoutes = new Set(['/', '/dashboard', '/inventory', '/purchase-records', '/recent-purchases', '/purchasing', '/japan-packages', '/outbound-shipments', '/unlisted-items', '/duplicate-variants', '/settings']);
 
 interface SidebarItemProps {
   to: string;
@@ -248,6 +249,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )}
           {canViewPage('/settings') && (
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
+          {!isMobile && !isCollapsed && (
+            <div className="sidebar-version" aria-label={`${ERP_SYSTEM_SHORT_NAME} ${ERP_SYSTEM_VERSION}`}>
+              <span>{ERP_SYSTEM_SHORT_NAME}</span>
+              <span>{ERP_SYSTEM_VERSION}</span>
+            </div>
           )}
           {isMobile && (
             <>

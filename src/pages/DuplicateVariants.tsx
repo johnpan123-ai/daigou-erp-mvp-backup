@@ -331,8 +331,16 @@ export default function DuplicateVariants() {
   return (
     <PageShell data-testid="duplicate-variants-root" mobileStyle={{ padding: '16px', maxWidth: '1100px' }}>
       <PageHeader className="workspace-header-inline" mobileStyle={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-        <Layers size={22} style={{ color: '#0f766e' }} />
-        <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', margin: 0 }}>重複品項管理</h1>
+        <div className="duplicate-title-stack" style={isMobile ? { display: 'contents' } : undefined}>
+          <div className="duplicate-title-row" style={isMobile ? { display: 'contents' } : undefined}>
+            <Layers size={22} style={{ color: '#0f766e' }} />
+            <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', margin: 0 }}>重複品項管理</h1>
+          </div>
+          {!isMobile && <p>
+            判定條件：同一商品群組內「SKU 相同」或「完整規格文字相同」、但未被系統自動合併的品項。
+            每組須手動選擇保留哪一筆並逐組確認後，才會對其餘品項做 soft delete（設 deleted_at，可還原）。無批次刪除。
+          </p>}
+        </div>
         <button
           className="btn"
           onClick={loadData}
@@ -343,10 +351,10 @@ export default function DuplicateVariants() {
           {isRefreshing ? '同步中…' : '重新整理'}
         </button>
       </PageHeader>
-      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
+      {isMobile && <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
         判定條件：同一商品群組內「SKU 相同」或「完整規格文字相同」、但未被系統自動合併的品項。
         每組須手動選擇保留哪一筆並逐組確認後，才會對其餘品項做 soft delete（設 deleted_at，可還原）。無批次刪除。
-      </div>
+      </div>}
 
       <div className="workspace-stats workspace-stats-three" data-workspace-stats style={isMobile ? { display: 'flex', gap: '16px', padding: '10px 14px', marginBottom: '16px', backgroundColor: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', fontSize: '13px', color: '#134e4a', flexWrap: 'wrap' } : { fontSize: '13px', color: '#134e4a' }}>
         <span>疑似重複：<b>{dupSets.length}</b> 組</span>

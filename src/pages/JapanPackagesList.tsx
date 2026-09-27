@@ -1247,10 +1247,13 @@ export default function JapanPackagesList() {
 
       {/* Header with Title and Add Button */}
       <PageHeader className="header-section">
-        <h1 className="header-title" style={isMobile ? { fontSize: '20px' } : undefined}>
-          <Truck size={isMobile ? 20 : 24} style={{ color: '#2563eb' }} />
-          日本包裹管理
-        </h1>
+        <div style={isMobile ? { display: 'contents' } : undefined}>
+          <h1 className="header-title" style={isMobile ? { fontSize: '20px' } : undefined}>
+            <Truck size={isMobile ? 20 : 24} style={{ color: '#2563eb' }} />
+            日本包裹管理
+          </h1>
+          {!isMobile && <p>管理包裹與點收進度。</p>}
+        </div>
         {!isMobile && (
           <button 
             className="btn btn-primary" 

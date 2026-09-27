@@ -41,6 +41,19 @@ try {
   try {
     {
       const { page, checkbox } = await open(context, 'success');
+      const sort = page.getByRole('combobox', { name: '包裹內容排序' });
+      assert.equal(await sort.inputValue(), 'sku', 'each detail opens in SKU order');
+      const groupHeader = page.locator('.checklist-group-header-main').first();
+      await groupHeader.click();
+      assert.ok((await page.locator('.checklist-group-header').first().textContent()).includes('▶'));
+      await sort.selectOption('name');
+      await sort.selectOption('similar-name');
+      await sort.selectOption('order');
+      await sort.selectOption('original');
+      assert.ok((await page.locator('.checklist-group-header').first().textContent()).includes('▶'), 'sort must preserve expansion state');
+      assert.equal((await page.evaluate(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.snapshot())).transactionCalls, 0, 'sorting never dispatches receiving');
+      await groupHeader.click();
+      assert.equal(await checkbox.isChecked(), false, 'sorting preserves checkbox state');
       await checkbox.click();
       await page.waitForFunction(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.snapshot().rpcCalls === 1);
       await page.waitForFunction(() => window.__JAPAN_PACKAGE_TRANSACTION_TEST__.snapshot().items[0].checked === true);

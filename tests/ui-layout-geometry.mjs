@@ -16,6 +16,7 @@ const cases = [
   ['outbound', '/outbound-shipments', '[data-testid="outbound-shipments-list-root"]'],
   ['unlisted', '/unlisted-items', '[data-testid="unlisted-items-root"]'],
   ['duplicates', '/duplicate-variants', '[data-testid="duplicate-variants-root"]'],
+  ['settings', '/settings', '.settings-page'],
 ].filter(([name]) => !selected || selected.includes(name));
 const origin = 'http://127.0.0.1:4388';
 const outputDir = `scratch/ui-layout-evidence/${phase}`;
@@ -55,12 +56,18 @@ try {
         const main = document.querySelector('.main-area');
         const header = element.querySelector('[data-workspace-header]');
         const firstContent = header?.nextElementSibling;
+        const title = header?.querySelector('h1');
+        const description = header?.querySelector('p:not(.dashboard-eyebrow)');
+        const titleStyle = title ? getComputedStyle(title) : null;
+        const descriptionStyle = description ? getComputedStyle(description) : null;
         const css = getComputedStyle(element);
         return {
           root: rect(element), available: rect(page), paddingLeft: parseFloat(css.paddingLeft), paddingRight: parseFloat(css.paddingRight),
           horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1 || main.scrollWidth > main.clientWidth + 1,
           headerToFirstContent: header && firstContent ? firstContent.getBoundingClientRect().top - header.getBoundingClientRect().bottom : null,
           purchaseRefreshInHeader: element.querySelector('[data-workspace-header] .cloud-refresh-control') !== null,
+          headerTitleStyle: titleStyle ? { size: titleStyle.fontSize, weight: titleStyle.fontWeight, lineHeight: titleStyle.lineHeight } : null,
+          headerDescriptionStyle: descriptionStyle ? { size: descriptionStyle.fontSize, color: descriptionStyle.color, lineHeight: descriptionStyle.lineHeight } : null,
           sections: [...element.querySelectorAll('[data-workspace-header], [data-workspace-stats], [data-workspace-toolbar], [data-workspace-content]')].map(node => ({ kind: node.getAttributeNames().find(a => a.startsWith('data-workspace-')), ...rect(node) })),
           headerCount: element.querySelectorAll('[data-workspace-header]').length,
           contentCount: element.querySelectorAll('[data-workspace-content]').length,
@@ -77,6 +84,12 @@ try {
         assert.equal(geometry.horizontalOverflow, false, `${name}/${width}: page overflow`);
         assert.ok(geometry.headerCount >= 1, `${name}/${width}: shared header`);
         assert.ok(geometry.headerToFirstContent >= 16 && geometry.headerToFirstContent <= 24, `${name}/${width}: shared header-to-content spacing ${geometry.headerToFirstContent}`);
+        assert.equal(geometry.headerTitleStyle?.size, '22px', `${name}/${width}: shared header title size`);
+        assert.equal(geometry.headerTitleStyle?.weight, '700', `${name}/${width}: shared header title weight`);
+        if (geometry.headerDescriptionStyle) {
+          assert.equal(geometry.headerDescriptionStyle.size, '14px', `${name}/${width}: shared description size`);
+          assert.equal(geometry.headerDescriptionStyle.color, 'rgb(100, 116, 139)', `${name}/${width}: shared description color`);
+        }
         if (name === 'purchase-records') assert.equal(geometry.purchaseRefreshInHeader, true, `${name}/${width}: refresh is a page-header action`);
         assert.ok(geometry.contentCount >= 1, `${name}/${width}: content shell`);
         const left = geometry.root.x + geometry.paddingLeft;
@@ -135,6 +148,14 @@ try {
         results.at(-1).empty = empty;
       }
       if (phase !== 'before' && width === 390) {
+        if (name === 'settings') {
+          assert.equal(geometry.horizontalOverflow, false, 'settings: no new mobile overflow');
+          assert.equal(await root.evaluate(element => element.classList.contains('workspace-page')), false, 'settings: no desktop workspace class on mobile');
+          assert.deepEqual(errors, [], 'settings/390: runtime errors');
+          assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0);
+          await context.close();
+          continue;
+        }
         const original = mobileBaseline.pages[name];
         assert.equal(geometry.root.x, mobileBaseline.rootX, `${name}: original mobile left edge`);
         assert.equal(geometry.root.width, mobileBaseline.rootWidth, `${name}: original mobile width`);
