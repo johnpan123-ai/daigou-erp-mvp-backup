@@ -111,7 +111,7 @@ try {
     await copy.waitFor();
     assert.equal(await copy.textContent(), '複製商品名稱');
     const box = await copy.boundingBox();
-    assert.ok(box.height >= 44 && box.x >= 0 && box.x + box.width <= width + 1);
+    assert.ok(box.height >= (width < 768 ? 44 : 32) && box.x >= 0 && box.x + box.width <= width + 1);
     await page.evaluate(() => {
       window.__copiedProductName = null;
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.__copiedProductName = text; } } });

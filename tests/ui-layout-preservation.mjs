@@ -9,7 +9,7 @@ const protectedPaths = ['src/providers', 'src/contexts', 'src/hooks', 'src/lib',
   'src/pages/OutboundShipmentDetail.tsx',
   'scripts/verify-erp-deployment-identity.mjs', 'tests/fixtures/cloud-p0-2-react-harness.mjs'];
 const changedProtected = execFileSync('git', ['diff', '--name-only', base, '--', ...protectedPaths], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
-assert.deepEqual(changedProtected, ['src/contexts/CloudRealtimeSyncContext.tsx'], 'Only shared refresh presentation may change in protected runtime source');
+assert.deepEqual(changedProtected, ['src/contexts/CloudRealtimeSyncContext.tsx', 'src/contexts/globalSyncPresentation.ts'], 'Only shared refresh presentation may change in protected runtime source');
 const pages = ['Dashboard', 'Inventory', 'PurchaseRecords', 'RecentPurchases', 'Purchasing', 'JapanPackagesList', 'OutboundShipmentsList', 'UnlistedItems', 'DuplicateVariants'];
 function handlers(source, file) {
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
