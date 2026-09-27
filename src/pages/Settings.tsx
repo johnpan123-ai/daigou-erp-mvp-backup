@@ -377,8 +377,8 @@ export default function Settings() {
             建議您在進行大量匯入或測試前，先將資料匯出為 JSON 檔案備份。
           </p>
 
-          <div className="flex-col gap-md">
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+          <div className="flex-col gap-md settings-backup-actions">
+            <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯出 JSON 備份</div>
                 <div className="text-xs text-muted">下載當前所有資料庫資料的 JSON 檔案。</div>
@@ -388,7 +388,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯出 Excel 備份</div>
                 <div className="text-xs text-muted">下載多分頁格式的試算表備份（用於核對與手工修復）。</div>
@@ -398,7 +398,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>簡易匯出 Excel</div>
                 <div className="text-xs text-muted">3 頁精簡報表：商品總覽（可點入查看規格）、數量核對、採購批次。</div>
@@ -408,7 +408,7 @@ export default function Settings() {
               </button>
             </div>
 
-            {!isCloudRestoreDisabledMode(currentMode) ? <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            {!isCloudRestoreDisabledMode(currentMode) ? <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
                 <div className="text-xs text-muted">
@@ -442,7 +442,7 @@ export default function Settings() {
           <h3 style={{ margin: '0 0 16px 0' }}>維護工具</h3>
           <div className="flex-col gap-md">
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新解析商品規格</div>
                 <div className="text-xs text-muted">修正因為舊版匯入導致的規格未正確切分問題。</div>
@@ -477,7 +477,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新整理商品標題</div>
                 <div className="text-xs text-muted">清理商品名稱中多餘的促銷/代購文字，僅保留商品主體。不影響原始名稱。</div>
@@ -493,7 +493,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>清空訂購紀錄資料</div>
                 <div className="text-xs text-muted">只清除訂購紀錄 (Group/Category/Variant)，不影響商品主檔。</div>
@@ -507,7 +507,7 @@ export default function Settings() {
 
         <div className="card flex-col settings-danger-section" style={{ gridColumn: 'span 3' }}>
           <h3 style={{ margin: '0 0 16px 0', color: 'var(--color-danger)' }}>危險區域</h3>
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-danger)', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-danger)', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-danger" style={{ marginBottom: '4px' }}>危險操作：清空全部資料</div>
                 <div className="text-xs text-danger" style={{ opacity: 0.8 }}>將清空所有測試與正式資料，操作無法復原。</div>

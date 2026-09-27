@@ -1972,9 +1972,8 @@ export default function JapanPackageDetail() {
         }
         .checklist-group-header {
           display: flex;
-          flex-direction: column;
-          align-items: stretch;
-          padding: 18px 26px;
+          align-items: center;
+          padding: 12px 14px;
           background: #f8fafc;
           border-bottom: 2px solid #e2e8f0;
           cursor: pointer;
@@ -1983,7 +1982,7 @@ export default function JapanPackageDetail() {
           color: #1e293b;
           font-size: 18px;
           transition: background-color 0.15s;
-          gap: 12px;
+          gap: 10px;
         }
         .checklist-group-header:hover {
           background: #f1f5f9;
@@ -1991,18 +1990,18 @@ export default function JapanPackageDetail() {
         .checklist-group-title-area {
           display: flex;
           align-items: center;
-          gap: 10px;
-          flex: 1;
+          gap: 7px;
+          flex: 1 1 auto;
           min-width: 0;
         }
         .checklist-group-header-main {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          gap: 10px;
+          flex: 1 1 auto;
           min-width: 0;
         }
         .compact-group-title {
+          flex: 1 1 auto;
           min-width: 0;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -2010,19 +2009,27 @@ export default function JapanPackageDetail() {
           font-size: 15px;
           font-weight: 700;
         }
+        .group-title-copy-action { display: inline-flex; flex: 0 0 auto; align-items: center; }
+        .group-title-copy-action button {
+          min-width: 0 !important;
+          min-height: 36px !important;
+          padding: 4px 6px !important;
+          font-size: 12px;
+          white-space: nowrap !important;
+        }
         .checklist-group-header-secondary {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          flex-wrap: wrap;
+          gap: 8px;
+          flex: 0 0 auto;
+          min-width: 0;
         }
         .group-progress-wrapper {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 5px;
           min-width: 0;
-          flex-wrap: wrap;
+          white-space: nowrap;
         }
         .group-item-count {
           font-size: 13px;
@@ -2035,8 +2042,8 @@ export default function JapanPackageDetail() {
           font-weight: 600;
         }
         .group-progress-bar-bg {
-          width: 100px;
-          height: 9px;
+          width: 48px;
+          height: 7px;
           background-color: #cbd5e1;
           border-radius: 9999px;
           overflow: hidden;
@@ -2049,11 +2056,12 @@ export default function JapanPackageDetail() {
         }
         .group-bulk-actions {
           display: flex;
-          gap: 6px;
+          gap: 4px;
+          flex: 0 0 auto;
         }
         .btn-bulk {
-          padding: 5px 12px;
-          font-size: 13px;
+          padding: 5px 7px;
+          font-size: 12px;
           font-weight: 600;
           background: #fff;
           border: 1px solid #d1d5db;
@@ -2251,6 +2259,11 @@ export default function JapanPackageDetail() {
           .page-content-full {
             padding: 24px 12px !important;
           }
+        }
+        @media (min-width: 1025px) and (max-width: 1399px) {
+          .detail-grid { gap: 16px; }
+          .package-info-card { width: 320px; padding: 20px; }
+          .items-section-card { padding: 20px; }
         }
         @media (min-width: 1400px) {
           .pkg-title {
@@ -3405,11 +3418,13 @@ export default function JapanPackageDetail() {
                             {isCollapsed ? '▶' : '▼'}
                           </span>
                           <span title={g.title} className="compact-group-title">📦 {g.title}</span>
+                          <span className="group-title-copy-action">
+                            <CopyProductNameButton name={g.title} groupId={g.id} />
+                          </span>
                         </div>
                       </div>
 
                       <div className="checklist-group-header-secondary" onClick={e => e.stopPropagation()}>
-                        <CopyProductNameButton name={g.title} groupId={g.id} />
                         <div className="group-progress-wrapper" title={`點收進度: ${checkedGroupItems} / ${totalGroupItems}`}>
                           <span className="group-item-count">共 {totalGroupItems} 項</span>
                           <span className="group-progress-text">完成 {checkedGroupItems} / {totalGroupItems}</span>

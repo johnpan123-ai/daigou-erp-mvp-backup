@@ -43,6 +43,32 @@ try {
       const { page, checkbox } = await open(context, 'success');
       const sort = page.getByRole('combobox', { name: '包裹內容排序' });
       assert.equal(await sort.inputValue(), 'sku', 'each detail opens in SKU order');
+      for (const width of [1280, 1366]) {
+        await page.setViewportSize({ width, height: 900 });
+        const geometry = await page.evaluate(() => {
+          const rect = selector => {
+            const element = document.querySelector(selector);
+            if (!element) throw new Error(`Missing ${selector}`);
+            const { x, y, width: elementWidth, height } = element.getBoundingClientRect();
+            return { x, y, width: elementWidth, height };
+          };
+          return {
+            pageWidth: document.documentElement.scrollWidth,
+            viewportWidth: window.innerWidth,
+            header: rect('.checklist-group-header'),
+            title: rect('.checklist-group-title-area'),
+            copy: rect('.group-title-copy-action'),
+            progress: rect('.group-progress-wrapper'),
+            actions: rect('.group-bulk-actions'),
+          };
+        });
+        assert.ok(geometry.pageWidth <= geometry.viewportWidth, `${width}px detail has no horizontal overflow`);
+        assert.ok(geometry.copy.x > geometry.title.x, 'copy action sits beside the group title');
+        assert.ok(geometry.progress.x > geometry.copy.x, 'progress follows the title and copy action');
+        assert.ok(geometry.actions.x > geometry.progress.x, 'bulk actions follow progress');
+        assert.ok(Math.abs(geometry.copy.y - geometry.actions.y) < 12, `${width}px group controls share one row`);
+        assert.ok(geometry.header.height < 76, `${width}px group header stays compact`);
+      }
       const groupHeader = page.locator('.checklist-group-header-main').first();
       await groupHeader.click();
       assert.ok((await page.locator('.checklist-group-header').first().textContent()).includes('▶'));
