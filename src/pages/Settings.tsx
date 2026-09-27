@@ -8,6 +8,7 @@ import {
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } from 'lucide-react';
 import { useAuth } from '../auth/authContext';
 import { useRole } from '../auth/useRole';
+import { useViewport } from '../contexts/ViewportContext';
 import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../lib/environmentModeLabel';
 import { clearSandboxData, getActiveSandboxConfig, isSandboxEnvironmentActive } from '../lib/testSandboxEnvironment';
@@ -46,6 +47,7 @@ const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: 
 ];
 
 export default function Settings() {
+  const { isMobile } = useViewport();
   const { user, signOut } = useAuth();
   const { role, displayName, isProfileLoading } = useRole();
   const currentMode = getProviderMode();
@@ -341,7 +343,7 @@ export default function Settings() {
             <Database size={18} className="text-primary" /> 
             資料庫狀態
           </h3>
-          <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'inventory', 'salesOrders']} onLocalRefresh={loadCounts} />
+          {isMobile && <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'inventory', 'salesOrders']} onLocalRefresh={loadCounts} />}
           <div className="flex-col gap-sm" style={{ backgroundColor: 'var(--color-bg-base)', padding: '16px', borderRadius: '8px' }}>
             <div className="flex justify-between">
               <span className="text-muted text-sm">商品主檔 (InventoryItem)</span>

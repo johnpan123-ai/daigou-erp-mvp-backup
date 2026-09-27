@@ -26,7 +26,9 @@ import {
   markCloudReachable,
   markCloudUnavailable,
   subscribeCloudConnectivity,
+  type CloudConnectivitySnapshot,
 } from '../providers/cloud/cloudConnectivity';
+import type { GlobalRefreshSnapshot } from './globalSyncPresentation';
 import {
   StagingRealtimeFaultControl,
   type RealtimeChannelState,
@@ -41,6 +43,9 @@ interface CloudRealtimeContextValue {
   subscribe: (listener: (resources: CloudResource[]) => void | Promise<void>) => () => void;
   clearConflict: (resources: CloudResource[]) => void;
   manualRefresh: (resources: CloudResource[]) => Promise<CloudRefreshResult | false>;
+  refreshAll: () => Promise<void>;
+  globalRefresh: GlobalRefreshSnapshot;
+  connectivity: CloudConnectivitySnapshot;
   stagingFaultControl: {
     available: boolean;
     snapshot: StagingRealtimeFaultSnapshot;
@@ -52,6 +57,7 @@ interface CloudRealtimeContextValue {
 const CloudRealtimeContext = createContext<CloudRealtimeContextValue | null>(null);
 
 const REALTIME_TABLES = Object.keys(CLOUD_TABLE_RESOURCE);
+const GLOBAL_REFRESH_RESOURCES = [...new Set(Object.values(CLOUD_TABLE_RESOURCE))];
 const CLOUD_RESTORE_EPOCH_TABLE = 'erp_cloud_restore_epoch';
 const EMPTY_SYNC_METRICS = {
   receivedEvents: 0,
@@ -91,6 +97,10 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const [faultSnapshot, setFaultSnapshot] = useState<StagingRealtimeFaultSnapshot>(EMPTY_FAULT_SNAPSHOT);
   const [conflictedResources, setConflictedResources] = useState<Set<CloudResource>>(new Set());
   const [mutationConflictMessage, setMutationConflictMessage] = useState('');
+  const [globalRefresh, setGlobalRefresh] = useState<GlobalRefreshSnapshot>({
+    mode: getProviderMode(), busy: false, errorAt: null, lastCompletedAt: null, message: '',
+  });
+  const globalRefreshInFlight = useRef<Promise<void> | null>(null);
   const connectivity = useSyncExternalStore(
     subscribeCloudConnectivity,
     getCloudConnectivitySnapshot,
@@ -116,6 +126,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     || connectivity.readStatus === 'read-error'
     || connectivity.readStatus === 'offline'
     || connectivity.readStatus === 'fresh-empty';
+  const isSoftCloudReadTimeout = connectivity.reason?.includes('Cloud sync timed out after 4000ms') ?? false;
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -504,6 +515,43 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     return coordinator.manualRefresh(resources);
   }, [cloudMode]);
 
+  const refreshAll = useCallback((): Promise<void> => {
+    if (globalRefreshInFlight.current) return globalRefreshInFlight.current;
+    const mode = getProviderMode();
+    setGlobalRefresh(current => ({ ...current, mode, busy: true, errorAt: null, message: '' }));
+    // Start after the in-flight reference is installed, including the local
+    // no-reader failure path, so a failed click never pins a rejected promise.
+    const pending = Promise.resolve().then(async () => {
+      try {
+        let message = '已更新至最新資料';
+        if (cloudMode) {
+          const result = await manualRefresh(GLOBAL_REFRESH_RESOURCES);
+          if (!result) throw new Error('CLOUD_REFRESH_UNAVAILABLE');
+          message = result.conflicts.length > 0
+            ? '雲端資料已讀取；你的草稿已保留，同筆資料衝突需要確認。'
+            : result.changed === false ? '目前已是最新資料' : message;
+        } else {
+          // The mounted route already owns its local authoritative reread.
+          // Reuse that subscription; do not introduce another local data source.
+          const mountedReaders = [...listeners.current];
+          if (mountedReaders.length === 0) throw new Error('LOCAL_REFRESH_UNAVAILABLE');
+          await Promise.all(mountedReaders.map(reader => reader(GLOBAL_REFRESH_RESOURCES)));
+        }
+        setGlobalRefresh({ mode, busy: false, errorAt: null, lastCompletedAt: Date.now(), message });
+      } catch (error) {
+        setGlobalRefresh(current => ({
+          ...current, mode, busy: false, errorAt: Date.now(),
+          message: '更新失敗，請稍後再試。原資料與草稿已保留，尚未完成更新。',
+        }));
+        throw error;
+      } finally {
+        globalRefreshInFlight.current = null;
+      }
+    });
+    globalRefreshInFlight.current = pending;
+    return pending;
+  }, [cloudMode, manualRefresh]);
+
   const value = useMemo<CloudRealtimeContextValue>(() => ({
     conflictedResources,
     registerEditing,
@@ -511,6 +559,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     subscribe,
     clearConflict,
     manualRefresh,
+    refreshAll,
+    globalRefresh,
+    connectivity,
     stagingFaultControl: {
       available: faultControlAllowed && enabled && !testBridge,
       snapshot: {
@@ -523,8 +574,10 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   }), [
     clearConflict,
     manualRefresh,
+    refreshAll,
+    globalRefresh,
+    connectivity,
     conflictedResources,
-    connectivity.readStatus,
     disconnectStagingRealtime,
     enabled,
     faultSnapshot,
@@ -541,9 +594,13 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       <div className="cloud-runtime-frame">
       <div className="cloud-status-stack">
       {cloudMode && showCloudReadStatus && (
-        <div role="status" aria-live="polite" style={{ background: connectivity.readStatus === 'fresh-empty' ? '#065f46' : '#7f1d1d', color: '#fff' }}>
+        <div role="status" aria-live="polite" style={{ background: connectivity.readStatus === 'fresh-empty' ? '#065f46' : isSoftCloudReadTimeout ? '#92400e' : '#7f1d1d', color: '#fff' }}>
           {connectivity.status === 'offline'
             ? 'Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用'
+            : isSoftCloudReadTimeout
+              ? connectivity.readStatus === 'stale-cache'
+                ? '雲端仍在同步｜目前顯示上次快取；寫入已暫停'
+                : '雲端仍在同步｜等待最新資料；寫入已暫停'
             : connectivity.readStatus === 'stale-cache'
               ? '雲端讀取失敗｜目前顯示舊快取，資料不是最新；寫入已暫停'
               : connectivity.readStatus === 'read-error'
@@ -571,6 +628,16 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       </div>
     </CloudRealtimeContext.Provider>
   );
+}
+
+// eslint-disable-next-line react-refresh/only-export-components -- Provider hooks share this context's single authoritative state.
+export function useGlobalSyncControl() {
+  const context = useContext(CloudRealtimeContext);
+  return {
+    connectivity: context?.connectivity ?? getCloudConnectivitySnapshot(),
+    refresh: context?.globalRefresh ?? { mode: getProviderMode(), busy: false, errorAt: null, lastCompletedAt: null, message: '' },
+    refreshAll: context?.refreshAll,
+  };
 }
 
 export function useCloudResourceSync(

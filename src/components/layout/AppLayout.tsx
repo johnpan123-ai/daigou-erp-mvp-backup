@@ -8,6 +8,7 @@ import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
 import { ERP_SYSTEM_SHORT_NAME, ERP_SYSTEM_VERSION } from './erpSystemIdentity';
+import { GlobalSyncControl } from './GlobalSyncControl';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 import '../../styles/workspace.css';
 
@@ -482,7 +483,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         
         {/* Global App Header */}
         <header className="app-header">
-          <div className="flex items-center gap-sm">
+          <div className="flex items-center gap-sm global-header-left">
             {isMobile && (
               <button className="btn btn-ghost" style={{ padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
                 {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -539,6 +540,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </span>
               );
             })()}
+            {!isMobile && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && <GlobalSyncControl />}
           </div>
 
           {/* Right Side Header Items: Auth Status + Viewport Switcher */}

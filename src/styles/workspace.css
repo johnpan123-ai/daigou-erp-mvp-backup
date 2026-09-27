@@ -1,5 +1,23 @@
 /* Desktop-only opt-in. Mobile and detail routes retain their existing layout. */
 @media (min-width: 768px) {
+.app-header { padding-left: 16px; padding-right: 16px; gap: 10px; }
+.app-header .global-header-left { min-width: 0; flex: 0 1 auto; gap: 7px; white-space: nowrap; }
+.global-sync-control { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.global-sync-status { font-size: 12px; font-weight: 700; line-height: 1.3; white-space: nowrap; }
+.global-sync-status--fresh { color: #15803d; }
+.global-sync-status--syncing { color: #2563eb; }
+.global-sync-status--cached { color: #a16207; }
+.global-sync-status--failed { color: #b91c1c; }
+.global-sync-button {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 30px;
+  padding: 4px 9px; border: 1px solid #bfdbfe; border-radius: 7px;
+  background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 700;
+  white-space: nowrap; cursor: pointer;
+}
+.global-sync-button:disabled { cursor: wait; opacity: 0.7; }
+.global-sync-button[aria-busy="true"] svg { animation: global-sync-spin 0.9s linear infinite; }
+@keyframes global-sync-spin { to { transform: rotate(360deg); } }
+.global-sync-feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sidebar-version-card {
   display: flex; align-items: flex-start; gap: 9px;
   margin: 14px 0 0; padding: 12px 10px;

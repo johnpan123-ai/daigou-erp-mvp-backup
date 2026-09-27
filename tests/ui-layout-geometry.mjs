@@ -65,7 +65,6 @@ try {
           root: rect(element), available: rect(page), paddingLeft: parseFloat(css.paddingLeft), paddingRight: parseFloat(css.paddingRight),
           horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1 || main.scrollWidth > main.clientWidth + 1,
           headerToFirstContent: header && firstContent ? firstContent.getBoundingClientRect().top - header.getBoundingClientRect().bottom : null,
-          purchaseRefreshInHeader: element.querySelector('[data-workspace-header] .cloud-refresh-control') !== null,
           headerTitleStyle: titleStyle ? { size: titleStyle.fontSize, weight: titleStyle.fontWeight, lineHeight: titleStyle.lineHeight } : null,
           headerDescriptionStyle: descriptionStyle ? { size: descriptionStyle.fontSize, color: descriptionStyle.color, lineHeight: descriptionStyle.lineHeight } : null,
           sections: [...element.querySelectorAll('[data-workspace-header], [data-workspace-stats], [data-workspace-toolbar], [data-workspace-content]')].map(node => ({ kind: node.getAttributeNames().find(a => a.startsWith('data-workspace-')), ...rect(node) })),
@@ -78,6 +77,7 @@ try {
       });
       results.push({ name, width, ...geometry });
       if (phase !== 'before' && width >= 768) {
+        assert.equal(await page.locator('[data-global-sync-control]').count(), 1, `${name}/${width}: one shared desktop sync control`);
         assert.ok(Math.abs(geometry.root.width - geometry.available.width) <= 1, `${name}/${width}: shell must fill available workspace`);
         assert.equal(geometry.paddingLeft, width < 768 ? 16 : 24, `${name}/${width}: left padding`);
         assert.equal(geometry.paddingRight, geometry.paddingLeft, `${name}/${width}: symmetric padding`);
@@ -90,7 +90,9 @@ try {
           assert.equal(geometry.headerDescriptionStyle.size, '14px', `${name}/${width}: shared description size`);
           assert.equal(geometry.headerDescriptionStyle.color, 'rgb(100, 116, 139)', `${name}/${width}: shared description color`);
         }
-        if (name === 'purchase-records') assert.equal(geometry.purchaseRefreshInHeader, true, `${name}/${width}: refresh is a page-header action`);
+        if (['purchase-records', 'purchasing', 'settings'].includes(name)) {
+          assert.equal(await root.locator('.cloud-refresh-control').count(), 0, `${name}/${width}: duplicate desktop full-refresh action removed`);
+        }
         assert.ok(geometry.contentCount >= 1, `${name}/${width}: content shell`);
         const left = geometry.root.x + geometry.paddingLeft;
         const right = geometry.root.right - geometry.paddingRight;

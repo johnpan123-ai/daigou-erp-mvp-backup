@@ -2754,7 +2754,6 @@ export default function PurchaseRecords() {
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
           {!isMobile && syncStatusSlot}
         </div>
-        {!isMobile && refreshButton}
       </PageHeader>
 
       {isMobile && refreshButton}

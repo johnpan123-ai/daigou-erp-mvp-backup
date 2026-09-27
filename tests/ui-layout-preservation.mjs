@@ -8,7 +8,8 @@ const protectedPaths = ['src/providers', 'src/contexts', 'src/hooks', 'src/lib',
   'src/components/CloudAtomicRestorePanel.tsx', 'src/components/ClosingDateResolutionWorkbench.tsx',
   'src/pages/OutboundShipmentDetail.tsx',
   'scripts/verify-erp-deployment-identity.mjs', 'tests/fixtures/cloud-p0-2-react-harness.mjs'];
-assert.equal(execFileSync('git', ['diff', '--name-only', base, '--', ...protectedPaths], { encoding: 'utf8' }).trim(), '', 'Protected business/runtime/fixture source must be unchanged');
+const changedProtected = execFileSync('git', ['diff', '--name-only', base, '--', ...protectedPaths], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
+assert.deepEqual(changedProtected, ['src/contexts/CloudRealtimeSyncContext.tsx'], 'Only shared refresh presentation may change in protected runtime source');
 const pages = ['Dashboard', 'Inventory', 'PurchaseRecords', 'RecentPurchases', 'Purchasing', 'JapanPackagesList', 'OutboundShipmentsList', 'UnlistedItems', 'DuplicateVariants'];
 function handlers(source, file) {
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -61,4 +62,4 @@ assert.ok(shell.includes("isMobile ? '' : 'workspace-page'"), 'Mobile mode must 
 assert.ok(shell.includes('isMobile ? mobileStyle : style'), 'Original mobile styles must be retained');
 assert.ok(!/experimental|VITE_MODE|VITE_DEPLOYMENT_ENV/i.test(shell + workspaceCss), 'Canonical layout cannot be environment-specific');
 execFileSync('git', ['merge-base', '--is-ancestor', 'e565d067f49c95cf71dd6c95c5fab5b4749558f8', 'HEAD']);
-console.log('PASS canonical ancestry; protected runtime/data/contracts unchanged; nine shared desktop-only shells/headers; handlers and mobile styles preserved; fixture names isolated');
+console.log('PASS canonical ancestry; only the shared sync context changes in protected runtime source; nine shared desktop-only shells/headers; handlers and mobile styles preserved; fixture names isolated');

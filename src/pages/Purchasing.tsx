@@ -694,7 +694,7 @@ export default function Purchasing() {
         <AlertTriangle size={28} color="#b42318" />
         <strong>採購資料載入失敗</strong>
         <p style={{ margin: 0, textAlign: 'center' }}>{loadError}</p>
-        <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
+        {isMobile && <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />}
       </div>
     );
   }
@@ -703,7 +703,7 @@ export default function Purchasing() {
 
   return (
     <PageShell className="mobile-summary-container" mobileStyle={{ width: '100%', maxWidth: '600px', margin: '0 auto', padding: '16px' }}>
-      {(selectedGroupId || isMobile) && workspaceRefreshControl}
+      {isMobile && workspaceRefreshControl}
       <style>{`
         .mobile-summary-container {
           width: 100%;
@@ -1176,7 +1176,6 @@ export default function Purchasing() {
             </h1>
             <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
             </div>
-            {!isMobile && workspaceRefreshControl}
           </PageHeader>
 
           <div className="search-wrapper workspace-toolbar" data-workspace-toolbar style={isMobile ? { display: 'flex', gap: '8px', alignItems: 'center' } : undefined}>
