@@ -62,10 +62,14 @@ try {
     await page.getByTestId('outbound-item-display-sort').selectOption('original');
     assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), before, 'display sort caused a business write');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'horizontal overflow');
+    await page.evaluate(() => window.__P0_REACT_HARNESS__.navigate('/outbound-shipments'));
+    const listTitle = page.getByRole('heading', { name: '出庫管理' });
+    await listTitle.waitFor();
+    assert.equal(await listTitle.locator('svg[aria-hidden="true"]').count(), 1, 'Outbound list title uses a leading icon');
     assert.deepEqual(errors, []);
     await page.close();
   }
-  console.log('PASS outbound natural SKU/name/original display order, stable fallback, no mutation, header delete placement, 1366/1280');
+  console.log('PASS outbound natural SKU/name/original display order, stable fallback, no mutation, header delete placement and list icon, 1366/1280');
 } finally {
   await browser?.close();
   vite.kill('SIGTERM');

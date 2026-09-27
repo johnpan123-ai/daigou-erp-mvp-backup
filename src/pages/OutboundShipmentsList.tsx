@@ -181,7 +181,10 @@ export default function OutboundShipmentsList() {
     <PageShell data-testid="outbound-shipments-list-root" mobileStyle={{ padding: '16px', maxWidth: 900, margin: '0 auto' }}>
       <PageHeader mobileStyle={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>出庫管理</h1>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 22, fontWeight: 700, margin: 0 }}>
+            <PackageOpen size={isMobile ? 20 : 24} style={{ color: '#2563eb', flexShrink: 0 }} aria-hidden="true" />
+            出庫管理
+          </h1>
           <p style={{ color: '#64748b', fontSize: 14, margin: '4px 0 0' }}>
             管理從日本寄回台灣的出庫單{isRefreshing ? ' · 同步最新資料中…' : ''}
           </p>
