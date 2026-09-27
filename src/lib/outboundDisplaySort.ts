@@ -5,10 +5,10 @@ export interface OutboundDisplayGroup<T> {
   items: T[];
 }
 
-const compareSku = (a: string, b: string) => {
+const compareSku = (a: string, b: string, original: boolean) => {
   if (!a && b) return 1;
   if (a && !b) return -1;
-  return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+  return a.localeCompare(b, 'ja', original ? { numeric: true } : { numeric: true, sensitivity: 'base' });
 };
 
 /** Presentation only. Never reorder or mutate the persisted shipment item array. */
@@ -23,7 +23,7 @@ export function sortOutboundDisplayGroups<T>(
     groupName,
     items: received || mode === 'sku'
       ? items.map((item, index) => ({ item, index })).sort((a, b) =>
-          compareSku(skuOf(a.item), skuOf(b.item)) || a.index - b.index
+          compareSku(skuOf(a.item), skuOf(b.item), mode === 'original') || a.index - b.index
         ).map(({ item }) => item)
       : items,
   }));
@@ -36,7 +36,8 @@ export function sortOutboundDisplayGroups<T>(
         )
       : compareSku(
           a.entry.items.map(skuOf).find(Boolean) || '',
-          b.entry.items.map(skuOf).find(Boolean) || ''
+          b.entry.items.map(skuOf).find(Boolean) || '',
+          mode === 'original',
         );
     return comparison || a.index - b.index;
   }).map(({ entry }) => entry);
