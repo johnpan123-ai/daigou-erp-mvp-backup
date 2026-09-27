@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
+    "test:ui-layout": "node tests/ui-layout-preservation.mjs && node tests/ui-layout-geometry.mjs",
     "test:workflow-ux-quick-wins": "node tests/workflow-ux-quick-wins.mjs",
     "test:core-port-isolation": "node tests/core-test-port-isolation.mjs",
     "test:sandbox-guard": "node tests/sandbox-guard.mjs",

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PageHeader } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Archive, Check, ChevronRight, Clock3, Copy, RefreshCw, ShoppingCart } from 'lucide-react';
 import type {
@@ -144,7 +145,7 @@ function WorkQueueSection({
             <div className="work-queue-row" key={item.group.id} onClick={() => onOpenItem(item.group.id)}>
               <div className="work-item-title-area">
                 <button type="button" className="work-item-main">
-                  <strong title={displayName}>{displayName}</strong>
+                  <strong className="workspace-product-title" title={displayName}>{displayName}</strong>
                   <span>{item.targetDate ? `結單 ${item.targetDate}` : '未設定結單日'}</span>
                 </button>
                 {showCopyAction && (
@@ -451,7 +452,7 @@ export default function Dashboard() {
 
   return (
     <div className="daily-dashboard workspace-page">
-      <header className="dashboard-header workspace-header" data-workspace-header>
+      <PageHeader className="dashboard-header">
         <div>
           <p className="dashboard-eyebrow">DAILY WORK</p>
           <h1>每日工作待辦</h1>
@@ -464,7 +465,7 @@ export default function Dashboard() {
             {isLoading ? '更新中' : '重新整理'}
           </button>
         </div>
-      </header>
+      </PageHeader>
 
       {loadError && (
         <div className="dashboard-error" role="alert">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { PageHeader } from '../components/layout/PageHeader';
 import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
@@ -441,7 +442,7 @@ export default function UnlistedItems() {
   }, [pendingItems]);
 
   return (
-    <div className="unlisted-container" data-testid="unlisted-items-root">
+    <div className="unlisted-container workspace-page" data-testid="unlisted-items-root">
       <style>{`
         .unlisted-container {
           width: 100%;
@@ -686,7 +687,7 @@ export default function UnlistedItems() {
         }
       `}</style>
 
-      <div className="unlisted-header">
+      <PageHeader className="unlisted-header">
         <div className="unlisted-title-area">
           <h1>
             <Archive size={26} style={{ color: '#2563eb' }} />
@@ -766,9 +767,9 @@ export default function UnlistedItems() {
             </button>
           )}
         </div>
-      </div>
+      </PageHeader>
 
-      <div className="stats-grid">
+      <div className="stats-grid workspace-stats workspace-stats-three" data-workspace-stats>
         <div className="stat-card">
           <span className="stat-label">待下架規格總數</span>
           <span className="stat-value">{stats.total} 筆</span>
@@ -783,7 +784,7 @@ export default function UnlistedItems() {
         </div>
       </div>
 
-      <div className="filter-bar">
+      <div className="filter-bar workspace-toolbar" data-workspace-toolbar>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             onClick={() => handleSwitchView('pending')}
@@ -849,12 +850,12 @@ export default function UnlistedItems() {
           <span className="text-sm text-secondary font-medium">資料整理中...</span>
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="table-card flex flex-col items-center justify-center" style={{ height: '200px', backgroundColor: '#fff' }}>
+        <div className="workspace-empty workspace-content flex flex-col items-center justify-center" data-workspace-content>
           <Archive size={40} style={{ color: '#cbd5e1', marginBottom: '8px' }} />
           <span className="text-sm text-secondary font-medium">{viewMode === 'pending' ? '沒有符合條件的待下架商品' : '目前沒有已處理紀錄'}</span>
         </div>
       ) : isMobile ? (
-        <div className="mobile-card-list">
+        <div className="mobile-card-list workspace-content" data-workspace-content>
           {filteredItems.map(item => (
             <div className="mobile-card" key={item.id}>
               <div className="mobile-card-header">
@@ -864,10 +865,10 @@ export default function UnlistedItems() {
                   onChange={() => handleToggleSelect(item.id)}
                   style={{ width: '18px', height: '18px', marginTop: '2px' }}
                 />
-                <div style={{ flex: 1, marginLeft: '10px' }}>
+                <div style={{ flex: 1, minWidth: 0, marginLeft: '10px' }}>
                   <div className="mobile-card-title" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <span>{item.name}</span>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <span className="workspace-product-title" title={item.name}>{item.name}</span>
+                    <div className="workspace-row-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                       <button
                         onClick={() => handleCopyItemName(item.id, item.name)}
                         title="複製商品名稱"
@@ -962,7 +963,7 @@ export default function UnlistedItems() {
           ))}
         </div>
       ) : (
-        <div className="table-card">
+        <div className="table-card workspace-panel workspace-content" data-workspace-content>
           <table className="unlisted-table">
             <thead>
               <tr>
@@ -998,8 +999,8 @@ export default function UnlistedItems() {
                     <td style={{ color: '#0f172a', verticalAlign: 'middle', padding: '16px 16px' }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '20px', fontWeight: 700 }}>{item.name}</span>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
+                          <span className="workspace-product-title" title={item.name} style={{ flex: 1, fontSize: '16px', fontWeight: 700 }}>{item.name}</span>
+                          <div className="workspace-row-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
                             <button
                               onClick={() => handleCopyItemName(item.id, item.name)}
                               title="複製商品名稱"

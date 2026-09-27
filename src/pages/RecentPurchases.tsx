@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PageHeader } from '../components/layout/PageHeader';
 import { ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
@@ -457,9 +458,9 @@ export default function RecentPurchases() {
         }
       `}</style>
 
-      <header className="recent-purchases-page-header workspace-header" data-workspace-header>
+      <PageHeader className="recent-purchases-page-header">
         <div>
-          <h1 style={{ margin: 0, color: '#0f172a', fontSize: '26px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <History size={26} color="#2563eb" />
             近期採購
           </h1>
@@ -473,7 +474,7 @@ export default function RecentPurchases() {
             ・同步中…
           </span>
         </div>
-      </header>
+      </PageHeader>
 
       <div className="recent-purchases-toolbar workspace-toolbar workspace-panel" data-workspace-toolbar style={{ padding: '16px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
@@ -616,7 +617,7 @@ export default function RecentPurchases() {
                               <button
                                 type="button"
                                 data-testid="recent-purchase-product"
-                                className="recent-purchase-product-button"
+                                className="recent-purchase-product-button workspace-product-title"
                                 onClick={() => openProductDetail(row.group.id)}
                               >
                                 {row.group.normalized_title || row.group.title}

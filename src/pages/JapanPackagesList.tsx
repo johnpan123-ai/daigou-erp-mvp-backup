@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { PageHeader } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, CheckCircle2, Pencil, Eye, AlertTriangle, ChevronRight } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
@@ -1245,7 +1246,7 @@ export default function JapanPackagesList() {
       `}</style>
 
       {/* Header with Title and Add Button */}
-      <div className="header-section workspace-header" data-workspace-header>
+      <PageHeader className="header-section">
         <h1 className="header-title" style={isMobile ? { fontSize: '20px' } : undefined}>
           <Truck size={isMobile ? 20 : 24} style={{ color: '#2563eb' }} />
           日本包裹管理
@@ -1275,7 +1276,7 @@ export default function JapanPackagesList() {
             登記新包裹
           </button>
         )}
-      </div>
+      </PageHeader>
 
       {/* Statistics & Search Toolbar */}
       {isMobile ? (

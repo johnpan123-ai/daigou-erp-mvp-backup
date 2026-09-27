@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { PageHeader } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrder, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
@@ -698,9 +699,11 @@ export default function Purchasing() {
     );
   }
 
+  const workspaceRefreshControl = <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />;
+
   return (
     <div className="mobile-summary-container workspace-page">
-      {selectedGroupId && <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />}
+      {selectedGroupId && workspaceRefreshControl}
       <style>{`
         .mobile-summary-container {
           width: 100%;
@@ -811,6 +814,7 @@ export default function Purchasing() {
 
         .card-content {
           flex: 1;
+          min-width: 0;
           display: flex;
           flex-direction: column;
           gap: 8px;
@@ -1155,7 +1159,7 @@ export default function Purchasing() {
       {!selectedGroup ? (
         // List View
         <div className="purchasing-page-inner">
-          <div className="summary-header workspace-header" data-workspace-header>
+          <PageHeader>
             <div>
             <h1 className="summary-title">
               <ClipboardList size={22} />
@@ -1163,8 +1167,8 @@ export default function Purchasing() {
             </h1>
             <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
             </div>
-            <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
-          </div>
+            {workspaceRefreshControl}
+          </PageHeader>
 
           <div className="search-wrapper workspace-toolbar" data-workspace-toolbar>
             <div style={{ position: 'relative', flex: 1 }}>
@@ -1291,7 +1295,7 @@ export default function Purchasing() {
                       />
                     )}
                     <div className="card-content" style={{ cursor: 'pointer' }}>
-                      <h2 className="card-title">{item.title}</h2>
+                      <h2 className="card-title workspace-product-title" title={item.title}>{item.title}</h2>
                       <div className="card-stats">
                         {item.gap > 0 && (
                           <span style={{ backgroundColor: '#fef2f2', color: '#dc2626', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>
@@ -1303,7 +1307,7 @@ export default function Purchasing() {
                     </div>
 
                     {!isSelectMode && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div className="workspace-row-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <button
                           onTouchStart={(e) => {
                             e.stopPropagation();

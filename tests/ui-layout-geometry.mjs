@@ -59,6 +59,8 @@ try {
           sections: [...element.querySelectorAll('[data-workspace-header], [data-workspace-stats], [data-workspace-toolbar], [data-workspace-content]')].map(node => ({ kind: node.getAttributeNames().find(a => a.startsWith('data-workspace-')), ...rect(node) })),
           headerCount: element.querySelectorAll('[data-workspace-header]').length,
           contentCount: element.querySelectorAll('[data-workspace-content]').length,
+          heading: element.querySelector('[data-workspace-header] h1') ? rect(element.querySelector('[data-workspace-header] h1')) : null,
+          stats: [...element.querySelectorAll('[data-workspace-stats] > *')].map(rect),
           sidebarVisible: document.querySelector('.app-sidebar').getBoundingClientRect().right > 0,
         };
       });
@@ -72,10 +74,58 @@ try {
         assert.ok(geometry.contentCount >= 1, `${name}/${width}: content shell`);
         const left = geometry.root.x + geometry.paddingLeft;
         const right = geometry.root.right - geometry.paddingRight;
+        assert.ok(geometry.heading && geometry.heading.x >= left - 1 && geometry.heading.x <= left + 44, `${name}/${width}: title must be left aligned`);
         for (const section of geometry.sections.filter(s => s.width > 0)) {
           assert.ok(section.x >= left - 1 && section.right <= right + 1, `${name}/${width}: ${section.kind} escapes content`);
         }
         if (width >= 768) assert.equal(geometry.sidebarVisible, true);
+        for (const card of geometry.stats) {
+          for (const peer of geometry.stats.filter(other => Math.abs(other.y - card.y) < 1)) {
+            assert.ok(Math.abs(peer.height - card.height) <= 1, `${name}/${width}: same-row stats height`);
+          }
+        }
+        assert.ok(geometry.sections.some(s => s.kind === 'data-workspace-content' && s.width >= (right - left) * 0.95), `${name}/${width}: full width list shell`);
+        if (name === 'purchasing') {
+          const title = root.locator('.summary-card .workspace-product-title').first();
+          const original = await title.textContent();
+          await title.evaluate((node, value) => { node.textContent = value.repeat(12); }, original);
+          const before = await root.locator('.workspace-row-actions').first().boundingBox();
+          const titleGeometry = await title.evaluate(node => ({ height: node.getBoundingClientRect().height, scrollHeight: node.scrollHeight, lineHeight: parseFloat(getComputedStyle(node).lineHeight), clamp: getComputedStyle(node).webkitLineClamp }));
+          assert.equal(titleGeometry.clamp, '2');
+          assert.ok(titleGeometry.height <= titleGeometry.lineHeight * 2 + 1);
+          assert.ok(titleGeometry.scrollHeight > titleGeometry.height, 'long fixture is genuinely truncated');
+          await title.evaluate(node => { node.textContent = '短商品名稱'; });
+          const after = await root.locator('.workspace-row-actions').first().boundingBox();
+          assert.ok(Math.abs(before.x - after.x) <= 1 && Math.abs(before.width - after.width) <= 1, 'operation column must not be pushed by long titles');
+          await title.evaluate((node, value) => { node.textContent = value; }, original);
+        }
+        if (name === 'inventory') {
+          // The legacy harness stubs getInventory, not the newer paired snapshot reader.
+          // Supply a read-only snapshot only inside this disposable browser context.
+          await page.evaluate(async () => {
+            const { dataProvider } = await import('/src/providers/dataProvider.ts');
+            const fixture = await fetch('/tests/fixtures/core-regression.json').then(response => response.json());
+            fixture.inventory[0].normalized_product_title = '隔離測試商品名稱'.repeat(30);
+            dataProvider.getInventoryCatalogSnapshot = async () => ({ inventory: fixture.inventory, productGroups: fixture.productGroups });
+          });
+          await root.locator('.btn-refresh-inv').click();
+          await root.locator('.inventory-list-card table').waitFor();
+          await page.screenshot({ path: `${outputDir}/${name}-${width}-populated.png`, fullPage: true });
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1 || document.querySelector('.main-area').scrollWidth > document.querySelector('.main-area').clientWidth + 1), false, 'populated inventory overflow');
+        }
+        // Search affects fixture UI only; never edits a ProductGroup or dispatches a write.
+        const search = root.getByPlaceholder(/搜尋/).first();
+        if (await search.count()) await search.fill('NO_MATCH_LAYOUT_FIXTURE_8e2d');
+        else if (name === 'dashboard') await root.locator('.daily-task-card').last().click();
+        await page.waitForTimeout(350);
+        await page.screenshot({ path: `${outputDir}/${name}-${width}-empty.png`, fullPage: true });
+        const empty = await root.evaluate(element => ({
+          overflow: document.documentElement.scrollWidth > innerWidth + 1 || document.querySelector('.main-area').scrollWidth > document.querySelector('.main-area').clientWidth + 1,
+          emptyHeight: element.querySelector('.workspace-empty')?.getBoundingClientRect().height ?? null,
+        }));
+        assert.equal(empty.overflow, false, `${name}/${width}: empty-state overflow`);
+        if (empty.emptyHeight !== null) assert.ok(empty.emptyHeight < 280, `${name}/${width}: compact empty state`);
+        results.at(-1).empty = empty;
       }
       assert.deepEqual(errors, [], `${name}/${width}: runtime errors`);
       assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0);

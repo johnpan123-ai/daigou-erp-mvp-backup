@@ -6,11 +6,12 @@ interface EmptyStateProps {
   description: string;
   actionLabel?: string;
   onAction?: () => void;
+  compact?: boolean;
 }
 
-export function EmptyState({ icon: Icon, title, description, actionLabel, onAction }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, actionLabel, onAction, compact = false }: EmptyStateProps) {
   return (
-    <div className="flex-col items-center justify-center gap-md" style={{
+    <div className={`flex-col items-center justify-center gap-md ${compact ? 'workspace-empty workspace-content' : ''}`} data-workspace-content={compact || undefined} style={compact ? undefined : {
       padding: 'var(--spacing-xl)',
       minHeight: '300px',
       border: '1px dashed var(--color-border)',

@@ -9,6 +9,7 @@ import { buildPurchaseRecordSearchDocuments, buildVariantsByGroup, purchaseRecor
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
+import { PageHeader } from '../components/layout/PageHeader';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { productGroupDisplayName, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
@@ -2504,7 +2505,7 @@ export default function PurchaseRecords() {
   }
 
   return (
-    <div className="flex-col gap-lg workspace-page" data-testid="purchase-records-root" style={{ paddingBottom: isMobile ? '180px' : undefined }}>
+    <div className="flex-col gap-lg workspace-page purchase-records-workspace" data-testid="purchase-records-root">
       {linkedGroupId !== null && (
         <div role="status" data-testid="purchase-records-group-scope" style={{ padding: 12, background: '#eff6ff', borderRadius: 8, overflowWrap: 'anywhere' }}>
           {baseGroups.length ? '正在查看指定商品的訂購紀錄（暫不套用其他篩選）' : '找不到指定商品，或目前無權讀取；未改用其他商品。'}
@@ -2736,12 +2737,12 @@ export default function PurchaseRecords() {
       `}</style>
 
 
-      <div className="workspace-header" data-workspace-header>
+      <PageHeader>
         <div>
           <h1 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: 600 }}>訂購紀錄表</h1>
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
         </div>
-      </div>
+      </PageHeader>
 
       <CloudRefreshButton
         refresh={refreshAuthoritative}
@@ -4693,6 +4694,7 @@ export default function PurchaseRecords() {
         <div className="flex-col gap-md">
           {(displayedMainGroups.length === 0 && displayedCompletedGroups.length === 0) ? (
             <EmptyState
+              compact
               icon={Receipt}
               title={groups.length === 0 ? "尚未有訂購紀錄" : "找不到符合的紀錄"}
               description={groups.length === 0 ? "您可以透過匯入商品清單來自動產生母體，或手動建立。" : "請嘗試調整搜尋關鍵字或篩選條件。"}
