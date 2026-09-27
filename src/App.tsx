@@ -21,6 +21,7 @@ import DuplicateVariants from './pages/DuplicateVariants';
 import OutboundShipmentsList from './pages/OutboundShipmentsList';
 import OutboundShipmentDetail from './pages/OutboundShipmentDetail';
 import NextRawDbIntegrityProbe from './pages/NextRawDbIntegrityProbe';
+import WacaIntegration from './pages/WacaIntegration';
 import { CloudRealtimeSyncBoundary } from './contexts/CloudRealtimeSyncContext';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -45,6 +46,7 @@ function App({ authClient, navigateAuth }: AppProps = {}) {
 
               <Route path="/orders-import" element={<OrdersImport />} />
               <Route path="/purchase-records" element={<PurchaseRecords />} />
+              <Route path="/waca" element={<WacaIntegration />} />
               <Route path="/purchase-records/:id" element={<PurchaseManagement />} />
               <Route path="/recent-purchases" element={<RecentPurchases />} />
               <Route path="/purchasing" element={<Purchasing />} />

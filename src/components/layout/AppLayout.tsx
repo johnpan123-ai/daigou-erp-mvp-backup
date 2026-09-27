@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { PackageSearch, Settings, Box, FileText, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers, PackageOpen, History } from 'lucide-react';
+import { PackageSearch, Settings, Box, FileText, FileSpreadsheet, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers, PackageOpen, History } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../../providers/providerMode';
 import { useAuth } from '../../auth/authContext';
@@ -12,7 +12,7 @@ import { GlobalSyncControl } from './GlobalSyncControl';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 import '../../styles/workspace.css';
 
-const workspaceRoutes = new Set(['/', '/dashboard', '/inventory', '/purchase-records', '/recent-purchases', '/purchasing', '/japan-packages', '/outbound-shipments', '/unlisted-items', '/duplicate-variants', '/settings']);
+const workspaceRoutes = new Set(['/', '/dashboard', '/inventory', '/purchase-records', '/waca', '/recent-purchases', '/purchasing', '/japan-packages', '/outbound-shipments', '/unlisted-items', '/duplicate-variants', '/settings']);
 
 interface SidebarItemProps {
   to: string;
@@ -234,6 +234,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )} */}
           <SidebarItem to="/purchase-records" state={{ resetSearch: Date.now() }} icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
+          {providerMode === 'next' && (
+            <SidebarItem to="/waca" icon={<FileSpreadsheet size={20} />} label="WACA 訂單整合" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
           <SidebarItem to="/recent-purchases" icon={<History size={20} />} label="近期採購" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/purchasing') && (
             <SidebarItem to="/purchasing" icon={<FileText size={20} />} label="採購總表" onClick={() => setIsMobileMenuOpen(false)} />

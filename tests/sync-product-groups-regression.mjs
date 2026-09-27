@@ -74,7 +74,7 @@ const localStoragePairs = [
 const vite = spawn(process.execPath, [
   VITE_PATH,
   '--mode', 'next',
-  '--host', '127.0.0.1', '--port', PORT, '--strictPort',
+  '--host', '127.0.0.1', '--port', PORT, '--strictPort', '--configLoader', 'runner',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });

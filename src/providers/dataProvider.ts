@@ -3,7 +3,7 @@ import { LocalProvider } from './localProvider';
 import { supabaseProvider } from './cloud/supabaseProvider';
 import { testSandboxProvider } from './testSandboxProvider';
 import { getProviderMode } from './providerMode';
-import type { 
+import type {
   InventoryItem, 
   SalesOrder, 
   SalesOrderItem, 
@@ -22,6 +22,7 @@ import type {
   OutboundShipment,
   OutboundShipmentItem
 } from '../lib/db';
+import { notifyLocalVariantCollectionChanged } from '../lib/db';
 import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
@@ -34,6 +35,10 @@ import type {
 } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 import type { CloudRestoreCandidateProofResult } from './cloud/cloudRestoreCandidateProof';
+import {
+  readNextWacaSnapshot, commitNextWacaSnapshot,
+  type NextWacaSnapshot,
+} from '../waca/nextStorage';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -363,6 +368,20 @@ class DynamicDataProvider implements IDataProvider {
   }
   async restoreBackup(backupData: any): Promise<boolean> {
     return this.guardedWrite(() => this.getActiveProvider().restoreBackup(backupData));
+  }
+  async getNextWacaSnapshot(): Promise<NextWacaSnapshot> {
+    if (getProviderMode() !== 'next') throw new Error('WACA_NEXT_ONLY');
+    return readNextWacaSnapshot();
+  }
+  async commitNextWacaSnapshot(
+    snapshot: NextWacaSnapshot, expectedRevision: number, updateAutoQuantity: boolean,
+  ): Promise<number> {
+    if (getProviderMode() !== 'next') throw new Error('WACA_NEXT_ONLY');
+    return this.guardedWrite(async () => {
+      const revision = await commitNextWacaSnapshot(snapshot, expectedRevision, updateAutoQuantity);
+      if (updateAutoQuantity) notifyLocalVariantCollectionChanged();
+      return revision;
+    });
   }
   async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');

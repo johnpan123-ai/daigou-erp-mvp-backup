@@ -1638,8 +1638,6 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     
     // 1. Calculate orders demand for myacg
     const myacgOrderDemandMap = new Map<string, number>();
-    // 2. Calculate orders demand for waca
-    const wacaOrderDemandMap = new Map<string, number>();
 
     for (const item of salesOrderItems) {
       if (item.order_status && item.order_status.includes('已取消')) continue;
@@ -1649,46 +1647,10 @@ export class LocalStorageAdapter implements DatabaseAdapter {
       const cleanItemCode = item.myacg_item_code.trim().toUpperCase();
       if (platform === 'myacg') {
         myacgOrderDemandMap.set(cleanItemCode, (myacgOrderDemandMap.get(cleanItemCode) || 0) + item.quantity);
-      } else if (platform === 'waca' || platform === 'ruten') {
+      } else if (platform === 'ruten') {
         myacgOrderDemandMap.set(cleanItemCode, (myacgOrderDemandMap.get(cleanItemCode) || 0) + item.quantity);
       }
     }
-
-    const getOrderDemandForVariant = (variantCode: string, demandMap: Map<string, number>): number => {
-      const cleanCode = variantCode.trim().toUpperCase();
-      
-      // 1. Exact match (case-insensitive)
-      for (const [code, qty] of demandMap.entries()) {
-        if (code.trim().toUpperCase() === cleanCode) {
-          return qty;
-        }
-      }
-      
-      // 2. Fuzzy base SKU match
-      const baseVariant = getBaseSku(cleanCode);
-      let sum = 0;
-      let matched = false;
-      for (const [code, qty] of demandMap.entries()) {
-        const normCode = code.trim().toUpperCase();
-        const baseNorm = getBaseSku(normCode);
-        if (baseNorm === baseVariant && 
-            (normCode === baseNorm || cleanCode === baseVariant)) {
-          sum += qty;
-          matched = true;
-        }
-      }
-      if (matched) return sum;
-
-      // 3. Fallback: match any order code sharing the same base SKU
-      for (const [code, qty] of demandMap.entries()) {
-        const normCode = code.trim().toUpperCase();
-        if (getBaseSku(normCode) === baseVariant) {
-          sum += qty;
-          matched = true;
-        }
-      }
-      return matched ? sum : 0;
-    };
 
     let changed = false;
     for (const v of variants) {
@@ -1709,16 +1671,12 @@ export class LocalStorageAdapter implements DatabaseAdapter {
         console.warn(`找不到 InventoryItem 對應 SKU: ${v.myacg_item_code}`);
       }
 
-      const newWacaAuto = getOrderDemandForVariant(v.myacg_item_code, wacaOrderDemandMap);
-
       if (
         v.effective_myacg_quantity !== effectiveMyacg || 
-        v.myacg_auto_quantity !== autoMyacg || 
-        v.waca_auto_quantity !== newWacaAuto
+        v.myacg_auto_quantity !== autoMyacg
       ) {
         v.effective_myacg_quantity = effectiveMyacg;
         v.myacg_auto_quantity = autoMyacg;
-        v.waca_auto_quantity = newWacaAuto;
         changed = true;
       }
     }
@@ -2060,6 +2018,11 @@ const ATOMIC_IMPORT_COLLECTIONS = [
 
 const OPTIONAL_ATOMIC_IMPORT_COLLECTIONS = [
   ['importBatches', 'erp_import_batches'],
+  ['wacaOrders', 'erp_waca_orders_v1'],
+  ['wacaItems', 'erp_waca_items_v1'],
+  ['wacaMappings', 'erp_waca_mappings_v1'],
+  ['wacaImportBatches', 'erp_waca_import_batches_v1'],
+  ['myacgMasterLinks', 'erp_myacg_master_links_v1'],
 ] as const;
 
 /**
@@ -2076,7 +2039,7 @@ export const LEGACY_SHARED_INDEXED_DB_NAME = 'daigou-erp-db';
 
 type AtomicImportEntry = {
   storageKey: string;
-  value: unknown[];
+  value: unknown;
 };
 
 const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] => {
@@ -2109,6 +2072,49 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
     }
     entries.push({ storageKey, value: Array.isArray(collection) ? collection : [] });
   }
+
+  if (data.wacaOrders !== undefined || data.wacaItems !== undefined || data.wacaMappings !== undefined) {
+    const records = (name: string) => (data[name] as Record<string, unknown>[] | undefined) ?? [];
+    const orders = records('wacaOrders');
+    const items = records('wacaItems');
+    const mappings = records('wacaMappings');
+    const links = records('myacgMasterLinks');
+    const variants = records('productVariants');
+    const unique = (values: unknown[], name: string) => {
+      if (values.some(value => typeof value !== 'string' || !value) || new Set(values).size !== values.length) {
+        throw new Error(`JSON 備份 WACA ${name} 識別碼無效或重複。`);
+      }
+    };
+    unique(orders.map(row => row.key), '訂單');
+    unique(items.map(row => row.key), '品項');
+    unique(mappings.map(row => row.feature), '對照');
+    unique(links.map(row => row.childCode), '主子關係');
+    const orderIds = new Set(orders.map(row => row.key));
+    const variantIds = new Set(variants.map(row => row.id));
+    if (items.some(row => !orderIds.has(row.orderKey) || (row.productVariantId && !variantIds.has(row.productVariantId)))) {
+      throw new Error('JSON 備份 WACA 品項關聯不完整。');
+    }
+    if (mappings.some(row => !variantIds.has(row.productVariantId)) ||
+        links.some(row => !variantIds.has(row.productVariantId))) {
+      throw new Error('JSON 備份 WACA 商品對照關聯不完整。');
+    }
+    const statusByOrder = new Map(orders.map(row => [row.key, row.status]));
+    const auto = new Map<string, number>();
+    for (const item of items) {
+      if (!item.productVariantId || !['處理中', '完成付款'].includes(String(statusByOrder.get(item.orderKey)))) continue;
+      const id = String(item.productVariantId);
+      const quantity = Number(item.quantity);
+      if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error('JSON 備份 WACA 數量無效。');
+      auto.set(id, (auto.get(id) ?? 0) + quantity);
+    }
+    if (items.length > 0 && variants.some(row => Number(row.waca_auto_quantity ?? 0) !== (auto.get(String(row.id)) ?? 0))) {
+      throw new Error('JSON 備份 WACA 自動數量與訂單不一致。');
+    }
+  }
+
+  // Revisions are concurrency markers, not user data. A restored snapshot begins
+  // a new local revision after all durable collections have committed together.
+  entries.push({ storageKey: 'erp_waca_revision_v1', value: 0 });
 
   return entries;
 };
@@ -3339,6 +3345,13 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   private variantDedupeCache: { canonical: ProductVariant[]; aliasMap: Map<string, string> } | null = null;
   private variantDedupeCacheVersion = -1;
 
+  /** Called after another NEXT owner commits the Variant collection in the same DB. */
+  invalidateVariantDedupeCache(): void {
+    this.variantVersion++;
+    this.variantDedupeCache = null;
+    this.variantDedupeCacheVersion = -1;
+  }
+
   private getCachedVariantDedupe(rawVariants: ProductVariant[]): { canonical: ProductVariant[]; aliasMap: Map<string, string> } {
     if (this.variantDedupeCache && this.variantDedupeCacheVersion === this.variantVersion) {
       return this.variantDedupeCache;
@@ -3517,8 +3530,6 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
     // 1. Calculate orders demand for myacg
     const myacgOrderDemandMap = new Map<string, number>();
-    // 2. Calculate orders demand for waca
-    const wacaOrderDemandMap = new Map<string, number>();
 
     for (const item of salesOrderItems) {
       if (item.order_status && item.order_status.includes('已取消')) continue;
@@ -3528,46 +3539,10 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       const cleanItemCode = item.myacg_item_code.trim().toUpperCase();
       if (platform === 'myacg') {
         myacgOrderDemandMap.set(cleanItemCode, (myacgOrderDemandMap.get(cleanItemCode) || 0) + item.quantity);
-      } else if (platform === 'waca' || platform === 'ruten') {
+      } else if (platform === 'ruten') {
         myacgOrderDemandMap.set(cleanItemCode, (myacgOrderDemandMap.get(cleanItemCode) || 0) + item.quantity);
       }
     }
-
-    const getOrderDemandForVariant = (variantCode: string, demandMap: Map<string, number>): number => {
-      const cleanCode = variantCode.trim().toUpperCase();
-
-      // 1. Exact match (case-insensitive)
-      for (const [code, qty] of demandMap.entries()) {
-        if (code.trim().toUpperCase() === cleanCode) {
-          return qty;
-        }
-      }
-
-      // 2. Fuzzy base SKU match
-      const baseVariant = getBaseSku(cleanCode);
-      let sum = 0;
-      let matched = false;
-      for (const [code, qty] of demandMap.entries()) {
-        const normCode = code.trim().toUpperCase();
-        const baseNorm = getBaseSku(normCode);
-        if (baseNorm === baseVariant &&
-            (normCode === baseNorm || cleanCode === baseVariant)) {
-          sum += qty;
-          matched = true;
-        }
-      }
-      if (matched) return sum;
-
-      // 3. Fallback: match any order code sharing the same base SKU
-      for (const [code, qty] of demandMap.entries()) {
-        const normCode = code.trim().toUpperCase();
-        if (getBaseSku(normCode) === baseVariant) {
-          sum += qty;
-          matched = true;
-        }
-      }
-      return matched ? sum : 0;
-    };
 
     let changed = false;
     for (const v of rawVariants) {
@@ -3587,16 +3562,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         console.warn(`找不到 InventoryItem 對應 SKU: ${v.myacg_item_code}`);
       }
 
-      const newWacaAuto = getOrderDemandForVariant(v.myacg_item_code, wacaOrderDemandMap);
-
       if (
         v.effective_myacg_quantity !== effectiveMyacg ||
-        v.myacg_auto_quantity !== autoMyacg ||
-        v.waca_auto_quantity !== newWacaAuto
+        v.myacg_auto_quantity !== autoMyacg
       ) {
         v.effective_myacg_quantity = effectiveMyacg;
         v.myacg_auto_quantity = autoMyacg;
-        v.waca_auto_quantity = newWacaAuto;
         changed = true;
       }
     }
@@ -3816,6 +3787,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       outboundShipments: await this.getOutboundShipments(),
       outboundShipmentItems: await this.getOutboundShipmentItems(),
       bundleComponents: await this.getBundleComponents(),
+      importBatches: await this.getImportBatches(),
+      wacaOrders: await this.get<unknown[]>('erp_waca_orders_v1', []),
+      wacaItems: await this.get<unknown[]>('erp_waca_items_v1', []),
+      wacaMappings: await this.get<unknown[]>('erp_waca_mappings_v1', []),
+      wacaImportBatches: await this.get<unknown[]>('erp_waca_import_batches_v1', []),
+      myacgMasterLinks: await this.get<unknown[]>('erp_myacg_master_links_v1', []),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -4013,7 +3990,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 }
 
-export const localDb: DatabaseAdapter = new IndexedDbAdapter(
+export const localDb = new IndexedDbAdapter(
   LOCAL_AUTHORITATIVE_INDEXED_DB_NAME,
   { migrateLegacyLocalData: true },
 );
@@ -4025,6 +4002,7 @@ export const cloudCacheDb = new IndexedDbAdapter(
 
 /** Backward-compatible name: direct callers always mean Local authoritative data. */
 export const db: DatabaseAdapter = localDb;
+export const notifyLocalVariantCollectionChanged = (): void => localDb.invalidateVariantDedupeCache();
 if (typeof window !== 'undefined') {
   // Diagnostic only: lets an operator run `await window.db.getVariantDuplicateReport()`
   // in the browser console to see which product_variants rows were merged as duplicates.

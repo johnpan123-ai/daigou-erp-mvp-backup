@@ -18,7 +18,7 @@ const stable = value => JSON.stringify(value, (_key, nested) => {
   if (!nested || typeof nested !== 'object' || Array.isArray(nested)) return nested;
   return Object.fromEntries(Object.entries(nested).sort(([left], [right]) => left.localeCompare(right)));
 });
-const vite = spawn(process.execPath, [VITE, '--mode', 'next', '--host', '127.0.0.1', '--port', '4251', '--strictPort'], {
+const vite = spawn(process.execPath, [VITE, '--mode', 'next', '--host', '127.0.0.1', '--port', '4251', '--strictPort', '--configLoader', 'runner'], {
   cwd: ROOT,
   stdio: ['ignore', 'pipe', 'pipe'],
 });

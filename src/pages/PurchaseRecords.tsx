@@ -999,7 +999,7 @@ export default function PurchaseRecords() {
         entry.wacaManual += (v.waca_manual_adjustment ?? 0);
         entry.gap += res.gap;
 
-        const proxyDemand = res.myacg + (v.waca_manual_adjustment ?? 0) + res.privateOrder;
+        const proxyDemand = res.myacg + res.waca + res.privateOrder;
         entry.proxyGap += Math.max(proxyDemand - res.purchased, 0);
 
         if (v.catalog_missing === true) entry.hasCatalogMissing = true;
@@ -3654,7 +3654,7 @@ export default function PurchaseRecords() {
 
                   const isProxy = activeTab === 'proxy';
                   const totalDemand = isProxy 
-                    ? (details.myacg + details.wacaManual + details.privateOrder) 
+                    ? (details.myacg + details.waca + details.privateOrder)
                     : demandAndPurchased.demand;
                   const purchased = isProxy ? details.purchased : demandAndPurchased.purchased;
                   const gap = isProxy ? getDynamicGap(g.id, details.gap) : demandAndPurchased.gap;
@@ -4220,6 +4220,7 @@ export default function PurchaseRecords() {
                               inputMode="numeric"
                               pattern="[0-9]*"
                               className="input" 
+                              title={`WACA 手動調整（自動 ${details.waca - details.wacaManual} 另計）`}
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={draftDemands[`${g.id}_waca`] !== undefined ? draftDemands[`${g.id}_waca`] : String(details.wacaManual)} 
                               onChange={e => handleUpdateDraft(g.id, 'waca', e.target.value.replace(/[^0-9]/g, ''))} 
@@ -4235,7 +4236,7 @@ export default function PurchaseRecords() {
                               onClick={e => e.stopPropagation()}
                             />
                           ) : (
-                            details.wacaManual
+                            details.waca
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#475569' }}>
@@ -4247,8 +4248,8 @@ export default function PurchaseRecords() {
                               ? (parseInt(draftDemands[`${g.id}_myacg`], 10) || 0)
                               : details.myacg;
                             const wacaVal = (editMode && isProxyProduct(g) && draftDemands[`${g.id}_waca`] !== undefined)
-                              ? (parseInt(draftDemands[`${g.id}_waca`], 10) || 0)
-                              : details.wacaManual;
+                              ? (details.waca - details.wacaManual + (parseInt(draftDemands[`${g.id}_waca`], 10) || 0))
+                              : details.waca;
                             const privateVal = details.privateOrder;
                             return myacgVal + wacaVal + privateVal;
                           })()}
@@ -4670,13 +4671,14 @@ export default function PurchaseRecords() {
                               inputMode="numeric"
                               pattern="[0-9]*"
                               className="input" 
+                              title={`WACA 手動調整（自動 ${details.waca - details.wacaManual} 另計）`}
                               style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }} 
                               value={details.wacaManual} 
                               onChange={e => handleUpdateGroupPlatformDemand(g.id, 'waca', parseInt(e.target.value.replace(/[^0-9]/g, '')) || 0)} 
                               onClick={e => e.stopPropagation()}
                             />
                           ) : (
-                            details.wacaManual
+                            details.waca
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 600, color: '#334155' }}>

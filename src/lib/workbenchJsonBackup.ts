@@ -1,4 +1,6 @@
 import type { IDataProvider } from '../providers/types';
+import { getProviderMode } from '../providers/providerMode';
+import type { NextWacaSnapshot } from '../waca/nextStorage';
 
 type BackupProvider = Pick<IDataProvider,
   | 'getInventory'
@@ -17,7 +19,7 @@ type BackupProvider = Pick<IDataProvider,
   | 'getJapanPackageItems'
   | 'getOutboundShipments'
   | 'getOutboundShipmentItems'
->;
+> & { getNextWacaSnapshot?: () => Promise<NextWacaSnapshot> };
 
 export interface WorkbenchBackupResult {
   data: Record<string, unknown[]>;
@@ -69,7 +71,7 @@ export async function collectWorkbenchBackupData(provider: BackupProvider): Prom
     provider.getOutboundShipmentItems(),
   ]);
 
-  return {
+  const data: Record<string, unknown[]> = {
     inventory,
     salesOrders,
     salesOrderItems,
@@ -87,6 +89,16 @@ export async function collectWorkbenchBackupData(provider: BackupProvider): Prom
     outboundShipments,
     outboundShipmentItems,
   };
+  if (getProviderMode() === 'next') {
+    if (!provider.getNextWacaSnapshot) throw new Error('NEXT_WACA_BACKUP_PROVIDER_MISSING');
+    const waca = await provider.getNextWacaSnapshot();
+    data.wacaOrders = waca.orders;
+    data.wacaItems = waca.items;
+    data.wacaMappings = waca.mappings;
+    data.wacaImportBatches = waca.batches;
+    data.myacgMasterLinks = waca.masterLinks;
+  }
+  return data;
 }
 
 export function serializeAndValidateWorkbenchBackup(data: Record<string, unknown[]>): { json: string; byteLength: number } {

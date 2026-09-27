@@ -14,6 +14,7 @@ import { EmptyState } from '../components/empty/EmptyState';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
+import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../waca/masterReference';
 import { getProviderMode } from '../providers/providerMode';
 import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
@@ -226,6 +227,18 @@ export default function Inventory() {
         try {
           syncStats = await dataProvider.syncProductGroupsWithInventory();
         } catch {
+          postCommitIssue = 'group-sync';
+        }
+      }
+      if (!postCommitIssue && currentMode === 'next') {
+        try {
+          const variants = await dataProvider.getProductVariants({ raw: true });
+          const waca = await dataProvider.getNextWacaSnapshot();
+          const evidence = linksFromMyAcgInventory(itemsWithBatchMeta, variants, file.name, currentTimestamp);
+          const masterLinks = mergeMyAcgMasterLinks(waca.masterLinks, evidence.links);
+          await dataProvider.commitNextWacaSnapshot({ ...waca, masterLinks }, waca.revision, false);
+        } catch (error) {
+          console.error('[NEXT MyACG master link capture]', error);
           postCommitIssue = 'group-sync';
         }
       }

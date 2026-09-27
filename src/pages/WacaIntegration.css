@@ -1,0 +1,39 @@
+.waca-page { width: 100%; max-width: 100%; padding: 0 24px 32px; color: #17212f; }
+.waca-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.waca-heading h1 { margin: 0 0 5px; font-size: 25px; }
+.waca-heading p, .waca-panel > p { margin: 0 0 18px; color: #64748b; }
+.waca-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; border-bottom: 1px solid #dbe3ec; }
+.waca-tabs button { border: 0; border-bottom: 3px solid transparent; background: transparent; padding: 10px 13px; color: #475569; font: inherit; cursor: pointer; }
+.waca-tabs button.active { border-bottom-color: #0369a1; color: #075985; font-weight: 700; }
+.waca-panel { background: #fff; border: 1px solid #dbe3ec; border-radius: 12px; padding: 22px; min-width: 0; }
+.waca-panel h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 10px; font-size: 19px; }
+.waca-panel h3 { margin: 24px 0 10px; font-size: 16px; }
+.waca-panel input[type=file] { display: block; margin: 12px 0 20px; max-width: 100%; }
+.waca-panel select { max-width: 270px; min-width: 160px; margin-right: 8px; padding: 7px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; }
+.waca-notice { margin: 12px 0; padding: 12px 15px; border-radius: 8px; background: #ecfdf5; color: #065f46; }
+.waca-error, .waca-danger { background: #fff1f2; color: #9f1239; }
+.waca-master-import { margin-top: 32px; padding-top: 22px; border-top: 1px solid #dbe3ec; }
+.waca-master-import .waca-notice button { margin-left: 15px; }
+.waca-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 9px; }
+.waca-metrics > div { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; background: #f8fafc; }
+.waca-metrics strong { display: block; font-size: 19px; color: #0f172a; }
+.waca-metrics span { display: block; font-size: 12px; color: #64748b; }
+.waca-equation { padding: 10px 12px; background: #eff6ff; color: #1e40af; border-radius: 7px; }
+.waca-scroll { max-width: 100%; overflow-x: auto; margin: 10px 0 20px; }
+.waca-scroll table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.waca-scroll th { text-align: left; white-space: nowrap; background: #f1f5f9; font-weight: 700; }
+.waca-scroll td, .waca-scroll th { padding: 9px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+.waca-scroll td small { display: block; color: #64748b; margin-top: 3px; }
+.waca-click-row { cursor: pointer; }
+.waca-click-row:hover { background: #f8fafc; }
+.waca-order-lines { min-width: 260px; margin-top: 8px; color: #475569; }
+.waca-order-lines p { margin: 4px 0; }
+.waca-pending-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin: 12px 0; }
+.waca-pending-card p { margin: 6px 0; color: #475569; }
+@media (max-width: 700px) {
+  .waca-page { padding: 0 12px 22px; }
+  .waca-heading { display: block; }
+  .waca-panel { padding: 14px; }
+  .waca-tabs { gap: 0; }
+  .waca-tabs button { padding: 9px; }
+}

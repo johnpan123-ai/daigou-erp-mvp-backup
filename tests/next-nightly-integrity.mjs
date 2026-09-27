@@ -43,7 +43,7 @@ const sourceText = readFileSync(SNAPSHOT_PATH, 'utf8');
 const source = JSON.parse(sourceText);
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
-  '--mode', 'next', '--host', '127.0.0.1', '--port', '4245', '--strictPort',
+  '--mode', 'next', '--host', '127.0.0.1', '--port', '4245', '--strictPort', '--configLoader', 'runner',
 ], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });
