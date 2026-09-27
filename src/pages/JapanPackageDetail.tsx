@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3, Copy } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3 } from 'lucide-react';
+import { productGroupDisplayName } from '../lib/productGroupDisplayName';
+import { CopyProductNameButton } from '../components/CopyProductNameButton';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import {
-  copyJapanPackageReceivingGroupTitle,
   getJapanPackageReceivingBundleComponentName,
   normalizeJapanPackageReceivingName,
   sortJapanPackageReceivingBundleComponentsBySku,
@@ -261,16 +262,6 @@ export default function JapanPackageDetail() {
     });
   };
 
-  const handleCopyGroupTitle = async (title: string, event: React.MouseEvent) => {
-    event.stopPropagation();
-    try {
-      await copyJapanPackageReceivingGroupTitle(title);
-    } catch (error) {
-      console.error('Failed to copy Japan package group title:', error);
-      window.alert('複製失敗，請再試一次。');
-    }
-  };
-
   const checkAndAutoUpdateStatus = async (updatedItems: JapanPackageItem[]) => {
     if (!pkg) return;
     const totalQty = updatedItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -467,6 +458,8 @@ export default function JapanPackageDetail() {
 
   // Group items by product_group_id, fallback to product_title
   const groupedItems = useMemo(() => {
+    const groupsById = new Map(productGroups.map(group => [group.id, group]));
+    const variantsById = new Map(variants.map(variant => [variant.id, variant]));
     const groups: Record<string, {
       id: string;
       title: string;
@@ -485,7 +478,9 @@ export default function JapanPackageDetail() {
         groupId = `title-${groupTitle}`;
       }
 
-      const cleanTitle = normalizeJapanPackageReceivingName(groupTitle);
+      const canonicalGroup = groupsById.get(item.product_group_id ?? '')
+        ?? groupsById.get(variantsById.get(item.product_variant_id ?? '')?.product_group_id ?? '');
+      const cleanTitle = canonicalGroup ? productGroupDisplayName(canonicalGroup) : normalizeJapanPackageReceivingName(groupTitle);
 
       if (!groups[groupId]) {
         groups[groupId] = {
@@ -1706,28 +1701,6 @@ export default function JapanPackageDetail() {
                           📦 {g.title}
                         </span>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          <button
-                            type="button"
-                            data-testid={`copy-japan-package-group-${g.id}`}
-                            aria-label={`複製商品群組名稱 ${g.title}`}
-                            title="複製商品群組名稱"
-                            onClick={event => void handleCopyGroupTitle(g.title, event)}
-                            style={{
-                              width: '30px',
-                              height: '30px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              border: '1px solid #cbd5e1',
-                              borderRadius: '6px',
-                              background: '#fff',
-                              color: '#475569',
-                              cursor: 'pointer',
-                              padding: 0
-                            }}
-                          >
-                            <Copy size={14} />
-                          </button>
                           <span style={{
                             fontSize: '12px',
                             color: '#64748b',
@@ -1743,6 +1716,9 @@ export default function JapanPackageDetail() {
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>
+                          <span style={{ display: 'block', marginBottom: 8 }}>
+                            <CopyProductNameButton name={g.title} groupId={g.id} />
+                          </span>
                           共 {g.items.length} 項・完成 {g.items.filter(item => item.checked).length} / {g.items.length}（{percent}%）
                         </span>
                         <div style={{ flex: '1 1 80px', minWidth: '64px', height: '5px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
@@ -3420,32 +3396,10 @@ export default function JapanPackageDetail() {
                           </span>
                           <span title={g.title} className="compact-group-title">📦 {g.title}</span>
                         </div>
-                        <button
-                          type="button"
-                          data-testid={`copy-japan-package-group-${g.id}`}
-                          aria-label={`複製商品群組名稱 ${g.title}`}
-                          title="複製商品群組名稱"
-                          onClick={event => void handleCopyGroupTitle(g.title, event)}
-                          style={{
-                            width: '28px',
-                            height: '28px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            border: '1px solid #cbd5e1',
-                            borderRadius: '6px',
-                            background: '#fff',
-                            color: '#475569',
-                            cursor: 'pointer',
-                            padding: 0,
-                            flexShrink: 0
-                          }}
-                        >
-                          <Copy size={14} />
-                        </button>
                       </div>
 
                       <div className="checklist-group-header-secondary" onClick={e => e.stopPropagation()}>
+                        <CopyProductNameButton name={g.title} groupId={g.id} />
                         <div className="group-progress-wrapper" title={`點收進度: ${checkedGroupItems} / ${totalGroupItems}`}>
                           <span className="group-item-count">共 {totalGroupItems} 項</span>
                           <span className="group-progress-text">完成 {checkedGroupItems} / {totalGroupItems}</span>

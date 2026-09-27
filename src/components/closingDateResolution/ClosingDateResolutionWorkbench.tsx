@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, CircleAlert, Clock3, ExternalLink, RefreshCw, X } from 'lucide-react';
 import type { ProductGroup } from '../../lib/db';
+import { productGroupDisplayName } from '../../lib/productGroupDisplayName';
 import type {
   RankedResolutionCandidate,
   ResolutionBatch,
@@ -136,11 +137,13 @@ const supplierDisplayName = (supplier: string): string => ({
 }[supplier.toLowerCase()] ?? supplier);
 
 const ResultCard = ({
+  displayTitle,
   result,
   selectedCandidateId,
   onSelect,
   cloudApply,
 }: {
+  displayTitle: string;
   result: ResolutionResult;
   selectedCandidateId: string | null;
   onSelect: (candidate: RankedResolutionCandidate) => void;
@@ -156,7 +159,7 @@ const ResultCard = ({
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <strong style={{ color: '#111827' }}>{result.erpTitleAtAnalysis}</strong>
+          <strong data-testid="closing-date-product-title" style={{ color: '#111827', overflowWrap: 'anywhere' }}>{displayTitle}</strong>
           <div style={{ color: colors.text, fontSize: 12, fontWeight: 700, marginTop: 4 }}>
             {classificationLabel[result.classification]}
           </div>
@@ -342,6 +345,10 @@ export default function ClosingDateResolutionWorkbench({
   onApplied,
   applySelections,
 }: ClosingDateResolutionWorkbenchProps) {
+  const productDisplayNames = useMemo(
+    () => new Map(allGroups.map(group => [group.id, productGroupDisplayName(group)])),
+    [allGroups],
+  );
   const [initializing, setInitializing] = useState(true);
   const [recentBatches, setRecentBatches] = useState<readonly ResolutionBatch[]>([]);
   const [currentBatch, setCurrentBatch] = useState<ResolutionBatch | null>(null);
@@ -750,6 +757,7 @@ export default function ClosingDateResolutionWorkbench({
                         <ResultCard
                           key={result.id}
                           result={result}
+                          displayTitle={productDisplayNames.get(result.erpProductGroupId) ?? result.erpTitleAtAnalysis}
                           selectedCandidateId={selectedCandidates[result.id] ?? result.selectedCandidateId ?? null}
                           onSelect={candidate => selectCandidate(result, candidate)}
                           cloudApply={Boolean(applySelections)}

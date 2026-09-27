@@ -3,7 +3,8 @@ import { Archive, Copy, Check, Search, AlertTriangle, Loader2, RotateCcw, Extern
 import { Link } from 'react-router-dom';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
-import { calculateGroupDemandAndPurchased, normalizeProductTitle } from '../lib/db';
+import { calculateGroupDemandAndPurchased } from '../lib/db';
+import { productGroupDisplayName, purchaseRecordsGroupUrl } from '../lib/productGroupDisplayName';
 import { mapPrivateOrderItemsByGroup, mapPurchaseBatchItemsByGroup } from '../lib/purchaseBatchScope';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
@@ -268,7 +269,7 @@ export default function UnlistedItems() {
 
           unlistedList.push({
             id: group.id,
-            name: group.normalized_title || group.title,
+            name: productGroupDisplayName(group),
             closingDate: group.closing_date,
             daysOverdue,
             source,
@@ -404,7 +405,7 @@ export default function UnlistedItems() {
 
   const handleCopyItemName = async (itemId: string, name: string) => {
     try {
-      const cleanName = normalizeProductTitle(name);
+      const cleanName = name;
       await navigator.clipboard.writeText(cleanName);
       setCopiedItemId(itemId);
       setTimeout(() => setCopiedItemId(current => current === itemId ? null : current), 1000);
@@ -419,7 +420,7 @@ export default function UnlistedItems() {
     const selectedItems = activeViewItems.filter(item => selectedIds.has(item.id));
 
     // Format: Product Name (Group Title)
-    const textToCopy = selectedItems.map(item => normalizeProductTitle(item.name)).join('\n');
+    const textToCopy = selectedItems.map(item => item.name).join('\n');
 
     try {
       await navigator.clipboard.writeText(textToCopy);
@@ -865,7 +866,7 @@ export default function UnlistedItems() {
                 />
                 <div style={{ flex: 1, marginLeft: '10px' }}>
                   <div className="mobile-card-title" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <span>{normalizeProductTitle(item.name)}</span>
+                    <span>{item.name}</span>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                       <button
                         onClick={() => handleCopyItemName(item.id, item.name)}
@@ -883,16 +884,17 @@ export default function UnlistedItems() {
                         {copiedItemId === item.id ? <Check size={12} /> : <Copy size={12} />}
                       </button>
                       <Link
-                        to={`/purchase-records/${item.id}`}
-                        title="前往訂購紀錄表詳細資訊"
+                        to={purchaseRecordsGroupUrl(item.id)}
+                        title="查看訂購紀錄"
                         style={{
                           color: '#3b82f6',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          padding: '2px'
+                          minHeight: 44,
+                          padding: '4px 6px'
                         }}
                       >
-                        <ExternalLink size={12} />
+                        <ExternalLink size={12} /> 查看訂購紀錄
                       </Link>
                     </div>
                   </div>
@@ -996,7 +998,7 @@ export default function UnlistedItems() {
                     <td style={{ color: '#0f172a', verticalAlign: 'middle', padding: '16px 16px' }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '20px', fontWeight: 700 }}>{normalizeProductTitle(item.name)}</span>
+                          <span style={{ fontSize: '20px', fontWeight: 700 }}>{item.name}</span>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
                             <button
                               onClick={() => handleCopyItemName(item.id, item.name)}
@@ -1014,16 +1016,17 @@ export default function UnlistedItems() {
                               {copiedItemId === item.id ? <Check size={14} /> : <Copy size={14} />}
                             </button>
                             <Link
-                              to={`/purchase-records/${item.id}`}
-                              title="前往訂購紀錄表詳細資訊"
+                              to={purchaseRecordsGroupUrl(item.id)}
+                              title="查看訂購紀錄"
                               style={{
                                 color: '#3b82f6',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                padding: '2px'
+                                minHeight: 44,
+                                padding: '4px 6px'
                               }}
                             >
-                              <ExternalLink size={14} />
+                              <ExternalLink size={14} /> 查看訂購紀錄
                             </Link>
                           </div>
                         </div>

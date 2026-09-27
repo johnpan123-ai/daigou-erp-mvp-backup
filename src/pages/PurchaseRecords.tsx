@@ -10,6 +10,7 @@ import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, Purc
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { productGroupDisplayName, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import {
@@ -610,9 +611,15 @@ export default function PurchaseRecords() {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const linkedGroupId = purchaseRecordsGroupScope(location.search);
 
   // Batch edit states and datepicker refs
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [selectedGroupIdsState, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  // A URL scope must also constrain bulk actions, not only the rendered rows.
+  const selectedGroupIds = useMemo(() => linkedGroupId === null
+    ? selectedGroupIdsState
+    : new Set([...selectedGroupIdsState].filter(id => id === linkedGroupId && groups.some(group => group.id === id))),
+  [groups, linkedGroupId, selectedGroupIdsState]);
   const [isClearingClosingDates, setIsClearingClosingDates] = useState(false);
   const [showClosingDateWorkbench, setShowClosingDateWorkbench] = useState(false);
   const [closingDateApplyNotice, setClosingDateApplyNotice] = useState<string | null>(null);
@@ -1116,6 +1123,7 @@ export default function PurchaseRecords() {
   );
 
   const baseGroups = useMemo(() => {
+    if (linkedGroupId !== null) return groups.filter(group => group.id === linkedGroupId);
     try {
       let result = [...groups];
 
@@ -1171,7 +1179,7 @@ export default function PurchaseRecords() {
     // Classification helpers are pure projections of groups/isProxyProductMap and are
     // intentionally represented by those stable data dependencies rather than function identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments]);
+  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments, linkedGroupId]);
 
   const checkHasMissingJpyCost = (g: ProductGroup): boolean => {
     if (isProxyProduct(g)) return false;
@@ -1197,6 +1205,7 @@ export default function PurchaseRecords() {
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
+    if (linkedGroupId !== null) return [];
     try {
     if (secondaryTab !== 'progress') return [];
 
@@ -1256,9 +1265,10 @@ export default function PurchaseRecords() {
       logCrash('completedGroups useMemo', err);
       return [];
     }
-  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly]);
+  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly, linkedGroupId]);
 
   const filteredAndSortedGroups = useMemo(() => {
+    if (linkedGroupId !== null) return baseGroups;
     try {
     let result = [...baseGroups];
 
@@ -1339,7 +1349,7 @@ export default function PurchaseRecords() {
       logCrash('filteredAndSortedGroups useMemo', err);
       return [];
     }
-  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly]);
+  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly, linkedGroupId]);
 
   const [stableEditOrder, setStableEditOrder] = useState<string[] | null>(null);
   const [stableCompletedOrder, setStableCompletedOrder] = useState<string[] | null>(null);
@@ -1372,18 +1382,20 @@ export default function PurchaseRecords() {
 
 
   const displayedMainGroups = useMemo(() => {
+    if (linkedGroupId !== null) return baseGroups;
     if (editMode && stableEditOrder) {
       return resolvePurchaseRecordsEditView(stableEditOrder, groups);
     }
     return filteredAndSortedGroups;
-  }, [editMode, stableEditOrder, filteredAndSortedGroups, groups]);
+  }, [editMode, stableEditOrder, filteredAndSortedGroups, groups, linkedGroupId, baseGroups]);
 
   const displayedCompletedGroups = useMemo(() => {
+    if (linkedGroupId !== null) return [];
     if (editMode && stableCompletedOrder) {
       return resolvePurchaseRecordsEditView(stableCompletedOrder, groups);
     }
     return completedGroups;
-  }, [editMode, stableCompletedOrder, completedGroups, groups]);
+  }, [editMode, stableCompletedOrder, completedGroups, groups, linkedGroupId]);
 
   useEffect(() => {
     if (searchTerm.trim().length > 0) {
@@ -2493,6 +2505,16 @@ export default function PurchaseRecords() {
 
   return (
     <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '180px' : '0px' }}>
+      {linkedGroupId !== null && (
+        <div role="status" data-testid="purchase-records-group-scope" style={{ padding: 12, background: '#eff6ff', borderRadius: 8, overflowWrap: 'anywhere' }}>
+          {baseGroups.length ? '正在查看指定商品的訂購紀錄（暫不套用其他篩選）' : '找不到指定商品，或目前無權讀取；未改用其他商品。'}
+          <button type="button" className="btn btn-outline" style={{ marginLeft: 8, minHeight: 44 }} onClick={() => {
+            const params = new URLSearchParams(location.search);
+            params.delete('productGroup');
+            navigate({ pathname: location.pathname, search: params.toString() });
+          }}>清除商品定位</button>
+        </div>
+      )}
       <div
         data-testid="purchase-records-sync-slot"
         role="status"
@@ -3683,7 +3705,7 @@ export default function PurchaseRecords() {
                             wordBreak: 'break-word',
                             flex: 1
                           }}>
-                            {g.normalized_title || g.title}
+                            <span data-testid="purchase-record-product-title">{productGroupDisplayName(g)}</span>
                             {gap > 0 && (
                               <span style={{
                                 backgroundColor: '#fee2e2',
@@ -3928,7 +3950,7 @@ export default function PurchaseRecords() {
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              <span data-testid="purchase-record-product-title" className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{productGroupDisplayName(g)}</span>
                               {dynamicGap > 0 && (
                                 <span style={{
                                   backgroundColor: '#fee2e2',
@@ -3971,7 +3993,7 @@ export default function PurchaseRecords() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleCopyTitle(g.id, g.normalized_title || g.title);
+                                  handleCopyTitle(g.id, productGroupDisplayName(g));
                                 }}
                                 style={{
                                   background: 'none',
@@ -4055,7 +4077,7 @@ export default function PurchaseRecords() {
                           {editMode && isProxyProduct(g) ? (
                             <input
                               data-testid={`proxy-purchased-quantity-${g.id}`}
-                              aria-label={`代理版商品 ${g.normalized_title || g.title} 叫貨數量`}
+                              aria-label={`代理版商品 ${productGroupDisplayName(g)} 叫貨數量`}
                               aria-busy={pendingDemandCommits.has(`${g.id}_purchased`)}
                               disabled={pendingDemandCommits.has(`${g.id}_purchased`)}
                               type="text"
@@ -4398,7 +4420,7 @@ export default function PurchaseRecords() {
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              <span data-testid="purchase-record-product-title" className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{productGroupDisplayName(g)}</span>
                               {demandAndPurchased.gap > 0 && (
                                 <span style={{
                                   backgroundColor: '#fee2e2',
@@ -4441,7 +4463,7 @@ export default function PurchaseRecords() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleCopyTitle(g.id, g.normalized_title || g.title);
+                                  handleCopyTitle(g.id, productGroupDisplayName(g));
                                 }}
                                 style={{
                                   background: 'none',

@@ -12,22 +12,34 @@ import { installCloudRealtimeTestBridge } from '/src/contexts/cloudRealtimeTestB
 import '/src/index.css';
 
 const fixtureParams = new URL(location.href).searchParams;
+const workflowQuickWins = fixtureParams.get('workflowQuickWins') === '1' || sessionStorage.getItem('workflowQuickWins') === '1';
+if (workflowQuickWins) sessionStorage.setItem('workflowQuickWins', '1');
 const requestedProviderMode = fixtureParams.get('providerMode') || 'experimental';
 // The test bridge is intentionally sandbox-only. Cloud-mode route fixtures install
 // the bridge while sandboxed, then switch before mounting the real App route.
 localStorage.setItem('erp_provider_mode', requestedProviderMode === 'cloud' ? 'experimental' : requestedProviderMode);
-const requestedRoute = fixtureParams.get('route') || '/dashboard';
+const requestedRoute = fixtureParams.get('route') || (workflowQuickWins ? location.pathname + location.search : '/dashboard');
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
 const outboundReceivingScenario = fixtureParams.get('outboundReceiving') === '1';
 const proxyDemandScenario = fixtureParams.get('proxyDemand') === '1';
 const closingDateWorkbenchScenario = fixtureParams.get('closingDateWorkbench') === '1';
 const realProviderReads = fixtureParams.get('realReads') === '1';
 const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
-history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
+const routeUrl = new URL(requestedRoute, location.origin);
+routeUrl.searchParams.set('p0ReactHarness', '1');
+history.replaceState({}, '', routeUrl.pathname + routeUrl.search);
 
 const clone = value => structuredClone(value);
 const coreFixture = await fetch('/tests/fixtures/core-regression.json').then(response => response.json());
 const server = clone(coreFixture);
+if (workflowQuickWins) {
+  const group = server.productGroups.find(row => row.id === 'g-holo');
+  group.title = '【小河馬日本代購】 預購 27年02月 代理版 GSC 黏土人 K-ON！輕音部 秋山澪 2.0';
+  group.normalized_title = 'GSC 黏土人 K-ON！輕音部 秋山澪 2.0 ' + '長商品名稱 '.repeat(8);
+  group.closing_date = '2020-01-01';
+  // Same display name must not resolve the different canonical ID.
+  server.productGroups.find(row => row.id === 'g-other').normalized_title = group.normalized_title;
+}
 if (realProviderReads) server.inventory = server.inventory.map((row, index) => ({
   ...row, id: `92000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
 }));
