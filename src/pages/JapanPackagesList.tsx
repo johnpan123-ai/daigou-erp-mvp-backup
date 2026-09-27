@@ -545,7 +545,7 @@ export default function JapanPackagesList() {
   );
 
   return (
-    <div data-testid="japan-packages-list-root" style={{ padding: '24px', maxWidth: '1800px', width: '100%', margin: '0 auto' }}>
+    <div data-testid="japan-packages-list-root" className="workspace-page">
       <style>{`
         .header-section {
           display: flex;
@@ -1245,7 +1245,7 @@ export default function JapanPackagesList() {
       `}</style>
 
       {/* Header with Title and Add Button */}
-      <div className="header-section">
+      <div className="header-section workspace-header" data-workspace-header>
         <h1 className="header-title" style={isMobile ? { fontSize: '20px' } : undefined}>
           <Truck size={isMobile ? 20 : 24} style={{ color: '#2563eb' }} />
           日本包裹管理
@@ -1325,7 +1325,7 @@ export default function JapanPackagesList() {
       ) : (
         <>
           {/* Statistics Cards */}
-          <div className="stats-grid">
+      <div className="stats-grid workspace-stats workspace-stats-five" data-workspace-stats>
             <div className="stat-card" style={{ borderLeft: '4px solid #2563eb' }}>
               <div className="stat-icon-wrapper" style={{ background: '#eff6ff', color: '#2563eb' }}>
                 <Package size={24} />
@@ -1374,7 +1374,7 @@ export default function JapanPackagesList() {
           </div>
 
           {/* Search & Filter Toolbar */}
-          <div className="toolbar">
+          <div className="toolbar workspace-toolbar workspace-panel" data-workspace-toolbar style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div className="toolbar-top">
               <div className="search-wrapper" style={{ flex: 1, maxWidth: '480px' }}>
                 <Search size={16} className="search-icon" />
@@ -1470,7 +1470,7 @@ export default function JapanPackagesList() {
           <p style={{ marginTop: '8px' }}>載入包裹資料中...</p>
         </div>
       ) : filteredPackages.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state workspace-empty workspace-content" data-workspace-content>
           <div className="empty-icon-wrapper">
             <Truck size={36} style={{ color: '#2563eb' }} />
           </div>
@@ -1479,7 +1479,7 @@ export default function JapanPackagesList() {
         </div>
       ) : isMobile ? (
         // Mobile layout
-        <div>
+        <div className="workspace-content" data-workspace-content>
           {filteredPackages.map(p => {
             const itemsCount = packageItemQuantityById.get(p.id) ?? 0;
             return (
@@ -1569,7 +1569,7 @@ export default function JapanPackagesList() {
         </div>
       ) : (
         // Desktop Logistics Dashboard Cards Layout
-        <div className="package-cards-list">
+        <div className="package-cards-list workspace-content" data-workspace-content>
           {filteredPackages.map(p => {
             const itemsCount = packageItemQuantityById.get(p.id) ?? 0;
             return (

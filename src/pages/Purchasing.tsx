@@ -699,14 +699,11 @@ export default function Purchasing() {
   }
 
   return (
-    <div className="mobile-summary-container">
-      <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
+    <div className="mobile-summary-container workspace-page">
+      {selectedGroupId && <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />}
       <style>{`
         .mobile-summary-container {
           width: 100%;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 16px;
           box-sizing: border-box;
           font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           color: #0f172a;
@@ -739,15 +736,6 @@ export default function Purchasing() {
         }
 
         /* Header Style */
-        .summary-header {
-          background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-          color: #ffffff !important;
-          padding: 20px;
-          border-radius: 12px;
-          margin-bottom: 16px;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-        }
-
         .summary-title, .summary-title span {
           font-size: 20px;
           font-weight: 800;
@@ -755,12 +743,12 @@ export default function Purchasing() {
           display: flex;
           align-items: center;
           gap: 8px;
-          color: #ffffff !important;
+          color: inherit;
         }
 
         .summary-subtitle {
           font-size: 12px;
-          color: #94a3b8 !important;
+          color: var(--color-text-secondary);
           margin: 0;
           font-weight: 400;
         }
@@ -1053,15 +1041,9 @@ export default function Purchasing() {
         }
 
         @media (min-width: 1024px) {
-          .mobile-summary-container {
-            max-width: none !important;
-            width: 100% !important;
-            padding: 32px !important;
-          }
           .purchasing-page-inner {
-            max-width: 760px !important;
-            margin: 0 auto !important;
-            width: 100% !important;
+            width: 100%;
+            min-width: 0;
             box-sizing: border-box;
           }
           .detail-view {
@@ -1077,21 +1059,6 @@ export default function Purchasing() {
           }
           
           /* Scaled elements on desktop */
-          .summary-header {
-            padding: 36px 40px !important;
-            margin-bottom: 24px !important;
-          }
-          .summary-title, .summary-title span {
-            font-size: 28px !important;
-          }
-          .summary-title svg {
-            width: 28px !important;
-            height: 28px !important;
-          }
-          .summary-subtitle {
-            font-size: 15px !important;
-            margin-top: 8px !important;
-          }
           .search-input {
             height: 48px !important;
             font-size: 15px !important;
@@ -1110,7 +1077,7 @@ export default function Purchasing() {
           
           /* Card list scaled up */
           .summary-card {
-            padding: 24px !important;
+            padding: 16px;
             gap: 16px !important;
             border-radius: 12px !important;
           }
@@ -1188,15 +1155,18 @@ export default function Purchasing() {
       {!selectedGroup ? (
         // List View
         <div className="purchasing-page-inner">
-          <div className="summary-header">
+          <div className="summary-header workspace-header" data-workspace-header>
+            <div>
             <h1 className="summary-title">
               <ClipboardList size={22} />
               <span>採購總表</span>
             </h1>
             <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
+            </div>
+            <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
           </div>
 
-          <div className="search-wrapper" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="search-wrapper workspace-toolbar" data-workspace-toolbar>
             <div style={{ position: 'relative', flex: 1 }}>
               <Search className="search-icon" size={18} />
               <input 
@@ -1281,7 +1251,7 @@ export default function Purchasing() {
           )}
 
           {filteredSummaries.length > 0 ? (
-            <div className="summary-list">
+            <div className="summary-list workspace-content" data-workspace-content>
               {filteredSummaries.map(item => {
                 const isChecked = selectedGroupIds.has(item.id);
                 return (
@@ -1372,7 +1342,7 @@ export default function Purchasing() {
               })}
             </div>
           ) : (
-            <div className="empty-state">
+            <div className="empty-state workspace-empty workspace-content" data-workspace-content>
               <p>沒有符合條件或有需求的商品。</p>
             </div>
           )}

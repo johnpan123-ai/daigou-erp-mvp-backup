@@ -380,7 +380,7 @@ export default function RecentPurchases() {
   };
 
   return (
-    <div data-testid="recent-purchases-page" style={{ width: '100%', maxWidth: '1500px', margin: '0 auto', paddingBottom: '40px' }}>
+    <div data-testid="recent-purchases-page" className="workspace-page">
       <style>{`
         .recent-purchases-filter-button {
           height: 36px;
@@ -457,7 +457,7 @@ export default function RecentPurchases() {
         }
       `}</style>
 
-      <header className="recent-purchases-page-header" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '18px' }}>
+      <header className="recent-purchases-page-header workspace-header" data-workspace-header>
         <div>
           <h1 style={{ margin: 0, color: '#0f172a', fontSize: '26px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px' }}>
             <History size={26} color="#2563eb" />
@@ -475,7 +475,7 @@ export default function RecentPurchases() {
         </div>
       </header>
 
-      <div className="recent-purchases-toolbar" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', padding: '14px', marginBottom: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff' }}>
+      <div className="recent-purchases-toolbar workspace-toolbar workspace-panel" data-workspace-toolbar style={{ padding: '16px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
           {dateFilterOptions.map(option => (
             <button
@@ -491,7 +491,7 @@ export default function RecentPurchases() {
           ))}
         </div>
 
-        <label className="recent-purchases-search" style={{ height: '36px', minWidth: '220px', maxWidth: '420px', flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 11px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#f8fafc' }}>
+        <label className="recent-purchases-search" style={{ order: -1, height: '36px', minWidth: 0, flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 11px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#f8fafc' }}>
           <Search size={16} color="#64748b" />
           <input
             data-testid="recent-purchases-search"
@@ -531,11 +531,11 @@ export default function RecentPurchases() {
           </button>
         </div>
       ) : sections.length === 0 ? (
-        <div style={{ padding: '80px 20px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff', textAlign: 'center', color: '#64748b' }}>
+        <div className="workspace-content workspace-empty" data-workspace-content>
           目前篩選條件下沒有採購紀錄。
         </div>
       ) : (
-        <div data-testid="recent-purchases-sections" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div data-testid="recent-purchases-sections" className="workspace-content" data-workspace-content style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {sections.map(section => {
             const sectionQuantity = section.rows.reduce((sum, row) => sum + row.totalQuantity, 0);
             const isExpanded = expandedDateKeys.has(section.dateKey);
