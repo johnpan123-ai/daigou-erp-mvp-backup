@@ -1,96 +1,116 @@
 # ERP Environment Identity Contract
 
-This repository uses human-readable environment roles separately from Cloudflare's physical project slugs. The physical slugs are intentionally locked until Cloudflare documents a rename operation that preserves the `pages.dev` hostname, deployment history, aliases, bindings, functions, custom domains, and rollback behavior.
+Human roles and Cloudflare physical slugs are separate. A name containing `preview`
+does not make a target safe for NEXT/Experimental. Keep physical slugs unchanged.
 
 ## Canonical map
 
-| Role | Human name | Account | Physical project / endpoint | Domain | Runtime marker | Supabase | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| ERP 1.0 | 小河馬訂購紀錄表 1.0 | `e0a58431cd5bcf0e01ec3438d531461a` | `daigou-erp-mvp-backup` | `https://daigou-erp-mvp-backup.pages.dev/` | `PRODUCTION` (bundle marker not independently proven in this pass) | `twzpqyesbtnfxdkorluf` | Locked; no deployment in this workflow |
-| ERP 2.0 | 小河馬訂購紀錄表 2.0 | `e0a58431cd5bcf0e01ec3438d531461a` | `hippo-erp-realtime-preview` | `https://hippo-erp-realtime-preview.pages.dev/` | `STAGING` / 測試雲端 | `rhfdjsklfrgpoqsaqpkn` | Accepted live baseline |
-| NEXT | ERP NEXT | not a Cloudflare target | local `http://127.0.0.1:4192` | local only | `NEXT` | `rhfdjsklfrgpoqsaqpkn` | Local sandbox |
-| Experimental | ERP Experimental / 高風險環境 | not a Cloudflare target | local `http://127.0.0.1:4193` | local only | `EXPERIMENTAL` | `rhfdjsklfrgpoqsaqpkn` | Local sandbox |
-| Catalog | Catalog Worker | `f543371d2e71d3f9d81dc5863b1f16c9` | `xiaohebo-catalog-beta` | `https://xiaohebo-catalog-beta.comiindex-hippo.workers.dev` | `CATALOG` | separate release process | Separate account and release process |
+| Role | Human name | Cloudflare account | Physical project / endpoint | Runtime | Supabase | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| ERP 1.0 | 小河馬訂購紀錄表 1.0 | `e0a58431cd5bcf0e01ec3438d531461a` | `daigou-erp-mvp-backup.pages.dev` | `PRODUCTION` (historical marker not independently proven) | `twzpqyesbtnfxdkorluf` | Locked; never deploy through this workflow |
+| ERP 2.0 | 小河馬訂購紀錄表 2.0 | `e0a58431cd5bcf0e01ec3438d531461a` | `hippo-erp-realtime-preview.pages.dev` | `STAGING` / 測試雲端 | `rhfdjsklfrgpoqsaqpkn` | Accepted ERP2 runtime contract |
+| NEXT | ERP NEXT | No proven Cloudflare target | `http://127.0.0.1:4192` | `NEXT` | `rhfdjsklfrgpoqsaqpkn` | Local only |
+| Experimental | ERP Experimental / 高風險環境 | No proven Cloudflare target | `http://127.0.0.1:4193` | `EXPERIMENTAL` | `rhfdjsklfrgpoqsaqpkn` | Local only |
+| Catalog | Catalog Worker | `f543371d2e71d3f9d81dc5863b1f16c9` | `xiaohebo-catalog-beta` Worker | `CATALOG` | Separate release process | Never an ERP target |
 
-The machine-readable source is [`config/erp-environment-identity.json`](../config/erp-environment-identity.json).
+Machine-readable identities: [`config/erp-environment-identity.json`](../config/erp-environment-identity.json).
+Profile `hippo-erp` must actually authenticate to the ERP account; `hippo-catalog` is separate.
+The ERP2 fingerprint is `D9EA6B7BB6524517`. The Pages deployment branch is
+`isolated-preview`; this is NOT the Git candidate branch.
 
-## Accepted baselines
+## Accepted baseline is not the only deployable branch
 
-ERP 2.0 is locked to the accepted live-acceptance baseline:
+Current accepted anchor (2026-09-27):
 
-- Deployment: `43e4076c-e347-4fff-b4f1-8b472ed174bd`
-- Source: `3089fbcec9e44323522c758059689bb7641d20eb`
-- Entry: `assets/index-Bo2YCBoE.js`
-- Provider: `assets/dataProvider-DnirxCMa.js`
-- Supabase: `rhfdjsklfrgpoqsaqpkn`
-- Fingerprint: `D9EA6B7BB6524517`
-- Atomic Restore: live acceptance passed; epoch 8
+- Remote annotated tag: `accepted-20260927-erp2-deadline-v1-live`
+- Peeled commit: `e565d067f49c95cf71dd6c95c5fab5b4749558f8`
+- Accepted deployment: `2ea71f25-a0d0-4002-93ba-37fd408cba7b`
+- Entry: `assets/index-VyvXxipw.js`; Provider: `assets/dataProvider-DmWx5fkp.js`
+- Checkpoint: `checkpoint-20260927-erp2-deadline-v1-canonical-integration`
 
-Cloudflare's read-only Pages inventory showed the ERP 2.0 project on branch `isolated-preview` and the ERP 1.0 project on branch `main`. The ERP 2.0 deployment remained unchanged during this cleanup.
+This accepted tag must not be moved to a candidate. Only after a separately authorized
+deployment AND live acceptance may a NEW accepted tag and reviewed configuration update
+advance the accepted anchor. An older task's complete branch name is not an environment identity.
 
-## Deployment guard
+The configuration's `currentDeployment` object retains the original environment-cleanup
+capture (`43e4076c` / `3089fbce`, Atomic Restore acceptance). It is historical provenance,
+not a current-active query or an authorization gate. Always read the actual active deployment
+before release; stop if it differs from that release's approved live baseline.
 
-Before any ERP upload, run the guard with the exact candidate identity and the GitHub gate values:
+## GitHub and environment hard gates
+
+All conditions must pass together, before upload:
+
+1. ERP2 role, human name, account ID, profile, project, runtime, Supabase, fingerprint match.
+2. Candidate worktree is clean (tracked and untracked), checked-out branch and full HEAD match explicit inputs.
+3. Remote URL is the approved GitHub repository, not an arbitrary local/fork remote.
+4. Remote candidate branch exists and HEAD equals the actual candidate HEAD.
+5. An EXPLICIT `--checkpoint-tag` exists remotely as an annotated tag and peels to candidate HEAD.
+6. Remote accepted tag exists and peels to the configured accepted SHA (a local tag is not evidence).
+7. `git --no-replace-objects merge-base --is-ancestor <remote-proven-accepted-SHA> <candidate-HEAD>` succeeds.
+8. Candidate branch matches `codex/erp2-*` sanity format. This NEVER substitutes for SHA/checkpoint/ancestry.
+9. Guard source itself is clean and backed by a remote branch/checkpoint, with accepted ancestry.
+10. Actual Wrangler `whoami` contains the exact ERP account ID; Pages project is visible under
+    the named profile and explicitly pinned `CLOUDFLARE_ACCOUNT_ID`.
+
+No latest-tag guessing, no arbitrary checkpoint search, no local-only accepted tag, no unpushed candidate.
+Git/network/authentication failures fail closed. A PASS is a read-only identity check, not an upload,
+not artifact verification, and not permission to skip release-specific gates. Re-run immediately
+before upload; do not reuse a stale PASS after branch, tag, source, session or artifact changes.
+
+## Guard source versus runtime source
+
+The guard may be newer than the runtime artifact. Keep the original candidate worktree checked
+out at its fixed HEAD. Run the new guard from its own backed-up worktree and pass
+`--candidate-worktree` explicitly. Git and Wrangler candidate checks run in that worktree;
+the guard configuration is loaded from the guard's own source, not the candidate's old config.
+
+For Quick Wins, from the guard-fix worktree (replace only the absolute candidate path):
 
 ```text
-npm run verify:erp-deployment-identity -- --role erp2 --profile hippo-erp --project hippo-erp-realtime-preview --supabase-project rhfdjsklfrgpoqsaqpkn --runtime-marker STAGING --fingerprint D9EA6B7BB6524517 --source-head 80469b966bc27999f55c804cfa374721773b55a4 --remote-branch codex/atomic-restore-durable-failure-recovery-v1 --checkpoint-tag checkpoint-20260927-erp-identity-guard-windows-safe-v1
+npm run verify:erp-deployment-identity -- --candidate-worktree "C:/path/to/erp2-workflow-ux-quick-wins-v1" --role erp2 --profile hippo-erp --project hippo-erp-realtime-preview --supabase-project rhfdjsklfrgpoqsaqpkn --runtime-marker STAGING --fingerprint D9EA6B7BB6524517 --source-head 68269ad9e80762c07d64fde38194a56e3db69e1f --remote-branch codex/erp2-workflow-ux-quick-wins-v1 --checkpoint-tag checkpoint-20260927-erp2-workflow-ux-quick-wins-v1 --guard-checkpoint-tag checkpoint-20260927-erp2-deployment-guard-lineage-fix-v1
 ```
 
-For every later candidate, replace `--source-head`, `--remote-branch` and `--checkpoint-tag` together; the supplied checkpoint tag must peel to that exact candidate SHA. The remote branch must also match the explicitly approved branch in the identity configuration.
+`--guard-checkpoint-tag` is required when the guard source HEAD/branch differs from the runtime
+candidate. When both are the same, the explicitly supplied candidate checkpoint also proves
+the guard. Output separates `guardSourceHead` / `guardSource` from `sourceHead` / candidate proof.
+Never put the guard-fix SHA into Cloudflare runtime source metadata for an artifact built at `68269ad9`.
 
-### Deadline V1 integration candidate (2026-09-27; not deployed)
+Quick Wins artifact remains fixed at `68269ad9`:
 
-The approved candidate branch is now `codex/erp2-deadline-v1-canonical-integration`.
-Its pre-task recovery tag is `backup-20260927-before-erp2-deadline-v1-integration`,
-which peels to canonical source `346e41ea19f92d1374452c8bec53dd706762dda0`.
-The delivery checkpoint is `checkpoint-20260927-erp2-deadline-v1-canonical-integration`.
-Use the candidate's verified full SHA with that branch/checkpoint in the guard.
-The accepted LIVE deployment and source above remain unchanged until a separately authorized release.
-The previous command example is historical, not the current candidate command.
+- Entry: `assets/index-CmjToX2m.js`
+- Provider: `assets/dataProvider-ngRYOiPH.js`
+- Workbench: `assets/ClosingDateResolutionWorkbench-CJfC7MsL.js`
+- Manifest: `FABCD9B5C3F3D75D62F70AF5494AA6B6087DE5922EDBC40CF8E00BEE0595DD41`
 
-Before source edits: accepted canonical baseline → task recovery tag → GitHub push →
-remote peeled-SHA verification. Before deployment: tests/build → commit/checkpoint →
-push branch AND checkpoint → remote SHA verification. Both gates are mandatory.
+This guard-only fix does not rebuild or retarget that artifact. Artifact byte verification,
+Functions provenance, current-live baseline checks and final authorized deployment are separate gates.
 
-Git-connected Pages projects can deploy on a branch push. Candidate delivery commits use
-`[CF-Pages-Skip]` at the start of the commit subject to prevent GitHub backup from initiating
-a Pages deployment. This does not authorize CLI deployment or bypass the deployment guard.
+Wrangler 4.141.0 is pinned for the read-only calls (no product dependency upgrade). Its local
+`whoami --help` has no `--profile`, while `pages project list --help` supports it. The candidate
+worktree's active session must therefore already be correct. No login/logout or credential reads
+are performed by the guard; command failure output is suppressed to avoid leaking credentials.
+See [Cloudflare general commands](https://developers.cloudflare.com/workers/wrangler/commands/general/).
 
-The guard fails closed unless all of these match:
+## Permanent recovery and delivery workflow
 
-- active Wrangler `whoami` account ID
-- named profile expected for the role
-- visible Pages project
-- physical project slug
-- runtime marker
-- Supabase project
-- public fingerprint
-- clean worktree
-- local HEAD
-- remote branch HEAD
-- remote checkpoint peeled HEAD
+Accepted Live Baseline → task Recovery Tag → push Recovery Tag → verify remote peeled SHA
+→ isolated Feature Branch → implementation → tests → build (only when needed) → commit(s)
+→ explicit Checkpoint → push branch AND Checkpoint → remote SHA verification
+→ Deployment Guard → authorized Deploy → Live Acceptance → NEW Accepted Tag.
 
-Wrangler 4.141.0 does not accept `--profile` for `whoami`; the guard therefore validates the active `whoami` account ID and separately uses the named profile for the read-only Pages visibility check. Credentials, tokens, cookies, and secrets are never printed.
+For this task, recovery tag `backup-20260927-before-erp2-deployment-guard-lineage-fix-v1`
+points to the preserved Quick Wins candidate `68269ad9`. The fix branch is
+`codex/erp2-deployment-guard-lineage-fix-v1`, with checkpoint
+`checkpoint-20260927-erp2-deployment-guard-lineage-fix-v1`.
 
-## Rename decision
+Use `[CF-Pages-Skip]` at the beginning of delivery commit subjects to prevent Git backup
+pushes from triggering Git-connected Pages builds. This never authorizes a CLI deployment.
 
-`SAFE IN-PLACE RENAME` was not proven. Wrangler's Pages CLI exposes project list/create/delete/deploy commands but no rename command. Cloudflare's Pages API exposes a project `PATCH` with a `name` field, while the official documentation states that the project name is used for the `pages.dev` hostname. It does not guarantee preservation of the old hostname, deployment aliases, history, bindings, or rollback semantics. The safe decision is therefore:
+## Physical naming decision
 
-`KEEP PHYSICAL SLUG / FIX CANONICAL LABELS`
-
-Do not create `hippo-erp-v1` or `hippo-erp-v2`, and do not PATCH a live project name as part of this cleanup.
-
-## GitHub pre-deploy gate
-
-The accepted baseline is backed up by:
-
-- Branch: `codex/atomic-restore-durable-failure-recovery-v1`
-- Checkpoint: `checkpoint-20260926-atomic-restore-execute-dispatch-boundary-v3`
-- Recovery tag: `backup-20260926-erp2-live-restore-accepted-before-cloudflare-rename`
-- All three point to `3089fbcec9e44323522c758059689bb7641d20eb` after peeling annotated tags.
-
-The permanent order is:
-
-`Tests → Build (when needed) → Commit → Checkpoint → Push branch → Push checkpoint/recovery tag → Verify remote HEAD → Deploy`
-
-No deploy is valid when the local branch, remote branch, and remote checkpoint do not resolve to the same candidate commit.
+`KEEP PHYSICAL SLUG / FIX CANONICAL LABELS` remains in force. The original cleanup did not
+prove an in-place rename preserving domains/history/bindings/rollback. Do not rename or create
+projects to work around identity checks. Historical recovery tag
+`backup-20260926-erp2-live-restore-accepted-before-cloudflare-rename` preserves `3089fbce`;
+it is not the current accepted-lineage anchor.

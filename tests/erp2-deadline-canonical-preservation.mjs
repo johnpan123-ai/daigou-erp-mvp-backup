@@ -18,7 +18,6 @@ const unchanged = [
   'src/lib/cloudClosingDateWorkbenchApply.ts',
   'src/lib/closingDateWorkbenchAtomicApply.ts',
   'src/lib/closingDateCandidateRetrievalV2.ts',
-  'scripts/verify-erp-deployment-identity.mjs',
   'wrangler.jsonc',
   ...readdirSync('supabase/sql').filter(name => /^(041|042|043)_/u.test(name))
     .map(name => 'supabase/sql/' + name),
@@ -31,8 +30,10 @@ const prior = JSON.parse(git('show', base + ':config/erp-environment-identity.js
 const current = JSON.parse(readFileSync('config/erp-environment-identity.json', 'utf8'));
 assert.deepEqual(current.environments, prior.environments, 'No environment retargeting');
 assert.deepEqual(current.accounts, prior.accounts, 'No account retargeting');
-assert.equal(current.githubPreDeployGate.acceptedHead, restore);
-assert.equal(current.githubPreDeployGate.branch, 'codex/erp2-deadline-v1-canonical-integration');
+// Release tooling intentionally evolved; runtime/environment preservation remains exact.
+assert.equal(current.githubPreDeployGate.acceptedHead, 'e565d067f49c95cf71dd6c95c5fab5b4749558f8');
+assert.equal(current.githubPreDeployGate.acceptedTag, 'accepted-20260927-erp2-deadline-v1-live');
+assert.equal(current.githubPreDeployGate.branch, undefined);
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const oldPkg = JSON.parse(git('show', base + ':package.json'));
 for (const [name, command] of Object.entries(oldPkg.scripts)) {
