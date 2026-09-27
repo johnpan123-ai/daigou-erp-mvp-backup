@@ -2095,7 +2095,8 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
       throw new Error('JSON 備份 WACA 品項關聯不完整。');
     }
     if (mappings.some(row => !variantIds.has(row.productVariantId)) ||
-        links.some(row => !variantIds.has(row.productVariantId))) {
+        links.some(row => typeof row.mainCode !== 'string' || !row.mainCode
+          || (row.productVariantId && !variantIds.has(row.productVariantId)))) {
       throw new Error('JSON 備份 WACA 商品對照關聯不完整。');
     }
     const statusByOrder = new Map(orders.map(row => [row.key, row.status]));
@@ -3777,7 +3778,8 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       salesOrderItems: await this.getSalesOrderItems(),
       productGroups: await this.getProductGroups(),
       productCategories: await this.getProductCategories(),
-      productVariants: await this.getProductVariants(),
+      // Backup must contain every stored variant, including rows hidden by the read-time dedupe view.
+      productVariants: await this.getProductVariants({ raw: true }),
       purchaseBatches: await this.getPurchaseBatches(),
       purchaseBatchItems: await this.getPurchaseBatchItems(),
       privateOrders: await this.getPrivateOrders(),

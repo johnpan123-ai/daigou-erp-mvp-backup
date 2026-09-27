@@ -79,7 +79,10 @@ export function validateNextWacaSnapshot(snapshot: NextWacaSnapshot, variants: r
     if (!variantIds.has(mapping.productVariantId)) throw new Error(`NEXT_WACA_ORPHAN_MAPPING:${mapping.feature}`);
   }
   for (const link of snapshot.masterLinks) {
-    if (!variantIds.has(link.productVariantId)) throw new Error(`NEXT_WACA_ORPHAN_MASTER_LINK:${link.childCode}`);
+    if (!link.mainCode || !link.childCode) throw new Error(`NEXT_WACA_MASTER_LINK_INVALID:${link.childCode}`);
+    if (link.productVariantId && !variantIds.has(link.productVariantId)) {
+      throw new Error(`NEXT_WACA_ORPHAN_MASTER_LINK:${link.childCode}`);
+    }
   }
 }
 

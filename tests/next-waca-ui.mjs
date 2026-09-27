@@ -99,7 +99,7 @@ try {
   await page.getByRole('heading', { name: 'WACA 訂單整合' }).waitFor();
 
   await upload();
-  assert.match(await page.locator('.waca-metrics').innerText(), /未變更\s+1/);
+  assert.match(await page.locator('.waca-metrics').last().innerText(), /未變更\s+1/);
   const [repeatBackup] = await Promise.all([
     page.waitForEvent('download'), page.getByRole('button', { name: '確認匯入' }).click(),
   ]);

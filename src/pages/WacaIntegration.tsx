@@ -7,7 +7,7 @@ import { parseMyAcgFile } from '../utils/myacgParser';
 import type { InventoryItem, ProductVariant } from '../lib/db';
 import {
   cloneWacaRepository, importWacaRows, normalizeWacaText,
-  refreshWacaMasterStatus, setWacaMapping, wacaFeature, wacaOrderKey,
+  matchWacaItem, refreshWacaMasterStatus, setWacaMapping, wacaFeature, wacaOrderKey,
   type MasterVariant, type WacaImportResult, type WacaItem, type WacaRow, type WacaStatus,
 } from '../waca/orderCore';
 import {
@@ -34,10 +34,13 @@ type PendingImport = {
 type PendingLinks = { fileName: string; revision: number; result: LinkImportResult; links: MyAcgMasterLink[] };
 
 const statusText: Record<string, string> = {
-  MASTER_MAPPING_MISSING: '缺少買動漫 GP → 商品群組對照',
-  VARIANT_NOT_MATCHED: '已找到 GP，規格未能唯一配對',
+  MASTER_EVIDENCE_MISSING: '缺少買動漫 GP → G 原始證據',
+  MASTER_MAPPING_MISSING: '舊版診斷；請補入買動漫 GP → G 證據並重匯',
+  MASTER_GROUP_LINK_MISSING: '已有 GP → G，ERP 商品群組連結待補',
+  VARIANT_NOT_MATCHED: '已找到 GP，但規格與候選 G 不符',
   MULTIPLE_VARIANT_CANDIDATES: '同一 GP 下有多個候選，待人工確認',
-  PRODUCT_NOT_IN_MASTER: '買動漫主檔無此商品',
+  VARIANT_NOT_IN_ERP: '買動漫已有 G，但 ERP 不存在此子品項',
+  PRODUCT_NOT_IN_MASTER: '完整買動漫主檔無此商品',
   NAME_CONFLICT: '品名與買動漫商品不一致',
 };
 
@@ -78,7 +81,7 @@ export default function WacaIntegration() {
     if (!snapshot) return { links: [] as MyAcgMasterLink[], master: [] as MasterVariant[], error: '' };
     try {
       const fromInventory = linksFromMyAcgInventory(inventory, variants, 'NEXT_CURRENT_MYACG_CATALOG', '');
-      const links = mergeMyAcgMasterLinks(snapshot.masterLinks, fromInventory.links);
+      const links = mergeMyAcgMasterLinks(fromInventory.links, snapshot.masterLinks);
       return { links, master: buildWacaMasterReference(variants, links), error: '' };
     } catch (cause) {
       return { links: snapshot.masterLinks, master: buildWacaMasterReference(variants, snapshot.masterLinks), error: String(cause) };
@@ -103,6 +106,11 @@ export default function WacaIntegration() {
       return true;
     });
   }, [items]);
+  const latestBatch = snapshot?.batches.at(-1);
+  const matchedFeatures = mappingItems.filter(item => item.productVariantId).length;
+  const manualFeatures = mappingItems.filter(item => item.match === 'MANUAL_MATCH').length;
+  const multipleFeatures = mappingItems.filter(item => item.diagnostic === 'MULTIPLE_VARIANT_CANDIDATES').length;
+  const previewFeatures = pendingImport ? [...new Map(pendingImport.items.map(item => [item.feature, item])).values()] : [];
 
   const run = (rows: WacaRow[], current: NextWacaSnapshot, importId: string, links = masterState.links) => {
     const currentRepo = repositoryFromSnapshot(current, variants);
@@ -149,15 +157,15 @@ export default function WacaIntegration() {
       const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
       await dataProvider.commitNextWacaSnapshot(next, current.revision, true);
       setPendingImport(null);
-      setMessage(`匯入完成：新增 ${result.inserted}、更新 ${result.updated}、未變更 ${result.unchanged}。請檢查待處理與訂購紀錄表。`);
       await load();
+      setMessage(`匯入完成：新增 ${result.inserted}、更新 ${result.updated}、未變更 ${result.unchanged}。請檢查待處理與訂購紀錄表。`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
 
   const handleMasterFile = async (file?: File) => {
     if (!file || !snapshot) return;
-    setBusy(true); setError(''); setPendingLinks(null);
+    setBusy(true); setError(''); setMessage(''); setPendingLinks(null);
     try {
       const parsed = await parseMyAcgFile(file);
       const result = linksFromMyAcgInventory(parsed, variants, file.name, new Date().toISOString());
@@ -175,9 +183,9 @@ export default function WacaIntegration() {
       if (current.revision !== pendingLinks.revision) throw new Error('對照資料已變更，請重新選擇買動漫檔案。');
       await dataProvider.exportData();
       await dataProvider.commitNextWacaSnapshot({ ...current, masterLinks: pendingLinks.links }, current.revision, false);
-      setMessage(`已保存 ${pendingLinks.result.accepted} 筆買動漫 GP → G 對照證據。`);
       setPendingLinks(null);
       await load();
+      setMessage(`已保存 ${pendingLinks.result.accepted} 筆買動漫 GP → G 對照證據。`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
@@ -190,10 +198,19 @@ export default function WacaIntegration() {
     return scoped;
   };
 
+  const explanationFor = (item: WacaItem) => {
+    const match = matchWacaItem({
+      orderStatus: '', orderNumber: '', purchasedAt: '', productCode: item.productCode,
+      productTitle: item.productTitle, spec1: item.spec1, spec2: item.spec2,
+      specCode: item.specCode, quantity: item.quantity, subtotal: item.subtotal,
+    }, masterState.master);
+    return match.diagnostic ? statusText[match.diagnostic] : '已找到安全候選';
+  };
+
   const manualMap = async (item: WacaItem) => {
     if (!snapshot) return;
     const chosen = choicesFor(item).find(row => row.variantId === selectedVariant[item.feature]);
-    if (!chosen) { setError('請先選擇同一買動漫 GP 底下的子規格。'); return; }
+    if (!chosen || !chosen.variantId) { setError('請先選擇同一買動漫 GP 底下且 ERP 存在的子規格。'); return; }
     setBusy(true); setError('');
     try {
       const current = await dataProvider.getNextWacaSnapshot();
@@ -209,8 +226,8 @@ export default function WacaIntegration() {
       await dataProvider.commitNextWacaSnapshot(
         snapshotFromRepository(current, candidate, current.batches, masterState.links), current.revision, true,
       );
-      setMessage('商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
       await load();
+      setMessage('商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
@@ -252,8 +269,8 @@ export default function WacaIntegration() {
       await dataProvider.commitNextWacaSnapshot(
         snapshotFromRepository(current, candidate, batches, masterState.links), current.revision, true,
       );
-      setMessage(`${orderKey} 已按「${status}」重新計算。`);
       await load();
+      setMessage(`${orderKey} 已按「${status}」重新計算。`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
@@ -274,6 +291,13 @@ export default function WacaIntegration() {
       ] as const).map(([key, label]) =>
         <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}
     </nav>
+    <div className="waca-metrics" aria-label="WACA 目前驗收摘要">
+      {([
+        ['商品特徵', mappingItems.length], ['已配對特徵', matchedFeatures],
+        ['人工確認特徵', manualFeatures], ['待處理特徵', mappingItems.length - matchedFeatures],
+        ['多候選特徵', multipleFeatures], ['最近一批折扣忽略', latestBatch?.result.discountIgnored ?? 0],
+      ] as const).map(([label, value]) => <div key={label}><strong>{quantity(value)}</strong><span>{label}</span></div>)}
+    </div>
     {tab === 'import' && <section className="waca-panel">
       <h2><FileSpreadsheet size={19} /> 上傳 WACA 訂單 Excel</h2>
       <p>先預覽解析、商品配對和數量變化；按「確認匯入」前不寫入資料。</p>
@@ -283,13 +307,17 @@ export default function WacaIntegration() {
         <h3>匯入預覽：{pendingImport.fileName}</h3>
         <div className="waca-metrics">
           {([
+            ['商品特徵', previewFeatures.length],
+            ['可自動配對特徵', previewFeatures.filter(item => item.match === 'AUTO_MATCH').length],
+            ['待人工確認特徵', previewFeatures.filter(item => item.match === 'MANUAL_REVIEW').length],
+            ['未配對特徵', previewFeatures.filter(item => item.match === 'UNMATCHED').length],
             ['訂單', pendingImport.result.ordersTotal], ['有效訂單', pendingImport.result.effectiveOrders],
             ['取消', pendingImport.result.cancelledOrders], ['失敗', pendingImport.result.failedOrders],
             ['商品列', pendingImport.result.productRows], ['有效商品數量', pendingImport.result.effectiveQuantity],
             ['折扣忽略', pendingImport.result.discountIgnored], ['新增', pendingImport.result.inserted],
             ['更新', pendingImport.result.updated], ['未變更', pendingImport.result.unchanged],
             ['已配對', pendingImport.result.matched], ['未配對', pendingImport.result.unmatched],
-            ['多候選', pendingImport.result.multipleCandidates], ['GP 對照缺失', pendingImport.result.mappingMissing],
+            ['多候選', pendingImport.result.multipleCandidates], ['主檔證據缺失', pendingImport.result.mappingMissing],
             ['狀態衝突', pendingImport.result.statusConflicts.length],
           ] as const).map(([label, value]) => <div key={label}><strong>{quantity(value)}</strong><span>{label}</span></div>)}
         </div>
@@ -317,12 +345,12 @@ export default function WacaIntegration() {
       </>}
       <div className="waca-master-import">
         <h2><Link2 size={19} /> 補入買動漫 GP → G 原始證據</h2>
-        <p>舊 ERP 快照可能只有 G 子編號。可上傳買動漫商品匯出檔保存 GP 主編號對照；不會新增商品。</p>
+        <p>保存 GP → G 原始證據，即使 ERP 尚無 G 或商品已下架也保留；不會新增 ERP 商品。歷史檔可逐份補入。</p>
         <input type="file" accept=".xls,.xlsx" aria-label="選擇買動漫商品匯出檔" disabled={busy || !snapshot}
           onChange={event => { void handleMasterFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
         {pendingLinks && <div className="waca-notice">
-          {pendingLinks.fileName}：可保存 {pendingLinks.result.accepted} 筆，
-          ERP 無對應子編號 {pendingLinks.result.missingVariant} 筆，
+          {pendingLinks.fileName}：可保存 {pendingLinks.result.accepted} 筆（含 ERP 尚無 G 的證據），
+          其中 ERP 無對應子編號 {pendingLinks.result.missingVariant} 筆，
           子編號不唯一 {pendingLinks.result.ambiguousVariant} 筆。
           <button className="btn btn-primary" disabled={busy} onClick={() => void confirmMasterLinks()}>確認保存對照</button>
         </div>}
@@ -349,12 +377,14 @@ export default function WacaIntegration() {
         {mappingItems.map(item => {
           const mapping = repo?.mappings.get(item.feature);
           const choices = choicesFor(item);
+          const evidence = mapping && masterState.links.find(link => link.childCode === mapping.myacgVariantId);
           return <tr key={item.feature}><td>{item.productCode}<small>{item.productTitle}／{item.spec1} {item.spec2}</small></td>
             <td>{mapping ? `${mapping.myacgMainId} / ${mapping.myacgVariantId}` : statusText[item.diagnostic ?? ''] ?? '待對照'}</td>
-            <td>{mapping ? `${mapping.method === 'AUTO' ? '自動' : '人工'}／${mapping.masterStatus === 'ACTIVE' ? '在主檔' : '最新主檔未出現'}` : '未確認'}</td>
-            <td><select aria-label={`對照 ${item.productCode} ${item.spec1}`} value={selectedVariant[item.feature] ?? ''} onChange={event => setSelectedVariant(previous => ({ ...previous, [item.feature]: event.target.value }))}>
+            <td>{mapping ? `${mapping.method === 'AUTO' ? '自動' : '人工'}／${mapping.masterStatus === 'ACTIVE' ? 'ERP 規格可用' : 'ERP 規格暫缺'}` : '未確認'}
+              {evidence && <small>GP → G 證據：{evidence.sourceFile}</small>}</td>
+            <td><small>{explanationFor(item)}</small><select aria-label={`對照 ${item.productCode} ${item.spec1}`} value={selectedVariant[item.feature] ?? ''} onChange={event => setSelectedVariant(previous => ({ ...previous, [item.feature]: event.target.value }))}>
               <option value="">選擇同 GP 規格</option>
-              {choices.map(choice => <option key={choice.variantId} value={choice.variantId}>{choice.childCode}／{choice.variantTitle}</option>)}
+              {choices.filter(choice => choice.variantId).map(choice => <option key={choice.variantId} value={choice.variantId}>{choice.childCode}／{choice.variantTitle}／ERP {choice.variantId}</option>)}
             </select><button className="btn btn-secondary" disabled={busy || !selectedVariant[item.feature]} onClick={() => void manualMap(item)}>保存</button></td>
           </tr>;
         })}
@@ -369,14 +399,21 @@ export default function WacaIntegration() {
     {tab === 'pending' && <section className="waca-panel"><h2>未配對與狀態衝突</h2>
       {pendingItems.map(item => <div className="waca-pending-card" key={item.key}>
         <strong>{item.productCode}／{item.spec1} {item.spec2}</strong>
-        <p>{item.productTitle}，訂單 {item.orderKey.replace('WACA::', '')}，數量 {item.quantity}</p>
+        <p>WACA 品名：{item.productTitle}</p>
+        <p>訂單 {item.orderKey.replace('WACA::', '')}，數量 {item.quantity}</p>
         <p>{statusText[item.diagnostic ?? ''] ?? '待人工確認'}</p>
+        <p>候選範圍與原因：{explanationFor(item)}</p>
+        {choicesFor(item).length ? <ul>{choicesFor(item).map(choice => <li key={`${choice.childCode}::${choice.variantId}`}>
+          {choice.mainCode || '直接 G'} → {choice.childCode}／買動漫規格 {choice.variantTitle || '未提供'}／
+          ERP ProductVariant {choice.variantId || '不存在'}／證據 {choice.sourceFile || 'ERP G 編號'}
+        </li>)}</ul> : <p>沒有同 GP 的買動漫候選 G；需補入正式主檔證據。</p>}
         <select aria-label={`處理 ${item.productCode} ${item.spec1}`} value={selectedVariant[item.feature] ?? ''} onChange={event => setSelectedVariant(previous => ({ ...previous, [item.feature]: event.target.value }))}>
           <option value="">選擇同 GP 規格</option>
-          {choicesFor(item).map(choice => <option key={choice.variantId} value={choice.variantId}>{choice.childCode}／{choice.variantTitle}</option>)}
+          {choicesFor(item).filter(choice => choice.variantId).map(choice => <option key={choice.variantId} value={choice.variantId}>{choice.childCode}／{choice.variantTitle}／ERP {choice.variantId}</option>)}
         </select>
         <button className="btn btn-secondary" disabled={busy || !selectedVariant[item.feature]} onClick={() => void manualMap(item)}>確認對照</button>
       </div>)}
+      {!pendingItems.length && !conflicts.length && <p>目前沒有未配對商品或訂單狀態衝突。</p>}
       {conflicts.map(({ batch, orderKey, rows }) => <div className="waca-pending-card" key={`${batch.id}::${orderKey}`}>
         <strong>狀態衝突：{orderKey.replace('WACA::', '')}</strong>
         <p>{batch.fileName}；同一匯入檔出現 {new Set(rows.map(row => row.orderStatus)).size} 種訂單狀態，尚未計入。</p>

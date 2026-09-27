@@ -7,8 +7,10 @@ export interface MyAcgMasterLink {
   childCode: string;
   productGroupId: string;
   productVariantId: string;
+  productTitle?: string;
   variantTitle: string;
   sourceFile: string;
+  sourceFiles?: string[];
   observedAt: string;
 }
 
@@ -41,19 +43,17 @@ export function linksFromMyAcgInventory(
       continue;
     }
     const candidates = byChild.get(childCode) ?? [];
-    if (!candidates.length) { missingVariant += 1; continue; }
-    if (candidates.length !== 1 || !candidates[0].product_group_id) {
-      ambiguousVariant += 1;
-      continue;
-    }
-    const variant = candidates[0];
+    if (!candidates.length) missingVariant += 1;
+    if (candidates.length > 1) ambiguousVariant += 1;
+    const variant = candidates.length === 1 ? candidates[0] : null;
     const link: MyAcgMasterLink = {
-      mainCode, childCode, productGroupId: variant.product_group_id!,
-      productVariantId: variant.id, variantTitle: row.raw_variant_name || variant.raw_variant_name || variant.variant_name,
-      sourceFile, observedAt,
+      mainCode, childCode, productGroupId: variant?.product_group_id ?? '',
+      productVariantId: variant?.id ?? '', productTitle: row.product_title,
+      variantTitle: row.raw_variant_name || variant?.raw_variant_name || variant?.variant_name || '',
+      sourceFile, sourceFiles: [sourceFile], observedAt,
     };
     const prior = links.get(childCode);
-    if (prior && (prior.mainCode !== link.mainCode || prior.productVariantId !== link.productVariantId)) {
+    if (prior && prior.mainCode !== link.mainCode) {
       throw new Error(`MYACG_PARENT_CHILD_CONFLICT:${childCode}`);
     }
     links.set(childCode, link);
@@ -68,10 +68,20 @@ export function mergeMyAcgMasterLinks(
   const byChild = new Map(existing.map(link => [link.childCode, link]));
   for (const link of incoming) {
     const prior = byChild.get(link.childCode);
-    if (prior && (prior.mainCode !== link.mainCode || prior.productVariantId !== link.productVariantId || prior.productGroupId !== link.productGroupId)) {
+    if (prior && (prior.mainCode !== link.mainCode
+      || (prior.productVariantId && link.productVariantId && prior.productVariantId !== link.productVariantId)
+      || (prior.productGroupId && link.productGroupId && prior.productGroupId !== link.productGroupId))) {
       throw new Error(`MYACG_PARENT_CHILD_CONFLICT:${link.childCode}`);
     }
-    byChild.set(link.childCode, link);
+    byChild.set(link.childCode, {
+      ...prior, ...link,
+      productGroupId: link.productGroupId || prior?.productGroupId || '',
+      productVariantId: link.productVariantId || prior?.productVariantId || '',
+      productTitle: link.productTitle || prior?.productTitle || '',
+      variantTitle: link.variantTitle || prior?.variantTitle || '',
+      sourceFiles: [...new Set([...(prior?.sourceFiles ?? (prior?.sourceFile ? [prior.sourceFile] : [])),
+        ...(link.sourceFiles ?? [link.sourceFile])])],
+    });
   }
   return [...byChild.values()].sort((a, b) => a.childCode.localeCompare(b.childCode));
 }
@@ -80,20 +90,40 @@ export function buildWacaMasterReference(
   variants: readonly ProductVariant[],
   links: readonly MyAcgMasterLink[],
 ): MasterVariant[] {
-  const byVariant = new Map(links.map(link => [link.productVariantId, link]));
-  return variants.map(variant => {
-    const link = byVariant.get(variant.id);
-    const validLink = link
-      && link.childCode === normalizeWacaText(variant.myacg_item_code)
-      && link.productGroupId === variant.product_group_id;
-    return {
-      mainCode: validLink ? link.mainCode : '',
-      childCode: variant.myacg_item_code,
-      variantId: variant.id,
+  const byChild = new Map<string, ProductVariant[]>();
+  for (const variant of variants) {
+    const child = normalizeWacaText(variant.myacg_item_code);
+    byChild.set(child, [...(byChild.get(child) ?? []), variant]);
+  }
+  const linkedChildren = new Set<string>();
+  const result: MasterVariant[] = [];
+  for (const link of links) {
+    const child = normalizeWacaText(link.childCode);
+    linkedChildren.add(child);
+    const candidates = byChild.get(child) ?? [];
+    if (!candidates.length) {
+      result.push({ mainCode: link.mainCode, childCode: link.childCode, variantId: '',
+        productGroupId: '', productTitle: link.productTitle ?? '', variantTitle: link.variantTitle,
+        active: true, sourceFile: link.sourceFile });
+      continue;
+    }
+    for (const variant of candidates) result.push({
+      mainCode: link.mainCode, childCode: link.childCode, variantId: variant.id,
       productGroupId: variant.product_group_id ?? '',
-      productTitle: variant.product_title,
-      variantTitle: validLink ? link.variantTitle : variant.raw_variant_name || variant.variant_name,
+      productTitle: link.productTitle || variant.product_title,
+      variantTitle: link.variantTitle || variant.raw_variant_name || variant.variant_name,
       active: (variant as ProductVariant & { deleted_at?: string | null }).deleted_at == null,
-    };
-  });
+      sourceFile: link.sourceFile,
+    });
+  }
+  for (const variant of variants) {
+    if (linkedChildren.has(normalizeWacaText(variant.myacg_item_code))) continue;
+    result.push({ mainCode: '', childCode: variant.myacg_item_code, variantId: variant.id,
+      productGroupId: variant.product_group_id ?? '', productTitle: variant.product_title,
+      variantTitle: variant.raw_variant_name || variant.variant_name,
+      active: (variant as ProductVariant & { deleted_at?: string | null }).deleted_at == null,
+      sourceFile: '',
+    });
+  }
+  return result;
 }

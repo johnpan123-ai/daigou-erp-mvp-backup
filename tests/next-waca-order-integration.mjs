@@ -29,7 +29,7 @@ assert.equal(normalizeWacaText(' Ａ  b '), 'A B');
 assert.notEqual(normalizeWacaText('2026 Limited'), normalizeWacaText('2027 Limited'));
 assert.equal(matchWacaItem(row(), master).candidate?.variantId, 'vr');
 assert.equal(matchWacaItem(row({ productCode: 'G-BLUE', spec1: 'Blue' }), master).candidate?.variantId, 'vb');
-assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master).diagnostic, 'MASTER_MAPPING_MISSING');
+assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master).diagnostic, 'MASTER_EVIDENCE_MISSING');
 assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master, true).diagnostic, 'PRODUCT_NOT_IN_MASTER');
 assert.equal(matchWacaItem(row({ spec1: 'Green' }), master).diagnostic, 'VARIANT_NOT_MATCHED');
 assert.equal(matchWacaItem(row({ spec1: '' }), master).diagnostic, 'MULTIPLE_VARIANT_CANDIDATES');
@@ -144,7 +144,7 @@ if (!existsSync(sample) || !existsSync(source) || !existsSync(snapshotFile)) {
     if (matched.kind === 'AUTO_MATCH') counts.auto += 1;
     else if (matched.kind === 'MANUAL_REVIEW') counts.multiple += 1;
     else counts.unmatched += 1;
-    if (matched.diagnostic === 'MASTER_MAPPING_MISSING') counts.mappingMissing += 1;
+    if (matched.diagnostic === 'MASTER_EVIDENCE_MISSING') counts.mappingMissing += 1;
     if (matched.kind !== 'AUTO_MATCH') pending.push({
       code: item.productCode, spec1: item.spec1, spec2: item.spec2,
       reason: matched.diagnostic, candidates: matched.candidates.length,

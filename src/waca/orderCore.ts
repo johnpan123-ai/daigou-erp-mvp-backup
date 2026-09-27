@@ -22,6 +22,7 @@ export interface MasterVariant {
   productTitle: string;
   variantTitle: string;
   active: boolean;
+  sourceFile?: string;
 }
 
 export interface WacaMapping {
@@ -56,7 +57,8 @@ export interface WacaItem {
   subtotal: number;
   productVariantId: string | null;
   match: 'AUTO_MATCH' | 'MANUAL_MATCH' | 'UNMATCHED' | 'MANUAL_REVIEW';
-  diagnostic: 'MASTER_MAPPING_MISSING' | 'VARIANT_NOT_MATCHED' | 'MULTIPLE_VARIANT_CANDIDATES' | 'PRODUCT_NOT_IN_MASTER' | 'NAME_CONFLICT' | null;
+  diagnostic: 'MASTER_EVIDENCE_MISSING' | 'MASTER_GROUP_LINK_MISSING' | 'VARIANT_NOT_MATCHED'
+    | 'MULTIPLE_VARIANT_CANDIDATES' | 'VARIANT_NOT_IN_ERP' | 'PRODUCT_NOT_IN_MASTER' | 'NAME_CONFLICT' | null;
 }
 
 export interface WacaRepository {
@@ -116,35 +118,45 @@ export interface WacaMatch {
   diagnostic: WacaItem['diagnostic'];
 }
 
-const matchesSpec = (row: WacaRow, candidate: MasterVariant): boolean => {
-  const specs = [row.spec1, row.spec2].map(normalizeWacaText).filter(Boolean);
-  if (specs.length === 0) return true;
-  const title = normalizeWacaText(candidate.variantTitle);
-  return title.length > 0 && specs.every(spec => title.includes(spec) || spec.includes(title));
+const specification = (value: string): string => normalizeWacaText(value)
+  .replace(/[\s\u3000/／・·.．,，:：()（）【】_-]+/gu, '').replaceAll('[', '').replaceAll(']', '');
+
+const matchingSpec = (row: WacaRow, candidates: readonly MasterVariant[]): MasterVariant[] => {
+  const wanted = [row.spec1, row.spec2].map(specification).filter(Boolean).join('');
+  if (!wanted) return [...candidates];
+  return candidates.filter(candidate => specification(candidate.variantTitle) === wanted);
 };
 
 const verifiesTitle = (row: WacaRow, candidate: MasterVariant): boolean => {
-  const wanted = normalizeWacaText(row.productTitle);
-  const actual = normalizeWacaText(candidate.productTitle);
+  // Seller punctuation and spacing may differ across platforms; words, digits and signs do not.
+  const title = (value: string) => normalizeWacaText(value).replace(/[\s\u3000、,，。・·]+/gu, '');
+  const wanted = title(row.productTitle);
+  const actual = title(candidate.productTitle);
   return !wanted || !actual || wanted === actual || wanted.includes(actual) || actual.includes(wanted);
 };
 
 export function matchWacaItem(row: WacaRow, master: readonly MasterVariant[], completeMaster = false): WacaMatch {
   const code = normalizeWacaText(row.productCode);
   const direct = master.filter(item => normalizeWacaText(item.childCode) === code && item.active);
-  const scoped = direct.length > 0 ? direct : master.filter(item => normalizeWacaText(item.mainCode) === code && item.active);
-  if (!scoped.length) return { kind: 'UNMATCHED', candidate: null, candidates: [], diagnostic: completeMaster ? 'PRODUCT_NOT_IN_MASTER' : 'MASTER_MAPPING_MISSING' };
-  const specMatches = scoped.filter(item => matchesSpec(row, item));
+  if (code.startsWith('G') && !code.startsWith('GP')) {
+    if (!direct.length) return { kind: 'UNMATCHED', candidate: null, candidates: [], diagnostic: 'VARIANT_NOT_IN_ERP' };
+    const resolved = direct.filter(item => item.variantId);
+    if (!resolved.length) return { kind: 'UNMATCHED', candidate: null, candidates: direct, diagnostic: 'VARIANT_NOT_IN_ERP' };
+    if (resolved.length !== 1) return { kind: 'MANUAL_REVIEW', candidate: null, candidates: resolved, diagnostic: 'MULTIPLE_VARIANT_CANDIDATES' };
+    return { kind: 'AUTO_MATCH', candidate: resolved[0], candidates: resolved,
+      diagnostic: resolved[0].mainCode && !resolved[0].productGroupId ? 'MASTER_GROUP_LINK_MISSING' : null };
+  }
+  const scoped = master.filter(item => normalizeWacaText(item.mainCode) === code && item.active);
+  if (!scoped.length) return { kind: 'UNMATCHED', candidate: null, candidates: [],
+    diagnostic: completeMaster ? 'PRODUCT_NOT_IN_MASTER' : 'MASTER_EVIDENCE_MISSING' };
+  const specMatches = matchingSpec(row, scoped);
   if (!specMatches.length) return { kind: 'UNMATCHED', candidate: null, candidates: scoped, diagnostic: 'VARIANT_NOT_MATCHED' };
-  const specs = [row.spec1, row.spec2].map(normalizeWacaText).filter(Boolean);
-  const exact = specs.length ? specMatches.filter(item => {
-    const title = normalizeWacaText(item.variantTitle);
-    return title === specs.join(' ') || title === specs.join('/');
-  }) : [];
-  const verified = (exact.length ? exact : specMatches).filter(item => verifiesTitle(row, item));
+  const verified = specMatches.filter(item => verifiesTitle(row, item));
   if (!verified.length) return { kind: 'UNMATCHED', candidate: null, candidates: specMatches, diagnostic: 'NAME_CONFLICT' };
   if (verified.length !== 1) return { kind: 'MANUAL_REVIEW', candidate: null, candidates: verified, diagnostic: 'MULTIPLE_VARIANT_CANDIDATES' };
-  return { kind: 'AUTO_MATCH', candidate: verified[0], candidates: verified, diagnostic: null };
+  if (!verified[0].variantId) return { kind: 'UNMATCHED', candidate: null, candidates: verified, diagnostic: 'VARIANT_NOT_IN_ERP' };
+  return { kind: 'AUTO_MATCH', candidate: verified[0], candidates: verified,
+    diagnostic: !verified[0].productGroupId ? 'MASTER_GROUP_LINK_MISSING' : null };
 }
 
 export const wacaOrderKey = (orderNumber: string): string => `WACA::${normalizeWacaText(orderNumber)}`;
@@ -262,7 +274,7 @@ export function importWacaRows(
       if (matchKind === 'UNMATCHED') unmatched += 1;
       else if (matchKind === 'MANUAL_REVIEW') multipleCandidates += 1;
       else matched += 1;
-      if (item.diagnostic === 'MASTER_MAPPING_MISSING') mappingMissing += 1;
+      if (item.diagnostic === 'MASTER_EVIDENCE_MISSING') mappingMissing += 1;
       if (matchKind === 'AUTO_MATCH' && !mapping && match?.candidate) {
         repo.mappings.set(feature, {
           feature, myacgMainId: match.candidate.mainCode, myacgVariantId: match.candidate.childCode,

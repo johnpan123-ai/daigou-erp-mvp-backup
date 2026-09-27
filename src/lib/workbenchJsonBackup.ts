@@ -58,7 +58,7 @@ export async function collectWorkbenchBackupData(provider: BackupProvider): Prom
     provider.getSalesOrderItems(),
     provider.getProductGroups(),
     provider.getProductCategories(),
-    provider.getProductVariants(),
+    provider.getProductVariants(getProviderMode() === 'next' ? { raw: true } : undefined),
     provider.getPurchaseBatches(),
     provider.getPurchaseBatchItems(),
     provider.getPrivateOrders(),
