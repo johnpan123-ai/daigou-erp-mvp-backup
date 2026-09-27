@@ -9,7 +9,7 @@ import { buildPurchaseRecordSearchDocuments, buildVariantsByGroup, purchaseRecor
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
-import { PageHeader } from '../components/layout/PageHeader';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { productGroupDisplayName, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
@@ -2505,7 +2505,7 @@ export default function PurchaseRecords() {
   }
 
   return (
-    <div className="flex-col gap-lg workspace-page purchase-records-workspace" data-testid="purchase-records-root">
+    <PageShell className="flex-col gap-lg" data-testid="purchase-records-root" mobileStyle={{ paddingBottom: '180px' }}>
       {linkedGroupId !== null && (
         <div role="status" data-testid="purchase-records-group-scope" style={{ padding: 12, background: '#eff6ff', borderRadius: 8, overflowWrap: 'anywhere' }}>
           {baseGroups.length ? '正在查看指定商品的訂購紀錄（暫不套用其他篩選）' : '找不到指定商品，或目前無權讀取；未改用其他商品。'}
@@ -2737,7 +2737,7 @@ export default function PurchaseRecords() {
       `}</style>
 
 
-      <PageHeader>
+      <PageHeader className="flex justify-between items-center" mobileStyle={{ marginBottom: 'var(--spacing-md)' }}>
         <div>
           <h1 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: 600 }}>訂購紀錄表</h1>
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
@@ -3057,7 +3057,7 @@ export default function PurchaseRecords() {
 
       </div>
 
-      <div className="workspace-toolbar workspace-panel" data-workspace-toolbar style={{ flexDirection: 'column', alignItems: 'stretch', padding: '16px' }}>
+      <div className="workspace-toolbar workspace-panel" data-workspace-toolbar style={isMobile ? { display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e5e7eb' } : { flexDirection: 'column', alignItems: 'stretch', padding: '16px' }}>
         
         <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '8px', padding: '0 12px', height: '40px' }}>
           <Search size={18} style={{ color: '#64748b', marginRight: '8px' }} />
@@ -4908,6 +4908,6 @@ export default function PurchaseRecords() {
       >
         {editMode ? '✏️ 編輯模式' : '🔒 鎖定模式'}
       </button>
-    </div>
+    </PageShell>
   );
 }

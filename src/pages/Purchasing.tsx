@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { PageHeader } from '../components/layout/PageHeader';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrder, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
@@ -702,8 +702,8 @@ export default function Purchasing() {
   const workspaceRefreshControl = <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />;
 
   return (
-    <div className="mobile-summary-container workspace-page">
-      {selectedGroupId && workspaceRefreshControl}
+    <PageShell className="mobile-summary-container" mobileStyle={{ width: '100%', maxWidth: '600px', margin: '0 auto', padding: '16px' }}>
+      {(selectedGroupId || isMobile) && workspaceRefreshControl}
       <style>{`
         .mobile-summary-container {
           width: 100%;
@@ -739,6 +739,16 @@ export default function Purchasing() {
         }
 
         /* Header Style */
+        .summary-header {
+          background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+          color: #ffffff !important;
+          padding: 20px;
+          border-radius: 12px;
+          margin-bottom: 16px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+        .summary-header .summary-title, .summary-header .summary-title span { color: #ffffff !important; }
+        .summary-header .summary-subtitle { color: #94a3b8 !important; }
         .summary-title, .summary-title span {
           font-size: 20px;
           font-weight: 800;
@@ -814,7 +824,6 @@ export default function Purchasing() {
 
         .card-content {
           flex: 1;
-          min-width: 0;
           display: flex;
           flex-direction: column;
           gap: 8px;
@@ -1159,7 +1168,7 @@ export default function Purchasing() {
       {!selectedGroup ? (
         // List View
         <div className="purchasing-page-inner">
-          <PageHeader>
+          <PageHeader className={isMobile ? 'summary-header' : undefined}>
             <div>
             <h1 className="summary-title">
               <ClipboardList size={22} />
@@ -1167,10 +1176,10 @@ export default function Purchasing() {
             </h1>
             <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
             </div>
-            {workspaceRefreshControl}
+            {!isMobile && workspaceRefreshControl}
           </PageHeader>
 
-          <div className="search-wrapper workspace-toolbar" data-workspace-toolbar>
+          <div className="search-wrapper workspace-toolbar" data-workspace-toolbar style={isMobile ? { display: 'flex', gap: '8px', alignItems: 'center' } : undefined}>
             <div style={{ position: 'relative', flex: 1 }}>
               <Search className="search-icon" size={18} />
               <input 
@@ -1695,6 +1704,6 @@ export default function Purchasing() {
       }}>
         Purchasing UI width fix v1
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { PageHeader } from '../components/layout/PageHeader';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Archive, Check, ChevronRight, Clock3, Copy, RefreshCw, ShoppingCart } from 'lucide-react';
 import type {
@@ -451,7 +451,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="daily-dashboard workspace-page">
+    <PageShell className="daily-dashboard">
       <PageHeader className="dashboard-header">
         <div>
           <p className="dashboard-eyebrow">DAILY WORK</p>
@@ -591,7 +591,7 @@ export default function Dashboard() {
       </section>
 
       <style>{`
-        .daily-dashboard { color: #172033; }
+        .daily-dashboard { max-width: 1420px; margin: 0 auto; padding: 26px 28px 56px; color: #172033; }
         .dashboard-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
         .dashboard-eyebrow { margin: 0 0 5px; color: #64748b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.16em; }
         .dashboard-header h1 { margin: 0; font-size: clamp(1.65rem, 2.4vw, 2.25rem); line-height: 1.15; letter-spacing: -0.03em; }
@@ -678,6 +678,6 @@ export default function Dashboard() {
           .work-item-metrics { width: 100%; justify-content: flex-start; }
         }
       `}</style>
-    </div>
+    </PageShell>
   );
 }

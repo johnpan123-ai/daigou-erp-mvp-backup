@@ -11,7 +11,7 @@ import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
-import { PageHeader } from '../components/layout/PageHeader';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
 import { getProviderMode } from '../providers/providerMode';
@@ -586,7 +586,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
   };
 
   return (
-    <div className="inventory-container workspace-page">
+    <PageShell className="inventory-container">
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1865,6 +1865,6 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
           </>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

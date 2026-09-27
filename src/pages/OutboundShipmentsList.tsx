@@ -10,7 +10,8 @@ import type {
   ProductGroup,
   ProductVariant,
 } from '../lib/db';
-import { PageHeader } from '../components/layout/PageHeader';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
+import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
 import {
@@ -45,6 +46,7 @@ const getStatusBadge = (status: string) => {
 };
 
 export default function OutboundShipmentsList() {
+  const { isMobile } = useViewport();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -176,8 +178,8 @@ export default function OutboundShipmentsList() {
   }, [shipments]);
 
   return (
-    <div data-testid="outbound-shipments-list-root" className="workspace-page">
-      <PageHeader>
+    <PageShell data-testid="outbound-shipments-list-root" mobileStyle={{ padding: '16px', maxWidth: 900, margin: '0 auto' }}>
+      <PageHeader mobileStyle={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>出庫管理</h1>
           <p style={{ color: '#64748b', fontSize: 14, margin: '4px 0 0' }}>
@@ -207,7 +209,7 @@ export default function OutboundShipmentsList() {
         if (draftCount === 0 && packingShipments.length === 0) return null;
 
         return (
-          <div className="workspace-stats workspace-stats-two" data-workspace-stats>
+          <div className="workspace-stats workspace-stats-two" data-workspace-stats style={isMobile ? { display: 'grid', gridTemplateColumns: '1fr', gap: 12, marginBottom: 20 } : undefined}>
             {draftCount > 0 && (
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 16px' }}>
                 <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 4 }}>草稿</div>
@@ -296,7 +298,7 @@ export default function OutboundShipmentsList() {
       </div>
 
       {/* Search */}
-      <div className="workspace-toolbar" data-workspace-toolbar style={{ position: 'relative' }}>
+      <div className="workspace-toolbar" data-workspace-toolbar style={{ position: 'relative', marginBottom: isMobile ? 16 : undefined }}>
         <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: '#94a3b8' }} />
         <input
           placeholder="搜尋出庫單名稱、追蹤號碼、商品名稱..."
@@ -330,12 +332,12 @@ export default function OutboundShipmentsList() {
       {isInitialLoading ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>載入中...</div>
       ) : filteredShipments.length === 0 ? (
-        <div className="workspace-content workspace-empty" data-workspace-content>
+        <div className="workspace-content workspace-empty" data-workspace-content style={isMobile ? { textAlign: 'center', padding: 40, color: '#94a3b8' } : undefined}>
           <PackageOpen size={48} style={{ marginBottom: 12, opacity: 0.3 }} />
           <p>目前沒有出庫單</p>
         </div>
       ) : (
-        <div className="workspace-content" data-workspace-content style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="workspace-content" data-workspace-content style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 10 : 12 }}>
           {filteredShipments.map(s => {
             const badge = getStatusBadge(s.status);
             const metrics = shipmentMetricsById.get(s.id);
@@ -378,6 +380,6 @@ export default function OutboundShipmentsList() {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

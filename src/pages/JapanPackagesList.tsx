@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { PageHeader } from '../components/layout/PageHeader';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, CheckCircle2, Pencil, Eye, AlertTriangle, ChevronRight } from 'lucide-react';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
@@ -546,7 +546,7 @@ export default function JapanPackagesList() {
   );
 
   return (
-    <div data-testid="japan-packages-list-root" className="workspace-page">
+    <PageShell data-testid="japan-packages-list-root" mobileStyle={{ padding: '24px', maxWidth: '1800px', width: '100%', margin: '0 auto' }}>
       <style>{`
         .header-section {
           display: flex;
@@ -1971,6 +1971,6 @@ export default function JapanPackagesList() {
             </form>
           </div>
         </div>
-      )}    </div>
+      )}    </PageShell>
   );
 }

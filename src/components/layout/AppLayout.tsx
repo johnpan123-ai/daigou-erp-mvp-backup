@@ -646,7 +646,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''} ${workspaceRoutes.has(location.pathname) ? 'page-content--workspace' : ''}`}>
+        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''} ${!isMobile && workspaceRoutes.has(location.pathname) ? 'page-content--workspace' : ''}`}>
           {getProviderMode() === 'local' && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && (
             <div style={{
               backgroundColor: '#fffbeb',

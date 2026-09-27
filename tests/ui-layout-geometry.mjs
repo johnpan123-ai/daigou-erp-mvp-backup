@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const phase = process.env.LAYOUT_PHASE || 'after';
 const selected = process.env.LAYOUT_ROUTES?.split(',');
+const mobileBaseline = JSON.parse(readFileSync('tests/fixtures/ui-layout-mobile-baseline.json', 'utf8'));
 const cases = [
   ['dashboard', '/dashboard', '.daily-dashboard'],
   ['inventory', '/inventory', '.inventory-container'],
@@ -36,7 +37,7 @@ try {
     await sleep(200);
   }
   browser = await chromium.launch({ executablePath: process.env.CORE_TEST_CHROME || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true });
-  for (const width of [1366, 1280, 390]) {
+  for (const width of (process.env.LAYOUT_WIDTHS || '1366,1280,390').split(',').map(Number)) {
     for (const [name, route, selector] of cases) {
       const context = await browser.newContext({ viewport: { width, height: 900 }, locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
       const page = await context.newPage();
@@ -65,7 +66,7 @@ try {
         };
       });
       results.push({ name, width, ...geometry });
-      if (phase !== 'before') {
+      if (phase !== 'before' && width >= 768) {
         assert.ok(Math.abs(geometry.root.width - geometry.available.width) <= 1, `${name}/${width}: shell must fill available workspace`);
         assert.equal(geometry.paddingLeft, width < 768 ? 16 : 24, `${name}/${width}: left padding`);
         assert.equal(geometry.paddingRight, geometry.paddingLeft, `${name}/${width}: symmetric padding`);
@@ -126,6 +127,16 @@ try {
         assert.equal(empty.overflow, false, `${name}/${width}: empty-state overflow`);
         if (empty.emptyHeight !== null) assert.ok(empty.emptyHeight < 280, `${name}/${width}: compact empty state`);
         results.at(-1).empty = empty;
+      }
+      if (phase !== 'before' && width === 390) {
+        const original = mobileBaseline.pages[name];
+        assert.equal(geometry.root.x, mobileBaseline.rootX, `${name}: original mobile left edge`);
+        assert.equal(geometry.root.width, mobileBaseline.rootWidth, `${name}: original mobile width`);
+        assert.equal(geometry.paddingLeft, original.padding, `${name}: original mobile padding`);
+        assert.equal(geometry.paddingRight, original.padding, `${name}: original mobile padding`);
+        assert.ok(Math.abs(geometry.root.height - original.height) <= 1, `${name}: original mobile height ${original.height}, actual ${geometry.root.height}`);
+        assert.equal(geometry.horizontalOverflow, false, `${name}: no new mobile overflow`);
+        assert.equal(await root.evaluate(element => element.classList.contains('workspace-page')), false, `${name}: desktop workspace styling must not apply to mobile`);
       }
       assert.deepEqual(errors, [], `${name}/${width}: runtime errors`);
       assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0);
