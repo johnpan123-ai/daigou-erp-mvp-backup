@@ -29,7 +29,9 @@ try {
     await reload().click();
     await page.getByRole('button', { name: /^(正在更新…|同步中…)$/u }).waitFor({ state: 'hidden' });
   };
-  await reload().waitFor();
+  await reload().waitFor({ timeout: 60000 });
+  assert.equal(await page.getByRole('button', { name: '重新載入最新資料', exact: true }).count(), 0,
+    'desktop ProductGroup detail must use the existing global sync control');
   const rootNode = await page.locator('.main-area').elementHandle();
   const patchVariant = patch => page.evaluate(patch => {
     const h = window.__P0_REACT_HARNESS__;
@@ -50,7 +52,7 @@ try {
   await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).waitFor();
   assert.equal(await rootNode.evaluate(e => e.isConnected), true, 'same mounted route');
   assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot().writes), 0);
-  console.log('PASS A: actual purchase-management button → paged Cloud read → atomic cache commit → same mounted UI');
+  console.log('PASS A: global authoritative refresh → paged Cloud read → atomic cache commit → same mounted UI');
 
   // A separate fresh client exercises the actual bootstrap/getter path; the
   // manual-refresh client stays mounted throughout this equivalence assertion.
@@ -72,7 +74,7 @@ try {
   await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextPageRead());
   await reload().click();
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().pageReadHeld);
-  assert.equal(await page.getByRole('button', { name: '正在更新…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: /^(正在更新…|同步中…)$/u }).isDisabled(), true);
   assert.equal(await page.getByRole('status').filter({ hasText: '已更新至最新資料' }).count(), 0);
   await page.evaluate(() => window.__P0_REACT_HARNESS__.releasePageRead());
   await page.getByText('Consumer completion awaited', { exact: false }).filter({ visible: true }).first().waitFor();
@@ -83,7 +85,7 @@ try {
   await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextTargetedRead());
   await reload().evaluate(e => { e.click(); e.click(); });
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().targetedReadHeld);
-  assert.equal(await page.getByRole('button', { name: '正在更新…' }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: /^(正在更新…|同步中…)$/u }).isDisabled(), true);
   await page.evaluate(() => window.__P0_REACT_HARNESS__.releaseTargetedRead());
   await reload().waitFor();
   const after = await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot());
@@ -207,6 +209,8 @@ try {
 
   for (const width of [1366, 1280, 390]) {
     await page.setViewportSize({ width, height: 768 });
+    assert.equal(await page.getByRole('button', { name: '重新載入最新資料', exact: true }).count(), width < 768 ? 1 : 0,
+      `${width}: preserve only the mobile local refresh entry`);
     await reload().scrollIntoViewIfNeeded();
     const geometry = () => reload().evaluate(button => {
       const r = button.getBoundingClientRect(), css = getComputedStyle(button);
@@ -240,7 +244,7 @@ try {
     assert.equal((await geometry()).feedbackHeight, idle.feedbackHeight, 'feedback reserves height');
     await page.screenshot({ path: `scratch/manual-refresh-idle-${width}.png` });
   }
-  console.log('PASS 1366/1280/390 actual global sync button: contrast >=4.5, 30px control, border, spinner/disabled, no loading layout shift or status overlap');
+  console.log('PASS 1366/1280 global sync and 390 preserved mobile refresh: contrast, target, spinner/disabled, no loading layout shift or status overlap');
 
   const ordering = await page.evaluate(async () => {
     const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');

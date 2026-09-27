@@ -11,15 +11,17 @@ import { markLocalCloudWrite } from '/src/providers/cloud/cloudRealtimeEchoRegis
 import { installCloudRealtimeTestBridge } from '/src/contexts/cloudRealtimeTestBridge.ts';
 import '/src/index.css';
 
-localStorage.setItem('erp_provider_mode', 'experimental');
 const fixtureParams = new URL(location.href).searchParams;
-const requestedRoute = fixtureParams.get('route') || '/dashboard';
+localStorage.setItem('erp_provider_mode', fixtureParams.get('providerMode') || localStorage.getItem('erp_provider_mode') || 'experimental');
+const requestedRoute = fixtureParams.get('route') || (location.pathname.startsWith('/tests/') ? '/dashboard' : location.pathname + location.search);
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
 const outboundReceivingScenario = fixtureParams.get('outboundReceiving') === '1';
 const proxyDemandScenario = fixtureParams.get('proxyDemand') === '1';
 const realProviderReads = fixtureParams.get('realReads') === '1';
 const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
-history.replaceState({}, '', `${requestedRoute}?p0ReactHarness=1`);
+const routeUrl = new URL(requestedRoute, location.origin);
+routeUrl.searchParams.set('p0ReactHarness', '1');
+history.replaceState({}, '', routeUrl.pathname + routeUrl.search);
 
 const clone = value => structuredClone(value);
 const coreFixture = await fetch('/tests/fixtures/core-regression.json').then(response => response.json());

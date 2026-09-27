@@ -31,6 +31,8 @@ import {
   outboundShipmentDeleteIntentCoordinator,
 } from '../providers/cloud/outboundShipmentTransaction';
 import { getAvailableJapanPackageItems } from '../lib/outboundPoolAvailability';
+import { productGroupDisplayName } from '../lib/productGroupDisplayName';
+import { sortOutboundDisplayGroups, type OutboundDisplaySortMode } from '../lib/outboundDisplaySort';
 
 const cleanProductTitle = (title: string) =>
   title
@@ -136,6 +138,7 @@ export default function OutboundShipmentDetail() {
   const [copiedGroupName, setCopiedGroupName] = useState<string | null>(null);
   const [showHeaderEdit, setShowHeaderEdit] = useState(false);
   const [showManualAdd, setShowManualAdd] = useState(false);
+  const [displaySort, setDisplaySort] = useState<OutboundDisplaySortMode>('original');
   const [manualSku, setManualSku] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualVariant, setManualVariant] = useState('');
@@ -549,30 +552,18 @@ export default function OutboundShipmentDetail() {
       else grouped.set(key, [item]);
     }
 
-    const entries = Array.from(grouped.entries()).map(([groupName, items]) => ({
-      groupName,
-      items: shipment?.status === 'received'
-        ? [...items].sort((a, b) => {
-            const aSku = resolveItemSku(a);
-            const bSku = resolveItemSku(b);
-            if (!aSku && bSku) return 1;
-            if (aSku && !bSku) return -1;
-            return aSku.localeCompare(bSku, 'ja', { numeric: true });
-          })
-        : items,
-    }));
-
-    if (shipment?.status === 'received') {
-      entries.sort((a, b) => {
-        const aSku = a.items.map(resolveItemSku).find(Boolean) || '';
-        const bSku = b.items.map(resolveItemSku).find(Boolean) || '';
-        if (!aSku && bSku) return 1;
-        if (aSku && !bSku) return -1;
-        return aSku.localeCompare(bSku, 'ja', { numeric: true });
-      });
-    }
-    return entries;
-  }, [resolveItemSku, selectedItems, shipment?.status]);
+    return sortOutboundDisplayGroups(
+      Array.from(grouped.entries()).map(([groupName, items]) => ({ groupName, items })),
+      displaySort,
+      shipment?.status === 'received',
+      resolveItemSku,
+      (item, fallback) => {
+        const groupId = resolveItemGroupId(item);
+        const group = groupId ? productGroupById.get(groupId) : undefined;
+        return group ? productGroupDisplayName(group) : fallback;
+      },
+    );
+  }, [displaySort, productGroupById, resolveItemGroupId, resolveItemSku, selectedItems, shipment?.status]);
 
   const copyGroupName = useCallback(async (groupName: string) => {
     try {
@@ -1319,15 +1310,22 @@ export default function OutboundShipmentDetail() {
           <ArrowLeft size={16} /> 返回出庫清單
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>{shipment.title}</h1>
-          <span style={{
-            padding: '3px 12px', borderRadius: 12, fontSize: 12, fontWeight: 600,
-            background: badge.bg, color: badge.color, flexShrink: 0,
-          }}>{STATUS_LABELS[shipment.status] || shipment.status}</span>
-          <button onClick={() => showHeaderEdit ? closeHeaderEdit() : setShowHeaderEdit(true)} style={{
-            background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4,
-          }}>✏️</button>
+        <div data-testid="outbound-page-header-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0, overflowWrap: 'anywhere' }}>{shipment.title}</h1>
+            <span style={{
+              padding: '3px 12px', borderRadius: 12, fontSize: 12, fontWeight: 600,
+              background: badge.bg, color: badge.color, flexShrink: 0,
+            }}>{STATUS_LABELS[shipment.status] || shipment.status}</span>
+            <button onClick={() => showHeaderEdit ? closeHeaderEdit() : setShowHeaderEdit(true)} style={{
+              background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 4, flexShrink: 0,
+            }}>✏️</button>
+          </div>
+          <button onClick={deleteShipment} disabled={deleteStatus !== 'idle'} style={{
+            padding: '8px 12px', background: '#fff', color: '#dc2626',
+            border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}>{deleteStatus === 'submitting' ? '刪除中…' : '刪除出庫單'}</button>
         </div>
         {!isMobile && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
@@ -1452,12 +1450,6 @@ export default function OutboundShipmentDetail() {
               whiteSpace: 'nowrap', flexShrink: 0,
             }}>清空全部</button>
           )}
-          <button onClick={deleteShipment} disabled={deleteStatus !== 'idle'} style={{
-            padding: '8px 12px', background: '#fff', color: '#dc2626',
-            border: '1px solid #fecaca', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer',
-            whiteSpace: 'nowrap', flexShrink: 0,
-            marginLeft: isMobile ? 0 : 'auto',
-          }}>{deleteStatus === 'submitting' ? '刪除中…' : '刪除出庫單'}</button>
           <span
             data-testid="outbound-background-status-slot"
             role="status"
@@ -1547,11 +1539,21 @@ export default function OutboundShipmentDetail() {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <span>📋 出庫清單 ({selectedItems.length} 項，{totalQty} 件)</span>
-            <button onClick={() => setShowManualAdd(!showManualAdd)} style={{
-              padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-              background: showManualAdd ? '#e2e8f0' : '#f1f5f9', color: '#475569',
-              border: '1px solid #e2e8f0', cursor: 'pointer',
-            }}>{showManualAdd ? '取消' : '+ 手動新增'}</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', fontSize: 12, color: '#475569' }}>
+                排序：
+                <select data-testid="outbound-item-display-sort" value={displaySort} onChange={event => setDisplaySort(event.target.value as OutboundDisplaySortMode)} style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontSize: 12 }}>
+                  <option value="sku">SKU 順序</option>
+                  <option value="name">商品名稱</option>
+                  <option value="original">原始順序</option>
+                </select>
+              </label>
+              <button onClick={() => setShowManualAdd(!showManualAdd)} style={{
+                padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+                background: showManualAdd ? '#e2e8f0' : '#f1f5f9', color: '#475569',
+                border: '1px solid #e2e8f0', cursor: 'pointer',
+              }}>{showManualAdd ? '取消' : '+ 手動新增'}</button>
+            </div>
           </div>
           {showManualAdd && (
             <div style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', background: '#fefce8' }}>
