@@ -115,6 +115,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const providerMode = getProviderMode();
   const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';
   const isSandboxMode = providerMode === 'test' || providerMode === 'next' || providerMode === 'experimental';
+  const isDesktopWorkspace = !isMobile && workspaceRoutes.has(location.pathname);
   const sandboxLabel = providerMode === 'next'
     ? 'NEXT SANDBOX'
     : providerMode === 'experimental'
@@ -646,7 +647,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''} ${!isMobile && workspaceRoutes.has(location.pathname) ? 'page-content--workspace' : ''}`}>
+        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''} ${isDesktopWorkspace ? 'page-content--workspace' : ''}`}>
           {getProviderMode() === 'local' && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && (
             <div style={{
               backgroundColor: '#fffbeb',
@@ -654,7 +655,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               color: '#d97706',
               padding: '12px 20px',
               borderRadius: '8px',
-              marginBottom: '20px',
+              marginBottom: isDesktopWorkspace ? 0 : '20px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

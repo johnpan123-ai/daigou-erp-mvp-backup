@@ -2504,6 +2504,43 @@ export default function PurchaseRecords() {
     );
   }
 
+  const syncStatusSlot = (
+    <div
+      data-testid="purchase-records-sync-slot"
+      role="status"
+      aria-live="polite"
+      aria-hidden={isSyncing ? undefined : true}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        height: '18px',
+        minHeight: '18px',
+        fontSize: '12px',
+        lineHeight: '18px',
+        color: '#64748b',
+        visibility: isSyncing ? 'visible' : 'hidden',
+      }}>
+        <div style={{
+          width: '12px',
+          height: '12px',
+          border: '2px solid #e2e8f0',
+          borderTopColor: '#2563eb',
+          borderRadius: '50%',
+          animation: 'erp-spin 0.8s linear infinite'
+        }} />
+        <span>同步中，顯示的是上次載入的資料...</span>
+        <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+  const refreshButton = (
+    <CloudRefreshButton
+      refresh={refreshAuthoritative}
+      resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']}
+      onLocalRefresh={loadFreshData}
+    />
+  );
+
   return (
     <PageShell className="flex-col gap-lg" data-testid="purchase-records-root" mobileStyle={{ paddingBottom: '180px' }}>
       {linkedGroupId !== null && (
@@ -2516,33 +2553,7 @@ export default function PurchaseRecords() {
           }}>清除商品定位</button>
         </div>
       )}
-      <div
-        data-testid="purchase-records-sync-slot"
-        role="status"
-        aria-live="polite"
-        aria-hidden={isSyncing ? undefined : true}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          height: '18px',
-          minHeight: '18px',
-          fontSize: '12px',
-          lineHeight: '18px',
-          color: '#64748b',
-          visibility: isSyncing ? 'visible' : 'hidden',
-        }}>
-          <div style={{
-            width: '12px',
-            height: '12px',
-            border: '2px solid #e2e8f0',
-            borderTopColor: '#2563eb',
-            borderRadius: '50%',
-            animation: 'erp-spin 0.8s linear infinite'
-          }} />
-          <span>同步中，顯示的是上次載入的資料...</span>
-          <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
+      {isMobile && syncStatusSlot}
       <style>{`
         .erp-table th {
           padding: 0 !important;
@@ -2741,14 +2752,12 @@ export default function PurchaseRecords() {
         <div>
           <h1 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: 600 }}>訂購紀錄表</h1>
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
+          {!isMobile && syncStatusSlot}
         </div>
+        {!isMobile && refreshButton}
       </PageHeader>
 
-      <CloudRefreshButton
-        refresh={refreshAuthoritative}
-        resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']}
-        onLocalRefresh={loadFreshData}
-      />
+      {isMobile && refreshButton}
       {isStale && (
         <div style={{
           backgroundColor: '#fef3c7',

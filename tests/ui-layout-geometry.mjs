@@ -53,10 +53,14 @@ try {
         const rect = node => { const b = node.getBoundingClientRect(); return { x: b.x, y: b.y, width: b.width, right: b.right, height: b.height }; };
         const page = document.querySelector('.page-content');
         const main = document.querySelector('.main-area');
+        const header = element.querySelector('[data-workspace-header]');
+        const firstContent = header?.nextElementSibling;
         const css = getComputedStyle(element);
         return {
           root: rect(element), available: rect(page), paddingLeft: parseFloat(css.paddingLeft), paddingRight: parseFloat(css.paddingRight),
           horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1 || main.scrollWidth > main.clientWidth + 1,
+          headerToFirstContent: header && firstContent ? firstContent.getBoundingClientRect().top - header.getBoundingClientRect().bottom : null,
+          purchaseRefreshInHeader: element.querySelector('[data-workspace-header] .cloud-refresh-control') !== null,
           sections: [...element.querySelectorAll('[data-workspace-header], [data-workspace-stats], [data-workspace-toolbar], [data-workspace-content]')].map(node => ({ kind: node.getAttributeNames().find(a => a.startsWith('data-workspace-')), ...rect(node) })),
           headerCount: element.querySelectorAll('[data-workspace-header]').length,
           contentCount: element.querySelectorAll('[data-workspace-content]').length,
@@ -72,6 +76,8 @@ try {
         assert.equal(geometry.paddingRight, geometry.paddingLeft, `${name}/${width}: symmetric padding`);
         assert.equal(geometry.horizontalOverflow, false, `${name}/${width}: page overflow`);
         assert.ok(geometry.headerCount >= 1, `${name}/${width}: shared header`);
+        assert.ok(geometry.headerToFirstContent >= 16 && geometry.headerToFirstContent <= 24, `${name}/${width}: shared header-to-content spacing ${geometry.headerToFirstContent}`);
+        if (name === 'purchase-records') assert.equal(geometry.purchaseRefreshInHeader, true, `${name}/${width}: refresh is a page-header action`);
         assert.ok(geometry.contentCount >= 1, `${name}/${width}: content shell`);
         const left = geometry.root.x + geometry.paddingLeft;
         const right = geometry.root.right - geometry.paddingRight;
