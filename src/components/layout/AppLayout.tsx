@@ -251,9 +251,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           {!isMobile && !isCollapsed && (
-            <div className="sidebar-version" aria-label={`${ERP_SYSTEM_SHORT_NAME} ${ERP_SYSTEM_VERSION}`}>
-              <span>{ERP_SYSTEM_SHORT_NAME}</span>
-              <span>{ERP_SYSTEM_VERSION}</span>
+            <div className="sidebar-version-card" aria-label={`${ERP_SYSTEM_SHORT_NAME} ${ERP_SYSTEM_VERSION}`}>
+              <span className="sidebar-version-icon" aria-hidden="true"><Box size={18} /></span>
+              <span className="sidebar-version-copy">
+                <span className="sidebar-version-name">{ERP_SYSTEM_SHORT_NAME}</span>
+                <span className="sidebar-version-badge"><span className="sidebar-version-dot" />{ERP_SYSTEM_VERSION}</span>
+              </span>
             </div>
           )}
           {isMobile && (
