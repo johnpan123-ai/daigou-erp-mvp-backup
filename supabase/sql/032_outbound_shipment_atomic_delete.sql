@@ -201,28 +201,80 @@ GRANT EXECUTE ON FUNCTION public.erp_apply_outbound_shipment_transaction(uuid, j
 DO $$
 DECLARE
   v_function_oid oid := pg_catalog.to_regprocedure('public.erp_apply_outbound_shipment_transaction(uuid,jsonb)');
-  v_identity_args text;
+  v_schema_name name;
+  v_function_name name;
+  v_argument_count smallint;
+  v_argument_types oidvector;
+  v_argument_names text[];
+  v_overload_count bigint;
   v_result_type oid;
   v_config text[];
   v_security_definer boolean;
   v_owner oid;
   v_kind "char";
   v_public_execute boolean;
+  v_search_path_values text[];
+  v_statement_timeout_values text[];
 BEGIN
   IF v_function_oid IS NULL THEN RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_FUNCTION_MISSING' USING ERRCODE = '55000'; END IF;
-  SELECT pg_catalog.pg_get_function_identity_arguments(v_function_oid),
+  SELECT namespace.nspname, function_record.proname, function_record.pronargs,
+         function_record.proargtypes, function_record.proargnames,
          function_record.prorettype, function_record.proconfig, function_record.prosecdef,
          function_record.proowner, function_record.prokind
-    INTO v_identity_args, v_result_type, v_config, v_security_definer, v_owner, v_kind
-    FROM pg_catalog.pg_proc function_record WHERE function_record.oid = v_function_oid;
-  IF v_identity_args IS DISTINCT FROM 'uuid, jsonb'
-     OR v_result_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype
-     OR v_kind IS DISTINCT FROM 'f'
-     OR v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user)
-     OR v_security_definer IS DISTINCT FROM true
-     OR NOT ('search_path=' = ANY(v_config))
-     OR NOT ('statement_timeout=15s' = ANY(v_config)) THEN
-    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_FUNCTION_CONTRACT_MISMATCH' USING ERRCODE = '55000';
+    INTO v_schema_name, v_function_name, v_argument_count,
+         v_argument_types, v_argument_names, v_result_type, v_config,
+         v_security_definer, v_owner, v_kind
+    FROM pg_catalog.pg_proc function_record
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function_record.pronamespace
+   WHERE function_record.oid = v_function_oid;
+  SELECT count(*)
+    INTO v_overload_count
+    FROM pg_catalog.pg_proc function_record
+    JOIN pg_catalog.pg_namespace namespace ON namespace.oid = function_record.pronamespace
+   WHERE namespace.nspname = 'public'
+     AND function_record.proname = 'erp_apply_outbound_shipment_transaction';
+  IF v_schema_name IS DISTINCT FROM 'public'
+     OR v_function_name IS DISTINCT FROM 'erp_apply_outbound_shipment_transaction' THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_SIGNATURE_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_overload_count IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_OVERLOAD_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_argument_count IS DISTINCT FROM 2 THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_ARG_COUNT_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_argument_types[0] IS DISTINCT FROM 'uuid'::pg_catalog.regtype::oid
+     OR v_argument_types[1] IS DISTINCT FROM 'jsonb'::pg_catalog.regtype::oid THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_ARG_TYPES_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_argument_names IS DISTINCT FROM ARRAY['p_idempotency_key', 'p_request']::text[] THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_ARG_NAMES_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_result_type IS DISTINCT FROM 'jsonb'::pg_catalog.regtype THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_RETURN_TYPE_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_kind IS DISTINCT FROM 'f' THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_KIND_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_owner IS DISTINCT FROM pg_catalog.to_regrole(current_user) THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_OWNER_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF v_security_definer IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_SECURITY_DEFINER_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  SELECT pg_catalog.array_agg(pg_catalog.split_part(config_entry, '=', 2) ORDER BY config_entry)
+    INTO v_search_path_values
+    FROM pg_catalog.unnest(COALESCE(v_config, ARRAY[]::text[])) config_entry
+   WHERE pg_catalog.split_part(config_entry, '=', 1) = 'search_path';
+  IF v_search_path_values IS DISTINCT FROM ARRAY['""']::text[] THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_SEARCH_PATH_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  SELECT pg_catalog.array_agg(pg_catalog.split_part(config_entry, '=', 2) ORDER BY config_entry)
+    INTO v_statement_timeout_values
+    FROM pg_catalog.unnest(COALESCE(v_config, ARRAY[]::text[])) config_entry
+   WHERE pg_catalog.split_part(config_entry, '=', 1) = 'statement_timeout';
+  IF v_statement_timeout_values IS DISTINCT FROM ARRAY['15s']::text[] THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_TIMEOUT_MISMATCH' USING ERRCODE = '55000';
   END IF;
   SELECT EXISTS (
     SELECT 1 FROM pg_catalog.pg_proc procedure
@@ -233,10 +285,14 @@ BEGIN
       AND privilege.grantee = 0
       AND privilege.privilege_type = 'EXECUTE'
   ) INTO v_public_execute;
-  IF v_public_execute
-     OR pg_catalog.has_function_privilege('anon', v_function_oid, 'EXECUTE')
-     OR NOT pg_catalog.has_function_privilege('authenticated', v_function_oid, 'EXECUTE') THEN
-    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_ACL_MISMATCH' USING ERRCODE = '55000';
+  IF v_public_execute THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_PUBLIC_ACL_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF pg_catalog.has_function_privilege('anon', v_function_oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_ANON_ACL_MISMATCH' USING ERRCODE = '55000';
+  END IF;
+  IF NOT pg_catalog.has_function_privilege('authenticated', v_function_oid, 'EXECUTE') THEN
+    RAISE EXCEPTION 'F4_OUTBOUND_POSTFLIGHT_AUTHENTICATED_ACL_MISMATCH' USING ERRCODE = '55000';
   END IF;
 END;
 $$;

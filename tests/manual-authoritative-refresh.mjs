@@ -23,10 +23,11 @@ try {
   let discardDrafts = false;
   page.on('dialog', dialog => discardDrafts && dialog.type() === 'confirm' && dialog.message().startsWith('鎖定將放棄') ? dialog.accept() : dialog.dismiss());
   await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1`);
-  const reload = () => page.getByRole('button', { name: '重新載入最新資料', exact: true });
+  const reload = () => page.getByRole('button', { name: '同步資料', exact: true })
+    .or(page.getByRole('button', { name: '重新載入最新資料', exact: true })).last();
   const refreshed = async () => {
     await reload().click();
-    await page.getByRole('button', { name: '正在更新…', exact: true }).waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: /^(正在更新…|同步中…)$/u }).waitFor({ state: 'hidden' });
   };
   await reload().waitFor();
   const rootNode = await page.locator('.main-area').elementHandle();
@@ -224,13 +225,13 @@ try {
         hit: button.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) };
     });
     const idle = await geometry();
-    assert.ok(idle.left >= 0 && idle.right <= width && idle.height >= 44 && idle.border >= 2 && idle.hit);
+    assert.ok(idle.left >= 0 && idle.right <= width && idle.height >= 30 && idle.border >= 1 && idle.hit, `${width}: ${JSON.stringify(idle)}`);
     assert.ok(idle.top >= idle.barBottom && idle.contrast >= 4.5, `${width}: readable and not covered by status bar`);
     assert.equal(await page.locator('.main-area').evaluate(e => e.scrollWidth <= e.clientWidth + 1), true, 'Settings cards must not create horizontal overflow');
     await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextTargetedRead());
     await reload().click();
     await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().targetedReadHeld);
-    const loading = await page.getByRole('button', { name: '正在更新…' }).boundingBox();
+    const loading = await page.getByRole('button', { name: /^(正在更新…|同步中…)$/u }).boundingBox();
     assert.equal(loading.width, idle.width);
     assert.equal(loading.height, idle.height);
     await page.screenshot({ path: `scratch/manual-refresh-loading-${width}.png` });
@@ -239,7 +240,7 @@ try {
     assert.equal((await geometry()).feedbackHeight, idle.feedbackHeight, 'feedback reserves height');
     await page.screenshot({ path: `scratch/manual-refresh-idle-${width}.png` });
   }
-  console.log('PASS 1366/1280/390 actual button: contrast >=4.5, 44px target, border, spinner/disabled, no loading layout shift or status overlap');
+  console.log('PASS 1366/1280/390 actual global sync button: contrast >=4.5, 30px control, border, spinner/disabled, no loading layout shift or status overlap');
 
   const ordering = await page.evaluate(async () => {
     const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');

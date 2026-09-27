@@ -1,0 +1,19 @@
+{
+  "source": "151fe2fd1fd07ec168affa72c7a27ee785c38fb6",
+  "viewport": { "width": 390, "height": 900 },
+  "fixture": "cloud-p0-2-react-harness.html?workflowQuickWins=1",
+  "rootX": 16,
+  "rootY": 164,
+  "rootWidth": 358,
+  "pages": {
+    "dashboard": { "height": 1264, "padding": 14 },
+    "inventory": { "height": 1202.890625, "padding": 0 },
+    "purchase-records": { "height": 1702.859375, "padding": 0 },
+    "recent-purchases": { "height": 535.5, "padding": 0 },
+    "purchasing": { "height": 836, "padding": 16 },
+    "japan-packages": { "height": 463, "padding": 24 },
+    "outbound": { "height": 527, "padding": 16 },
+    "unlisted": { "height": 1858.28125, "padding": 0 },
+    "duplicates": { "height": 399, "padding": 16 }
+  }
+}

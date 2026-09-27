@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { useViewport } from '../../contexts/ViewportContext';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -6,11 +7,14 @@ interface EmptyStateProps {
   description: string;
   actionLabel?: string;
   onAction?: () => void;
+  compact?: boolean;
 }
 
-export function EmptyState({ icon: Icon, title, description, actionLabel, onAction }: EmptyStateProps) {
+export function EmptyState({ icon: Icon, title, description, actionLabel, onAction, compact = false }: EmptyStateProps) {
+  const { isMobile } = useViewport();
+  const compactDesktop = compact && !isMobile;
   return (
-    <div className="flex-col items-center justify-center gap-md" style={{
+    <div className={`flex-col items-center justify-center gap-md ${compactDesktop ? 'workspace-empty workspace-content' : ''}`} data-workspace-content={compact || undefined} style={compactDesktop ? undefined : {
       padding: 'var(--spacing-xl)',
       minHeight: '300px',
       border: '1px dashed var(--color-border)',

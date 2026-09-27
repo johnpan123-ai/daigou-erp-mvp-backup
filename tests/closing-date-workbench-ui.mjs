@@ -73,7 +73,7 @@ try {
     if (/\.supabase\.co\//iu.test(request.url())) productionSupabaseRequests.push(request.url());
   });
   page.on('pageerror', error => pageErrors.push(error.message));
-  await page.route('**/api/catalog/search**', async route => {
+  await page.route('**/api/catalog/deadline-candidates**', async route => {
     const url = new URL(route.request().url());
     const query = url.searchParams.get('q') || '';
     catalogRequests.push(query);
@@ -108,7 +108,26 @@ try {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ products }),
+      body: JSON.stringify({
+        schemaVersion: 'deadline-v1',
+        status: products.length > 0 ? 'AMBIGUOUS' : 'NOT_FOUND',
+        reason: products.length > 0 ? 'FIXTURE_CANDIDATES' : 'NO_MATCH',
+        query,
+        candidates: products.map(product => ({
+          catalogProductId: product.id,
+          productName: product.name,
+          catalogId: '00000000-0000-4000-8000-000000000999',
+          supplierCode: product.catalog?.supplier?.code ?? 'unknown',
+          supplierProductId: product.sku ?? product.id,
+          deadlineAt: product.catalog?.deadlineAt ?? null,
+          sourceUpdatedAt: '2026-08-21T00:00:00.000Z',
+          matchEvidence: {
+            originalName: product.name,
+            brandName: product.brand?.name ?? null,
+            catalogName: 'Fixture',
+          },
+        })),
+      }),
     });
   });
 
@@ -581,8 +600,7 @@ try {
   assert.match(yellowPrimaryText, /#1/u);
   assert.match(yellowPrimaryText, /廠牌：Good Smile Company/u);
   assert.match(yellowPrimaryText, /供應商：萬榮/u);
-  assert.match(yellowPrimaryText, /JAN：4580590200002/u);
-  assert.match(yellowPrimaryText, /型號：NENDOROID-3121/u);
+  assert.match(yellowPrimaryText, /供應商商品編號：NENDOROID-3121/u);
   assert.match(yellowPrimaryText, /官方結單：2026\/09\/07/u);
   assert.match(yellowPrimaryText, /建議結單：2026\/09\/05/u);
   assert.doesNotMatch(yellowPrimaryText, /PARSER_INFERRED|Native Rank|Query P|Match Evidence|Source ID|T08:00:00/u);
@@ -634,20 +652,35 @@ try {
   await page.getByTestId('closing-date-workbench').waitFor({ state: 'detached' });
   await page.getByTestId('closing-date-apply-success').waitFor();
   assert.match(await page.getByTestId('closing-date-apply-success').textContent(), /已成功套用 2 筆結單日/u);
-  const datesAfterUiApply = await page.evaluate(async () => {
+  const uiApplyState = await page.evaluate(async () => {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
+    const applyModule = await import('/src/lib/closingDateWorkbenchAtomicApply.ts');
     const snapshot = await environment.readPhysicalIndexedDbSnapshot(environment.NEXT_SANDBOX_INDEXED_DB_NAME);
-    return Object.fromEntries(snapshot.erp_product_groups.map(group => [group.id, group.closing_date]));
+    return {
+      dates: Object.fromEntries(snapshot.erp_product_groups.map(group => [group.id, group.closing_date])),
+      mappings: await applyModule.findAtomicClosingDateVerifiedMappings(['ui-yellow']),
+    };
   });
-  assert.equal(datesAfterUiApply['ui-green'], '2026/09/16');
-  assert.equal(datesAfterUiApply['ui-yellow'], '2026/09/05');
-  assert.equal(datesAfterUiApply['ui-red'], '');
+  assert.equal(uiApplyState.dates['ui-green'], '2026/09/16');
+  assert.equal(uiApplyState.dates['ui-yellow'], '2026/09/05');
+  assert.equal(uiApplyState.dates['ui-red'], '');
+  assert.equal(uiApplyState.mappings[0]?.verificationEvidence?.catalogProductId, 'candidate-yellow');
+  assert.equal(
+    uiApplyState.mappings[0]?.verificationEvidence?.catalogId,
+    '00000000-0000-4000-8000-000000000999',
+  );
+  assert.equal(uiApplyState.mappings[0]?.verificationEvidence?.supplierCode, 'wanrong');
+  assert.equal(
+    uiApplyState.mappings[0]?.verificationEvidence?.supplierProductId,
+    'NENDOROID-3121',
+  );
   await sleep(900);
   assert.equal(catalogRequests.length, requestsBeforeClose, 'Closing Workbench must stop UI polling/network work');
 
   await page.reload({ waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /已結單/u }).click();
   await page.getByText('代理版 figma 地獄征服者 Helltaker 路西法').waitFor();
-  for (const id of ['ui-green', 'ui-yellow', 'ui-red']) {
+  for (const id of ['ui-green', 'ui-yellow']) {
     await page.getByTestId(`purchase-record-select-${id}`).first().check();
   }
   await page.getByTestId('open-closing-date-workbench').click();

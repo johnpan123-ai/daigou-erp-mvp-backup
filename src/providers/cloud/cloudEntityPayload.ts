@@ -2,7 +2,7 @@ import type { CloudMutableEntity } from './cloudFieldCas';
 
 type CloudSourceRow = Record<string, unknown>;
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 const text = (value: unknown, fallback = ''): string => typeof value === 'string' ? value : fallback;
 const optionalText = (value: unknown): string | null => typeof value === 'string' && value.length > 0 ? value : null;

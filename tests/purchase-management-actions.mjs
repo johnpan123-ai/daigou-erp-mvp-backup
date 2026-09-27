@@ -304,7 +304,7 @@ try {
   await copyBatchLedger.click();
   await copyDialog;
   const copiedBatchLedger = await page.evaluate(() => navigator.clipboard.readText());
-  assert.equal(copiedBatchLedger, 'hololive active-General-A\t1\t1000', 'Per-batch clipboard output must contain product name, quantity, and unit purchase price');
+  assert.equal(copiedBatchLedger, 'hololive active-General-A\t1\t\t1000', 'Per-batch clipboard output must contain product name, quantity, a blank third column, and unit purchase price');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${BASE_URL}/purchase-records/g-holo`, { waitUntil: 'networkidle' });

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import type { ProductGroup, ProductVariant, ProductCategory, PrivateOrder, PrivateOrderItem, InventoryItem, PurchaseBatchItem, SalesOrderItem, PurchaseBatch } from '../lib/db';
@@ -693,20 +694,19 @@ export default function Purchasing() {
         <AlertTriangle size={28} color="#b42318" />
         <strong>採購資料載入失敗</strong>
         <p style={{ margin: 0, textAlign: 'center' }}>{loadError}</p>
-        <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
+        {isMobile && <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />}
       </div>
     );
   }
 
+  const workspaceRefreshControl = <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />;
+
   return (
-    <div className="mobile-summary-container">
-      <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']} onLocalRefresh={loadAllData} />
+    <PageShell className="mobile-summary-container" mobileStyle={{ width: '100%', maxWidth: '600px', margin: '0 auto', padding: '16px' }}>
+      {isMobile && workspaceRefreshControl}
       <style>{`
         .mobile-summary-container {
           width: 100%;
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 16px;
           box-sizing: border-box;
           font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
           color: #0f172a;
@@ -747,7 +747,8 @@ export default function Purchasing() {
           margin-bottom: 16px;
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
         }
-
+        .summary-header .summary-title, .summary-header .summary-title span { color: #ffffff !important; }
+        .summary-header .summary-subtitle { color: #94a3b8 !important; }
         .summary-title, .summary-title span {
           font-size: 20px;
           font-weight: 800;
@@ -755,12 +756,12 @@ export default function Purchasing() {
           display: flex;
           align-items: center;
           gap: 8px;
-          color: #ffffff !important;
+          color: inherit;
         }
 
         .summary-subtitle {
           font-size: 12px;
-          color: #94a3b8 !important;
+          color: var(--color-text-secondary);
           margin: 0;
           font-weight: 400;
         }
@@ -1053,15 +1054,9 @@ export default function Purchasing() {
         }
 
         @media (min-width: 1024px) {
-          .mobile-summary-container {
-            max-width: none !important;
-            width: 100% !important;
-            padding: 32px !important;
-          }
           .purchasing-page-inner {
-            max-width: 760px !important;
-            margin: 0 auto !important;
-            width: 100% !important;
+            width: 100%;
+            min-width: 0;
             box-sizing: border-box;
           }
           .detail-view {
@@ -1077,21 +1072,6 @@ export default function Purchasing() {
           }
           
           /* Scaled elements on desktop */
-          .summary-header {
-            padding: 36px 40px !important;
-            margin-bottom: 24px !important;
-          }
-          .summary-title, .summary-title span {
-            font-size: 28px !important;
-          }
-          .summary-title svg {
-            width: 28px !important;
-            height: 28px !important;
-          }
-          .summary-subtitle {
-            font-size: 15px !important;
-            margin-top: 8px !important;
-          }
           .search-input {
             height: 48px !important;
             font-size: 15px !important;
@@ -1110,7 +1090,7 @@ export default function Purchasing() {
           
           /* Card list scaled up */
           .summary-card {
-            padding: 24px !important;
+            padding: 16px;
             gap: 16px !important;
             border-radius: 12px !important;
           }
@@ -1188,15 +1168,17 @@ export default function Purchasing() {
       {!selectedGroup ? (
         // List View
         <div className="purchasing-page-inner">
-          <div className="summary-header">
+          <PageHeader className={isMobile ? 'summary-header' : undefined}>
+            <div>
             <h1 className="summary-title">
               <ClipboardList size={22} />
               <span>採購總表</span>
             </h1>
             <p className="summary-subtitle">唯讀需求清單與預估總金額 (日本現地小幫手專用)</p>
-          </div>
+            </div>
+          </PageHeader>
 
-          <div className="search-wrapper" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="search-wrapper workspace-toolbar" data-workspace-toolbar style={isMobile ? { display: 'flex', gap: '8px', alignItems: 'center' } : undefined}>
             <div style={{ position: 'relative', flex: 1 }}>
               <Search className="search-icon" size={18} />
               <input 
@@ -1281,7 +1263,7 @@ export default function Purchasing() {
           )}
 
           {filteredSummaries.length > 0 ? (
-            <div className="summary-list">
+            <div className="summary-list workspace-content" data-workspace-content>
               {filteredSummaries.map(item => {
                 const isChecked = selectedGroupIds.has(item.id);
                 return (
@@ -1321,7 +1303,7 @@ export default function Purchasing() {
                       />
                     )}
                     <div className="card-content" style={{ cursor: 'pointer' }}>
-                      <h2 className="card-title">{item.title}</h2>
+                      <h2 className="card-title workspace-product-title" title={item.title}>{item.title}</h2>
                       <div className="card-stats">
                         {item.gap > 0 && (
                           <span style={{ backgroundColor: '#fef2f2', color: '#dc2626', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>
@@ -1333,7 +1315,7 @@ export default function Purchasing() {
                     </div>
 
                     {!isSelectMode && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div className="workspace-row-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <button
                           onTouchStart={(e) => {
                             e.stopPropagation();
@@ -1372,7 +1354,7 @@ export default function Purchasing() {
               })}
             </div>
           ) : (
-            <div className="empty-state">
+            <div className="empty-state workspace-empty workspace-content" data-workspace-content>
               <p>沒有符合條件或有需求的商品。</p>
             </div>
           )}
@@ -1704,23 +1686,6 @@ export default function Purchasing() {
         />
       )}
 
-      {/* Version Tag */}
-      <div className="purchasing-version-tag" style={{
-        position: 'fixed',
-        bottom: '16px',
-        right: '16px',
-        backgroundColor: '#1e293b',
-        color: '#ffffff',
-        padding: '6px 12px',
-        borderRadius: '6px',
-        fontSize: '12px',
-        fontWeight: 'bold',
-        zIndex: 9999,
-        pointerEvents: 'none',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-      }}>
-        Purchasing UI width fix v1
-      </div>
-    </div>
+    </PageShell>
   );
 }

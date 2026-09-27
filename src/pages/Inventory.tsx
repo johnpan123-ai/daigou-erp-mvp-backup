@@ -11,6 +11,7 @@ import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
 import { getProviderMode } from '../providers/providerMode';
@@ -585,7 +586,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
   };
 
   return (
-    <div className="inventory-container">
+    <PageShell className="inventory-container">
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -1294,7 +1295,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       `}</style>
 
       {/* Header Area */}
-      <div className="inventory-header">
+      <PageHeader className="inventory-header">
         <div className="inventory-title-left">
           <div className="inventory-title-area">
             <h1>商品主檔</h1>
@@ -1383,10 +1384,10 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
             <span>重新整理</span>
           </button>
         </div>
-      </div>
+      </PageHeader>
 
       {/* KPI Cards Row */}
-      <div className="kpi-row">
+      <div className="kpi-row workspace-stats workspace-stats-six" data-workspace-stats>
         {/* 商品總數 */}
         <div className="kpi-card">
           <div className="kpi-card-icon-wrapper kpi-icon-blue">
@@ -1465,7 +1466,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       </div>
 
       {/* Filter and Search Bar Card */}
-      <div className="filter-bar-card">
+      <div className="filter-bar-card workspace-toolbar" data-workspace-toolbar>
         <div className="filter-left-group">
           {/* Search Input */}
           <div className="search-input-wrapper">
@@ -1545,9 +1546,10 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       </div>
 
       {/* Main List Section */}
-      <div className="inventory-list-card">
+      <div className="inventory-list-card workspace-content workspace-panel" data-workspace-content>
         {groups.length === 0 ? (
           <EmptyState
+            compact
             icon={PackageX}
             title={searchTerm || categoryFilter !== 'all' || proxyFilter !== 'all' || statusFilter !== 'all' ? "找不到符合條件的商品" : "尚未匯入商品主檔"}
             description={searchTerm || categoryFilter !== 'all' || proxyFilter !== 'all' || statusFilter !== 'all' ? "請嘗試更換搜尋關鍵字或篩選條件。" : "請點擊匯入買動漫匯出檔案，建立系統內 SKU 與庫存數據。"}
@@ -1863,6 +1865,6 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
           </>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

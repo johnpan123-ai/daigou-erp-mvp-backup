@@ -7,7 +7,12 @@ import { useAuth } from '../../auth/authContext';
 import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
+import { ERP_SYSTEM_SHORT_NAME, ERP_SYSTEM_VERSION } from './erpSystemIdentity';
+import { GlobalSyncControl } from './GlobalSyncControl';
 import '../../styles/layout.css'; // Ensure layout classes are applied
+import '../../styles/workspace.css';
+
+const workspaceRoutes = new Set(['/', '/dashboard', '/inventory', '/purchase-records', '/recent-purchases', '/purchasing', '/japan-packages', '/outbound-shipments', '/unlisted-items', '/duplicate-variants', '/settings']);
 
 interface SidebarItemProps {
   to: string;
@@ -112,6 +117,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const providerMode = getProviderMode();
   const isCloudOrFallback = providerMode === 'cloud' || providerMode === 'fallback';
   const isSandboxMode = providerMode === 'test' || providerMode === 'next' || providerMode === 'experimental';
+  const isDesktopWorkspace = !isMobile && workspaceRoutes.has(location.pathname);
   const sandboxLabel = providerMode === 'next'
     ? 'NEXT SANDBOX'
     : providerMode === 'experimental'
@@ -244,6 +250,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )}
           {canViewPage('/settings') && (
             <SidebarItem to="/settings" icon={<Settings size={20} />} label="設定" onClick={() => setIsMobileMenuOpen(false)} />
+          )}
+          {!isMobile && !isCollapsed && (
+            <div className="sidebar-version-card" aria-label={`${ERP_SYSTEM_SHORT_NAME} ${ERP_SYSTEM_VERSION}`}>
+              <span className="sidebar-version-icon" aria-hidden="true"><Box size={18} /></span>
+              <span className="sidebar-version-copy">
+                <span className="sidebar-version-name">{ERP_SYSTEM_SHORT_NAME}</span>
+                <span className="sidebar-version-badge"><span className="sidebar-version-dot" />{ERP_SYSTEM_VERSION}</span>
+              </span>
+            </div>
           )}
           {isMobile && (
             <>
@@ -468,7 +483,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         
         {/* Global App Header */}
         <header className="app-header">
-          <div className="flex items-center gap-sm">
+          <div className="flex items-center gap-sm global-header-left">
             {isMobile && (
               <button className="btn btn-ghost" style={{ padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
                 {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -525,6 +540,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </span>
               );
             })()}
+            {!isMobile && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && <GlobalSyncControl />}
           </div>
 
           {/* Right Side Header Items: Auth Status + Viewport Switcher */}
@@ -643,7 +659,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''}`}>
+        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''} ${isDesktopWorkspace ? 'page-content--workspace' : ''}`}>
           {getProviderMode() === 'local' && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && (
             <div style={{
               backgroundColor: '#fffbeb',
@@ -651,7 +667,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               color: '#d97706',
               padding: '12px 20px',
               borderRadius: '8px',
-              marginBottom: '20px',
+              marginBottom: isDesktopWorkspace ? 0 : '20px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
+import { useViewport } from '../contexts/ViewportContext';
 import { ArrowRight, Check, ChevronDown, ChevronRight, Copy, ExternalLink, History, RefreshCcw, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { ProductCategory, ProductGroup, ProductVariant, PurchaseBatch, PurchaseBatchItem } from '../lib/db';
@@ -77,6 +79,7 @@ const dateFilterOptions: Array<{ value: DateFilter; label: string }> = [
 ];
 
 export default function RecentPurchases() {
+  const { isMobile } = useViewport();
   const navigate = useNavigate();
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -380,7 +383,7 @@ export default function RecentPurchases() {
   };
 
   return (
-    <div data-testid="recent-purchases-page" style={{ width: '100%', maxWidth: '1500px', margin: '0 auto', paddingBottom: '40px' }}>
+    <PageShell data-testid="recent-purchases-page" mobileStyle={{ width: '100%', maxWidth: '1500px', margin: '0 auto', paddingBottom: '40px' }}>
       <style>{`
         .recent-purchases-filter-button {
           height: 36px;
@@ -457,9 +460,9 @@ export default function RecentPurchases() {
         }
       `}</style>
 
-      <header className="recent-purchases-page-header" style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '18px' }}>
+      <PageHeader className="recent-purchases-page-header" mobileStyle={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '18px' }}>
         <div>
-          <h1 style={{ margin: 0, color: '#0f172a', fontSize: '26px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1 style={isMobile ? { margin: 0, color: '#0f172a', fontSize: '26px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px' } : { display: 'flex', alignItems: 'center', gap: '8px' }}>
             <History size={26} color="#2563eb" />
             近期採購
           </h1>
@@ -473,9 +476,9 @@ export default function RecentPurchases() {
             ・同步中…
           </span>
         </div>
-      </header>
+      </PageHeader>
 
-      <div className="recent-purchases-toolbar" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', padding: '14px', marginBottom: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff' }}>
+      <div className="recent-purchases-toolbar workspace-toolbar workspace-panel" data-workspace-toolbar style={isMobile ? { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', padding: '14px', marginBottom: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff' } : { padding: '16px' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
           {dateFilterOptions.map(option => (
             <button
@@ -491,7 +494,7 @@ export default function RecentPurchases() {
           ))}
         </div>
 
-        <label className="recent-purchases-search" style={{ height: '36px', minWidth: '220px', maxWidth: '420px', flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 11px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#f8fafc' }}>
+        <label className="recent-purchases-search" style={{ order: isMobile ? undefined : -1, height: '36px', minWidth: isMobile ? '220px' : 0, maxWidth: isMobile ? '420px' : undefined, flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 11px', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#f8fafc' }}>
           <Search size={16} color="#64748b" />
           <input
             data-testid="recent-purchases-search"
@@ -531,11 +534,11 @@ export default function RecentPurchases() {
           </button>
         </div>
       ) : sections.length === 0 ? (
-        <div style={{ padding: '80px 20px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff', textAlign: 'center', color: '#64748b' }}>
+        <div className="workspace-content workspace-empty" data-workspace-content style={isMobile ? { padding: '80px 20px', border: '1px solid #e2e8f0', borderRadius: '12px', background: '#fff', textAlign: 'center', color: '#64748b' } : undefined}>
           目前篩選條件下沒有採購紀錄。
         </div>
       ) : (
-        <div data-testid="recent-purchases-sections" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div data-testid="recent-purchases-sections" className="workspace-content" data-workspace-content style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {sections.map(section => {
             const sectionQuantity = section.rows.reduce((sum, row) => sum + row.totalQuantity, 0);
             const isExpanded = expandedDateKeys.has(section.dateKey);
@@ -616,7 +619,7 @@ export default function RecentPurchases() {
                               <button
                                 type="button"
                                 data-testid="recent-purchase-product"
-                                className="recent-purchase-product-button"
+                                className="recent-purchase-product-button workspace-product-title"
                                 onClick={() => openProductDetail(row.group.id)}
                               >
                                 {row.group.normalized_title || row.group.title}
@@ -677,6 +680,6 @@ export default function RecentPurchases() {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

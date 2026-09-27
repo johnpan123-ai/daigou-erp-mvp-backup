@@ -321,7 +321,13 @@ try {
     const httpClient = cacheModule.createReadonlyCatalogHttpClient({
       fetcher: async input => {
         capturedUrl = String(input);
-        return new Response(JSON.stringify({ products: [] }), {
+        return new Response(JSON.stringify({
+          schemaVersion: 'deadline-v1',
+          status: 'NOT_FOUND',
+          reason: 'NO_MATCH',
+          query: '露易絲',
+          candidates: [],
+        }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });

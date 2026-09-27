@@ -46,9 +46,28 @@ for (const file of changedFiles) {
   addedLinesByFile.set(resolve(file).toLowerCase(), addedLines);
 }
 
-const changedLineFindings = currentResults.flatMap(result => {
+const rawChangedLineFindings = currentResults.flatMap(result => {
   const addedLines = addedLinesByFile.get(resolve(result.filePath).toLowerCase()) || new Set();
-  return result.messages.filter(message => message.line && addedLines.has(message.line));
+  return result.messages.filter(message => message.line && addedLines.has(message.line))
+    .map(message => ({ ...message, filePath: result.filePath }));
+});
+const findingKey = message =>
+  `${resolve(message.filePath).toLowerCase()}::${message.ruleId}::${message.message}`;
+const inheritedCounts = new Map();
+for (const result of baselineResults) {
+  for (const message of result.messages) {
+    const key = findingKey({ ...message, filePath: result.filePath });
+    inheritedCounts.set(key, (inheritedCounts.get(key) || 0) + 1);
+  }
+}
+// A reconciled hunk can move an existing hook warning to a new line without
+// introducing a new lint defect. Compare finding identity, not old line number.
+const changedLineFindings = rawChangedLineFindings.filter(message => {
+  const key = findingKey(message);
+  const inherited = inheritedCounts.get(key) || 0;
+  if (inherited === 0) return true;
+  inheritedCounts.set(key, inherited - 1);
+  return false;
 });
 
 const baseline = totals(baselineResults);

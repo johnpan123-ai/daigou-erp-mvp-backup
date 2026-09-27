@@ -77,7 +77,14 @@ export interface VerifiedMappingRegistryEntry {
 export interface ResolutionCandidateIdentifiers {
   jan?: string | null;
   modelCode?: string | null;
+  supplierProductId?: string | null;
 }
+
+export type CatalogDeadlineResolutionStatus =
+  | 'DIRECT_MATCHED'
+  | 'DIRECT_NO_DEADLINE'
+  | 'DIRECT_TEMPORARY_ERROR'
+  | 'STALE_MAPPING';
 
 export type ResolutionCandidateQueryKind =
   | 'MODEL_CODE'
@@ -177,6 +184,7 @@ export interface ResolutionResult {
   ruleVersion: string;
   snapshotVersion: string;
   serviceError?: ResolutionServiceError | null;
+  catalogLookupStatus?: CatalogDeadlineResolutionStatus;
   analyzedAt: string;
 }
 
@@ -236,6 +244,7 @@ export interface CreateResolutionResultInput {
   selectedCandidateId?: string | null;
   activeVerifiedMapping?: VerifiedMappingRegistryEntry | null;
   serviceError?: ResolutionServiceError | null;
+  catalogLookupStatus?: CatalogDeadlineResolutionStatus;
   identityConflict?: boolean;
   retrievedButRejected?: boolean;
   ruleVersion: string;
@@ -722,6 +731,7 @@ export function createResolutionResult(input: CreateResolutionResultInput): Reso
     ruleVersion: nonEmpty(input.ruleVersion, 'ruleVersion'),
     snapshotVersion: nonEmpty(input.snapshotVersion, 'snapshotVersion'),
     serviceError: input.serviceError ?? null,
+    ...(input.catalogLookupStatus ? { catalogLookupStatus: input.catalogLookupStatus } : {}),
     analyzedAt: nonEmpty(input.analyzedAt, 'analyzedAt'),
   };
 }

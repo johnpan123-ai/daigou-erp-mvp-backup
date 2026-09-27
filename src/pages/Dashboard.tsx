@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Archive, Check, ChevronRight, Clock3, Copy, RefreshCw, ShoppingCart } from 'lucide-react';
 import type {
@@ -144,7 +145,7 @@ function WorkQueueSection({
             <div className="work-queue-row" key={item.group.id} onClick={() => onOpenItem(item.group.id)}>
               <div className="work-item-title-area">
                 <button type="button" className="work-item-main">
-                  <strong title={displayName}>{displayName}</strong>
+                  <strong className="workspace-product-title" title={displayName}>{displayName}</strong>
                   <span>{item.targetDate ? `結單 ${item.targetDate}` : '未設定結單日'}</span>
                 </button>
                 {showCopyAction && (
@@ -450,8 +451,8 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="daily-dashboard">
-      <header className="dashboard-header">
+    <PageShell className="daily-dashboard">
+      <PageHeader className="dashboard-header">
         <div>
           <p className="dashboard-eyebrow">DAILY WORK</p>
           <h1>每日工作待辦</h1>
@@ -464,7 +465,7 @@ export default function Dashboard() {
             {isLoading ? '更新中' : '重新整理'}
           </button>
         </div>
-      </header>
+      </PageHeader>
 
       {loadError && (
         <div className="dashboard-error" role="alert">
@@ -476,7 +477,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <section className="daily-task-grid" aria-label="每日工作優先順序">
+      <section className="daily-task-grid workspace-stats" data-workspace-stats aria-label="每日工作優先順序">
         <button type="button" className="daily-task-card task-unlisted" data-dashboard-task="unlisted" onClick={() => showQueue('unlisted')}>
           <span className="task-icon"><Archive size={23} /></span>
           <span className="task-copy"><strong>待下架</strong><small>仍在賣場、需要處理</small></span>
@@ -506,7 +507,7 @@ export default function Dashboard() {
         </button>
       </section>
 
-      <section id="dashboard-work-switcher" className="dashboard-work-switcher" aria-label="工作清單切換">
+      <section id="dashboard-work-switcher" className="dashboard-work-switcher workspace-content" data-workspace-content aria-label="工作清單切換">
         <div className="work-queue-tabs" role="tablist" aria-label="選擇工作清單">
           <button
             type="button"
@@ -677,6 +678,6 @@ export default function Dashboard() {
           .work-item-metrics { width: 100%; justify-content: flex-start; }
         }
       `}</style>
-    </div>
+    </PageShell>
   );
 }

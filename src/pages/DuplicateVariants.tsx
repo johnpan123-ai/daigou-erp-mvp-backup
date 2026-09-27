@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
+import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
 import type {
   ProductVariant, ProductGroup, ProductCategory,
@@ -53,6 +55,7 @@ interface DupSet {
 }
 
 export default function DuplicateVariants() {
+  const { isMobile } = useViewport();
   const { canEdit } = useRole();
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
@@ -326,10 +329,18 @@ export default function DuplicateVariants() {
   };
 
   return (
-    <div data-testid="duplicate-variants-root" style={{ padding: '16px', maxWidth: '1100px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-        <Layers size={22} style={{ color: '#0f766e' }} />
-        <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', margin: 0 }}>重複品項管理</h1>
+    <PageShell data-testid="duplicate-variants-root" mobileStyle={{ padding: '16px', maxWidth: '1100px' }}>
+      <PageHeader className="workspace-header-inline" mobileStyle={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+        <div className="duplicate-title-stack" style={isMobile ? { display: 'contents' } : undefined}>
+          <div className="duplicate-title-row" style={isMobile ? { display: 'contents' } : undefined}>
+            <Layers size={22} style={{ color: '#0f766e' }} />
+            <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', margin: 0 }}>重複品項管理</h1>
+          </div>
+          {!isMobile && <p>
+            判定條件：同一商品群組內「SKU 相同」或「完整規格文字相同」、但未被系統自動合併的品項。
+            每組須手動選擇保留哪一筆並逐組確認後，才會對其餘品項做 soft delete（設 deleted_at，可還原）。無批次刪除。
+          </p>}
+        </div>
         <button
           className="btn"
           onClick={loadData}
@@ -339,17 +350,13 @@ export default function DuplicateVariants() {
           <RefreshCw size={14} className={isInitialLoading || isRefreshing ? 'spin' : undefined} />
           {isRefreshing ? '同步中…' : '重新整理'}
         </button>
-      </div>
-      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
+      </PageHeader>
+      {isMobile && <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px' }}>
         判定條件：同一商品群組內「SKU 相同」或「完整規格文字相同」、但未被系統自動合併的品項。
         每組須手動選擇保留哪一筆並逐組確認後，才會對其餘品項做 soft delete（設 deleted_at，可還原）。無批次刪除。
-      </div>
+      </div>}
 
-      <div style={{
-        display: 'flex', gap: '16px', padding: '10px 14px', marginBottom: '16px',
-        backgroundColor: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px',
-        fontSize: '13px', color: '#134e4a', flexWrap: 'wrap'
-      }}>
+      <div className="workspace-stats workspace-stats-three" data-workspace-stats style={isMobile ? { display: 'flex', gap: '16px', padding: '10px 14px', marginBottom: '16px', backgroundColor: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', fontSize: '13px', color: '#134e4a', flexWrap: 'wrap' } : { fontSize: '13px', color: '#134e4a' }}>
         <span>疑似重複：<b>{dupSets.length}</b> 組</span>
         <span>涉及品項：<b>{totalRows}</b> 筆</span>
         <span>刪除候選全部零關聯的組數：<b>{dupSets.filter(s => s.rows.slice(1).every(r => !r.hasAssoc)).length}</b></span>
@@ -358,7 +365,7 @@ export default function DuplicateVariants() {
       {isInitialLoading && <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>載入中…</div>}
 
       {!isInitialLoading && dupSets.length === 0 && (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+        <div className="workspace-empty workspace-content" data-workspace-content style={isMobile ? { padding: '40px', textAlign: 'center', color: '#64748b' } : undefined}>
           <CheckCircle2 size={36} style={{ color: '#16a34a', marginBottom: '8px' }} />
           <div>沒有偵測到重複品項 🎉</div>
         </div>
@@ -371,7 +378,7 @@ export default function DuplicateVariants() {
         const anyBlocked = targets.some(t => t.hasAssoc);
         const specLabel = set.rows[0].v.raw_variant_name || `${set.rows[0].categoryTitle || ''} ${set.rows[0].v.variant_name}`.trim();
         return (
-          <div key={set.key} style={{
+          <div key={set.key} className="workspace-content workspace-panel" data-workspace-content style={{
             border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '10px',
             backgroundColor: '#ffffff', overflow: 'hidden'
           }}>
@@ -385,7 +392,7 @@ export default function DuplicateVariants() {
               {isOpen ? <ChevronDown size={16} style={{ flexShrink: 0, color: '#64748b' }} /> : <ChevronRight size={16} style={{ flexShrink: 0, color: '#64748b' }} />}
               <span style={{ fontSize: '12px', color: '#94a3b8', flexShrink: 0 }}>#{idx + 1}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div className="workspace-product-title" title={set.groupTitle} style={{ fontSize: '14px', fontWeight: 600, color: '#1e293b', ...(isMobile ? { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : {}) }}>
                   {set.groupTitle}
                 </div>
                 <div style={{ fontSize: '12px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -490,6 +497,6 @@ export default function DuplicateVariants() {
           </div>
         );
       })}
-    </div>
+    </PageShell>
   );
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue, useCallback } from 'react';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, cloudCacheDb, localDb } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
@@ -9,7 +9,9 @@ import { buildPurchaseRecordSearchDocuments, buildVariantsByGroup, purchaseRecor
 import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, PrivateOrder, PrivateOrderItem, InventoryItem, SalesOrderItem } from '../lib/db';
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { productGroupDisplayName, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import {
@@ -47,8 +49,12 @@ import {
   canUseNextFieldTestClosingDateClear,
   createNextFieldTestClosingDateClearPlan,
 } from '../lib/nextFieldTestClosingDate';
-import { canUseClosingDateWorkbenchUi } from '../lib/closingDateWorkbenchAccess';
+import {
+  canUseClosingDateWorkbenchUi,
+  getClosingDateWorkbenchMode,
+} from '../lib/closingDateWorkbenchAccess';
 import { capturePurchaseRecordsEditView, resolvePurchaseRecordsEditView } from '../lib/purchaseRecordsEditView';
+import type { ClosingDateWorkbenchApplyRequest } from '../components/closingDateResolution/ClosingDateResolutionWorkbench';
 
 const ClosingDateResolutionWorkbench = lazy(
   () => import('../components/closingDateResolution/ClosingDateResolutionWorkbench'),
@@ -304,6 +310,7 @@ export default function PurchaseRecords() {
   const providerMode = getProviderMode();
   const isNextIdentityShadowMode = canUseProxyIdentityShadow(providerMode);
   const isClosingDateWorkbenchAvailable = canUseClosingDateWorkbenchUi(providerMode);
+  const closingDateWorkbenchMode = getClosingDateWorkbenchMode(providerMode);
 
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -605,9 +612,15 @@ export default function PurchaseRecords() {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const linkedGroupId = purchaseRecordsGroupScope(location.search);
 
   // Batch edit states and datepicker refs
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [selectedGroupIdsState, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  // A URL scope must also constrain bulk actions, not only the rendered rows.
+  const selectedGroupIds = useMemo(() => linkedGroupId === null
+    ? selectedGroupIdsState
+    : new Set([...selectedGroupIdsState].filter(id => id === linkedGroupId && groups.some(group => group.id === id))),
+  [groups, linkedGroupId, selectedGroupIdsState]);
   const [isClearingClosingDates, setIsClearingClosingDates] = useState(false);
   const [showClosingDateWorkbench, setShowClosingDateWorkbench] = useState(false);
   const [closingDateApplyNotice, setClosingDateApplyNotice] = useState<string | null>(null);
@@ -1111,6 +1124,7 @@ export default function PurchaseRecords() {
   );
 
   const baseGroups = useMemo(() => {
+    if (linkedGroupId !== null) return groups.filter(group => group.id === linkedGroupId);
     try {
       let result = [...groups];
 
@@ -1166,7 +1180,7 @@ export default function PurchaseRecords() {
     // Classification helpers are pure projections of groups/isProxyProductMap and are
     // intentionally represented by those stable data dependencies rather than function identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments]);
+  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments, linkedGroupId]);
 
   const checkHasMissingJpyCost = (g: ProductGroup): boolean => {
     if (isProxyProduct(g)) return false;
@@ -1192,6 +1206,7 @@ export default function PurchaseRecords() {
   }, [baseGroups]);
 
   const completedGroups = useMemo(() => {
+    if (linkedGroupId !== null) return [];
     try {
     if (secondaryTab !== 'progress') return [];
 
@@ -1251,9 +1266,10 @@ export default function PurchaseRecords() {
       logCrash('completedGroups useMemo', err);
       return [];
     }
-  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly]);
+  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly, linkedGroupId]);
 
   const filteredAndSortedGroups = useMemo(() => {
+    if (linkedGroupId !== null) return baseGroups;
     try {
     let result = [...baseGroups];
 
@@ -1334,7 +1350,7 @@ export default function PurchaseRecords() {
       logCrash('filteredAndSortedGroups useMemo', err);
       return [];
     }
-  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly]);
+  }, [baseGroups, secondaryTab, sortMode, needsPurchaseOnly, linkedGroupId]);
 
   const [stableEditOrder, setStableEditOrder] = useState<string[] | null>(null);
   const [stableCompletedOrder, setStableCompletedOrder] = useState<string[] | null>(null);
@@ -1367,18 +1383,20 @@ export default function PurchaseRecords() {
 
 
   const displayedMainGroups = useMemo(() => {
+    if (linkedGroupId !== null) return baseGroups;
     if (editMode && stableEditOrder) {
       return resolvePurchaseRecordsEditView(stableEditOrder, groups);
     }
     return filteredAndSortedGroups;
-  }, [editMode, stableEditOrder, filteredAndSortedGroups, groups]);
+  }, [editMode, stableEditOrder, filteredAndSortedGroups, groups, linkedGroupId, baseGroups]);
 
   const displayedCompletedGroups = useMemo(() => {
+    if (linkedGroupId !== null) return [];
     if (editMode && stableCompletedOrder) {
       return resolvePurchaseRecordsEditView(stableCompletedOrder, groups);
     }
     return completedGroups;
-  }, [editMode, stableCompletedOrder, completedGroups, groups]);
+  }, [editMode, stableCompletedOrder, completedGroups, groups, linkedGroupId]);
 
   useEffect(() => {
     if (searchTerm.trim().length > 0) {
@@ -1618,6 +1636,11 @@ export default function PurchaseRecords() {
     return true;
   };
 
+  const applyCloudClosingDateSelections = useCallback(async (request: ClosingDateWorkbenchApplyRequest) => {
+    const { applyCloudClosingDateResolutionBatch } = await import('../lib/cloudClosingDateWorkbenchApply');
+    return applyCloudClosingDateResolutionBatch(request.resolutionBatch, request.selections);
+  }, []);
+
   const handleBatchApply = async () => {
     if (guardAgainstStaleWrite()) return;
     if (selectedGroupIds.size === 0) {
@@ -1768,7 +1791,7 @@ export default function PurchaseRecords() {
       const cached = catalogQueryCache.get(normalizedQuery);
       if (cached) return cached;
       const request = fetchReadonlyCatalogJson<{ products?: any[] }>(
-        `/api/catalog/search?q=${encodeURIComponent(normalizedQuery)}&pageSize=8`,
+        `/api/catalog/search?q=${encodeURIComponent(normalizedQuery)}&limit=8`,
       );
       catalogQueryCache.set(normalizedQuery, request);
       try {
@@ -2481,35 +2504,56 @@ export default function PurchaseRecords() {
     );
   }
 
+  const syncStatusSlot = (
+    <div
+      data-testid="purchase-records-sync-slot"
+      role="status"
+      aria-live="polite"
+      aria-hidden={isSyncing ? undefined : true}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        height: '18px',
+        minHeight: '18px',
+        fontSize: '12px',
+        lineHeight: '18px',
+        color: '#64748b',
+        visibility: isSyncing ? 'visible' : 'hidden',
+      }}>
+        <div style={{
+          width: '12px',
+          height: '12px',
+          border: '2px solid #e2e8f0',
+          borderTopColor: '#2563eb',
+          borderRadius: '50%',
+          animation: 'erp-spin 0.8s linear infinite'
+        }} />
+        <span>同步中，顯示的是上次載入的資料...</span>
+        <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+  const refreshButton = (
+    <CloudRefreshButton
+      refresh={refreshAuthoritative}
+      resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']}
+      onLocalRefresh={loadFreshData}
+    />
+  );
+
   return (
-    <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '180px' : '0px' }}>
-      <div
-        data-testid="purchase-records-sync-slot"
-        role="status"
-        aria-live="polite"
-        aria-hidden={isSyncing ? undefined : true}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          height: '18px',
-          minHeight: '18px',
-          fontSize: '12px',
-          lineHeight: '18px',
-          color: '#64748b',
-          visibility: isSyncing ? 'visible' : 'hidden',
-        }}>
-          <div style={{
-            width: '12px',
-            height: '12px',
-            border: '2px solid #e2e8f0',
-            borderTopColor: '#2563eb',
-            borderRadius: '50%',
-            animation: 'erp-spin 0.8s linear infinite'
-          }} />
-          <span>同步中，顯示的是上次載入的資料...</span>
-          <style>{`@keyframes erp-spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
+    <PageShell className="flex-col gap-lg" data-testid="purchase-records-root" mobileStyle={{ paddingBottom: '180px' }}>
+      {linkedGroupId !== null && (
+        <div role="status" data-testid="purchase-records-group-scope" style={{ padding: 12, background: '#eff6ff', borderRadius: 8, overflowWrap: 'anywhere' }}>
+          {baseGroups.length ? '正在查看指定商品的訂購紀錄（暫不套用其他篩選）' : '找不到指定商品，或目前無權讀取；未改用其他商品。'}
+          <button type="button" className="btn btn-outline" style={{ marginLeft: 8, minHeight: 44 }} onClick={() => {
+            const params = new URLSearchParams(location.search);
+            params.delete('productGroup');
+            navigate({ pathname: location.pathname, search: params.toString() });
+          }}>清除商品定位</button>
+        </div>
+      )}
+      {isMobile && syncStatusSlot}
       <style>{`
         .erp-table th {
           padding: 0 !important;
@@ -2704,18 +2748,15 @@ export default function PurchaseRecords() {
       `}</style>
 
 
-      <div className="flex justify-between items-center" style={{ marginBottom: 'var(--spacing-md)' }}>
+      <PageHeader className="flex justify-between items-center" mobileStyle={{ marginBottom: 'var(--spacing-md)' }}>
         <div>
           <h1 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: 600 }}>訂購紀錄表</h1>
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
+          {!isMobile && syncStatusSlot}
         </div>
-      </div>
+      </PageHeader>
 
-      <CloudRefreshButton
-        refresh={refreshAuthoritative}
-        resources={['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders']}
-        onLocalRefresh={loadFreshData}
-      />
+      {isMobile && refreshButton}
       {isStale && (
         <div style={{
           backgroundColor: '#fef3c7',
@@ -3024,7 +3065,7 @@ export default function PurchaseRecords() {
 
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+      <div className="workspace-toolbar workspace-panel" data-workspace-toolbar style={isMobile ? { display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e5e7eb' } : { flexDirection: 'column', alignItems: 'stretch', padding: '16px' }}>
         
         <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '8px', padding: '0 12px', height: '40px' }}>
           <Search size={18} style={{ color: '#64748b', marginRight: '8px' }} />
@@ -3449,7 +3490,7 @@ export default function PurchaseRecords() {
                 type="button"
                 data-testid="open-closing-date-workbench"
                 onClick={() => setShowClosingDateWorkbench(true)}
-                title="NEXT FIELD TEST ONLY"
+                title={closingDateWorkbenchMode === 'cloud' ? '候選結單日查詢' : 'NEXT FIELD TEST ONLY'}
                 style={{
                   padding: '0 14px',
                   height: '36px',
@@ -3467,9 +3508,11 @@ export default function PurchaseRecords() {
               >
                 <Search size={14} />
                 <span>分析結單日</span>
-                <span style={{ fontSize: '9px', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' }}>
-                  NEXT ONLY
-                </span>
+                {closingDateWorkbenchMode === 'next' && (
+                  <span style={{ fontSize: '9px', padding: '2px 4px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' }}>
+                    NEXT ONLY
+                  </span>
+                )}
               </button>
             )}
             <button
@@ -3603,7 +3646,7 @@ export default function PurchaseRecords() {
         const renderGroupsTableInner = (list: ProductGroup[], tableId: string) => {
           if (isMobile) {
             return (
-              <div className="mobile-card-list">
+              <div className="mobile-card-list workspace-content" data-workspace-content>
                 {list.map((g) => {
                   const details = getGroupPlatformDetails(g.id);
                   const demandAndPurchased = getGroupDemandAndPurchased(g.id);
@@ -3671,7 +3714,7 @@ export default function PurchaseRecords() {
                             wordBreak: 'break-word',
                             flex: 1
                           }}>
-                            {g.normalized_title || g.title}
+                            <span data-testid="purchase-record-product-title">{productGroupDisplayName(g)}</span>
                             {gap > 0 && (
                               <span style={{
                                 backgroundColor: '#fee2e2',
@@ -3771,7 +3814,7 @@ export default function PurchaseRecords() {
             <>
               {activeTab === 'proxy' ? (
               <ScrollWrapper isMobile={isMobile}>
-                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
+                <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -3916,7 +3959,7 @@ export default function PurchaseRecords() {
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              <span data-testid="purchase-record-product-title" className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{productGroupDisplayName(g)}</span>
                               {dynamicGap > 0 && (
                                 <span style={{
                                   backgroundColor: '#fee2e2',
@@ -3959,7 +4002,7 @@ export default function PurchaseRecords() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleCopyTitle(g.id, g.normalized_title || g.title);
+                                  handleCopyTitle(g.id, productGroupDisplayName(g));
                                 }}
                                 style={{
                                   background: 'none',
@@ -4043,7 +4086,7 @@ export default function PurchaseRecords() {
                           {editMode && isProxyProduct(g) ? (
                             <input
                               data-testid={`proxy-purchased-quantity-${g.id}`}
-                              aria-label={`代理版商品 ${g.normalized_title || g.title} 叫貨數量`}
+                              aria-label={`代理版商品 ${productGroupDisplayName(g)} 叫貨數量`}
                               aria-busy={pendingDemandCommits.has(`${g.id}_purchased`)}
                               disabled={pendingDemandCommits.has(`${g.id}_purchased`)}
                               type="text"
@@ -4218,7 +4261,7 @@ export default function PurchaseRecords() {
               </ScrollWrapper>
             ) : (
               <ScrollWrapper isMobile={isMobile}>
-                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
+                <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
                 <thead className="purchase-records-sticky-header">
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -4386,7 +4429,7 @@ export default function PurchaseRecords() {
                         <td style={{ fontWeight: 600, color: 'var(--color-text-primary)', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                           <div className="flex-col gap-xs">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                              <span className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{g.normalized_title || g.title}</span>
+                              <span data-testid="purchase-record-product-title" className="product-name-text" style={{ userSelect: 'text', cursor: 'text' }}>{productGroupDisplayName(g)}</span>
                               {demandAndPurchased.gap > 0 && (
                                 <span style={{
                                   backgroundColor: '#fee2e2',
@@ -4429,7 +4472,7 @@ export default function PurchaseRecords() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleCopyTitle(g.id, g.normalized_title || g.title);
+                                  handleCopyTitle(g.id, productGroupDisplayName(g));
                                 }}
                                 style={{
                                   background: 'none',
@@ -4659,6 +4702,7 @@ export default function PurchaseRecords() {
         <div className="flex-col gap-md">
           {(displayedMainGroups.length === 0 && displayedCompletedGroups.length === 0) ? (
             <EmptyState
+              compact
               icon={Receipt}
               title={groups.length === 0 ? "尚未有訂購紀錄" : "找不到符合的紀錄"}
               description={groups.length === 0 ? "您可以透過匯入商品清單來自動產生母體，或手動建立。" : "請嘗試調整搜尋關鍵字或篩選條件。"}
@@ -4809,6 +4853,9 @@ export default function PurchaseRecords() {
             selectedGroups={closingDateWorkbenchSelection}
             allGroups={groups}
             onClose={() => setShowClosingDateWorkbench(false)}
+            applySelections={closingDateWorkbenchMode === 'cloud'
+              ? applyCloudClosingDateSelections
+              : undefined}
             onApplied={async appliedCount => {
               await loadData();
               setSelectedGroupIds(new Set());
@@ -4869,6 +4916,6 @@ export default function PurchaseRecords() {
       >
         {editMode ? '✏️ 編輯模式' : '🔒 鎖定模式'}
       </button>
-    </div>
+    </PageShell>
   );
 }

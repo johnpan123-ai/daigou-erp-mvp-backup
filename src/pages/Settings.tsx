@@ -8,6 +8,7 @@ import {
 import { Settings as SettingsIcon, Download, Upload, Trash2, Database, Lock } from 'lucide-react';
 import { useAuth } from '../auth/authContext';
 import { useRole } from '../auth/useRole';
+import { useViewport } from '../contexts/ViewportContext';
 import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../lib/environmentModeLabel';
 import { clearSandboxData, getActiveSandboxConfig, isSandboxEnvironmentActive } from '../lib/testSandboxEnvironment';
@@ -19,9 +20,12 @@ import {
   type TestSnapshotCollectionName,
   type TestSnapshotMetadata,
 } from '../lib/testSnapshotImport';
+import CloudAtomicRestorePanel from '../components/CloudAtomicRestorePanel';
 import { SettingsCountLoadGate } from './settingsCountLoadGate';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
+import { PageHeader, PageShell } from '../components/layout/PageHeader';
+import { SystemInformation } from '../components/layout/SystemInformation';
 import './Settings.css';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
@@ -43,6 +47,7 @@ const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: 
 ];
 
 export default function Settings() {
+  const { isMobile } = useViewport();
   const { user, signOut } = useAuth();
   const { role, displayName, isProfileLoading } = useRole();
   const currentMode = getProviderMode();
@@ -323,22 +328,22 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex-col gap-lg" style={{ padding: '0 24px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div className="flex items-center gap-sm" style={{ padding: '16px 0', borderBottom: '1px solid var(--color-border)' }}>
+    <PageShell className="settings-page flex-col gap-lg" mobileStyle={{ padding: '0 24px', maxWidth: '1200px', margin: '0 auto' }}>
+      <PageHeader className="flex items-center gap-sm" mobileStyle={{ padding: '16px 0', borderBottom: '1px solid var(--color-border)' }}>
         <SettingsIcon size={24} className="text-primary" />
         <div>
           <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600 }}>系統設定</h1>
           <p className="text-muted text-sm" style={{ margin: 0, marginTop: '4px' }}>資料庫管理、備份與還原</p>
         </div>
-      </div>
+      </PageHeader>
 
-      <div className="kpi-grid settings-data-grid">
+      <div className="kpi-grid settings-data-grid workspace-content" data-workspace-content>
         <div className="card flex-col">
           <h3 style={{ margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Database size={18} className="text-primary" /> 
             資料庫狀態
           </h3>
-          <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'inventory', 'salesOrders']} onLocalRefresh={loadCounts} />
+          {isMobile && <CloudRefreshButton refresh={refreshAuthoritative} resources={['products', 'inventory', 'salesOrders']} onLocalRefresh={loadCounts} />}
           <div className="flex-col gap-sm" style={{ backgroundColor: 'var(--color-bg-base)', padding: '16px', borderRadius: '8px' }}>
             <div className="flex justify-between">
               <span className="text-muted text-sm">商品主檔 (InventoryItem)</span>
@@ -374,8 +379,8 @@ export default function Settings() {
             建議您在進行大量匯入或測試前，先將資料匯出為 JSON 檔案備份。
           </p>
 
-          <div className="flex-col gap-md">
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+          <div className="flex-col gap-md settings-backup-actions">
+            <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯出 JSON 備份</div>
                 <div className="text-xs text-muted">下載當前所有資料庫資料的 JSON 檔案。</div>
@@ -385,7 +390,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯出 Excel 備份</div>
                 <div className="text-xs text-muted">下載多分頁格式的試算表備份（用於核對與手工修復）。</div>
@@ -395,7 +400,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>簡易匯出 Excel</div>
                 <div className="text-xs text-muted">3 頁精簡報表：商品總覽（可點入查看規格）、數量核對、採購批次。</div>
@@ -405,7 +410,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            {!isCloudRestoreDisabledMode(currentMode) ? <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
                 <div className="text-xs text-muted">
@@ -430,26 +435,16 @@ export default function Settings() {
                 disabled={isCloudRestoreDisabledMode(currentMode)}
                 style={{ display: 'none' }} 
               />
-            </div>
+            </div> : <CloudAtomicRestorePanel onAuthoritativeRefreshComplete={loadCounts} />}
 
-            {isCloudRestoreDisabledMode(currentMode) && (
-              <div
-                role="alert"
-                style={{
-                  padding: '12px 16px',
-                  border: '1px solid #f59e0b',
-                  borderRadius: '8px',
-                  background: '#fffbeb',
-                  color: '#92400e',
-                  fontSize: '13px',
-                  lineHeight: 1.6,
-                }}
-              >
-                {CLOUD_RESTORE_DISABLED_MESSAGE}
-              </div>
-            )}
+          </div>
+        </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+        <div className="card flex-col" style={{ gridColumn: 'span 3' }}>
+          <h3 style={{ margin: '0 0 16px 0' }}>維護工具</h3>
+          <div className="flex-col gap-md">
+
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新解析商品規格</div>
                 <div className="text-xs text-muted">修正因為舊版匯入導致的規格未正確切分問題。</div>
@@ -484,7 +479,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新整理商品標題</div>
                 <div className="text-xs text-muted">清理商品名稱中多餘的促銷/代購文字，僅保留商品主體。不影響原始名稱。</div>
@@ -500,7 +495,7 @@ export default function Settings() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>清空訂購紀錄資料</div>
                 <div className="text-xs text-muted">只清除訂購紀錄 (Group/Category/Variant)，不影響商品主檔。</div>
@@ -509,8 +504,12 @@ export default function Settings() {
                 <Trash2 size={16} /> 清空紀錄
               </button>
             </div>
+          </div>
+        </div>
 
-            <div className="flex items-center justify-between" style={{ padding: '16px', border: '1px solid var(--color-danger)', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
+        <div className="card flex-col settings-danger-section" style={{ gridColumn: 'span 3' }}>
+          <h3 style={{ margin: '0 0 16px 0', color: 'var(--color-danger)' }}>危險區域</h3>
+            <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-danger)', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-danger" style={{ marginBottom: '4px' }}>危險操作：清空全部資料</div>
                 <div className="text-xs text-danger" style={{ opacity: 0.8 }}>將清空所有測試與正式資料，操作無法復原。</div>
@@ -519,7 +518,6 @@ export default function Settings() {
                 <Trash2 size={16} /> 清空 Reset
               </button>
             </div>
-          </div>
         </div>
 
         {/* 資料來源模式 */}
@@ -727,6 +725,8 @@ export default function Settings() {
           )}
         </div>
 
+        <SystemInformation />
+
         {/* Supabase 連線測試 */}
         {(() => {
           let statusBg = '#f7fafc';
@@ -928,6 +928,6 @@ export default function Settings() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

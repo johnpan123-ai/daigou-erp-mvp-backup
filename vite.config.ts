@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolveCatalogUpstreamPath } from './functions/catalogProxyRuntime.ts'
 import { assertSupabaseEnvironmentBoundary } from './src/lib/supabaseEnvironmentBoundary'
 
 const catalogProxyTarget = process.env.CATALOG_API_PROXY_TARGET?.trim()
@@ -26,7 +27,14 @@ export default defineConfig(({ mode }) => {
         '/api/catalog': {
           target: catalogProxyTarget,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/catalog/, '/api'),
+          rewrite: (path) => {
+            const incoming = new URL(path, 'https://erp.invalid')
+            const pathSegments = incoming.pathname
+              .replace(/^\/api\/catalog\/?/, '')
+              .split('/')
+              .filter(Boolean)
+            return `${resolveCatalogUpstreamPath(pathSegments)}${incoming.search}`
+          },
         },
         '/api/hololive': {
           target: 'https://shop.hololivepro.com',

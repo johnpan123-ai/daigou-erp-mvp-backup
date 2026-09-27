@@ -174,7 +174,7 @@ try {
   assert.equal((pageSource.match(/bundleComps\.map\(renderBundleComponent\)/g) || []).length, 3, 'A receiving layout lost its component rows');
   assert.ok((pageSource.match(/套組內容/g) || []).length >= 6, 'Expand/collapse structure labels were removed');
   assert.ok(pageSource.includes('handleToggleCheck'), 'Receiving check behavior is no longer wired');
-  assert.equal((pageSource.match(/data-testid={`copy-japan-package-group-\${g\.id}`}/g) || []).length, 2, 'Desktop/mobile group-title copy controls are incomplete');
+  assert.equal((pageSource.match(/<CopyProductNameButton name={g\.title} groupId={g\.id} \/>/g) || []).length, 2, 'Desktop/mobile group-title copy controls are incomplete');
   assert.ok(pageSource.includes('checklist-group-header-main'), 'Two-row desktop group header main row is missing');
   assert.ok(pageSource.includes('checklist-group-header-secondary'), 'Two-row desktop group header status row is missing');
   console.log('PASS all three receiving layouts keep expand/collapse structure without redundant inner headings');

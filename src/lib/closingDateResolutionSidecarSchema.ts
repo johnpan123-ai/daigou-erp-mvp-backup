@@ -9,9 +9,12 @@ import type {
 
 /**
  * A separate Next-only database keeps Workbench state out of the ERP snapshot.
- * This name must never be routed to daigou-erp-db or a Supabase-backed store.
+ * These names must never be routed to daigou-erp-db or a Supabase-backed store.
+ * NEXT and Cloud keep separate local analysis histories so one runtime cannot
+ * reuse the other runtime's sidecar state.
  */
 export const NEXT_CLOSING_DATE_SIDECAR_DB_NAME = 'daigou-erp-closing-date-sidecar-next-v1';
+export const CLOUD_CLOSING_DATE_SIDECAR_DB_NAME = 'daigou-erp-closing-date-sidecar-cloud-v1';
 export const NEXT_CLOSING_DATE_SIDECAR_DB_VERSION = 1;
 
 export const CLOSING_DATE_SIDECAR_STORES = {

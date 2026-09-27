@@ -68,7 +68,7 @@ export interface CloudRefreshRequest {
   reason: 'realtime' | 'editing-ended' | 'focus' | 'visibility' | 'reconnect' | 'manual';
   changes: CloudChange[];
   resources: CloudResource[];
-  /** Monotonic generation for a complete authoritative cache replacement. */
+  /** Server Restore epoch whose complete cache generation this read must commit. */
   authoritativeEpoch?: number;
 }
 
@@ -364,6 +364,25 @@ export class CloudReconnectCatchUp {
     if (changed) this.resourceRevision += 1;
     if (!changed || !this.pending || next.length === 0) return;
     this.trigger = 'resource-registration';
+    this.emit('trigger');
+    this.startIfReady();
+  }
+
+  /**
+   * Arm one bounded catch-up generation without requiring resources to have
+   * registered first. A later updateResources() call starts the same
+   * generation, so initial React effect ordering cannot lose the refresh.
+   */
+  ensurePending(trigger: CloudReconnectTrigger): void {
+    if (this.disposed || (this.pending && this.armed)) return;
+    if (!this.pending) {
+      this.generation += 1;
+      this.attempt = 0;
+    }
+    this.pending = true;
+    this.armed = true;
+    this.exhausted = false;
+    this.trigger = trigger;
     this.emit('trigger');
     this.startIfReady();
   }

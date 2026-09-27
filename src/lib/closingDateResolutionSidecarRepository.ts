@@ -18,6 +18,7 @@ import {
   CLOSING_DATE_SIDECAR_INDEXES,
   CLOSING_DATE_SIDECAR_STORE_NAMES,
   CLOSING_DATE_SIDECAR_STORES,
+  CLOUD_CLOSING_DATE_SIDECAR_DB_NAME,
   NEXT_CLOSING_DATE_SIDECAR_DB_NAME,
   NEXT_CLOSING_DATE_SIDECAR_DB_VERSION,
   migrateClosingDateResolutionSidecar,
@@ -32,6 +33,7 @@ import type {
   StoredVerifiedMapping,
 } from './closingDateResolutionSidecarSchema';
 import { getBuildSandboxMode } from './testSandboxEnvironment';
+import { getProviderMode } from '../providers/providerMode';
 
 export const CLOSING_DATE_SIDECAR_FEATURE_FLAG = 'VITE_ENABLE_CLOSING_DATE_WORKBENCH_STORAGE';
 
@@ -191,6 +193,20 @@ export function assertNextClosingDateSidecarAccess(
   }
 }
 
+export function assertCloudClosingDateSidecarAccess(
+  buildMode: ReturnType<typeof getBuildSandboxMode>,
+  providerMode = getProviderMode(),
+): void {
+  const cloudRuntime = buildMode === null && (providerMode === 'cloud' || providerMode === 'fallback');
+  const experimentalHarness = buildMode === 'experimental'
+    && (providerMode === 'experimental' || providerMode === 'cloud');
+  if (!cloudRuntime && !experimentalHarness) {
+    throw new ClosingDateSidecarUnavailableError(
+      'Closing Date Workbench Cloud sidecar storage is available only in the Cloud build/provider.',
+    );
+  }
+}
+
 const requestResult = <T>(request: IDBRequest<T>): Promise<T> => new Promise((resolve, reject) => {
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'));
@@ -222,11 +238,14 @@ const ensureNonEmpty = (value: string, label: string): string => {
   return normalized;
 };
 
-const ensureSidecarDatabaseName = (databaseName: string): string => {
+const ensureSidecarDatabaseName = (
+  databaseName: string,
+  allowedPrefix: string = NEXT_CLOSING_DATE_SIDECAR_DB_NAME,
+): string => {
   const normalized = ensureNonEmpty(databaseName, 'sidecar database name');
-  if (!normalized.startsWith(NEXT_CLOSING_DATE_SIDECAR_DB_NAME)) {
+  if (!normalized.startsWith(allowedPrefix)) {
     throw new ClosingDateSidecarUnavailableError(
-      `Refusing non-Next Closing Date sidecar database: ${normalized}`,
+      `Refusing Closing Date sidecar database outside ${allowedPrefix}: ${normalized}`,
     );
   }
   return normalized;
@@ -1421,6 +1440,24 @@ export function createNextClosingDateResolutionRepository(
   }
   const databaseName = ensureSidecarDatabaseName(
     options.databaseName ?? NEXT_CLOSING_DATE_SIDECAR_DB_NAME,
+  );
+  return new IndexedDbClosingDateResolutionRepository(
+    databaseName,
+    window.indexedDB,
+    options.faultInjector,
+  );
+}
+
+export function createCloudClosingDateResolutionRepository(
+  options: CreateClosingDateSidecarRepositoryOptions = {},
+): ClosingDateResolutionSidecarRepository {
+  assertCloudClosingDateSidecarAccess(getBuildSandboxMode(), getProviderMode());
+  if (typeof window === 'undefined' || !window.indexedDB) {
+    throw new ClosingDateSidecarUnavailableError('IndexedDB is unavailable in this runtime.');
+  }
+  const databaseName = ensureSidecarDatabaseName(
+    options.databaseName ?? CLOUD_CLOSING_DATE_SIDECAR_DB_NAME,
+    CLOUD_CLOSING_DATE_SIDECAR_DB_NAME,
   );
   return new IndexedDbClosingDateResolutionRepository(
     databaseName,

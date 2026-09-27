@@ -20,6 +20,14 @@ import type {
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
+import type {
+  CloudRestoreAttemptCommand,
+  CloudRestoreAttemptOutcome,
+  CloudRestoreCommand,
+  CloudRestoreExecutionCommand,
+  CloudRestoreResult,
+} from './cloud/cloudAtomicRestore';
+import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 
 export interface IDataProvider {
   getInventory(): Promise<InventoryItem[]>;
@@ -85,5 +93,8 @@ export interface IDataProvider {
   getLastImportBackup(): Promise<{ data: string; timestamp: string } | null>;
   saveLastImportBackup(backup: { data: string; timestamp: string }): Promise<void>;
   restoreBackup(backupData: any): Promise<boolean>;
+  validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult>;
+  prepareCloudRestoreAttempt(command: CloudRestoreCommand): Promise<CloudRestoreAttemptOutcome>;
+  reconcileCloudRestoreAttempt(command: CloudRestoreAttemptCommand): Promise<CloudRestoreAttemptOutcome>;
+  restoreCloudSnapshot(command: CloudRestoreExecutionCommand): Promise<CloudRestoreResult>;
 }
-
