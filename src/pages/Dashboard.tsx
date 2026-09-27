@@ -450,8 +450,8 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="daily-dashboard">
-      <header className="dashboard-header">
+    <div className="daily-dashboard workspace-page">
+      <header className="dashboard-header workspace-header" data-workspace-header>
         <div>
           <p className="dashboard-eyebrow">DAILY WORK</p>
           <h1>每日工作待辦</h1>
@@ -476,7 +476,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <section className="daily-task-grid" aria-label="每日工作優先順序">
+      <section className="daily-task-grid workspace-stats" data-workspace-stats aria-label="每日工作優先順序">
         <button type="button" className="daily-task-card task-unlisted" data-dashboard-task="unlisted" onClick={() => showQueue('unlisted')}>
           <span className="task-icon"><Archive size={23} /></span>
           <span className="task-copy"><strong>待下架</strong><small>仍在賣場、需要處理</small></span>
@@ -506,7 +506,7 @@ export default function Dashboard() {
         </button>
       </section>
 
-      <section id="dashboard-work-switcher" className="dashboard-work-switcher" aria-label="工作清單切換">
+      <section id="dashboard-work-switcher" className="dashboard-work-switcher workspace-content" data-workspace-content aria-label="工作清單切換">
         <div className="work-queue-tabs" role="tablist" aria-label="選擇工作清單">
           <button
             type="button"
@@ -590,7 +590,7 @@ export default function Dashboard() {
       </section>
 
       <style>{`
-        .daily-dashboard { max-width: 1420px; margin: 0 auto; padding: 26px 28px 56px; color: #172033; }
+        .daily-dashboard { color: #172033; }
         .dashboard-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
         .dashboard-eyebrow { margin: 0 0 5px; color: #64748b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.16em; }
         .dashboard-header h1 { margin: 0; font-size: clamp(1.65rem, 2.4vw, 2.25rem); line-height: 1.15; letter-spacing: -0.03em; }

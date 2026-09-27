@@ -8,6 +8,9 @@ import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
 import '../../styles/layout.css'; // Ensure layout classes are applied
+import '../../styles/workspace.css';
+
+const workspaceRoutes = new Set(['/', '/dashboard', '/inventory', '/purchase-records', '/recent-purchases', '/purchasing', '/japan-packages', '/outbound-shipments', '/unlisted-items', '/duplicate-variants']);
 
 interface SidebarItemProps {
   to: string;
@@ -643,7 +646,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''}`}>
+        <div className={`page-content ${(location.pathname.startsWith('/japan-packages') || location.pathname.startsWith('/outbound-shipments')) ? 'page-content-full' : ''} ${workspaceRoutes.has(location.pathname) ? 'page-content--workspace' : ''}`}>
           {getProviderMode() === 'local' && location.pathname !== '/login' && location.pathname !== '/auth/recovery' && (
             <div style={{
               backgroundColor: '#fffbeb',

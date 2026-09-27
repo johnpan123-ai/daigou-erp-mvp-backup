@@ -2504,7 +2504,7 @@ export default function PurchaseRecords() {
   }
 
   return (
-    <div className="flex-col gap-lg" style={{ paddingBottom: isMobile ? '180px' : '0px' }}>
+    <div className="flex-col gap-lg workspace-page" data-testid="purchase-records-root" style={{ paddingBottom: isMobile ? '180px' : undefined }}>
       {linkedGroupId !== null && (
         <div role="status" data-testid="purchase-records-group-scope" style={{ padding: 12, background: '#eff6ff', borderRadius: 8, overflowWrap: 'anywhere' }}>
           {baseGroups.length ? '正在查看指定商品的訂購紀錄（暫不套用其他篩選）' : '找不到指定商品，或目前無權讀取；未改用其他商品。'}
@@ -2736,7 +2736,7 @@ export default function PurchaseRecords() {
       `}</style>
 
 
-      <div className="flex justify-between items-center" style={{ marginBottom: 'var(--spacing-md)' }}>
+      <div className="workspace-header" data-workspace-header>
         <div>
           <h1 style={{ marginBottom: '4px', fontSize: '20px', fontWeight: 600 }}>訂購紀錄表</h1>
           <p className="text-muted text-sm" style={{ margin: 0 }}>總體商品群組清單，點擊進入該群組進行採購與需求管理。</p>
@@ -3056,7 +3056,7 @@ export default function PurchaseRecords() {
 
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '16px', backgroundColor: '#fff', padding: '16px', borderRadius: '12px', border: '1px solid #e5e7eb' }}>
+      <div className="workspace-toolbar workspace-panel" data-workspace-toolbar style={{ flexDirection: 'column', alignItems: 'stretch', padding: '16px' }}>
         
         <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#f1f5f9', borderRadius: '8px', padding: '0 12px', height: '40px' }}>
           <Search size={18} style={{ color: '#64748b', marginRight: '8px' }} />
@@ -3637,7 +3637,7 @@ export default function PurchaseRecords() {
         const renderGroupsTableInner = (list: ProductGroup[], tableId: string) => {
           if (isMobile) {
             return (
-              <div className="mobile-card-list">
+              <div className="mobile-card-list workspace-content" data-workspace-content>
                 {list.map((g) => {
                   const details = getGroupPlatformDetails(g.id);
                   const demandAndPurchased = getGroupDemandAndPurchased(g.id);
@@ -3805,7 +3805,7 @@ export default function PurchaseRecords() {
             <>
               {activeTab === 'proxy' ? (
               <ScrollWrapper isMobile={isMobile}>
-                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
+                <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
                 <thead>
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
@@ -4252,7 +4252,7 @@ export default function PurchaseRecords() {
               </ScrollWrapper>
             ) : (
               <ScrollWrapper isMobile={isMobile}>
-                <table className="erp-table" style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
+                <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
                 <thead className="purchase-records-sticky-header">
                   <tr>
                     <th style={{ width: '40px', textAlign: 'center' }}>
