@@ -334,7 +334,8 @@ try {
     }, cachePresent);
     await timeoutFixture.context.close();
     assert.equal(timeout.state.status, 'online', 'A read timeout must be degraded/stale, not misreported as offline.');
-    assert.equal(timeout.state.readStatus, cachePresent ? 'stale-cache' : 'read-error');
+    assert.equal(timeout.state.readStatus, cachePresent ? 'stale-cache' : 'loading');
+    assert.equal(timeout.state.authoritativeReadPending, true, 'soft timeout must retain pending authoritative read');
     assert.equal(timeout.rows.length, cachePresent ? 1 : 0);
     assert.deepEqual(timeout.rows, timeout.cached);
   }
@@ -381,16 +382,16 @@ try {
   assert.equal(reconnect.outboundMutations, 0);
   assert.equal(reconnect.metrics.fullPulls, 0);
 
-  const contextSource = await readFile(new URL('../src/contexts/CloudRealtimeSyncContext.tsx', import.meta.url), 'utf8');
-  assert.match(contextSource, /雲端讀取失敗｜目前顯示舊快取/);
-  assert.match(contextSource, /雲端已確認｜目前沒有資料/);
+  const presentationSource = await readFile(new URL('../src/contexts/globalSyncPresentation.ts', import.meta.url), 'utf8');
+  assert.match(presentationSource, /雲端讀取失敗｜目前顯示舊快取/);
+  assert.match(presentationSource, /雲端已確認｜目前沒有資料/);
   assert.equal(supabaseRequests.length, 0, 'Cloud cache authority regression contacted Supabase');
 
   console.log('PASS server rows replace Cloud cache and are marked fresh-online');
   console.log('PASS four-second stale fallback observes the eventual atomic authoritative replacement');
   console.log('PASS authoritative server zero clears stale Cloud cache and is marked fresh-empty');
   console.log('PASS partial server read failure leaves the complete Cloud cache transaction unchanged');
-  console.log('PASS timeout with cache is stale-cache; timeout without cache is read-error');
+  console.log('PASS soft-timeout with cache shows cached pending; without cache remains loading pending');
   console.log('PASS reconnect zero/new rows converge cache without outbound mutation; fullPulls = 0');
   console.log('PASS Cloud cache authority fixtures create 0 Production/Staging requests');
 } finally {

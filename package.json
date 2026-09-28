@@ -17,7 +17,12 @@
     "test:waca-postgrest-isolated-v3": "node tests/waca-postgrest-isolated-v3.mjs",
     "test:next-waca-ui": "node tests/next-waca-ui.mjs",
     "build:experimental": "tsc -b && vite build --mode experimental",
-    "build:staging": "tsc -b && vite build --mode staging --configLoader runner",
+    "build:staging": "node scripts/staging-release-build.mjs",
+    "verify:erp2-promotion": "node scripts/verify-erp2-promotion.mjs",
+    "deploy:erp2": "node scripts/deploy-erp2-pages.mjs",
+    "test:erp2-promotion-guard": "node tests/erp2-promotion-guard.mjs",
+    "test:staging-build-identity": "node tests/staging-build-identity.mjs",
+    "test:promotion-sync-state": "node tests/promotion-sync-state.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
@@ -134,6 +139,7 @@
     "playwright": "^1.60.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "wrangler": "4.141.0"
   }
 }

@@ -382,7 +382,9 @@ export default function Settings() {
         <div className="card flex-col" style={{ gridColumn: 'span 2' }}>
           <h3 style={{ margin: '0 0 16px 0' }}>資料備份與還原</h3>
           <p className="text-muted text-sm" style={{ marginBottom: '24px' }}>
-            所有的 ERP 資料目前皆儲存在您的瀏覽器本地端 (LocalStorage)。<br/>
+            {currentMode === 'cloud' || currentMode === 'fallback'
+              ? <>ERP 資料以 Supabase 雲端資料庫為正式來源；瀏覽器只保留受控快取，不能取代雲端備份。<br/></>
+              : <>目前資料儲存在這個瀏覽器的獨立本機資料庫。<br/></>}
             建議您在進行大量匯入或測試前，先將資料匯出為 JSON 檔案備份。
           </p>
 

@@ -28,7 +28,11 @@ import {
   subscribeCloudConnectivity,
   type CloudConnectivitySnapshot,
 } from '../providers/cloud/cloudConnectivity';
-import type { GlobalRefreshSnapshot } from './globalSyncPresentation';
+import {
+  resolveGlobalSyncPresentation,
+  type GlobalRefreshSnapshot,
+  type GlobalSyncPresentation,
+} from './globalSyncPresentation';
 import {
   StagingRealtimeFaultControl,
   type RealtimeChannelState,
@@ -45,6 +49,7 @@ interface CloudRealtimeContextValue {
   manualRefresh: (resources: CloudResource[]) => Promise<CloudRefreshResult | false>;
   refreshAll: () => Promise<void>;
   globalRefresh: GlobalRefreshSnapshot;
+  syncPresentation: GlobalSyncPresentation;
   connectivity: CloudConnectivitySnapshot;
   stagingFaultControl: {
     available: boolean;
@@ -120,13 +125,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       return false;
     }
   })();
-  const showCloudReadStatus = connectivity.status !== 'online'
-    || (connectivity.readStatus === 'loading' && connectivity.reason !== 'cloud-background-read')
-    || connectivity.readStatus === 'stale-cache'
-    || connectivity.readStatus === 'read-error'
-    || connectivity.readStatus === 'offline'
-    || connectivity.readStatus === 'fresh-empty';
-  const isSoftCloudReadTimeout = connectivity.reason?.includes('Cloud sync timed out after 4000ms') ?? false;
+  const presentationMode = testBridge ? 'cloud' : getProviderMode();
+  const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, globalRefresh);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -561,6 +561,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     manualRefresh,
     refreshAll,
     globalRefresh,
+    syncPresentation,
     connectivity,
     stagingFaultControl: {
       available: faultControlAllowed && enabled && !testBridge,
@@ -576,6 +577,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     manualRefresh,
     refreshAll,
     globalRefresh,
+    syncPresentation,
     connectivity,
     conflictedResources,
     disconnectStagingRealtime,
@@ -593,23 +595,18 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     <CloudRealtimeContext.Provider value={value}>
       <div className="cloud-runtime-frame">
       <div className="cloud-status-stack">
-      {cloudMode && showCloudReadStatus && (
-        <div role="status" aria-live="polite" style={{ background: connectivity.readStatus === 'fresh-empty' ? '#065f46' : isSoftCloudReadTimeout ? '#92400e' : '#7f1d1d', color: '#fff' }}>
-          {connectivity.status === 'offline'
-            ? 'Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用'
-            : isSoftCloudReadTimeout
-              ? connectivity.readStatus === 'stale-cache'
-                ? '雲端仍在同步｜目前顯示上次快取；寫入已暫停'
-                : '雲端仍在同步｜等待最新資料；寫入已暫停'
-            : connectivity.readStatus === 'stale-cache'
-              ? '雲端讀取失敗｜目前顯示舊快取，資料不是最新；寫入已暫停'
-              : connectivity.readStatus === 'read-error'
-                ? '雲端讀取失敗｜目前沒有可確認的最新資料；寫入已暫停'
-                : connectivity.readStatus === 'offline'
-                  ? '雲端已恢復連線｜等待重新讀取雲端最新資料；寫入仍暫停'
-                : connectivity.readStatus === 'fresh-empty'
-                  ? '雲端已確認｜目前沒有資料'
-                  : '雲端資料讀取中｜所有新增、修改、刪除與匯入暫停'}
+      {cloudMode && syncPresentation.banner && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-global-sync-banner={syncPresentation.status}
+          style={{
+            background: syncPresentation.tone === 'success' ? '#065f46'
+              : syncPresentation.tone === 'warning' ? '#92400e' : '#7f1d1d',
+            color: '#fff',
+          }}
+        >
+          {syncPresentation.banner}
         </div>
       )}
       {conflictedResources.size > 0 && (
@@ -636,10 +633,16 @@ export function useGlobalSyncControl() {
   return {
     connectivity: context?.connectivity ?? getCloudConnectivitySnapshot(),
     refresh: context?.globalRefresh ?? { mode: getProviderMode(), busy: false, errorAt: null, lastCompletedAt: null, message: '' },
+    presentation: context?.syncPresentation ?? resolveGlobalSyncPresentation(
+      getProviderMode(),
+      getCloudConnectivitySnapshot(),
+      { mode: getProviderMode(), busy: false, errorAt: null, lastCompletedAt: null, message: '' },
+    ),
     refreshAll: context?.refreshAll,
   };
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Provider hooks share this context's single authoritative state.
 export function useCloudResourceSync(
   owner: string,
   resources: CloudResource[],

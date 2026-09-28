@@ -188,7 +188,7 @@ try {
   await page.waitForTimeout(4100);
   await page.evaluate(async () => {
     const c = await import('/src/providers/cloud/cloudConnectivity.ts');
-    c.markCloudReadFailed(new Error('Cloud sync timed out after 4000ms'), true);
+    c.markCloudReadDeferred(true);
   });
   assert.equal(await stat('商品 SKU (ProductVariant)').textContent(), '3254 筆', 'no publication before atomic commit');
   await page.evaluate(() => window.__P0_REACT_HARNESS__.releaseTargetedRead());

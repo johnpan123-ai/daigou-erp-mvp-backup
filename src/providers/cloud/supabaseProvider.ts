@@ -111,6 +111,7 @@ import { toCloudFieldRow } from './cloudEntityPayload';
 import {
   assertCloudWriteAllowed,
   isLikelyCloudConnectivityError,
+  markCloudReadDeferred,
   markCloudReadFailed,
   markCloudReadFresh,
   markCloudReadLoading,
@@ -1275,12 +1276,16 @@ export class SupabaseProvider implements IDataProvider {
 
     this.corePullCompletionPromise = syncPromise;
 
+    const syncTimeoutError = new Error('Cloud sync timed out after 4000ms');
     const syncTimeout = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error('Cloud sync timed out after 4000ms')), 4000);
+      setTimeout(() => reject(syncTimeoutError), 4000);
     });
 
     this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(async err => {
       console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
+      // A completed failure already published its final fail-closed state above.
+      // Only the timer boundary means that an authoritative read is still pending.
+      if (err !== syncTimeoutError) return;
       // The detached authoritative pull continues after the four-second UI boundary.
       // If it committed while this fallback was being scheduled, it is newer than the
       // timeout and must not be downgraded back to stale or made eligible for a second pull.
@@ -1295,7 +1300,7 @@ export class SupabaseProvider implements IDataProvider {
         db.getPrivateOrderItems(),
       ]);
       if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
-      markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
+      markCloudReadDeferred(cachedRows.some(rows => rows.length > 0));
       this.isPulled = false;
     });
 

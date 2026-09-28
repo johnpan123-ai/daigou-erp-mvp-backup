@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "githubPreDeployGate": {
+    "repository": "johnpan123-ai/daigou-erp-mvp-backup",
+    "remote": "origin",
+    "allowedBranchPattern": "^codex/(?:erp2|next)-[a-z0-9][a-z0-9-]*$",
+    "acceptedTag": "accepted-20260927-erp2-deadline-v1-live",
+    "acceptedHead": "e565d067f49c95cf71dd6c95c5fab5b4749558f8",
+    "lineage": {
+      "mode": "DIRECT_OR_RECONCILED_CHECKPOINT_DESCENDANT",
+      "reconciliationTag": "checkpoint-20260927-next-final-parity-update-v1",
+      "reconciliationHead": "89b4ecc367c99061db48e200d1d81928bf597a3b"
+    }
+  },
+  "accounts": {
+    "erp": {
+      "profile": "hippo-erp",
+      "accountId": "e0a58431cd5bcf0e01ec3438d531461a"
+    }
+  },
+  "environments": {
+    "erp2": {
+      "role": "ERP_2_CLOUD_CANDIDATE",
+      "humanName": "小河馬訂購紀錄表 2.0",
+      "cloudflareAccountId": "e0a58431cd5bcf0e01ec3438d531461a",
+      "cloudflareProject": "hippo-erp-realtime-preview",
+      "pagesDomain": "hippo-erp-realtime-preview.pages.dev",
+      "pagesBranch": "isolated-preview",
+      "runtimeMarker": "STAGING",
+      "deploymentEnvironment": "staging",
+      "supabaseProject": "rhfdjsklfrgpoqsaqpkn",
+      "publicFingerprint": "D9EA6B7BB6524517",
+      "deploymentAllowed": true
+    }
+  }
+}

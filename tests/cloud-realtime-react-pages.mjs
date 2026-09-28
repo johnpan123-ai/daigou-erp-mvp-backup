@@ -106,6 +106,7 @@ try {
         const row = { ...h.server.productGroups.find(item => item.id === 'g-c108'), title: 'SHOULD NOT BE FRESH' };
         try { await h.emitUpsert('product_groups', row); } catch { /* expected */ }
       });
+      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().connectivity.readStatus === 'stale-cache');
       await waitText(page, '目前顯示舊快取');
       assert.deepEqual(await page.locator('[data-dashboard-task] [data-task-count]').allTextContents(), beforeCounts);
       assert.equal((await snap(page)).connectivity.readStatus, 'stale-cache');

@@ -10,6 +10,7 @@ export type CloudReadFreshnessStatus =
 export interface CloudConnectivitySnapshot {
   status: CloudConnectivityStatus;
   readStatus: CloudReadFreshnessStatus;
+  authoritativeReadPending: boolean;
   lastReachableAt: number | null;
   lastFreshReadAt: number | null;
   reason: string | null;
@@ -29,6 +30,7 @@ const listeners = new Set<() => void>();
 let snapshot: CloudConnectivitySnapshot = {
   status: typeof navigator === 'undefined' ? 'online' : navigator.onLine === false ? 'offline' : 'checking',
   readStatus: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'loading',
+  authoritativeReadPending: typeof navigator === 'undefined' ? false : navigator.onLine !== false,
   lastReachableAt: null,
   lastFreshReadAt: null,
   reason: typeof navigator !== 'undefined' && navigator.onLine === false ? 'browser-offline' : null,
@@ -38,6 +40,7 @@ const publish = (next: CloudConnectivitySnapshot): void => {
   if (
     snapshot.status === next.status
     && snapshot.readStatus === next.readStatus
+    && snapshot.authoritativeReadPending === next.authoritativeReadPending
     && snapshot.lastReachableAt === next.lastReachableAt
     && snapshot.lastFreshReadAt === next.lastFreshReadAt
     && snapshot.reason === next.reason
@@ -65,6 +68,7 @@ export const markCloudReachable = (): void => publish({
 export const markCloudReadLoading = (reason = 'cloud-read-loading'): void => publish({
   ...snapshot,
   readStatus: 'loading',
+  authoritativeReadPending: true,
   reason,
 });
 
@@ -74,6 +78,7 @@ export const markCloudReadFresh = (rowCount?: number): void => {
     ...snapshot,
     status: 'online',
     readStatus: rowCount === 0 ? 'fresh-empty' : 'fresh-online',
+    authoritativeReadPending: false,
     lastReachableAt: now,
     lastFreshReadAt: now,
     reason: null,
@@ -84,14 +89,24 @@ export const markCloudReadFailed = (error: unknown, hasCachedData: boolean): voi
   publish({
     ...snapshot,
     readStatus: hasCachedData ? 'stale-cache' : 'read-error',
+    authoritativeReadPending: false,
     reason: String((error as { message?: unknown } | null)?.message ?? error ?? 'cloud-read-failed'),
   });
 };
+
+/** The UI boundary elapsed, but the same authoritative request is still running. */
+export const markCloudReadDeferred = (hasCachedData: boolean): void => publish({
+  ...snapshot,
+  readStatus: hasCachedData ? 'stale-cache' : 'loading',
+  authoritativeReadPending: true,
+  reason: 'cloud-read-soft-timeout',
+});
 
 export const markCloudReconnectPending = (): void => publish({
   ...snapshot,
   status: 'checking',
   readStatus: 'loading',
+  authoritativeReadPending: true,
   reason: 'reconnect-pending',
 });
 
@@ -99,6 +114,7 @@ export const markCloudUnavailable = (reason = 'cloud-unavailable'): void => publ
   ...snapshot,
   status: 'offline',
   readStatus: 'offline',
+  authoritativeReadPending: false,
   reason,
 });
 
