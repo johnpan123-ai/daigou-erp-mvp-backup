@@ -36,11 +36,9 @@ const parseJson = output => {
 
 const runWrangler = (root, argv, accountId) => {
   if (argv.some(value => !/^[a-zA-Z0-9-]+$/u.test(value))) fail('unsafe Wrangler argument');
-  const executable = process.platform === 'win32'
-    ? resolve(root, 'node_modules/.bin/wrangler.cmd')
-    : resolve(root, 'node_modules/.bin/wrangler');
+  const entry = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
   try {
-    return parseJson(execFileSync(executable, argv, {
+    return parseJson(execFileSync(process.execPath, [entry, ...argv], {
       cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
       env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId },
     }));

@@ -16,9 +16,7 @@ if (!execute) {
 }
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const executable = process.platform === 'win32'
-  ? resolve(root, 'node_modules/.bin/wrangler.cmd')
-  : resolve(root, 'node_modules/.bin/wrangler');
+const entry = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
 const args = [
   'pages', 'deploy', proof.artifactRoot,
   '--profile', proof.cloudflare.profile,
@@ -29,7 +27,7 @@ const args = [
   '--commit-message', `ERP2 guarded artifact ${proof.artifact.identity}`,
 ];
 try {
-  execFileSync(executable, args, {
+  execFileSync(process.execPath, [entry, ...args], {
     cwd: proof.candidateWorktree,
     stdio: 'inherit', timeout: 300_000,
     env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: CANONICAL_ERP2_TARGET.accountId },
