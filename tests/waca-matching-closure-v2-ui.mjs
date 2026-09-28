@@ -28,6 +28,22 @@ try {
   browser = await chromium.launch({ executablePath: process.env.CORE_TEST_CHROME
     || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true });
   const context = await browser.newContext({ acceptDownloads: true, locale: 'zh-TW' });
+  await context.addInitScript(() => {
+    window.__wacaPerf = { transactions: 0, writes: 0, reactCommits: 0 };
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function countedTransaction(stores, mode, options) {
+      window.__wacaPerf.transactions += 1;
+      if (mode === 'readwrite') window.__wacaPerf.writes += 1;
+      return originalTransaction.call(this, stores, mode, options);
+    };
+    const renderers = new Map();
+    window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+      supportsFiber: true, renderers,
+      inject(renderer) { const id = renderers.size + 1; renderers.set(id, renderer); return id; },
+      onCommitFiberRoot() { window.__wacaPerf.reactCommits += 1; },
+      onCommitFiberUnmount() {},
+    };
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -102,6 +118,53 @@ try {
     throw error;
   });
   assert.match(await page.locator('[aria-label="WACA 目前驗收摘要"]').innerText(), /60\s+已配對特徵/);
+  const measureTab = label => page.evaluate(async tabLabel => {
+    const button = [...document.querySelectorAll('.waca-tabs button')].find(row => row.textContent.trim() === tabLabel);
+    if (!button) throw new Error(`Missing WACA tab ${tabLabel}`);
+    window.__wacaPerf.transactions = 0;
+    window.__wacaPerf.writes = 0;
+    window.__wacaPerf.reactCommits = 0;
+    const start = performance.now();
+    button.click();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const elapsedMs = Math.round((performance.now() - start) * 10) / 10;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return { tab: tabLabel, elapsedMs,
+      reads: window.__wacaPerf.transactions - window.__wacaPerf.writes,
+      writes: window.__wacaPerf.writes, reactCommits: window.__wacaPerf.reactCommits };
+  }, label);
+  const firstTabMetrics = [];
+  const repeatTabMetrics = [];
+  for (const label of ['來源訂單', '商品對照', '匯入紀錄', '待處理 0', 'WACA 匯入']) firstTabMetrics.push(await measureTab(label));
+  for (const label of ['來源訂單', '商品對照', '匯入紀錄', '待處理 0', 'WACA 匯入']) repeatTabMetrics.push(await measureTab(label));
+  for (const metric of [...firstTabMetrics, ...repeatTabMetrics]) {
+    assert.equal(metric.reads, 0, `${metric.tab} must reuse the loaded WACA read model`);
+    assert.equal(metric.writes, 0, `${metric.tab} must not perform a business write`);
+    assert.equal(metric.reactCommits, 1, `${metric.tab} should commit only the tab change`);
+  }
+  for (const metric of repeatTabMetrics) {
+    assert.ok(metric.elapsedMs < 100, `${metric.tab} repeat tab switch took ${metric.elapsedMs}ms`);
+  }
+  console.log('WACA TAB PERF', JSON.stringify({ firstTabMetrics, repeatTabMetrics }));
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
+  for (const label of ['來源訂單', '商品對照', '匯入紀錄', '待處理 0', 'WACA 匯入']) await measureTab(label);
+  const coverage = await cdp.send('Profiler.takePreciseCoverage');
+  await cdp.send('Profiler.stopPreciseCoverage');
+  await cdp.detach();
+  assert.ok(coverage.result.length > 0, 'V8 function coverage must be active during tab switches');
+  const coreCalls = Object.fromEntries(['parseWacaWorkbook', 'importWacaRows', 'matchWacaItem',
+    'recomputeWacaQuantities', 'reconcileWacaReadback'].map(name => {
+    const functions = coverage.result.flatMap(script => script.functions).filter(fn => fn.functionName === name);
+    return [name, functions.reduce((total, fn) => total + (fn.ranges[0]?.count ?? 0), 0)];
+  }));
+  assert.deepEqual(Object.values(coreCalls), [0, 0, 0, 0, 0], 'tab changes must not rerun WACA business calculations');
+  console.log('WACA TAB CORE CALLS', JSON.stringify(coreCalls));
+  await page.getByRole('button', { name: '商品對照' }).click();
+  const mappingOptions = await page.locator('.waca-panel select option').allTextContents();
+  assert.equal(mappingOptions.some(title => title.includes('【小河馬日本代購】') || /預購\s*27年/u.test(title)), false);
+  await page.getByRole('button', { name: 'WACA 匯入' }).click();
   const quantityBefore = await page.evaluate(() => window.db.getProductVariants({ raw: true }));
   const quantityMapBefore = new Map(quantityBefore.map(row => [row.id, row.waca_auto_quantity ?? 0]));
 
