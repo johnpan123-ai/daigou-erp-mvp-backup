@@ -13,14 +13,16 @@ try {
   const a = RESOURCE_CLASSIFICATION.A_MUST_BACKUP_RESTORE;
   const b = RESOURCE_CLASSIFICATION.B_DERIVED_REBUILDABLE;
   const c = RESOURCE_CLASSIFICATION.C_EPHEMERAL_EXCLUDED;
-  const keys = a.map(row => row.key);
-  assert.equal(new Set(keys).size, keys.length, 'duplicate durable resource');
+  const d = RESOURCE_CLASSIFICATION.D_LEGACY_UNUSED;
+  const keys = [...a, ...d].map(row => row.key);
+  assert.equal(new Set(keys).size, keys.length, 'duplicate classified resource');
   for (const row of a) {
     assert.ok(row.backupKey && row.restore && row.cloud, `${row.key} lacks backup/restore/cloud classification`);
   }
-  const cloud = a.filter(row => row.cloud !== 'deadline-sidecar-section').map(row => row.cloud).sort();
+  const cloud = [...a.filter(row => row.cloud !== 'deadline-sidecar-section').map(row => row.cloud),
+    ...d.filter(row => row.cloud === 'dashboard_category_images').map(row => row.cloud)].sort();
   assert.deepEqual(cloud, CLOUD_RESTORE_TABLES.map(([, table]) => table).sort(),
-    'Cloud restore resource map must cover every durable Cloud table');
+    'Cloud restore resource map must cover active durable and compatibility-preserved Cloud tables');
   const sidecar = new Set(Object.values(CLOSING_DATE_SIDECAR_STORES));
   const durableSidecar = a.filter(row => row.restore === 'deadline-sidecar').map(row =>
     CLOSING_DATE_SIDECAR_STORES[row.key === 'deadlineVerifiedMappings' ? 'verifiedMappings'
@@ -42,11 +44,23 @@ try {
   assert.match(workbenchSource, /data\.dashboardCategoryImages\s*=/u);
   assert.match(dbSource, /dashboardCategoryImages:\s*DASHBOARD_IMAGE_CATEGORY_KEYS\.map/u);
   assert.match(dbSource, /validateDashboardImageBackup\(data\.dashboardCategoryImages\)/u);
+  assert.ok(d.some(row => row.key === 'dashboardCategoryImages' && row.cloud === 'dashboard_category_images'));
+  assert.ok(d.some(row => row.cloud === 'legacy-storage-bucket' && row.backupKey === null));
+  const appSource = readFileSync('src/App.tsx', 'utf8');
+  const dashboardSource = readFileSync('src/pages/Dashboard.tsx', 'utf8');
+  assert.match(appSource, /import Dashboard from '\.\/pages\/Dashboard'/u);
+  assert.doesNotMatch(appSource, /Dashboard_backup/u);
+  assert.doesNotMatch(dashboardSource,
+    /dashboardCategoryImages|dashboard_category_images|dashboard_cloud_img_|dashboardImageStore|<img\b|backgroundImage|storage\.from\(/iu,
+    'The mounted homepage must not consume legacy dashboard image data');
+  const providerSource = readFileSync('src/providers/cloud/supabaseProvider.ts', 'utf8');
+  assert.doesNotMatch(providerSource, /supabase\.storage\.from\(['"]dashboard-category-images['"]\)/u,
+    'Current Cloud provider must not read or write legacy Storage image binaries');
   const migrationSource = readFileSync('supabase/sql/044_waca_cloud_ledger.sql', 'utf8');
   const migratedWacaTables = [...migrationSource.matchAll(/create table public\.(waca_[a-z_]+)\s*\(/giu)]
     .map(match => match[1]).sort();
   assert.deepEqual(migratedWacaTables, a.filter(row => row.cloud.startsWith('waca_')).map(row => row.cloud).sort(),
     'Every newly created WACA Cloud table must be classified');
   assert.ok(c.includes('erp_waca_revision_v1') && c.includes('erp_last_import_backup'));
-  console.log(`PASS durable registry: ${a.length} A, ${b.length} B, ${c.length} C, ${cloud.length} Cloud tables, ${sidecar.size} Deadline stores`);
+  console.log(`PASS durable registry: ${a.length} A, ${b.length} B, ${c.length} C, ${d.length} legacy/unused, ${cloud.length} Cloud tables, ${sidecar.size} Deadline stores`);
 } finally { await vite.close(); }

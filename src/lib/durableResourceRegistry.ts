@@ -5,7 +5,6 @@ export const DURABLE_RESOURCE_REGISTRY = [
   { key: 'salesOrderItems', backupKey: 'salesOrderItems', restore: 'core-idb', cloud: 'sales_order_items' },
   { key: 'productGroups', backupKey: 'productGroups', restore: 'core-idb', cloud: 'product_groups' },
   { key: 'productCategories', backupKey: 'productCategories', restore: 'core-idb', cloud: 'product_categories' },
-  { key: 'dashboardCategoryImages', backupKey: 'dashboardCategoryImages', restore: 'core-idb-image', cloud: 'dashboard_category_images' },
   { key: 'productVariants', backupKey: 'productVariants', restore: 'core-idb', cloud: 'product_variants' },
   { key: 'purchaseBatches', backupKey: 'purchaseBatches', restore: 'core-idb', cloud: 'purchase_batches' },
   { key: 'purchaseBatchItems', backupKey: 'purchaseBatchItems', restore: 'core-idb', cloud: 'purchase_batch_items' },
@@ -44,8 +43,27 @@ export const EPHEMERAL_RESOURCE_REGISTRY = [
   'cloud_deadline_restore_stage',
 ] as const;
 
+/** Retained for old-data compatibility, but absent from the mounted ERP homepage. */
+export const LEGACY_UNUSED_RESOURCE_REGISTRY = [
+  {
+    key: 'dashboardCategoryImages',
+    backupKey: 'dashboardCategoryImages',
+    restore: 'core-idb-image',
+    cloud: 'dashboard_category_images',
+    reason: 'Legacy image metadata/local bytes remain in JSON and Cloud row snapshots for compatibility; no current UI consumes them.',
+  },
+  {
+    key: 'dashboard-category-images-storage-objects',
+    backupKey: null,
+    restore: 'not-in-current-product',
+    cloud: 'legacy-storage-bucket',
+    reason: 'The current mounted ERP UI has no Supabase Storage image read or write path.',
+  },
+] as const;
+
 export const RESOURCE_CLASSIFICATION = {
   A_MUST_BACKUP_RESTORE: DURABLE_RESOURCE_REGISTRY,
   B_DERIVED_REBUILDABLE: REBUILDABLE_RESOURCE_REGISTRY,
   C_EPHEMERAL_EXCLUDED: EPHEMERAL_RESOURCE_REGISTRY,
+  D_LEGACY_UNUSED: LEGACY_UNUSED_RESOURCE_REGISTRY,
 } as const;
