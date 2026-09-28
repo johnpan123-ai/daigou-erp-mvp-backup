@@ -31,6 +31,8 @@ assert.match(buildSource, /verifyLocalCandidate/u);
 assert.match(buildSource, /verifyArtifactIdentity/u);
 assert.doesNotMatch(buildSource, /--source-head|VITE_ERP_BUILD_SHA\?\?/u, 'build SHA must not be free-form input');
 assert.match(guardSource, /verifyArtifactIdentity/u);
+assert.match(guardSource, /resolve\(fileURLToPath\(new URL\('\.\.', import\.meta\.url\)\)\)/u,
+  'guard and candidate roots must use the same normalized path on Windows');
 assert.match(deploySource, /runPromotionGuard/u);
 assert.match(deploySource, /--profile[\s\S]*proof\.cloudflare\.profile/u);
 assert.match(deploySource, /--commit-hash/u);

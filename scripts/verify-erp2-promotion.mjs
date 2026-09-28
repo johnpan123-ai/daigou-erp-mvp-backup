@@ -52,7 +52,7 @@ const runWrangler = (root, argv, accountId) => {
 
 export async function runPromotionGuard(argv = process.argv.slice(2), environment = process.env) {
   const args = parseArguments(argv);
-  const guardRoot = fileURLToPath(new URL('..', import.meta.url));
+  const guardRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
   const candidateRoot = resolve(args.get('candidate-worktree') || guardRoot);
   const artifactRoot = resolve(candidateRoot, args.get('artifact-dir') || 'staging-release-artifacts/dist');
   const checkpointTag = args.get('checkpoint-tag') || fail('missing --checkpoint-tag');
