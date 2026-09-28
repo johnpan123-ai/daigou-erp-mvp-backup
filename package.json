@@ -25,6 +25,7 @@
     "test:promotion-sync-state": "node tests/promotion-sync-state.mjs",
     "test:schema-reconciliation": "node tests/schema-reconciliation.mjs",
     "test:schema-reconciliation-pg": "node tests/schema-reconciliation-pglite.mjs",
+    "test:erp2-046-isolated": "node tests/erp2-046-compatibility-isolated.mjs",
     "schema:canonical-snapshot": "node tools/schema-reconciliation/generateCanonicalSnapshot.mjs",
     "lint": "eslint .",
     "preview": "vite preview",

@@ -26,10 +26,20 @@ function evidenceFor(snapshot, condition) {
       return exact(Boolean(table), Boolean(table)
         && (condition.rls === undefined || table.rls === condition.rls)
         && (condition.forceRls === undefined || table.forceRls === condition.forceRls), table ?? null);
+    case 'tableOwner':
+      return exact(Boolean(table), Boolean(table) && table.owner === condition.expected, table?.owner ?? null);
     case 'column': {
       const value = table?.columns?.[detail];
       return exact(Boolean(value), Boolean(value) && value.dataType === condition.expected
-        && (condition.nullable === undefined || value.nullable === condition.nullable), value ?? null);
+        && (condition.nullable === undefined || value.nullable === condition.nullable)
+        && (condition.default === undefined || value.default === condition.default), value ?? null);
+    }
+    case 'columnCompatible': {
+      const value = table?.columns?.[detail];
+      const matches = !value || (value.dataType === condition.expected
+        && (condition.nullable === undefined || value.nullable === condition.nullable)
+        && (condition.default === undefined || value.default === condition.default));
+      return exact(Boolean(table), Boolean(table) && matches, value ?? null);
     }
     case 'primaryKey':
       return exact(Boolean(table?.primaryKey), sameSet(table?.primaryKey, condition.expected), table?.primaryKey ?? null);
@@ -50,7 +60,25 @@ function evidenceFor(snapshot, condition) {
     }
     case 'index': {
       const owner = Object.values(snapshot.tables ?? {}).find(value => value.indexes?.[condition.object]);
-      return exact(Boolean(owner), Boolean(owner), owner?.indexes?.[condition.object] ?? null);
+      const value = owner?.indexes?.[condition.object];
+      const definition = normalizeDefinition(value?.definition ?? '');
+      const matches = Boolean(value)
+        && (condition.unique === undefined || value.unique === condition.unique)
+        && (condition.primary === undefined || value.primary === condition.primary)
+        && (condition.valid === undefined || value.valid === condition.valid)
+        && (condition.definitionIncludes ?? []).every(entry => definition.includes(normalizeDefinition(entry)));
+      return exact(Boolean(value), matches, value ?? null);
+    }
+    case 'indexCompatible': {
+      const owner = Object.values(snapshot.tables ?? {}).find(value => value.indexes?.[condition.object]);
+      const value = owner?.indexes?.[condition.object];
+      if (!value) return exact(true, true, null);
+      const definition = normalizeDefinition(value.definition ?? '');
+      const matches = (condition.unique === undefined || value.unique === condition.unique)
+        && (condition.primary === undefined || value.primary === condition.primary)
+        && (condition.valid === undefined || value.valid === condition.valid)
+        && (condition.definitionIncludes ?? []).every(entry => definition.includes(normalizeDefinition(entry)));
+      return exact(true, matches, value);
     }
     case 'trigger': {
       const value = table?.triggers?.[detail];
@@ -68,16 +96,35 @@ function evidenceFor(snapshot, condition) {
         : condition.expected.every(value => grants.includes(value));
       return exact(Boolean(table), matches, grants);
     }
+    case 'tableGrantSubset': {
+      const grants = table?.grants?.[detail] ?? [];
+      return exact(Boolean(table), Boolean(table) && grants.every(value => condition.expected.includes(value)), grants);
+    }
     case 'function': {
       const value = getFunction(snapshot, condition.object);
       const definition = normalizeDefinition(value?.definition ?? '');
       const matches = Boolean(value)
+        && (condition.owner === undefined || value.owner === condition.owner)
+        && (condition.returnType === undefined || value.returnType === condition.returnType)
         && (condition.securityDefiner === undefined || value.securityDefiner === condition.securityDefiner)
         && (condition.authenticatedExecute === undefined || value.authenticatedExecute === condition.authenticatedExecute)
         && (condition.anonExecute === undefined || value.anonExecute === condition.anonExecute)
+        && (condition.publicExecute === undefined || value.publicExecute === condition.publicExecute)
         && (condition.requiredConfig ?? []).every(entry => (value.config ?? [])
           .some(actual => canonicalConfig(actual) === canonicalConfig(entry)))
         && (condition.definitionIncludes ?? []).every(entry => definition.includes(normalizeDefinition(entry)));
+      return exact(Boolean(value), matches, value ?? null);
+    }
+    case 'functionSignatureSet': {
+      const prefix = `${condition.object.toLowerCase()}(`;
+      const signatures = Object.keys(snapshot.functions ?? {}).filter(signature => signature.toLowerCase().startsWith(prefix));
+      return exact(true, sameSet(signatures.map(canonicalFunctionSignature), condition.expected.map(canonicalFunctionSignature)), signatures);
+    }
+    case 'functionDefinitionCompatible': {
+      const value = getFunction(snapshot, condition.object);
+      const definition = normalizeDefinition(value?.definition ?? '');
+      const matches = Boolean(value) && (condition.variants ?? [])
+        .filter(entry => definition.includes(normalizeDefinition(entry))).length === 1;
       return exact(Boolean(value), matches, value ?? null);
     }
     case 'inventoryIntegrity': {
@@ -89,9 +136,11 @@ function evidenceFor(snapshot, condition) {
 }
 
 const requiredSection = kind => ({
-  table: 'tables', column: 'columns', primaryKey: 'constraints', unique: 'constraints', foreignKey: 'constraints', index: 'indexes',
+  table: 'tables', tableOwner: 'tables', column: 'columns', columnCompatible: 'columns',
+  primaryKey: 'constraints', unique: 'constraints', foreignKey: 'constraints', index: 'indexes', indexCompatible: 'indexes',
   trigger: 'triggers', policy: 'policies', tableGrant: 'grants', tableGrantContains: 'grants',
-  function: 'functions', inventoryIntegrity: 'inventoryIntegrity',
+  tableGrantSubset: 'grants', function: 'functions', functionSignatureSet: 'functions',
+  functionDefinitionCompatible: 'functions', inventoryIntegrity: 'inventoryIntegrity',
 }[kind]);
 
 export function evaluateConditions(snapshot, conditions) {
@@ -145,6 +194,7 @@ export function reconcileMigration(snapshot, effect) {
   let state;
   if (unknown) state = EFFECT_STATES.UNKNOWN;
   else if (matched === post.length) state = EFFECT_STATES.SATISFIED;
+  else if (effect.allowPartialApply) state = EFFECT_STATES.NEEDS_APPLY;
   else if (conflicts > 0) state = EFFECT_STATES.CONFLICT;
   else if (matched > 0 && missing > 0) state = EFFECT_STATES.PARTIAL;
   else state = EFFECT_STATES.NEEDS_APPLY;
@@ -166,6 +216,7 @@ export function reconcileMigration(snapshot, effect) {
     state, historicalExecution: snapshot.migrationHistory?.entries?.[effect.migrationId]?.eventType === 'MIGRATION_APPLIED'
       && snapshot.migrationHistory.entries[effect.migrationId].result === 'PASS' ? 'PROVEN_APPLIED' : 'UNPROVEN',
     safeToApply, risk: effect.risk, dependencies: effect.dependencies,
+    repairClosure: effect.repairClosure ?? null, repairs: effect.repairs ?? [],
     preconditions: pre, postconditions: post, detector,
   };
 }
@@ -223,16 +274,31 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
       item.dependencyBlocker = blockedDependency;
     }
   }
-  const blockers = migrations.filter(item => [EFFECT_STATES.PARTIAL, EFFECT_STATES.CONFLICT, EFFECT_STATES.UNKNOWN].includes(item.state)
-    || (item.state === EFFECT_STATES.NEEDS_APPLY && !item.safeToApply));
+  for (const item of migrations) {
+    if (!item.repairClosure || item.state === EFFECT_STATES.SATISFIED) continue;
+    const repair = byId.get(item.repairClosure);
+    if (repair && (repair.state === EFFECT_STATES.SATISFIED
+      || (repair.state === EFFECT_STATES.NEEDS_APPLY && repair.safeToApply))) {
+      item.coveredByRepair = repair.migrationId;
+    }
+  }
+  const blockers = migrations.filter(item => !item.coveredByRepair
+    && ([EFFECT_STATES.PARTIAL, EFFECT_STATES.CONFLICT, EFFECT_STATES.UNKNOWN].includes(item.state)
+      || (item.state === EFFECT_STATES.NEEDS_APPLY && !item.safeToApply)));
   const readyForApply = blockers.length === 0;
   const currentFingerprint = snapshot.completeness?.structural === true
     ? fingerprintStructuralSnapshot(snapshot) : null;
   for (const item of migrations) {
     item.reason = reasonFor(item);
     item.applyMethod = applyMethodFor(item);
+    if (item.coveredByRepair) item.applyMethod = 'SUPERSEDED_BY_COMPATIBILITY_REPAIR';
     item.postflightChecks = item.postconditions.map(check => check.condition.object);
   }
+  const applyPlan = migrations.filter(item => item.state === EFFECT_STATES.NEEDS_APPLY
+    && item.safeToApply && !item.coveredByRepair).map(item => ({
+    migrationId: item.migrationId, sourceFile: item.sourceFile, sourceChecksum: item.sourceChecksum,
+    canonicalOrder: item.canonicalOrder, applyMethod: item.applyMethod,
+  }));
   const baselineRecord = (snapshot.migrationHistory?.records ?? []).find(record => record.eventType === 'BASELINE_ADOPTED'
     && record.eventKey === options.requiredBaselineId && record.result === 'PASS') ?? null;
   return {
@@ -250,6 +316,7 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
     migrations,
     baselineRecord,
     blockers: blockers.map(item => ({ migrationId: item.migrationId, state: item.state })),
+    applyPlan,
     readyForApply,
     evidenceFingerprint: fingerprintValue({ snapshot, migrations: migrations.map(({ postconditions, preconditions, ...item }) => item) }),
   };
@@ -271,13 +338,15 @@ export function formatReconciliationReport(plan) {
     lines.push(`原因：${item.reason}`);
     lines.push(`資料風險：${item.risk}`);
     lines.push(`方式：${item.applyMethod}`);
+    if (item.coveredByRepair) lines.push(`相容修復：${item.coveredByRepair} 已納入安全 apply plan`);
     lines.push(`依賴：${item.dependencies.join(', ') || '無'}`);
     const checks = [...new Set(item.postflightChecks)];
     lines.push(`Postflight：${checks.length} 項（${checks.slice(0, 8).join(', ')}${checks.length > 8 ? ', …' : ''}）`);
     lines.push('');
   }
   lines.push('LIVE MIGRATION DELTA');
-  for (const item of plan.migrations.filter(value => value.state !== EFFECT_STATES.SATISFIED)) {
+  for (const planned of plan.applyPlan) {
+    const item = plan.migrations.find(value => value.migrationId === planned.migrationId);
     lines.push(`${item.migrationId} | ${item.state} | ${item.applyMethod} | ${item.risk}`);
   }
   lines.push(`READY FOR APPLY = ${plan.readyForApply ? 'YES' : 'NO'}`);

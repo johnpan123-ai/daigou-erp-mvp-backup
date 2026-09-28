@@ -9,7 +9,7 @@ import { readdir } from 'node:fs/promises';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 const registry = await buildMigrationEffectRegistry();
-assert.deepEqual(Object.keys(registry), ['018','026b','027','029','030','041','042','043','044','045','046','047']);
+assert.deepEqual(Object.keys(registry), ['018','026b','027','029','030','041','042','043','044','045','046','046b','047']);
 for (const effect of Object.values(registry)) {
   assert.match(effect.sourceChecksum, /^[0-9a-f]{64}$/u);
   assert.ok(effect.sourceEffects.transactionWrapped);
@@ -25,12 +25,15 @@ assert.ok(registry['044'].sourceEffects.tables.find(value => value.name === 'wac
   .some(value => value.referencedTable === 'public.waca_orders'));
 assert.ok(registry['026b'].sourceEffects.identityRewrites.some(value => value.table === 'inventory_items'));
 assert.ok(registry['043'].sourceEffects.functionAcl.some(value => value.action === 'GRANT'));
+assert.deepEqual(registry['046b'].repairs, ['046']);
+assert.equal(registry['047'].dependencies.includes('046b'), true);
 console.log('PASS migration effect registry is checksum-bound to parsed SQL source');
 
 for (const file of await readdir(new URL('../tools/schema-reconciliation/sql/', import.meta.url))) {
   const sql = await readFile(new URL(`../tools/schema-reconciliation/sql/${file}`, import.meta.url), 'utf8');
   const withoutComments = sql.replace(/--[^\r\n]*/gu, ' ');
-  assert.doesNotMatch(withoutComments, /\b(create|alter|drop|insert|update|delete|truncate|call|grant|revoke)\b/iu, file);
+  const withoutLiterals = withoutComments.replace(/'(?:''|[^'])*'/gu, "''");
+  assert.doesNotMatch(withoutLiterals, /\b(create|alter|drop|insert|update|delete|truncate|call|grant|revoke)\b/iu, file);
   assert.match(withoutComments, /^\s*(with|select)\b/iu, file);
 }
 console.log('PASS live query pack is SELECT-only');
@@ -53,20 +56,27 @@ const applyCondition = (snapshot, condition) => {
   const [schema, tableName, detail] = condition.object.split('.');
   if (condition.kind === 'function') {
     const value = snapshot.functions[condition.object] ??= { config: [], definition: '', securityDefiner: false,
-      authenticatedExecute: false, anonExecute: false };
+      authenticatedExecute: false, anonExecute: false, publicExecute: false };
+    if (condition.owner !== undefined) value.owner = condition.owner;
+    if (condition.returnType !== undefined) value.returnType = condition.returnType;
     if (condition.securityDefiner !== undefined) value.securityDefiner = condition.securityDefiner;
     if (condition.authenticatedExecute !== undefined) value.authenticatedExecute = condition.authenticatedExecute;
     if (condition.anonExecute !== undefined) value.anonExecute = condition.anonExecute;
+    if (condition.publicExecute !== undefined) value.publicExecute = condition.publicExecute;
     value.config = [...new Set([...value.config, ...(condition.requiredConfig ?? [])])];
     value.definition += ` ${(condition.definitionIncludes ?? []).join(' ')}`;
     return;
   }
   if (condition.kind === 'index') {
-    ensureTable(snapshot, 'public.__fixture_index_host').indexes[condition.object] = { definition: condition.object };
+    ensureTable(snapshot, 'public.__fixture_index_host').indexes[condition.object] = {
+      definition: `using btree (${(condition.definitionIncludes ?? []).join(' ')})`,
+      unique: condition.unique ?? false, primary: condition.primary ?? false, valid: condition.valid ?? true,
+    };
     return;
   }
   const table = ensureTable(snapshot, `${schema}.${tableName}`);
   if (condition.kind === 'table') { if (condition.rls !== undefined) table.rls = condition.rls; if (condition.forceRls !== undefined) table.forceRls = condition.forceRls; }
+  if (condition.kind === 'tableOwner') table.owner = condition.expected;
   if (condition.kind === 'column') table.columns[detail] = { dataType: condition.expected, nullable: condition.nullable ?? true, default: null };
   if (condition.kind === 'primaryKey') table.primaryKey = [...condition.expected];
   if (condition.kind === 'unique') table.uniques.push([...condition.expected]);
@@ -147,6 +157,53 @@ assert.equal(fullPlan.migrations.find(item => item.migrationId === '041').state,
 assert.equal(fullPlan.migrations.find(item => item.migrationId === '043').state, EFFECT_STATES.SATISFIED);
 assert.equal(fullPlan.migrations.find(item => item.migrationId === '043').historicalExecution, 'UNPROVEN');
 console.log('PASS 041/043 schema effects can be satisfied without invented migration history');
+
+const live046 = structuredClone(canonical);
+const live046Inventory = live046.tables['public.inventory_items'];
+delete live046Inventory.columns.myacg_parent_code;
+for (const value of Object.values(live046.tables)) delete value.indexes?.['public.inventory_items_myacg_parent_code_idx'];
+const parentFunction = live046.functions['public.erp_apply_field_mutations(text,jsonb)'];
+parentFunction.definition = "v_create_allowed := ARRAY['inventory_key','myacg_item_code','product_id'";
+live046Inventory.grants.anon = ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE'];
+live046Inventory.grants.authenticated = ['DELETE','INSERT','MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE'];
+delete live046.tables['public.erp_schema_migration_ledger'];
+delete live046.functions['public.erp_record_schema_migration_event(text,text,text,text,text,text,text,text,text,text,jsonb)'];
+for (const value of Object.values(live046.tables)) delete value.indexes?.['public.erp_schema_migration_ledger_recorded_at_idx'];
+const live046Plan = planSchemaDelta(live046, registry, { expectedSnapshot: canonical });
+const original046 = live046Plan.migrations.find(item => item.migrationId === '046');
+const repair046 = live046Plan.migrations.find(item => item.migrationId === '046b');
+const ledger047 = live046Plan.migrations.find(item => item.migrationId === '047');
+assert.equal(original046.state, EFFECT_STATES.CONFLICT);
+assert.equal(original046.coveredByRepair, '046b');
+assert.equal(repair046.state, EFFECT_STATES.NEEDS_APPLY);
+assert.equal(repair046.safeToApply, true);
+assert.equal(ledger047.state, EFFECT_STATES.NEEDS_APPLY);
+assert.equal(ledger047.safeToApply, true);
+assert.equal(ledger047.dependencyBlocker, undefined);
+assert.equal(live046Plan.readyForApply, true);
+assert.deepEqual(live046Plan.applyPlan.map(item => item.migrationId), ['046b','047']);
+assert.equal(original046.applyMethod, 'SUPERSEDED_BY_COMPATIBILITY_REPAIR');
+console.log('PASS live-like 046 conflict is covered by the ordered 046b compatibility closure');
+
+const unsafe046Fixtures = [
+  ['wrong column type', fixture => { fixture.tables['public.inventory_items'].columns.myacg_parent_code = { dataType: 'uuid', nullable: true, default: null }; }],
+  ['conflicting index', fixture => {
+    ensureTable(fixture, 'public.__fixture_index_host').indexes['public.inventory_items_myacg_parent_code_idx'] = {
+      definition: 'using btree (myacg_parent_code)', unique: true, primary: false, valid: true,
+    };
+  }],
+  ['unexpected function signature', fixture => { fixture.functions['public.erp_apply_field_mutations(uuid,jsonb)'] = structuredClone(parentFunction); }],
+  ['non-canonical inventory PK', fixture => { fixture.tables['public.inventory_items'].primaryKey = ['inventory_key']; }],
+  ['unexpected table privilege', fixture => { fixture.tables['public.inventory_items'].grants.anon.push('UNEXPECTED'); }],
+];
+for (const [label, mutate] of unsafe046Fixtures) {
+  const fixture = structuredClone(live046); mutate(fixture);
+  const plan = planSchemaDelta(fixture, registry, { expectedSnapshot: canonical });
+  const repair = plan.migrations.find(item => item.migrationId === '046b');
+  assert.equal(repair.safeToApply, false, label);
+  assert.equal(plan.readyForApply, false, label);
+}
+console.log('PASS unsafe 046 column/index/function/PK/ACL states fail closed');
 
 const adoption = createBaselineAdoptionRecord({ plan: fullPlan, baselineId: contract.schemaBaseline.requiredBaselineId,
   sourceHead: 'c12bd42567b9080d84051825f7c3ff2c955677e8', checkpoint: 'checkpoint-fixture',

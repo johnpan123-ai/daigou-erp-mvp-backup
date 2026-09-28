@@ -10,6 +10,20 @@ const fn = (signature, extra = {}) => q('function', `public.${signature}`, true,
 const table = (name, extra = {}) => q('table', `public.${name}`, true, extra);
 const index = (name, extra = {}) => q('index', `public.${name}`, true, extra);
 const column = (tableName, name, dataType, extra = {}) => q('column', `public.${tableName}.${name}`, dataType, extra);
+const inventoryParentColumn = extra => column('inventory_items', 'myacg_parent_code', 'text', {
+  nullable: true, default: null, ...extra,
+});
+const inventoryParentIndex = extra => index('inventory_items_myacg_parent_code_idx', {
+  unique: false, primary: false, valid: true,
+  definitionIncludes: ['myacg_parent_code', 'myacg_parent_code is not null', 'deleted_at is null'],
+  ...extra,
+});
+const inventoryParentFunction = extra => fn('erp_apply_field_mutations(text,jsonb)', {
+  owner: 'postgres', returnType: 'jsonb', publicExecute: false,
+  securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+  requiredConfig: ['search_path=""'],
+  definitionIncludes: ['myacg_parent_code'], ...extra,
+});
 
 const RESTORE_TABLES = Object.freeze([
   'inventory_items', 'product_groups', 'product_categories', 'product_variants', 'bundle_components',
@@ -193,21 +207,52 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   },
   '046': {
     sourceFile: '046_waca_myacg_parent_evidence.sql', dependencies: ['020', '044', '045'],
-    risk: 'LOW_ADDITIVE_EVIDENCE_COLUMN', idempotency: 'RERUN_SAFE',
+    risk: 'LOW_ADDITIVE_EVIDENCE_COLUMN', idempotency: 'SOURCE_DRIFT_GUARDED_ONE_TIME', repairClosure: '046b',
     preconditions: [table('inventory_items'), fn('erp_apply_field_mutations(text,jsonb)')],
     postconditions: [
-      column('inventory_items', 'myacg_parent_code', 'text'),
-      index('inventory_items_myacg_parent_code_idx'),
-      fn('erp_apply_field_mutations(text,jsonb)', {
-        securityDefiner: true, authenticatedExecute: true, anonExecute: false,
-        definitionIncludes: ['myacg_parent_code'],
-      }),
+      inventoryParentColumn(), inventoryParentIndex(), inventoryParentFunction(),
       q('tableGrantContains', 'public.inventory_items.authenticated', ['SELECT']),
       q('tableGrantContains', 'public.inventory_items.anon', [], { exact: true }),
     ],
   },
+  '046b': {
+    sourceFile: '046b_waca_myacg_parent_compatibility_repair.sql', dependencies: ['020', '044', '045'],
+    risk: 'LOW_STATE_GUARDED_ACL_REPAIR', idempotency: 'STATE_GUARDED_RERUN_SAFE', repairs: ['046'],
+    allowPartialApply: true,
+    preconditions: [
+      table('inventory_items'), q('tableOwner', 'public.inventory_items', 'postgres'),
+      q('primaryKey', 'public.inventory_items', ['id']),
+      column('inventory_items', 'id', 'uuid', { nullable: false }),
+      column('inventory_items', 'inventory_key', 'text', { nullable: false }),
+      q('unique', 'public.inventory_items', ['inventory_key']),
+      q('inventoryIntegrity', 'inventory_items', 'PASS'),
+      q('columnCompatible', 'public.inventory_items.myacg_parent_code', 'text', { nullable: true, default: null }),
+      q('indexCompatible', 'public.inventory_items_myacg_parent_code_idx', true, {
+        unique: false, primary: false, valid: true,
+        definitionIncludes: ['myacg_parent_code', 'myacg_parent_code is not null', 'deleted_at is null'],
+      }),
+      q('functionSignatureSet', 'public.erp_apply_field_mutations', ['public.erp_apply_field_mutations(text,jsonb)']),
+      q('functionDefinitionCompatible', 'public.erp_apply_field_mutations(text,jsonb)', true, {
+        variants: [
+          "v_create_allowed := ARRAY['inventory_key','myacg_item_code','product_id'",
+          "v_create_allowed := ARRAY['inventory_key','myacg_item_code','myacg_parent_code','product_id'",
+        ],
+      }),
+      q('tableGrantSubset', 'public.inventory_items.anon', ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE']),
+      q('tableGrantSubset', 'public.inventory_items.authenticated',
+        ['DELETE','INSERT','MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']),
+      q('tableGrantContains', 'public.inventory_items.authenticated', ['SELECT']),
+      q('tableGrant', 'public.inventory_items.public', []),
+    ],
+    postconditions: [
+      inventoryParentColumn(), inventoryParentIndex(), inventoryParentFunction(),
+      q('tableGrant', 'public.inventory_items.authenticated', ['SELECT'], { mismatchIsMissing: true }),
+      q('tableGrant', 'public.inventory_items.anon', [], { mismatchIsMissing: true }),
+      q('tableGrant', 'public.inventory_items.public', []),
+    ],
+  },
   '047': {
-    sourceFile: '047_erp_schema_migration_ledger.sql', dependencies: ['011', '046'],
+    sourceFile: '047_erp_schema_migration_ledger.sql', dependencies: ['011', '046b'],
     risk: 'LOW_ENVIRONMENT_LOCAL_METADATA', idempotency: 'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',
     classification: 'ENVIRONMENT_LOCAL_NON_PORTABLE_OPS_METADATA',
     preconditions: [fn('is_owner(uuid)')],

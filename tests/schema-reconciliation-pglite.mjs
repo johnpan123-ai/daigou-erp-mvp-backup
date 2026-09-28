@@ -50,6 +50,7 @@ async function capture(db) {
 const fresh = await createDatabase();
 const upgraded = await createDatabase();
 const partialBridge = await createDatabase();
+const compatibility = await createDatabase();
 try {
   await apply(fresh, CANONICAL_FRESH_INSTALL_V3, 'fresh');
   const freshSnapshot = await capture(fresh);
@@ -92,6 +93,32 @@ try {
   assert.ok(plan.migrations.every(item => item.historicalExecution === 'UNPROVEN'));
   console.log('PASS actual PostgreSQL-equivalent catalog satisfies migration effect registry');
 
+  const original046Index = CANONICAL_FRESH_INSTALL_V3.indexOf('046_waca_myacg_parent_evidence.sql');
+  const repair046Index = CANONICAL_FRESH_INSTALL_V3.indexOf('046b_waca_myacg_parent_compatibility_repair.sql');
+  assert.equal(repair046Index, original046Index + 1);
+  await apply(compatibility, CANONICAL_FRESH_INSTALL_V3.slice(0, original046Index), 'live-like-through-045');
+  await compatibility.exec(`
+    grant maintain,references,trigger,truncate on table public.inventory_items to anon;
+    grant delete,insert,maintain,references,select,trigger,truncate,update
+      on table public.inventory_items to authenticated;
+  `);
+  const liveLikeBefore = await capture(compatibility);
+  const beforePlan = planSchemaDelta(liveLikeBefore, registry, { expectedSnapshot: freshSnapshot });
+  assert.equal(beforePlan.migrations.find(item => item.migrationId === '046').state, 'CONFLICT');
+  assert.equal(beforePlan.migrations.find(item => item.migrationId === '046').coveredByRepair, '046b');
+  assert.equal(beforePlan.migrations.find(item => item.migrationId === '046b').safeToApply, true);
+  assert.equal(beforePlan.migrations.find(item => item.migrationId === '047').dependencyBlocker, undefined);
+  await apply(compatibility, ['046b_waca_myacg_parent_compatibility_repair.sql'], 'live-like-repair');
+  const once = fingerprintStructuralSnapshot(await capture(compatibility));
+  await apply(compatibility, ['046b_waca_myacg_parent_compatibility_repair.sql'], 'live-like-repair-replay');
+  assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), once);
+  await apply(compatibility, ['047_erp_schema_migration_ledger.sql'], 'live-like-ledger');
+  const repairedSnapshot = await capture(compatibility);
+  assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), fingerprintStructuralSnapshot(freshSnapshot));
+  const repairedPlan = planSchemaDelta(repairedSnapshot, registry, { expectedSnapshot: freshSnapshot });
+  assert.ok(['046','046b','047'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
+  console.log('PASS live-like 046 conflict repairs idempotently, unblocks 047, and converges to fresh target');
+
   const owner = '00000000-0000-4000-8000-000000000099';
   await fresh.exec(`insert into auth.users(id,email) values('${owner}','owner@example.com');
     update public.profiles set role='owner' where user_id='${owner}';
@@ -110,7 +137,7 @@ try {
   assert.equal(Object.hasOwn(businessSnapshot, 'erp_schema_migration_ledger'), false);
   console.log('PASS baseline ledger is owner-only operational metadata outside 24-resource Restore');
 } finally {
-  await fresh.close(); await upgraded.close(); await partialBridge.close();
+  await fresh.close(); await upgraded.close(); await partialBridge.close(); await compatibility.close();
 }
 
 console.log(JSON.stringify({ result: 'PASS', engine: 'PGlite PostgreSQL 18', liveMutation: 0 }));
