@@ -2026,6 +2026,11 @@ const OPTIONAL_ATOMIC_IMPORT_COLLECTIONS = [
   ['wacaCutoverAudit', 'erp_waca_cutover_audit_v2'],
 ] as const;
 
+import { classifyWorkbenchBackup, legacyCutoverState, validateDashboardImageBackup, WORKBENCH_BACKUP_FORMAT_VERSION,
+  type WacaCutoverState } from '../waca/backupFormat';
+import { readDeadlineDurableBackup } from './closingDateSidecarBackup';
+import { DASHBOARD_IMAGE_CATEGORY_KEYS, getAllDashboardCategoryImages } from './dashboardImageStore';
+
 /**
  * Local Mode owns this database.  It is authoritative for Local Mode only and
  * must never be used as the Cloud provider's cache.
@@ -2043,13 +2048,20 @@ type AtomicImportEntry = {
   value: unknown;
 };
 
-const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] => {
+const validateAtomicImportPayload = (jsonString: string, source: 'backup' | 'cloud-sync' = 'backup'): AtomicImportEntry[] => {
   const parsed: unknown = JSON.parse(jsonString);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('JSON 備份最上層必須是物件。');
   }
 
   const data = parsed as Record<string, unknown>;
+  // Cloud pull is an authoritative server cache projection, never a legacy
+  // backup. It must preserve the server's WACA auto/manual fields verbatim and
+  // must not alter any local WACA ledger/cutover keys.
+  const backupKind = source === 'backup' ? classifyWorkbenchBackup(data) : null;
+  const cutoverState: WacaCutoverState | null = backupKind === 'waca-v2'
+    ? (data.wacaCutoverState as WacaCutoverState[])[0]
+    : backupKind ? legacyCutoverState(backupKind, data) : null;
   const entries: AtomicImportEntry[] = [];
 
   for (const [collectionName, storageKey] of ATOMIC_IMPORT_COLLECTIONS) {
@@ -2060,7 +2072,20 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
     if (collection.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
       throw new Error(`JSON 備份集合 ${collectionName} 含有無效資料列。`);
     }
-    entries.push({ storageKey, value: collection });
+    if (collectionName === 'productVariants' && cutoverState && cutoverState.mode !== 'ORDER_DRIVEN_ACTIVE') {
+      const legacyVariants = (collection as Record<string, unknown>[]).map(row => {
+        const storedAuto = Number(row.waca_auto_quantity ?? 0);
+        const storedManual = Number(row.waca_manual_adjustment ?? 0);
+        const legacyQuantity = Number(row.waca_quantity ?? storedAuto + storedManual);
+        if (!Number.isSafeInteger(legacyQuantity) || legacyQuantity < 0) {
+          throw new Error('舊備份的 WACA 數量無效，已取消還原。');
+        }
+        return { ...row, waca_auto_quantity: legacyQuantity, waca_manual_adjustment: 0 };
+      });
+      entries.push({ storageKey, value: legacyVariants });
+    } else {
+      entries.push({ storageKey, value: collection });
+    }
   }
 
   for (const [collectionName, storageKey] of OPTIONAL_ATOMIC_IMPORT_COLLECTIONS) {
@@ -2074,7 +2099,16 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
     entries.push({ storageKey, value: Array.isArray(collection) ? collection : [] });
   }
 
-  if (data.wacaOrders !== undefined || data.wacaItems !== undefined || data.wacaMappings !== undefined) {
+  if (source === 'cloud-sync') return entries;
+  if (!cutoverState || !backupKind) throw new Error('JSON 備份格式無法確認。');
+
+  if (backupKind === 'waca-v2') {
+    for (const row of validateDashboardImageBackup(data.dashboardCategoryImages)) {
+      entries.push({ storageKey: `dashboard_category_img_${row.categoryKey}`, value: row.dataUrl });
+    }
+  }
+
+  if (backupKind !== 'legacy-pre-waca') {
     const records = (name: string) => (data[name] as Record<string, unknown>[] | undefined) ?? [];
     const orders = records('wacaOrders');
     const items = records('wacaItems');
@@ -2116,14 +2150,22 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
       if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error('JSON 備份 WACA 數量無效。');
       auto.set(id, (auto.get(id) ?? 0) + quantity);
     }
-    if (items.length > 0 && variants.some(row => Number(row.waca_auto_quantity ?? 0) !== (auto.get(String(row.id)) ?? 0))) {
+    if (cutoverState.mode === 'ORDER_DRIVEN_ACTIVE'
+      && variants.some(row => Number(row.waca_auto_quantity ?? 0) !== (auto.get(String(row.id)) ?? 0))) {
       throw new Error('JSON 備份 WACA 自動數量與訂單不一致。');
+    }
+    if (cutoverState.mode === 'ORDER_DRIVEN_ACTIVE') {
+      const variantEntry = entries.find(entry => entry.storageKey === 'erp_product_variants');
+      if (variantEntry) variantEntry.value = variants.map(row => ({
+        ...row, waca_auto_quantity: auto.get(String(row.id)) ?? 0,
+      }));
     }
   }
 
   // Revisions are concurrency markers, not user data. A restored snapshot begins
   // a new local revision after all durable collections have committed together.
   entries.push({ storageKey: 'erp_waca_revision_v1', value: 0 });
+  entries.push({ storageKey: 'erp_waca_cutover_state_v1', value: cutoverState });
 
   return entries;
 };
@@ -3780,6 +3822,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   }
 
   async exportData(): Promise<void> {
+    const images = await getAllDashboardCategoryImages();
     const data = {
       inventory: await this.getInventory(),
       salesOrders: await this.getSalesOrders(),
@@ -3804,6 +3847,16 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       wacaImportBatches: await this.get<unknown[]>('erp_waca_import_batches_v1', []),
       myacgMasterLinks: await this.get<unknown[]>('erp_myacg_master_links_v1', []),
       wacaCutoverAudit: await this.get<unknown[]>('erp_waca_cutover_audit_v2', []),
+      wacaCutoverState: [await this.get<WacaCutoverState>('erp_waca_cutover_state_v1', {
+        mode: 'LEGACY_QUANTITY_ACTIVE', updatedAt: new Date().toISOString(), sourceBackupFormatVersion: null,
+      })],
+      backupFormatVersion: WORKBENCH_BACKUP_FORMAT_VERSION,
+      dashboardCategoryImages: DASHBOARD_IMAGE_CATEGORY_KEYS.map(categoryKey => ({
+        categoryKey, dataUrl: images[categoryKey] ?? '',
+      })),
+      ...(this.databaseName === 'daigou-erp-db-next-v1' ? await readDeadlineDurableBackup('next') : {
+        deadlineVerifiedMappings: [], deadlineApplyBatches: [], deadlineApplyItems: [],
+      }),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3816,12 +3869,15 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     URL.revokeObjectURL(url);
   }
   
-  async importData(jsonString: string): Promise<boolean> {
+  async importData(jsonString: string, source: 'backup' | 'cloud-sync' = 'backup'): Promise<boolean> {
     try {
+      if (source === 'cloud-sync' && this.databaseName !== CLOUD_CACHE_INDEXED_DB_NAME) {
+        throw new Error('CLOUD_CACHE_IMPORT_TARGET_INVALID');
+      }
       // Validate the complete backup before opening a write transaction. This
       // prevents malformed later collections from leaving an earlier subset
       // committed to the database.
-      const entries = validateAtomicImportPayload(jsonString);
+      const entries = validateAtomicImportPayload(jsonString, source);
       const database = await this.dbPromise;
 
       await new Promise<void>((resolve, reject) => {

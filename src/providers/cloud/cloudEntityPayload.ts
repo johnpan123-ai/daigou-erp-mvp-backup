@@ -100,6 +100,7 @@ export const toCloudFieldRow = (
     };
     case 'inventory_items': return {
       ...common(entity, row), inventory_key: text(row.inventory_key), myacg_item_code: text(row.myacg_item_code),
+      myacg_parent_code: optionalText(row.myacg_parent_code),
       product_id: optionalText(row.product_id), product_title: text(row.product_title),
       normalized_product_title: optionalText(row.normalized_product_title), raw_variant_name: text(row.raw_variant_name),
       listing_type: text(row.listing_type), final_price: numeric(row.final_price),

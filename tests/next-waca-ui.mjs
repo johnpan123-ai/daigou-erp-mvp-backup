@@ -114,7 +114,8 @@ try {
   assert.equal(backup.wacaMappings.length, 1);
   assert.equal(backup.myacgMasterLinks.length, 1);
   assert.equal(backup.productVariants[0].waca_auto_quantity, 2);
-  assert.equal(backup.wacaCutoverAudit[0].unverifiedPreCutoverManualQuantity, 4);
+  assert.equal(backup.wacaCutoverAudit[0].legacyWacaQuantity, 4);
+  assert.equal(backup.wacaCutoverAudit[0].unverifiedPreCutoverManualQuantity, 0);
   const workbenchBackup = await page.evaluate(async () => {
     const { collectWorkbenchBackupData } = await import('/src/lib/workbenchJsonBackup.ts');
     return collectWorkbenchBackupData(window.dataProvider);

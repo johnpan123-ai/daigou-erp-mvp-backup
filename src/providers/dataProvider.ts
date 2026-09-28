@@ -39,6 +39,9 @@ import {
   readNextWacaSnapshot, commitNextWacaSnapshot,
   type NextWacaSnapshot,
 } from '../waca/nextStorage';
+import { classifyWorkbenchBackup } from '../waca/backupFormat';
+import { readDeadlineDurableBackup, restoreDeadlineDurableBackup,
+  validateDeadlineDurableBackup } from '../lib/closingDateSidecarBackup';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -331,7 +334,27 @@ class DynamicDataProvider implements IDataProvider {
     return this.getActiveProvider().exportData();
   }
   async importData(jsonString: string): Promise<boolean> {
-    return this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
+    if (getProviderMode() !== 'next') {
+      return this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
+    }
+    const parsed = JSON.parse(jsonString) as Record<string, unknown>;
+    const kind = classifyWorkbenchBackup(parsed);
+    if (kind !== 'waca-v2') {
+      return this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
+    }
+    // The sidecar lives in another IDB database. Validate it and stage it first,
+    // then compensate if the core atomic import refuses the backup.
+    const incoming = validateDeadlineDurableBackup(parsed);
+    const before = await readDeadlineDurableBackup('next');
+    await restoreDeadlineDurableBackup('next', incoming);
+    try {
+      const imported = await this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
+      if (!imported) await restoreDeadlineDurableBackup('next', before);
+      return imported;
+    } catch (error) {
+      await restoreDeadlineDurableBackup('next', before);
+      throw error;
+    }
   }
   async clearData(): Promise<void> {
     return this.guardedWrite(() => this.getActiveProvider().clearData());
@@ -370,13 +393,29 @@ class DynamicDataProvider implements IDataProvider {
     return this.guardedWrite(() => this.getActiveProvider().restoreBackup(backupData));
   }
   async getNextWacaSnapshot(): Promise<NextWacaSnapshot> {
-    if (getProviderMode() !== 'next') throw new Error('WACA_NEXT_ONLY');
-    return readNextWacaSnapshot();
+    const mode = getProviderMode();
+    if (mode === 'next') return readNextWacaSnapshot();
+    if (mode === 'cloud' || mode === 'fallback') return this.supabaseProvider.getWacaSnapshot();
+    throw new Error('WACA_ENVIRONMENT_NOT_SUPPORTED');
+  }
+  async getAuthoritativeWacaVariants(): Promise<ProductVariant[]> {
+    const mode = getProviderMode();
+    if (mode === 'cloud' || mode === 'fallback') return this.supabaseProvider.getAuthoritativeWacaVariants();
+    if (mode === 'next') return this.getProductVariants({ raw: true });
+    throw new Error('WACA_ENVIRONMENT_NOT_SUPPORTED');
+  }
+  async getCloudDashboardCategoryImageRows(): Promise<Record<string, unknown>[]> {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.supabaseProvider.getCloudDashboardCategoryImageRows();
   }
   async commitNextWacaSnapshot(
     snapshot: NextWacaSnapshot, expectedRevision: number, updateAutoQuantity: boolean,
   ): Promise<number> {
-    if (getProviderMode() !== 'next') throw new Error('WACA_NEXT_ONLY');
+    const mode = getProviderMode();
+    if (mode === 'cloud' || mode === 'fallback') {
+      return this.guardedWrite(() => this.supabaseProvider.commitWacaSnapshot(snapshot, expectedRevision, updateAutoQuantity));
+    }
+    if (mode !== 'next') throw new Error('WACA_ENVIRONMENT_NOT_SUPPORTED');
     return this.guardedWrite(async () => {
       const revision = await commitNextWacaSnapshot(snapshot, expectedRevision, updateAutoQuantity);
       if (updateAutoQuantity) notifyLocalVariantCollectionChanged();

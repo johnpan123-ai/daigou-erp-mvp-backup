@@ -45,6 +45,11 @@ const stableStringify = value => JSON.stringify(value, (_key, nestedValue) => {
 const expectedSnapshot = fixture => Object.fromEntries(
   Object.entries(collectionMap).map(([collection, storageKey]) => [storageKey, fixture[collection] ?? []]),
 );
+const legacyCoreProjection = snapshot => Object.fromEntries(
+  Object.values(collectionMap).map(key => [key, key === 'erp_product_variants'
+    ? (snapshot[key] ?? []).map(({ waca_auto_quantity, waca_manual_adjustment, ...row }) => row)
+    : snapshot[key] ?? []]),
+);
 
 const cloudProviderSource = readFileSync(
   fileURLToPath(new URL('../src/providers/cloud/supabaseProvider.ts', import.meta.url)),
@@ -65,8 +70,13 @@ assert.match(inventorySource, /Cloud Mode 暫停還原/);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+  '--mode', 'staging', '--configLoader', 'runner',
   '--host', '127.0.0.1', '--port', TEST_PORT, '--strictPort',
-], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
+], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'], env: {
+  ...process.env, VITE_DEPLOYMENT_ENV: 'staging',
+  VITE_SUPABASE_URL: 'https://rhfdjsklfrgpoqsaqpkn.supabase.co',
+  VITE_SUPABASE_ANON_KEY: 'isolated-test-no-network',
+} });
 
 let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });
@@ -129,7 +139,8 @@ try {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
     return environment.readPhysicalIndexedDbSnapshot('daigou-erp-local-authoritative-v1');
   });
-  assert.equal(stableStringify(localAfterSuccess), stableStringify(expectedSnapshot(validFixture)), 'Local restore B must survive F5');
+  assert.equal(stableStringify(legacyCoreProjection(localAfterSuccess)), stableStringify(expectedSnapshot(validFixture)), 'Local restore B must survive F5');
+  assert.equal(localAfterSuccess.erp_waca_cutover_state_v1.mode, 'ORDER_REBASELINE_REQUIRED');
 
   const localInvalidResult = await page.evaluate(data => window.dataProvider.restoreBackup(data), invalidFixture);
   assert.equal(localInvalidResult, false, 'Local malformed restore must fail');
@@ -197,7 +208,8 @@ try {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
     return environment.readPhysicalIndexedDbSnapshot('daigou-erp-db-test-v1');
   });
-  assert.equal(stableStringify(testAfterSuccess), stableStringify(expectedSnapshot(validFixture)), 'Test restore B must survive F5');
+  assert.equal(stableStringify(legacyCoreProjection(testAfterSuccess)), stableStringify(expectedSnapshot(validFixture)), 'Test restore B must survive F5');
+  assert.equal(testAfterSuccess.erp_waca_cutover_state_v1.mode, 'ORDER_REBASELINE_REQUIRED');
 
   const testInvalidResult = await page.evaluate(data => window.dataProvider.restoreBackup(data), invalidFixture);
   assert.equal(testInvalidResult, false, 'Test malformed restore must fail');

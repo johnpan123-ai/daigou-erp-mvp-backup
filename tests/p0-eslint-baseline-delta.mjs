@@ -75,6 +75,11 @@ const current = totals(currentResults);
 const newErrorDelta = Math.max(0, current.errors - baseline.errors);
 const newWarningDelta = Math.max(0, current.warnings - baseline.warnings);
 
+if (changedLineFindings.length > 0) {
+  console.error(JSON.stringify(changedLineFindings.map(({ filePath, line, ruleId, message }) =>
+    ({ filePath, line, ruleId, message })), null, 2));
+}
+
 assert.equal(newErrorDelta, 0, 'P0-1 introduced new ESLint errors over the Accepted NEXT baseline.');
 assert.equal(newWarningDelta, 0, 'P0-1 introduced new ESLint warnings over the Accepted NEXT baseline.');
 assert.equal(changedLineFindings.length, 0, 'P0-1 added lines contain ESLint findings.');

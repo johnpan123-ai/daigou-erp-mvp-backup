@@ -12,6 +12,7 @@ if (!existsSync(CHROME)) throw new Error(`Chrome not found: ${CHROME}`);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+  '--configLoader', 'runner',
   '--config', 'tests/fixtures/inventory-cloud-import-vite.config.mjs',
   '--mode', 'experimental', '--host', '127.0.0.1', '--port', PORT, '--strictPort',
 ], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -19,9 +20,9 @@ let output = '';
 vite.stdout.on('data', chunk => { output += String(chunk); });
 vite.stderr.on('data', chunk => { output += String(chunk); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const makeHtmlXls = (sku, title) => `<!doctype html><html><body><table>
-<tr><th>商品編號</th><th>商品名稱</th><th>規格</th><th>庫存</th><th>已售</th><th>售價</th></tr>
-<tr><td>${sku}</td><td>${title}</td><td>規格A</td><td>2</td><td>0</td><td>10</td></tr>
+const makeHtmlXls = (sku, title, parent = '') => `<!doctype html><html><body><table>
+<tr><th>主編號(多規格編號)</th><th>商品編號</th><th>商品名稱</th><th>規格</th><th>庫存</th><th>已售</th><th>售價</th></tr>
+<tr><td>${parent}</td><td>${sku}</td><td>${title}</td><td>規格A</td><td>2</td><td>0</td><td>10</td></tr>
 </table></body></html>`;
 
 try {
@@ -35,13 +36,19 @@ try {
     const context = await browser.newContext({ acceptDownloads: true, locale: 'zh-TW' });
     const page = await context.newPage();
     const dialogs = [];
+    const pageErrors = [];
+    page.on('pageerror', error => pageErrors.push(error.message));
     page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept(); });
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => Boolean(window.__INVENTORY_CLOUD_IMPORT_TEST__));
+    await page.waitForFunction(() => Boolean(window.__INVENTORY_CLOUD_IMPORT_TEST__)).catch(async error => {
+      throw new Error(`${error.message}\nPage errors: ${pageErrors.join(' | ')}\nBody: ${(await page.locator('body').innerText()).slice(0, 500)}\nVite: ${output.slice(-1000)}`);
+    });
     const productCount = page.getByText('商品總數', { exact: true }).locator('..').locator('.kpi-card-value');
     const joinedCount = page.getByText('已加入訂購', { exact: true }).locator('..').locator('.kpi-card-value');
     const unjoinedCount = page.getByText('未加入訂購', { exact: true }).locator('..').locator('.kpi-card-value');
-    await page.waitForFunction(() => document.body.innerText.includes('商品總數'));
+    await page.waitForFunction(() => document.body.innerText.includes('商品總數')).catch(async error => {
+      throw new Error(`${error.message}\nPage errors: ${pageErrors.join(' | ')}\nBody: ${(await page.locator('body').innerText()).slice(0, 1200)}\nVite: ${output.slice(-1000)}`);
+    });
     assert.equal(await productCount.innerText(), '501', 'The bounded bootstrap may expose the incomplete pre-authoritative cache');
     assert.deepEqual((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).callOrder.slice(0, 2), ['groups', 'catalog-snapshot']);
 
@@ -57,12 +64,12 @@ try {
     });
     await page.waitForFunction(() => document.body.innerText.includes('500'));
 
-    const importFile = async (name, sku, title) => {
+    const importFile = async (name, sku, title, parent = '') => {
       const expectedUpserts = (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls + 1;
       const chooserPromise = page.waitForEvent('filechooser');
       await page.getByRole('button', { name: '匯入主檔 XLS' }).click();
       const chooser = await chooserPromise;
-      await chooser.setFiles({ name, mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(makeHtmlXls(sku, title)) });
+      await chooser.setFiles({ name, mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(makeHtmlXls(sku, title, parent)) });
       await page.waitForFunction(expected => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().upsertCalls === expected, expectedUpserts);
     };
 
@@ -105,6 +112,12 @@ try {
       syncCalls: 1,
       upsertCalls: 3,
     });
+    await importFile('gp-evidence.xls', 'GP-EVIDENCE-G', 'GP Evidence Product', 'GP-EVIDENCE-001');
+    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot().commits === 1);
+    const evidence = await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot());
+    assert.equal(evidence.links.length, 1, 'Cloud catalog import must persist GP → G evidence once');
+    assert.equal(evidence.links[0].mainCode, 'GP-EVIDENCE-001');
+    assert.equal(evidence.links[0].childCode, 'GP-EVIDENCE-G');
   } finally {
     await browser.close();
   }
@@ -112,4 +125,4 @@ try {
   vite.kill();
 }
 
-console.log('PASS Cloud catalog import preserves authoritative read order, skips impossible no-op sync, and reports committed partial state truthfully');
+console.log('PASS Cloud catalog import preserves authoritative read order, persists GP→G evidence, and reports committed partial state truthfully');

@@ -128,7 +128,7 @@ export const CLOUD_FIELD_ENTITY_CONTRACTS: Readonly<Record<CloudMutableEntity, E
     { reorder: ['sort_order'] },
   ),
   inventory_items: contract([
-    'inventory_key', 'myacg_item_code', 'product_id', 'product_title',
+    'inventory_key', 'myacg_item_code', 'myacg_parent_code', 'product_id', 'product_title',
     'normalized_product_title', 'raw_variant_name', 'listing_type', 'final_price',
     'myacg_available_quantity', 'myacg_sold_quantity', 'myacg_demand_quantity',
     'myacg_listed_at', 'import_sort_index', 'latest_catalog_import_id',

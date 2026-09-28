@@ -226,10 +226,17 @@ export default function Settings() {
 
     try {
       const text = await file.text();
+      const { classifyWorkbenchBackup } = await import('../waca/backupFormat');
+      const backupKind = classifyWorkbenchBackup(JSON.parse(text) as Record<string, unknown>);
+      if (backupKind === 'legacy-pre-waca' && !confirm(
+        '此備份建立於 WACA 訂單系統啟用前。還原會以備份當時的 WACA 數量取代目前資料，並標記為需要匯入完整 WACA 歷史訂單。確定要還原嗎？',
+      )) return;
       const success = await dataProvider.importData(text);
 
       if (success) {
-        alert('資料還原成功！');
+        alert(backupKind === 'legacy-pre-waca'
+          ? '舊版備份已還原。已恢復備份當時的 WACA 數量；請匯入完整 WACA 歷史訂單，系統會重新計算並取代舊數量。'
+          : '資料還原成功！');
         await loadCounts();
       } else {
         alert('還原失敗，資料未套用；匯入前的原有資料已完整保留。請確認 JSON 格式與必要集合。');

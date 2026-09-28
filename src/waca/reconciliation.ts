@@ -38,7 +38,7 @@ export interface WacaReconciliationIssue {
   storedQuantity: number;
   displayedQuantity: number;
   difference: number;
-  reason: 'AUTO_MISMATCH' | 'DISPLAY_MISMATCH' | 'MAPPING_MISMATCH' | 'CUTOVER_MISSING';
+  reason: 'AUTO_MISMATCH' | 'DISPLAY_MISMATCH' | 'MAPPING_MISMATCH' | 'CUTOVER_MISSING' | 'UNMATCHED_SOURCE';
 }
 
 export interface WacaReconciliation {
@@ -58,6 +58,7 @@ export function reconcileWacaReadback(
   const mappings = new Map(snapshot.mappings.map(row => [row.feature, row]));
   const source = new Map<string, number>();
   const featureToVariant = new Map<string, string>();
+  const unmatchedEffective = new Map<string, { quantity: number; sku: string; title: string; variant: string }>();
   const badMapping = new Set<string>();
   let effectiveQuantity = 0;
   for (const item of snapshot.items) {
@@ -65,7 +66,13 @@ export function reconcileWacaReadback(
     const order = orders.get(item.orderKey);
     if (!order || !isEffectiveWacaStatus(order.status)) continue;
     effectiveQuantity += item.quantity;
-    if (!item.productVariantId) continue;
+    if (!item.productVariantId) {
+      const prior = unmatchedEffective.get(item.feature);
+      unmatchedEffective.set(item.feature, { quantity: (prior?.quantity ?? 0) + item.quantity,
+        sku: item.productCode, title: item.productTitle,
+        variant: [item.spec1, item.spec2].filter(Boolean).join(' / ') });
+      continue;
+    }
     source.set(item.productVariantId, (source.get(item.productVariantId) ?? 0) + item.quantity);
     if (mappings.get(item.feature)?.productVariantId !== item.productVariantId) badMapping.add(item.productVariantId);
   }
@@ -88,12 +95,19 @@ export function reconcileWacaReadback(
       sourceQuantity, storedQuantity, displayedQuantity,
       difference: sourceQuantity - storedQuantity, reason });
   }
+  for (const [feature, pending] of unmatchedEffective) {
+    issues.push({ variantId: '', sku: pending.sku, productTitle: pending.title,
+      variantTitle: pending.variant, sourceQuantity: pending.quantity,
+      storedQuantity: 0, displayedQuantity: 0, difference: pending.quantity,
+      reason: 'UNMATCHED_SOURCE' });
+    featureToVariant.delete(feature);
+  }
   const failedVariants = new Set(issues.map(row => row.variantId));
   const mappedVariants = new Set(featureToVariant.values());
   const extraVariants = [...relevant].filter(id => !mappedVariants.has(id));
-  const total = featureToVariant.size + extraVariants.length;
+  const total = featureToVariant.size + extraVariants.length + unmatchedEffective.size;
   const failed = [...featureToVariant.values()].filter(id => failedVariants.has(id)).length
-    + extraVariants.filter(id => failedVariants.has(id)).length;
+    + extraVariants.filter(id => failedVariants.has(id)).length + unmatchedEffective.size;
   return { status: issues.length ? 'FAIL' : 'PASS', passed: total - failed,
     total, effectiveQuantity, issues };
 }

@@ -6,8 +6,9 @@ import {
   verifyLegacyCloudRestoreSnapshot,
 } from './cloudRestoreLegacySnapshot';
 import { parseCloudRestoreFailure, type CloudRestoreFailure } from './cloudRestoreFailure';
+import { validateDeadlineDurableBackup, type DeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 
-export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v1' as const;
+export const CLOUD_RESTORE_SCHEMA_VERSION = 'cloud-erp-snapshot-v2' as const;
 export const CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION = 'inventory-id-v2' as const;
 
 export const CLOUD_RESTORE_RPC = 'erp_restore_proven_cloud_snapshot_attempt' as const;
@@ -23,6 +24,7 @@ export const CLOUD_RESTORE_TABLES = [
   ['inventory', 'inventory_items'],
   ['productGroups', 'product_groups'],
   ['productCategories', 'product_categories'],
+  ['dashboardCategoryImages', 'dashboard_category_images'],
   ['productVariants', 'product_variants'],
   ['bundleComponents', 'bundle_components'],
   ['purchaseBatches', 'purchase_batches'],
@@ -31,11 +33,26 @@ export const CLOUD_RESTORE_TABLES = [
   ['privateOrderItems', 'private_order_items'],
   ['salesOrders', 'sales_orders'],
   ['salesOrderItems', 'sales_order_items'],
+  ['importBatches', 'import_batches'],
   ['japanPackages', 'japan_packages'],
   ['japanPackageItems', 'japan_package_items'],
   ['outboundShipments', 'outbound_shipments'],
   ['outboundShipmentItems', 'outbound_shipment_items'],
+  ['wacaOrders', 'waca_orders'],
+  ['wacaItems', 'waca_order_items'],
+  ['wacaMappings', 'waca_mappings'],
+  ['myacgMasterLinks', 'waca_master_links'],
+  ['wacaImportBatches', 'waca_import_batches'],
+  ['wacaCutoverAudit', 'waca_cutover_audit'],
+  ['wacaCutoverState', 'waca_state'],
 ] as const;
+
+export const CLOUD_PASSTHROUGH_RESTORE_TABLES = new Set<string>([
+  'dashboard_category_images',
+  'import_batches',
+  'waca_orders', 'waca_order_items', 'waca_mappings', 'waca_master_links',
+  'waca_import_batches', 'waca_cutover_audit', 'waca_state',
+]);
 
 export type CloudRestoreCollection = typeof CLOUD_RESTORE_TABLES[number][0];
 export type CloudRestoreTable = typeof CLOUD_RESTORE_TABLES[number][1];
@@ -89,7 +106,12 @@ export interface CloudRestoreCandidate {
   schemaVersion: typeof CLOUD_RESTORE_SCHEMA_VERSION;
   data: CloudRestoreSnapshotData;
   manifest: CloudRestoreManifest;
-  sourceIdentityContractVersion: typeof CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION | 'current-unversioned' | typeof LEGACY_CLOUD_RESTORE_IDENTITY_CONTRACT;
+  sourceIdentityContractVersion: typeof CLOUD_RESTORE_IDENTITY_CONTRACT_VERSION | 'current-unversioned'
+    | 'cloud-pre-waca-v1' | typeof LEGACY_CLOUD_RESTORE_IDENTITY_CONTRACT;
+  legacyWacaBackup?: boolean;
+  legacyDashboardPreserved?: boolean;
+  deadlineSidecar?: DeadlineDurableBackup;
+  deadlineSidecarSha256?: string;
   sourceEnvironment: string;
   fileName: string;
   sourceFileSha256: string;
@@ -229,13 +251,17 @@ const normalizeRows = (
       throw new CloudRestoreValidationError('INVENTORY_KEY_REQUIRED', 'Inventory 資料缺少 inventory_key。');
     }
     let row: Record<string, unknown>;
-    try {
-      row = toCloudFieldRow(entity, value);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('CANONICAL_UUID_REQUIRED')) {
-        throw new CloudRestoreValidationError('CANONICAL_UUID_REQUIRED', `${table} 必須保留 canonical database UUID。`);
+    if (CLOUD_PASSTHROUGH_RESTORE_TABLES.has(table)) {
+      row = { ...value };
+    } else {
+      try {
+        row = toCloudFieldRow(entity, value);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('CANONICAL_UUID_REQUIRED')) {
+          throw new CloudRestoreValidationError('CANONICAL_UUID_REQUIRED', `${table} 必須保留 canonical database UUID。`);
+        }
+        throw error;
       }
-      throw error;
     }
     // Restore never inherits mutation-time identity synthesis. Every raw Cloud
     // resource, including inventory_items, must carry its authoritative DB id.
@@ -362,6 +388,49 @@ export const assertCurrentCloudRestoreDataContract = (data: CloudRestoreSnapshot
   if (duplicateVariantLocalIdCount > 0) {
     throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
   }
+  const uniqueBusinessKey = (table: CloudRestoreTable, field: string) => {
+    const values = data[table].map(row => String(row[field] ?? '').trim());
+    if (values.some(value => !value) || duplicateCount(values) > 0) {
+      throw new CloudRestoreValidationError('WACA_BUSINESS_KEY_INVALID', `${table}.${field} 不可缺少或重複。`);
+    }
+  };
+  uniqueBusinessKey('waca_orders', 'order_key');
+  uniqueBusinessKey('waca_order_items', 'item_key');
+  uniqueBusinessKey('waca_mappings', 'feature');
+  uniqueBusinessKey('waca_master_links', 'child_code');
+  uniqueBusinessKey('waca_import_batches', 'batch_key');
+  uniqueBusinessKey('waca_cutover_audit', 'product_variant_id');
+  if (data.waca_state.length !== 1 || data.waca_state[0].id !== '00000000-0000-4000-8000-000000000001') {
+    throw new CloudRestoreValidationError('WACA_CUTOVER_STATE_INVALID', 'WACA 數量來源狀態缺少或不唯一。');
+  }
+  const mode = String(data.waca_state[0].mode ?? '');
+  if (!['LEGACY_QUANTITY_ACTIVE', 'ORDER_REBASELINE_REQUIRED', 'ORDER_DRIVEN_ACTIVE'].includes(mode)) {
+    throw new CloudRestoreValidationError('WACA_CUTOVER_STATE_INVALID', 'WACA 數量來源狀態無效。');
+  }
+  const statusByOrder = new Map(data.waca_orders.map(row => [String(row.id), String(row.status)]));
+  const mappingByFeature = new Map(data.waca_mappings.map(row => [String(row.feature), String(row.product_variant_id)]));
+  const derived = new Map<string, number>();
+  for (const row of data.waca_order_items) {
+    const quantity = Number(row.quantity);
+    if (!Number.isSafeInteger(quantity) || quantity < 0) {
+      throw new CloudRestoreValidationError('WACA_QUANTITY_INVALID', 'WACA 訂單明細數量無效。');
+    }
+    const variantId = String(row.product_variant_id ?? '');
+    if (variantId && mappingByFeature.get(String(row.feature)) !== variantId) {
+      throw new CloudRestoreValidationError('WACA_MAPPING_MISMATCH', 'WACA 明細與永久商品對照不一致。');
+    }
+    if (variantId && ['處理中', '完成付款'].includes(statusByOrder.get(String(row.order_id)) ?? '')) {
+      derived.set(variantId, (derived.get(variantId) ?? 0) + quantity);
+    }
+  }
+  if (mode === 'ORDER_DRIVEN_ACTIVE') {
+    for (const variant of data.product_variants) {
+      if (Number(variant.waca_auto_quantity ?? 0) !== (derived.get(String(variant.id)) ?? 0)) {
+        throw new CloudRestoreValidationError('WACA_QUANTITY_RECONCILIATION_FAILED',
+          'WACA 訂單數量與訂購紀錄表不一致。');
+      }
+    }
+  }
 };
 
 const manifestFor = async (data: CloudRestoreSnapshotData): Promise<CloudRestoreManifest> => {
@@ -445,6 +514,7 @@ export async function buildCloudRestoreManifest(source: Record<string, unknown>,
   assertInventoryKeyUniqueness(seed);
   assertInventoryKeyUniqueness(raw);
   const data = closeCloudRestoreData(seed, raw);
+  assertCurrentCloudRestoreDataContract(data);
   return { data, manifest: await manifestFor(data) };
 }
 
@@ -459,6 +529,23 @@ export async function rebuildCurrentCloudRestoreCandidate(
   return { data, manifest: await manifestFor(data) };
 }
 
+/** Old 15-resource files never contained dashboard images. Retain the target's
+ * current image associations instead of silently deleting them on restore. */
+export async function preserveLegacyCloudDashboardImages(
+  candidate: CloudRestoreCandidate,
+  targetRows: Record<string, unknown>[],
+): Promise<CloudRestoreCandidate> {
+  if (!candidate.legacyWacaBackup || !Array.isArray(targetRows)) {
+    throw new CloudRestoreValidationError('LEGACY_DASHBOARD_POLICY_INVALID', '舊備份首頁圖片保留流程無效。');
+  }
+  const data = { ...candidate.data,
+    dashboard_category_images: targetRows.map(row => ({ ...row })) } as CloudRestoreSnapshotData;
+  assertCurrentCloudRestoreDataContract(data);
+  const manifest = await manifestFor(data);
+  return { ...candidate, data, manifest, executionFingerprint: manifest.snapshotFingerprint,
+    legacyDashboardPreserved: true };
+}
+
 export async function prepareCloudRestoreSnapshot(
   input: string | unknown,
   options: { fileName?: string; sourceEnvironment?: string; sourceFileSha256?: string } = {},
@@ -470,11 +557,77 @@ export async function prepareCloudRestoreSnapshot(
     throw new CloudRestoreValidationError('MALFORMED_JSON', `JSON 解析失敗：${error instanceof Error ? error.message : String(error)}`);
   }
   if (!isRecord(parsed)) throw new CloudRestoreValidationError('RESTORE_DOCUMENT_INVALID', 'JSON 最上層必須是物件。');
-  if (parsed.schemaVersion !== CLOUD_RESTORE_SCHEMA_VERSION) {
+  if (parsed.schemaVersion !== CLOUD_RESTORE_SCHEMA_VERSION && parsed.schemaVersion !== 'cloud-erp-snapshot-v1') {
     throw new CloudRestoreValidationError('UNSUPPORTED_SCHEMA_VERSION', `不支援的 schemaVersion：${String(parsed.schemaVersion ?? 'missing')}`);
   }
   const rawData = isRecord(parsed.data) ? parsed.data : null;
   if (!rawData) throw new CloudRestoreValidationError('RESTORE_DATA_REQUIRED', 'JSON 缺少 data 物件。');
+  const legacyPreWaca = parsed.schemaVersion === 'cloud-erp-snapshot-v1';
+  const deadlineSidecar = !legacyPreWaca && isRecord(parsed.deadlineSidecar)
+    ? validateDeadlineDurableBackup(parsed.deadlineSidecar) : undefined;
+  if (!legacyPreWaca && !deadlineSidecar) {
+    throw new CloudRestoreValidationError('DEADLINE_SIDECAR_BACKUP_REQUIRED',
+      '新版備份缺少已確認的期限對照與套用紀錄，已取消還原。');
+  }
+  if (legacyPreWaca) {
+    const oldTables = CLOUD_RESTORE_TABLES.filter(([, table]) =>
+      table !== 'import_batches' && !CLOUD_PASSTHROUGH_RESTORE_TABLES.has(table));
+    const oldKeys = new Set<string>(oldTables.flatMap(([collection, table]) => [collection, table]));
+    if (Object.keys(rawData).length !== 15 || Object.keys(rawData).some(key => !oldKeys.has(key))
+      || !isRecord(parsed.manifest) || parsed.manifest.resourceCount !== 15) {
+      throw new CloudRestoreValidationError('LEGACY_CLOUD_BACKUP_INVALID', '舊版雲端備份資料類別不完整。');
+    }
+    const expanded = { ...rawData,
+      dashboardCategoryImages: [],
+      importBatches: [],
+      wacaOrders: [], wacaItems: [], wacaMappings: [], myacgMasterLinks: [],
+      wacaImportBatches: [], wacaCutoverAudit: [],
+      wacaCutoverState: [{
+        id: '00000000-0000-4000-8000-000000000001', revision: 0,
+        mode: 'ORDER_REBASELINE_REQUIRED',
+        // A fixed compatibility marker keeps the same legacy file byte-for-byte
+        // idempotent across retries and browsers.
+        payload: { mode: 'ORDER_REBASELINE_REQUIRED', updatedAt: '1970-01-01T00:00:00.000Z', sourceBackupFormatVersion: 1 },
+        updated_by: null,
+      }],
+    };
+    const normalized = normalizeRows(expanded);
+    // The pre-WACA inventory schema did not have the GP parent evidence
+    // column. Verify its original fingerprint against that historical row
+    // shape, then keep the new nullable field in the modern candidate.
+    const oldData = Object.fromEntries(oldTables.map(([, table]) => [table,
+      table === 'inventory_items'
+        ? normalized[table].map(row => Object.fromEntries(
+          Object.entries(row).filter(([key]) => key !== 'myacg_parent_code')))
+        : normalized[table]]));
+    const oldCounts = Object.fromEntries(oldTables.map(([, table]) => [table, normalized[table].length]));
+    const oldProjection = oldTables.flatMap(([, table]) => normalized[table].map(row => ({
+      table, id: canonicalId(row, table),
+      relations: Object.fromEntries(Object.entries(row).filter(([key]) => key.endsWith('_id') && key !== 'local_id')),
+    }))).sort((left, right) => `${left.table}:${left.id}`.localeCompare(`${right.table}:${right.id}`));
+    const oldManifest = parsed.manifest;
+    if (oldManifest.schemaVersion !== 'cloud-erp-snapshot-v1'
+      || stableCloudRestoreJson(oldManifest.counts) !== stableCloudRestoreJson(oldCounts)
+      || oldManifest.totalRows !== Object.values(oldCounts).reduce((sum, count) => sum + count, 0)
+      || oldManifest.snapshotFingerprint !== await sha256Hex(stableCloudRestoreJson(oldData))
+      || oldManifest.relationshipHash !== await sha256Hex(stableCloudRestoreJson(oldProjection))) {
+      throw new CloudRestoreValidationError('LEGACY_CLOUD_BACKUP_INVALID', '舊版雲端備份驗證失敗，已取消還原。');
+    }
+    assertCurrentCloudRestoreDataContract(normalized);
+    const manifest = await manifestFor(normalized);
+    const serialized = typeof input === 'string' ? input : stableCloudRestoreJson(input);
+    const sourceFileSha256 = (options.sourceFileSha256 ?? await sha256Hex(serialized)).toLowerCase();
+    if (!/^[0-9a-f]{64}$/u.test(sourceFileSha256)) {
+      throw new CloudRestoreValidationError('RESTORE_SOURCE_SHA256_INVALID', '原始 JSON SHA-256 無效。');
+    }
+    return {
+      schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION, data: normalized, manifest,
+      sourceIdentityContractVersion: 'cloud-pre-waca-v1', legacyWacaBackup: true,
+      sourceEnvironment: String(parsed.sourceEnvironment ?? options.sourceEnvironment ?? 'unknown'),
+      fileName: options.fileName ?? 'cloud-restore.json', sourceFileSha256,
+      executionFingerprint: manifest.snapshotFingerprint,
+    };
+  }
   const allowedCollections = new Set<string>(CLOUD_RESTORE_TABLES.map(([collection]) => collection));
   const unexpected = Object.keys(rawData).filter(key => !allowedCollections.has(key));
   if (unexpected.length > 0) throw new CloudRestoreValidationError('UNEXPECTED_RESOURCE', `JSON 含不支援的 resource：${unexpected.join(', ')}`);
@@ -529,6 +682,8 @@ export async function prepareCloudRestoreSnapshot(
     schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
     data: current.data,
     manifest: current.manifest,
+    deadlineSidecar,
+    deadlineSidecarSha256: deadlineSidecar ? await sha256Hex(stableCloudRestoreJson(deadlineSidecar)) : undefined,
     sourceIdentityContractVersion,
     sourceEnvironment: String(parsed.sourceEnvironment ?? options.sourceEnvironment ?? 'unknown'),
     fileName: options.fileName ?? 'cloud-restore.json',

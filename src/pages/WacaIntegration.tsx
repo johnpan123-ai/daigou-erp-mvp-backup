@@ -72,7 +72,7 @@ export default function WacaIntegration() {
   const load = useCallback(async () => {
     const [nextSnapshot, nextVariants, nextInventory, nextGroups] = await Promise.all([
       dataProvider.getNextWacaSnapshot(),
-      dataProvider.getProductVariants({ raw: true }),
+      dataProvider.getAuthoritativeWacaVariants(),
       dataProvider.getInventory(),
       dataProvider.getProductGroups(),
     ]);
@@ -83,7 +83,7 @@ export default function WacaIntegration() {
   }, []);
 
   useEffect(() => {
-    if (getProviderMode() !== 'next') return;
+    if (!['next', 'cloud', 'fallback'].includes(getProviderMode())) return;
     void Promise.resolve().then(load).catch(cause => setError(String(cause)));
   }, [load]);
 
@@ -237,14 +237,16 @@ export default function WacaIntegration() {
       const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
       await dataProvider.commitNextWacaSnapshot(next, current.revision, true);
       const saved = await dataProvider.getNextWacaSnapshot();
-      const savedVariants = await dataProvider.getProductVariants({ raw: true });
+      const savedVariants = await dataProvider.getAuthoritativeWacaVariants();
       const checked = reconcileWacaReadback(saved, savedVariants);
       const recorded = { status: checked.status, passed: checked.passed, total: checked.total,
         effectiveQuantity: checked.effectiveQuantity, checkedAt: new Date().toISOString() };
       const recordedBatches = saved.batches.map(row => row.id === batch.id ? { ...row, reconciliation: recorded } : row);
-      await dataProvider.commitNextWacaSnapshot({ ...saved, batches: recordedBatches }, saved.revision, false);
+      if (getProviderMode() === 'next') {
+        await dataProvider.commitNextWacaSnapshot({ ...saved, batches: recordedBatches }, saved.revision, false);
+      }
       const finalSnapshot = await dataProvider.getNextWacaSnapshot();
-      const finalVariants = await dataProvider.getProductVariants({ raw: true });
+      const finalVariants = await dataProvider.getAuthoritativeWacaVariants();
       const finalCheck = reconcileWacaReadback(finalSnapshot, finalVariants);
       if (finalSnapshot.batches.at(-1)?.reconciliation?.status !== finalCheck.status) {
         throw new Error('匯入紀錄與數量對帳結果不一致，請重新讀取並檢查待處理。');
@@ -401,6 +403,8 @@ export default function WacaIntegration() {
     </PageHeader>
     {error && <div className="waca-notice waca-error" role="alert"><span className="badge badge-danger">需確認</span> {error}</div>}
     {message && <div className="waca-notice" role="status"><span className="badge badge-success">已完成</span> {message}</div>}
+    {snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED' &&
+      <div className="waca-notice" role="status">目前顯示的是舊備份當時的 WACA 數量。請匯入完整 WACA 歷史訂單；確認更新後，系統會重新計算並取代舊數量。</div>}
     {masterState.error && <div className="waca-notice waca-error">{masterState.error}</div>}
     <nav className="waca-tabs" aria-label="WACA 功能">
       {([
@@ -517,10 +521,12 @@ export default function WacaIntegration() {
       </tbody></table></div>
     </section>}
     {tab === 'pending' && <section className="waca-panel"><h2>需要處理的項目</h2>
-      {reconciliation?.issues.map(issue => <div className="waca-pending-card" key={`reconcile-${issue.variantId}`}>
+      {reconciliation?.issues.map((issue, index) => <div className="waca-pending-card" key={`reconcile-${issue.variantId}-${issue.sku}-${index}`}>
         <strong>{displayNameForVariant(issue.variantId, issue.productTitle)}／{issue.variantTitle}</strong>
-        <p>SKU：{issue.sku}</p><p>來源訂單數量 {issue.sourceQuantity}，系統 WACA 數量 {issue.storedQuantity}，差異 {issue.difference > 0 ? '+' : ''}{issue.difference}。</p>
-        <p>訂購紀錄表顯示 {issue.displayedQuantity}。請重新讀取後確認；若仍不一致，先不要繼續匯入。</p>
+        <p>SKU：{issue.sku}</p>{issue.reason === 'UNMATCHED_SOURCE'
+          ? <p>此商品尚未對應訂購紀錄表；有效訂單 {issue.sourceQuantity} 件尚未計入 WACA 數量。請先確認商品對照。</p>
+          : <><p>來源訂單數量 {issue.sourceQuantity}，系統 WACA 數量 {issue.storedQuantity}，差異 {issue.difference > 0 ? '+' : ''}{issue.difference}。</p>
+            <p>訂購紀錄表顯示 {issue.displayedQuantity}。請重新讀取後確認；若仍不一致，先不要繼續匯入。</p></>}
         <details className="waca-tech"><summary>查看技術資訊</summary>{issue.reason}／{issue.variantId}</details>
       </div>)}
       {pendingItems.map(item => <div className="waca-pending-card" key={item.key}>

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'vite';
 
 const SQL = readFileSync(new URL('../supabase/sql/036_cloud_restore_final_closure.sql', import.meta.url), 'utf8');
@@ -167,7 +169,8 @@ if (!existsSync(snapshotPath)) {
 } else {
   const sourceBytes = readFileSync(snapshotPath);
   const sourceHashBefore = createHash('sha256').update(sourceBytes).digest('hex');
-  const vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
+  const vite = await createServer({ configFile: false, cacheDir: join(tmpdir(), 'waca-v3-final-vite'),
+    optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true }, appType: 'custom' });
   try {
     const domain = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
     const portability = await vite.ssrLoadModule('/src/providers/cloud/cloudRestorePortability.ts');
@@ -196,19 +199,23 @@ if (!existsSync(snapshotPath)) {
     const finalValidationStarted = performance.now();
     const verified = await portability.assertCloudRestoreEffectiveCandidate(effective);
     const finalValidationMs = performance.now() - finalValidationStarted;
-    assert.equal(source.manifest.totalRows, 17658);
-    assert.equal(Object.values(source.manifest.counts).reduce((sum, count) => sum + count, 0), 17658);
-    assert.equal(source.manifest.snapshotFingerprint, '068c83250fe07116f53538a290427f6148aa858a4e37041f4b6f4aa1d2603341');
+    console.log('RESTORE_V3_CANDIDATE', JSON.stringify({ rows: source.manifest.totalRows,
+      sourceFingerprint: source.manifest.snapshotFingerprint,
+      transforms: effective.portability.totalTransformedRows,
+      effectiveFingerprint: effective.manifest.snapshotFingerprint }));
+    assert.equal(source.manifest.totalRows, 17659);
+    assert.equal(Object.values(source.manifest.counts).reduce((sum, count) => sum + count, 0), 17659);
+    assert.equal(source.manifest.snapshotFingerprint, '6142386ba283402cd7964d8e870dd810ee6dea32fa93d54727ffbb11ef3e0134');
     assert.equal(effective.portability.totalTransformedRows, 15395);
-    assert.equal(effective.manifest.snapshotFingerprint, '2539b3f7b64b3b4b65463a5fe76d0fff2e9edbde9cf7970fdcfc80a4bbd2787f');
-    assert.equal(Object.values(effective.data).reduce((sum, rows) => sum + rows.length, 0), 17658);
+    assert.equal(effective.manifest.snapshotFingerprint, 'd5fdcdd74554005de410b9852860f77d9605c521a68e5831fe674765c6366245');
+    assert.equal(Object.values(effective.data).reduce((sum, rows) => sum + rows.length, 0), 17659);
     assert.equal(Object.values(effective.data).flat().filter(row => row.updated_by !== null).length, 0);
     assert.equal(verified.mode, 'cross-environment');
     assert.equal(createHash('sha256').update(readFileSync(snapshotPath)).digest('hex'), sourceHashBefore, 'Source file must remain byte-identical');
     const totalMs = performance.now() - started;
     assert(totalMs < 120_000, 'Local candidate preparation exceeded the bounded Server execution budget');
     console.log(JSON.stringify({
-      evidence: 'actual-17658-row-source-candidate', rows: 17658, transformedUpdatedBy: 15395,
+      evidence: 'actual-17658-row-legacy-source-plus-cutover-state', rows: 17659, transformedUpdatedBy: 15395,
       validationMs: Number(validationMs.toFixed(2)), transformMs: Number(transformMs.toFixed(2)),
       finalValidationMs: Number(finalValidationMs.toFixed(2)), totalMs: Number(totalMs.toFixed(2)),
       effectiveFingerprint: effective.manifest.snapshotFingerprint,
@@ -220,4 +227,4 @@ if (!existsSync(snapshotPath)) {
 
 console.log('PASS 036 bounded timeout, one-pass transform, safe observability, ACL, bypass closure, no-auto-retry, and 57014 UI contract');
 console.log('PASS timeout rollback matrix, exactly-once epoch/replay model, strict/cross-environment wiring, and 15-table fail-closed coverage');
-console.log('PENDING real PostgreSQL apply/postflight: no isolated PostgreSQL runtime is installed; Staging apply is forbidden in this turn');
+console.log('PENDING Staging/Live PostgreSQL apply and postflight: forbidden in this Sol turn; isolated 24-resource writer is tested separately');

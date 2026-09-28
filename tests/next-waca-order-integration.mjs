@@ -125,6 +125,11 @@ const readback = {
 };
 const readbackVariant = { ...variants[0], waca_auto_quantity: 2, waca_manual_adjustment: 0 };
 assert.equal(reconcileWacaReadback(readback, [readbackVariant]).status, 'PASS');
+const unmatchedReadback = structuredClone(readback);
+unmatchedReadback.items.push({ ...unmatchedReadback.items[0], key: 'UNMATCHED-EFFECTIVE',
+  feature: 'UNMATCHED-EFFECTIVE', productVariantId: '', quantity: 2 });
+assert.equal(reconcileWacaReadback(unmatchedReadback, [readbackVariant]).status, 'FAIL');
+assert.equal(reconcileWacaReadback(unmatchedReadback, [readbackVariant]).issues.at(-1).reason, 'UNMATCHED_SOURCE');
 assert.equal(reconcileWacaReadback(readback, [readbackVariant]).total, 1);
 assert.equal(purchaseRecordsWacaQuantity(readbackVariant, true), 2);
 assert.equal(reconcileWacaReadback(readback, [{ ...readbackVariant, waca_auto_quantity: 3 }]).issues[0].difference, -1);

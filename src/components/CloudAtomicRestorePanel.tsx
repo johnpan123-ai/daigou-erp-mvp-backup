@@ -6,13 +6,18 @@ import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { dataProvider } from '../providers/dataProvider';
 import {
   prepareCloudRestoreSnapshot,
-  sha256BytesHex,
+  preserveLegacyCloudDashboardImages,
+  sha256BytesHex, sha256Hex, stableCloudRestoreJson,
   type CloudRestoreAttemptCommand,
   type CloudRestoreAttemptOutcome,
   type CloudRestoreCandidate,
   type CloudRestoreExecutionCommand,
   type CloudRestoreResult,
 } from '../providers/cloud/cloudAtomicRestore';
+import { readDeadlineDurableBackup, restoreDeadlineDurableBackup } from '../lib/closingDateSidecarBackup';
+import {
+  clearCloudDeadlineRestoreStage, readCloudDeadlineRestoreStage, stageCloudDeadlineRestore,
+} from '../lib/cloudDeadlineRestoreStage';
 import {
   bindCloudRestoreCandidateProof,
   isCloudRestoreCandidateProofCurrent,
@@ -281,13 +286,12 @@ export default function CloudAtomicRestorePanel({
     try {
       const rawBytes = await file.arrayBuffer();
       const sourceFileSha256 = await sha256BytesHex(rawBytes);
-      const source = await prepareCloudRestoreSnapshot(new TextDecoder().decode(rawBytes), {
+      let source = await prepareCloudRestoreSnapshot(new TextDecoder().decode(rawBytes), {
         fileName: file.name,
         sourceEnvironment: window.location.origin,
         sourceFileSha256,
       });
       if (candidateGenerationRef.current !== generation) return;
-      setSourceCandidate(source);
       if (refreshAuthoritative) {
         const refreshed = await refreshAuthoritative(CLOUD_RESTORE_READINESS_RESOURCES);
         if (refreshed === false) throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_NOT_AUTHORITATIVE_FRESH' }, 'pre-dispatch');
@@ -296,6 +300,12 @@ export default function CloudAtomicRestorePanel({
         cloudMode: getProviderMode() === 'cloud', authenticated: Boolean(user), owner: role === 'owner',
       });
       if (!readiness.allowed) throw createCloudRestoreSafeSubmitError({ code: readiness.code }, 'pre-dispatch');
+      if (source.legacyWacaBackup) {
+        const targetImages = await dataProvider.getCloudDashboardCategoryImageRows();
+        if (candidateGenerationRef.current !== generation) return;
+        source = await preserveLegacyCloudDashboardImages(source, targetImages);
+      }
+      setSourceCandidate(source);
       const portable = await prepareCrossEnvironmentCloudRestoreCandidate(source, supabaseEnvironment.projectRef);
       const prepared = portable.portability && portable.portability.totalTransformedRows > 0 ? portable : source;
       const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(prepared);
@@ -360,6 +370,32 @@ export default function CloudAtomicRestorePanel({
       });
       return;
     }
+    let deadlineStage;
+    try {
+      deadlineStage = await readCloudDeadlineRestoreStage(pending.idempotencyKey);
+    } catch {
+      deadlineStage = null;
+    }
+    if (deadlineStage?.deadlineSidecar) {
+      try {
+        await restoreDeadlineDurableBackup('cloud', deadlineStage.deadlineSidecar);
+        const readBack = await readDeadlineDurableBackup('cloud');
+        if (await sha256Hex(stableCloudRestoreJson(readBack)) !== deadlineStage.deadlineSidecarSha256) {
+          throw new Error('DEADLINE_SIDECAR_READBACK_MISMATCH');
+        }
+      } catch {
+        setAttemptClosed(true);
+        setStatus('error');
+        setMessage('雲端 ERP 資料已還原，但期限對照資料尚未通過還原驗證。請勿再次執行雲端還原；請保留原備份檔並聯繫維護者完成期限對照修復。');
+        return;
+      }
+    } else if (!deadlineStage?.legacyBackup) {
+      setAttemptClosed(true);
+      setStatus('error');
+      setMessage('雲端 ERP 資料已還原，但期限對照還原暫存無法讀取。請勿再次執行雲端還原；請保留原備份檔並聯繫維護者。');
+      return;
+    }
+    void clearCloudDeadlineRestoreStage(pending.idempotencyKey).catch(() => {});
     setProgressStep('refresh');
     let syncPending = restored.authoritativeRefresh?.status === 'pending';
     if (onAuthoritativeRefreshComplete) {
@@ -372,7 +408,9 @@ export default function CloudAtomicRestorePanel({
     setAttemptClosed(true);
     setScreenRefreshPending(syncPending);
     setStatus('success');
-    setMessage(syncPending
+    setMessage(deadlineStage?.legacyBackup
+      ? '舊版雲端備份已還原。WACA 數量保留為備份當時狀態，需匯入完整歷史訂單；目前首頁圖片已保留，舊備份不含期限對照資料，請重新確認對照。'
+      : syncPending
       ? '還原已完成；畫面仍在同步最新資料，請勿再次還原。'
       : '還原完成，畫面已更新為最新資料。');
     if (!syncPending) {
@@ -408,6 +446,7 @@ export default function CloudAtomicRestorePanel({
           expectedEpoch: outcome.expectedEpoch,
         });
       } else if (outcome.status === 'not_committed') {
+        void clearCloudDeadlineRestoreStage(outcome.attemptId).catch(() => {});
         setFailureEvidence(outcome.failure ?? null);
         setUnresolvedAttempt(null);
         setRecoveredAttempt(null);
@@ -517,6 +556,16 @@ export default function CloudAtomicRestorePanel({
       const activeProof = proofRecordRef.current?.result;
       if (!activeProof) throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_PROOF_REQUIRED' }, 'pre-dispatch');
       await assertCloudRestoreEffectiveCandidate(activeCandidate);
+      // This survives a page reload while the Cloud attempt is unresolved.
+      // A completed Cloud restore can therefore finish the Deadline sidecar
+      // without re-running the business restore or asking for the file again.
+      await stageCloudDeadlineRestore({
+        id: pending.idempotencyKey,
+        sourceFingerprint: activeCandidate.executionFingerprint,
+        legacyBackup: activeCandidate.legacyWacaBackup === true,
+        deadlineSidecar: activeCandidate.deadlineSidecar,
+        deadlineSidecarSha256: activeCandidate.deadlineSidecarSha256,
+      });
       attemptPrepareStarted = true;
       persistCloudRestoreUnresolvedAttempt({ attemptId: pending.idempotencyKey, traceId: pending.correlationId });
       durableAttempt = await (prepareRestoreAttempt ?? (command => dataProvider.prepareCloudRestoreAttempt(command)))({
@@ -591,6 +640,9 @@ export default function CloudAtomicRestorePanel({
       } else if (attemptPrepareStarted) {
         setUnresolvedAttempt(null);
         clearCloudRestoreUnresolvedAttempt();
+        void clearCloudDeadlineRestoreStage(pending.idempotencyKey).catch(() => {});
+      } else {
+        void clearCloudDeadlineRestoreStage(pending.idempotencyKey).catch(() => {});
       }
       setVisibleError(safe);
       submissionLockedRef.current = requiresOutcomeCheck || durableFailure;
@@ -686,6 +738,11 @@ export default function CloudAtomicRestorePanel({
           <div id="cloud-restore-ready-title" className="font-medium">準備還原</div>
           <p style={{ margin: '8px 0 4px' }}>備份資料：{candidate.manifest.totalRows.toLocaleString()} 筆</p>
           <p style={{ margin: '4px 0' }}>資料類別：{candidate.manifest.resourceCount} 個</p>
+          {candidate.legacyWacaBackup && <p style={{ margin: '4px 0' }}>
+            此備份建立於 WACA 訂單系統啟用前。還原後會保留當時的 WACA 數量，
+            並標記需要匯入完整 WACA 歷史訂單；匯入後會由訂單重新計算並取代舊數量。
+            舊備份也不含首頁圖片與期限對照，因此會保留目前的首頁圖片和期限對照，不會當成空資料清除。
+          </p>}
           <p style={{ margin: '4px 0' }}>安全檢查：已通過</p>
           {candidate.portability && <p data-testid="cloud-restore-portability-summary" style={{ margin: '4px 0' }}>系統已自動處理跨環境欄位。</p>}
           <p style={{ margin: '10px 0' }}>目前測試環境的資料將由這份備份取代。</p>

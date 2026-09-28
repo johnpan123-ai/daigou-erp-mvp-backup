@@ -13,6 +13,7 @@ if (!existsSync(CHROME)) throw new Error(`Chrome not found: ${CHROME}`);
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+  '--configLoader', 'runner',
   '--mode', 'experimental', '--host', '127.0.0.1', '--port', PORT, '--strictPort',
 ], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';

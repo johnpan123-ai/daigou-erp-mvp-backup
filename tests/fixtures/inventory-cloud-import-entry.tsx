@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { dataProvider } from '../../src/providers/dataProvider';
 import type { InventoryItem, ProductGroup } from '../../src/lib/db';
 import Inventory from '../../src/pages/Inventory';
+import { ViewportProvider } from '../../src/contexts/ViewportContext';
 
 const inventoryRow = (index: number, title = `Authoritative ${index}`): InventoryItem => ({
   id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
@@ -113,7 +114,24 @@ const empty = async () => [];
 dataProvider.getSalesOrders = empty as never;
 dataProvider.getSalesOrderItems = empty as never;
 dataProvider.getProductCategories = empty as never;
-dataProvider.getProductVariants = empty as never;
+dataProvider.getProductVariants = async () => [{
+  id: '10000000-0000-4000-8000-000000008888', product_group_id: '10000000-0000-4000-8000-000000008887',
+  myacg_item_code: 'GP-EVIDENCE-G', product_title: 'GP Evidence Product', variant_name: '規格',
+}] as never;
+dataProvider.getAuthoritativeWacaVariants = dataProvider.getProductVariants;
+let wacaEvidenceCommits = 0;
+let wacaMasterLinks: unknown[] = [];
+dataProvider.getNextWacaSnapshot = async () => ({
+  revision: wacaEvidenceCommits, orders: [], items: [], mappings: [], batches: [],
+  masterLinks: wacaMasterLinks, cutoverAudit: [], cutoverState: {
+    mode: 'LEGACY_QUANTITY_ACTIVE', updatedAt: '', sourceBackupFormatVersion: null,
+  },
+}) as never;
+dataProvider.commitNextWacaSnapshot = async snapshot => {
+  wacaMasterLinks = snapshot.masterLinks;
+  wacaEvidenceCommits += 1;
+  return wacaEvidenceCommits;
+};
 dataProvider.getPurchaseBatches = empty as never;
 dataProvider.getPurchaseBatchItems = empty as never;
 dataProvider.getPrivateOrders = empty as never;
@@ -136,6 +154,7 @@ declare global {
       remount: () => void;
       resetToServer500: () => void;
       snapshot: () => { callOrder: string[]; inventoryCount: number; syncCalls: number; upsertCalls: number };
+      evidenceSnapshot: () => { commits: number; links: unknown[] };
     };
   }
 }
@@ -155,13 +174,14 @@ window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
   remount: () => {
     root?.unmount();
     root = createRoot(document.getElementById('root')!);
-    root.render(<Inventory />);
+    root.render(<ViewportProvider><Inventory /></ViewportProvider>);
   },
   resetToServer500: () => {
     inventory = authoritative.slice(0, 500).map(row => ({ ...row }));
   },
   snapshot: () => ({ callOrder: [...callOrder], inventoryCount: inventory.length, syncCalls, upsertCalls }),
+  evidenceSnapshot: () => ({ commits: wacaEvidenceCommits, links: [...wacaMasterLinks] }),
 };
 
 root = createRoot(document.getElementById('root')!);
-root.render(<Inventory />);
+root.render(<ViewportProvider><Inventory /></ViewportProvider>);

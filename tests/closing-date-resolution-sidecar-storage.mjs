@@ -45,6 +45,7 @@ for (const storeName of expectedStores) {
 
 const vite = spawn(process.execPath, [
   VITE,
+  '--configLoader', 'runner',
   '--mode', 'next',
   '--host', '127.0.0.1',
   '--port', String(PORT),

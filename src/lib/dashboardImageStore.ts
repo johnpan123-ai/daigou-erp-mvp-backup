@@ -1,14 +1,13 @@
 import { reportStorageWriteFailure } from './storageGuard';
 import { LOCAL_AUTHORITATIVE_INDEXED_DB_NAME } from './db';
+import { DASHBOARD_IMAGE_CATEGORY_KEYS } from './dashboardImageCategories';
+export { DASHBOARD_IMAGE_CATEGORY_KEYS } from './dashboardImageCategories';
+export type { DashboardImageCategoryKey } from './dashboardImageCategories';
 
 // Dashboard category images are user-uploaded Base64 Data URLs that can each run to
 // several megabytes. localStorage is a ~5MB origin-wide budget shared with the Supabase
 // auth token, so storing them there can silently push the login session out. They live in
 // IndexedDB instead, reusing the same database/object store the main adapter already owns.
-
-export const DASHBOARD_IMAGE_CATEGORY_KEYS = ['all', 'hololive', 'vspo', 'agency', 'other'] as const;
-
-export type DashboardImageCategoryKey = typeof DASHBOARD_IMAGE_CATEGORY_KEYS[number];
 
 const legacyLocalStorageKey = (categoryKey: string) => `dashboard_category_img_${categoryKey}`;
 

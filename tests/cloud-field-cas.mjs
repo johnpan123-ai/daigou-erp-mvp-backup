@@ -9,7 +9,9 @@ const PROVIDER_PATH = fileURLToPath(new URL('../src/providers/cloud/supabaseProv
 const uuid = suffix => `10000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
 const clone = value => structuredClone(value);
 
-const vite = await createServer({ root: ROOT, mode: 'experimental', server: { middlewareMode: true }, appType: 'custom' });
+const vite = await createServer({ root: ROOT, configFile: false, cacheDir: `${ROOT}/.vite-cache/cloud-field-cas-test`,
+  mode: 'experimental',
+  server: { middlewareMode: true }, appType: 'custom' });
 try {
   const cas = await vite.ssrLoadModule('/src/providers/cloud/cloudFieldCas.ts');
   const {

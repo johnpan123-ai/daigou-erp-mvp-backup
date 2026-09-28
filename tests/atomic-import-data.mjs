@@ -45,11 +45,18 @@ const stableStringify = value => JSON.stringify(value, (_key, nestedValue) => {
 });
 
 const expectedSnapshot = fixture => Object.fromEntries(
-  Object.entries(collectionMap).map(([collection, storageKey]) => [storageKey, fixture[collection] ?? []]),
+  Object.entries(collectionMap).map(([collection, storageKey]) => [storageKey,
+    collection === 'productVariants'
+      ? (fixture[collection] ?? []).map(row => ({ ...row, waca_auto_quantity: 0, waca_manual_adjustment: 0 }))
+      : fixture[collection] ?? []]),
+);
+const coreSnapshot = snapshot => Object.fromEntries(
+  Object.values(collectionMap).map(storageKey => [storageKey, snapshot[storageKey]]),
 );
 
 const vite = spawn(process.execPath, [
   fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url)),
+  '--configLoader', 'runner',
   '--host', '127.0.0.1', '--port', '4253', '--strictPort',
 ], { cwd: ROOT_PATH, stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -123,7 +130,8 @@ try {
     const environment = await import('/src/lib/testSandboxEnvironment.ts');
     return environment.readPhysicalIndexedDbSnapshot('daigou-erp-db-test-v1');
   });
-  assert.equal(stableStringify(testBeforeFailure), stableStringify(expectedSnapshot(baselineFixture)));
+  assert.equal(stableStringify(coreSnapshot(testBeforeFailure)), stableStringify(expectedSnapshot(baselineFixture)));
+  assert.equal(testBeforeFailure.erp_waca_cutover_state_v1?.mode, 'ORDER_REBASELINE_REQUIRED');
 
   const invalidResult = await page.evaluate(text => window.dataProvider.importData(text), invalidFixtureText);
   assert.equal(invalidResult, false, 'Malformed collection #8 must be rejected before writing');
@@ -170,9 +178,27 @@ try {
     };
   });
 
-  assert.equal(stableStringify(finalState.testDb), stableStringify(expectedSnapshot(validFixture)), 'F5 must retain exactly replacement B');
+  assert.equal(stableStringify(coreSnapshot(finalState.testDb)), stableStringify(expectedSnapshot(validFixture)),
+    'F5 must retain exactly replacement B in all original core collections');
+  assert.equal(finalState.testDb.erp_waca_cutover_state_v1?.mode, 'ORDER_REBASELINE_REQUIRED');
   assert.equal(stableStringify(finalState.productionDb), stableStringify(productionBefore.db));
   assert.equal(finalState.productionLocalStorage, productionBefore.localStorage);
+  const cloudCache = await page.evaluate(async fixture => {
+    const { cloudCacheDb } = await import('/src/lib/db.ts');
+    const { readPhysicalIndexedDbSnapshot } = await import('/src/lib/testSandboxEnvironment.ts');
+    const projected = { ...fixture, productVariants: fixture.productVariants.map((row, index) => ({
+      ...row, waca_auto_quantity: index === 0 ? 11 : 0,
+      waca_manual_adjustment: index === 0 ? 3 : 0,
+    })) };
+    const accepted = await cloudCacheDb.importData(JSON.stringify(projected), 'cloud-sync');
+    const variants = await cloudCacheDb.getProductVariants({ raw: true });
+    const physical = await readPhysicalIndexedDbSnapshot('daigou-erp-cloud-cache-v1');
+    return { accepted, variant: variants[0], wacaKeys: Object.keys(physical).filter(key => key.startsWith('erp_waca_')) };
+  }, validFixture);
+  assert.equal(cloudCache.accepted, true);
+  assert.equal(cloudCache.variant.waca_auto_quantity, 11, 'Cloud cache must preserve server WACA auto quantity');
+  assert.equal(cloudCache.variant.waca_manual_adjustment, 3, 'Cloud cache must preserve confirmed manual adjustment');
+  assert.deepEqual(cloudCache.wacaKeys, [], 'Cloud core sync must not write a fake WACA legacy ledger');
   assert.deepEqual(productionSupabaseRequests, [], 'P0-A Test import must make zero Production Supabase requests');
   assert.deepEqual(unexpectedErrors, []);
 
@@ -180,6 +206,7 @@ try {
   console.log('PASS forced collection #8 put failure aborts the single transaction');
   console.log('PASS failed imports preserve baseline A after F5');
   console.log('PASS successful import replaces all 16 collections with B after F5');
+  console.log('PASS Cloud core cache sync preserves WACA 11 + manual 3 without legacy conversion');
   console.log('PASS Production IndexedDB/localStorage remain unchanged and Supabase requests = 0');
 } finally {
   await browser.close();

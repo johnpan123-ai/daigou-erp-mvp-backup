@@ -59,7 +59,7 @@ const bool = (v: unknown): boolean | null => {
 };
 const counts = (v: unknown): Counts => {
   const raw = record(v);
-  if (Object.keys(raw).length !== 15) throw new Error(INVALID);
+  if (Object.keys(raw).length !== CLOUD_RESTORE_TABLES.length) throw new Error(INVALID);
   return Object.fromEntries(CLOUD_RESTORE_TABLES.map(([, t]) => [t, count(raw[t])])) as Counts;
 };
 

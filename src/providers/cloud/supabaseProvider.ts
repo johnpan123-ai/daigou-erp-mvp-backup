@@ -83,6 +83,8 @@
 })();
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
+import type { NextWacaSnapshot } from '../../waca/nextStorage';
+import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
 import { isCloudRestoreFailureCode } from './cloudRestoreFailure';
 import { readCloudRestoreIntegrityAudit } from './cloudRestoreIntegrityAudit';
@@ -338,6 +340,64 @@ const fetchAll = async <T>(
 
 
 export class SupabaseProvider implements IDataProvider {
+  async getAuthoritativeWacaVariants(): Promise<ProductVariant[]> {
+    // WACA reconciliation must never fall back to an old local cache after a
+    // committed ledger transaction. Read the server's Variant projection.
+    let rows: Record<string, unknown>[];
+    try {
+      rows = await fetchAll<Record<string, unknown>>(async (from, to) => supabase
+        .from('product_variants')
+        .select('*')
+        .is('deleted_at', null)
+        .order('id')
+        .range(from, to));
+    } catch (cause) { markCloudRequestFailed(cause); throw cause; }
+    markCloudReachable();
+    return rows.map(row => ({ ...row, id: String(row.id) })) as ProductVariant[];
+  }
+  async getWacaSnapshot(): Promise<NextWacaSnapshot> {
+    let data: unknown;
+    let error: unknown;
+    try { ({ data, error } = await supabase.rpc('erp_read_waca_snapshot')); }
+    catch (cause) { markCloudRequestFailed(cause); throw cause; }
+    if (error) { markCloudRequestFailed(error); throw error; }
+    const snapshot = data as NextWacaSnapshot | null;
+    if (!snapshot || !Number.isSafeInteger(snapshot.revision)
+      || !Array.isArray(snapshot.orders) || !Array.isArray(snapshot.items)
+      || !Array.isArray(snapshot.mappings) || !Array.isArray(snapshot.batches)
+      || !Array.isArray(snapshot.masterLinks) || !Array.isArray(snapshot.cutoverAudit)) {
+      throw new Error('WACA 雲端資料格式不完整，請重新整理後再試。');
+    }
+    markCloudReachable();
+    return snapshot;
+  }
+
+  async commitWacaSnapshot(
+    snapshot: NextWacaSnapshot, expectedRevision: number, updateAutoQuantity: boolean,
+  ): Promise<number> {
+    await this.requireCloudWritePermission();
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc('erp_commit_waca_snapshot', {
+        p_snapshot: snapshot, p_expected_revision: expectedRevision,
+        p_update_auto_quantity: updateAutoQuantity,
+      }));
+    } catch (cause) { markCloudRequestFailed(cause); throw cause; }
+    if (error) { markCloudRequestFailed(error); throw error; }
+    const revision = Number((data as { revision?: unknown } | null)?.revision);
+    if (!Number.isSafeInteger(revision) || revision !== expectedRevision + 1) {
+      throw new Error('WACA 雲端寫入結果無法確認，請先重新讀取訂單與數量。');
+    }
+    markCloudReachable();
+    if (updateAutoQuantity) {
+      // The server has committed both ledger and quantity; invalidate this
+      // client cache so the next read is not mistaken for authoritative data.
+      this.isPulled = false;
+      this.pullPromise = null;
+    }
+    return revision;
+  }
   async readCloudRestoreIntegrityAudit() {
     return readCloudRestoreIntegrityAudit(supabase);
   }
@@ -1120,6 +1180,7 @@ export class SupabaseProvider implements IDataProvider {
             database_id: r.id,
             inventory_key: r.inventory_key || `${normalizeProductTitle(r.product_title)}::${r.myacg_item_code}::${r.raw_variant_name || ''}`,
             myacg_item_code: r.myacg_item_code,
+            myacg_parent_code: r.myacg_parent_code || undefined,
             product_id: r.product_id || undefined,
             product_title: r.product_title,
             normalized_product_title: r.normalized_product_title || undefined,
@@ -1157,7 +1218,7 @@ export class SupabaseProvider implements IDataProvider {
             outboundShipmentItems: mappedShipmentItems,
             bundleComponents: mappedBundleComponents,
             importBatches: [],
-          }));
+          }), 'cloud-sync');
           if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
           this.authoritativeCacheGeneration += 1;
 
@@ -1770,6 +1831,7 @@ export class SupabaseProvider implements IDataProvider {
         database_id: r.id,
         inventory_key: r.inventory_key || `${normalizeProductTitle(r.product_title)}::${r.myacg_item_code}::${r.raw_variant_name || ''}`,
         myacg_item_code: r.myacg_item_code,
+        myacg_parent_code: r.myacg_parent_code || undefined,
         product_id: r.product_id || undefined,
         product_title: r.product_title,
         normalized_product_title: r.normalized_product_title || undefined,
@@ -2389,6 +2451,13 @@ export class SupabaseProvider implements IDataProvider {
     throw new Error('雲端匯入批次必須由 Server 完成；本機快取不接受獨立寫入。');
   }
 
+  async getCloudDashboardCategoryImageRows(): Promise<Record<string, unknown>[]> {
+    await this.requireCloudWritePermission();
+    const rows = await fetchAll<Record<string, unknown>>(async (from, to) => supabase
+      .from('dashboard_category_images').select('*').order('id').range(from, to));
+    return rows;
+  }
+
   // === 資料庫管理與輔助方法 (完全委託本地 db) ===
   async exportData(): Promise<void> {
     let rawData: unknown;
@@ -2416,6 +2485,7 @@ export class SupabaseProvider implements IDataProvider {
       sourceEnvironment: 'cloud-authoritative',
       manifest: prepared.manifest,
       data: fileData,
+      deadlineSidecar: await readDeadlineDurableBackup('cloud'),
     };
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

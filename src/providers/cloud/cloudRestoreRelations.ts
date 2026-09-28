@@ -39,6 +39,11 @@ export const CLOUD_RESTORE_RELATIONS = [
   { childTable: 'outbound_shipment_items', field: 'japan_package_item_id', parentTable: 'japan_package_items', kind: 'metadata', optional: true },
   { childTable: 'outbound_shipment_items', field: 'product_group_id', parentTable: 'product_groups', kind: 'metadata', optional: true },
   { childTable: 'outbound_shipment_items', field: 'product_variant_id', parentTable: 'product_variants', kind: 'metadata', optional: true },
+  { childTable: 'waca_order_items', field: 'order_id', parentTable: 'waca_orders', kind: 'blocking', optional: false },
+  { childTable: 'waca_order_items', field: 'product_variant_id', parentTable: 'product_variants', kind: 'metadata', optional: true },
+  { childTable: 'waca_mappings', field: 'product_variant_id', parentTable: 'product_variants', kind: 'blocking', optional: false },
+  { childTable: 'waca_master_links', field: 'product_variant_id', parentTable: 'product_variants', kind: 'metadata', optional: true },
+  { childTable: 'waca_cutover_audit', field: 'product_variant_id', parentTable: 'product_variants', kind: 'blocking', optional: false },
 ] as const satisfies readonly CloudRestoreRelationSpec[];
 
 export const cloudRestoreRelationKey = (relation: CloudRestoreRelationSpec): string => (

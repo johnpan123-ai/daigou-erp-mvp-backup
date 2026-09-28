@@ -8,6 +8,7 @@ import {
 } from './orderCore';
 import type { MyAcgMasterLink } from './masterReference';
 import { buildWacaCutoverAudit } from './reconciliation';
+import type { WacaCutoverState } from './backupFormat';
 
 export interface WacaBatch {
   id: string;
@@ -43,6 +44,7 @@ export interface NextWacaSnapshot {
   batches: WacaBatch[];
   masterLinks: MyAcgMasterLink[];
   cutoverAudit?: WacaCutoverAudit[];
+  cutoverState?: WacaCutoverState;
 }
 
 export const NEXT_WACA_KEYS = {
@@ -52,6 +54,7 @@ export const NEXT_WACA_KEYS = {
   batches: 'erp_waca_import_batches_v1',
   masterLinks: 'erp_myacg_master_links_v1',
   cutoverAudit: 'erp_waca_cutover_audit_v2',
+  cutoverState: 'erp_waca_cutover_state_v1',
   revision: 'erp_waca_revision_v1',
 } as const;
 
@@ -78,6 +81,8 @@ const rows = <T>(value: unknown, key: string): T[] => {
 };
 
 export function validateNextWacaSnapshot(snapshot: NextWacaSnapshot, variants: readonly ProductVariant[]): void {
+  if (snapshot.cutoverState && !['LEGACY_QUANTITY_ACTIVE', 'ORDER_REBASELINE_REQUIRED', 'ORDER_DRIVEN_ACTIVE']
+    .includes(snapshot.cutoverState.mode)) throw new Error('NEXT_WACA_CUTOVER_STATE_INVALID');
   const unique = (values: readonly string[], label: string) => {
     if (new Set(values).size !== values.length) throw new Error(`NEXT_WACA_DUPLICATE:${label}`);
   };
@@ -126,6 +131,7 @@ export async function readNextWacaSnapshot(): Promise<NextWacaSnapshot> {
         batches: rows<WacaBatch>(values.get(NEXT_WACA_KEYS.batches), 'batches'),
         masterLinks: rows<MyAcgMasterLink>(values.get(NEXT_WACA_KEYS.masterLinks), 'masterLinks'),
         cutoverAudit: rows<WacaCutoverAudit>(values.get(NEXT_WACA_KEYS.cutoverAudit), 'cutoverAudit'),
+        cutoverState: values.get(NEXT_WACA_KEYS.cutoverState) as WacaCutoverState | undefined,
       });
       transaction.onerror = () => reject(transaction.error ?? new Error('NEXT_WACA_READ_FAILED'));
       transaction.onabort = () => reject(transaction.error ?? new Error('NEXT_WACA_READ_ABORTED'));
@@ -158,6 +164,7 @@ export function snapshotFromRepository(
     batches,
     masterLinks,
     cutoverAudit: prior.cutoverAudit ?? [],
+    cutoverState: prior.cutoverState,
   };
 }
 
@@ -191,6 +198,14 @@ export async function commitNextWacaSnapshot(
         try { validateNextWacaSnapshot(snapshot, variants); } catch (error) { abort(error as Error); return; }
         let nextVariants = variants;
         let cutoverAudit = snapshot.cutoverAudit ?? [];
+        const previousState = snapshot.cutoverState;
+        const cutoverState: WacaCutoverState = updateAutoQuantity ? {
+          mode: 'ORDER_DRIVEN_ACTIVE', updatedAt: new Date().toISOString(),
+          sourceBackupFormatVersion: previousState?.sourceBackupFormatVersion ?? null,
+        } : previousState ?? {
+          mode: cutoverAudit.length ? 'ORDER_DRIVEN_ACTIVE' : 'LEGACY_QUANTITY_ACTIVE',
+          updatedAt: new Date().toISOString(), sourceBackupFormatVersion: null,
+        };
         if (updateAutoQuantity) {
           const repo = repositoryFromSnapshot(snapshot, variants);
           if (!cutoverAudit.length && variants.length) {
@@ -207,7 +222,8 @@ export async function commitNextWacaSnapshot(
           nextVariants = variants.map(variant => ({
             ...variant,
             waca_auto_quantity: repo.autoQuantities.get(variant.id) ?? 0,
-            waca_manual_adjustment: (snapshot.cutoverAudit ?? []).length ? (variant.waca_manual_adjustment ?? 0) : 0,
+            waca_manual_adjustment: previousState?.mode === 'ORDER_DRIVEN_ACTIVE' || (snapshot.cutoverAudit ?? []).length
+              ? (variant.waca_manual_adjustment ?? 0) : 0,
           }));
         }
         try {
@@ -217,6 +233,7 @@ export async function commitNextWacaSnapshot(
           store.put(snapshot.batches, NEXT_WACA_KEYS.batches);
           store.put(snapshot.masterLinks, NEXT_WACA_KEYS.masterLinks);
           store.put(cutoverAudit, NEXT_WACA_KEYS.cutoverAudit);
+          store.put(cutoverState, NEXT_WACA_KEYS.cutoverState);
           if (updateAutoQuantity) store.put(nextVariants, 'erp_product_variants');
           store.put(revision + 1, NEXT_WACA_KEYS.revision);
         } catch (error) {

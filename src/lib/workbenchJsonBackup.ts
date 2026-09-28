@@ -1,6 +1,9 @@
 import type { IDataProvider } from '../providers/types';
 import { getProviderMode } from '../providers/providerMode';
 import type { NextWacaSnapshot } from '../waca/nextStorage';
+import { WORKBENCH_BACKUP_FORMAT_VERSION } from '../waca/backupFormat';
+import { readDeadlineDurableBackup } from './closingDateSidecarBackup';
+import { DASHBOARD_IMAGE_CATEGORY_KEYS, getAllDashboardCategoryImages } from './dashboardImageStore';
 
 type BackupProvider = Pick<IDataProvider,
   | 'getInventory'
@@ -22,7 +25,7 @@ type BackupProvider = Pick<IDataProvider,
 > & { getNextWacaSnapshot?: () => Promise<NextWacaSnapshot> };
 
 export interface WorkbenchBackupResult {
-  data: Record<string, unknown[]>;
+  data: Record<string, unknown>;
   json: string;
   filename: string;
   byteLength: number;
@@ -34,7 +37,7 @@ export function formatBackupDateTime(date: Date): string {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
-export async function collectWorkbenchBackupData(provider: BackupProvider): Promise<Record<string, unknown[]>> {
+export async function collectWorkbenchBackupData(provider: BackupProvider): Promise<Record<string, unknown>> {
   const [
     inventory,
     salesOrders,
@@ -71,7 +74,7 @@ export async function collectWorkbenchBackupData(provider: BackupProvider): Prom
     provider.getOutboundShipmentItems(),
   ]);
 
-  const data: Record<string, unknown[]> = {
+  const data: Record<string, unknown> = {
     inventory,
     salesOrders,
     salesOrderItems,
@@ -98,12 +101,23 @@ export async function collectWorkbenchBackupData(provider: BackupProvider): Prom
     data.wacaImportBatches = waca.batches;
     data.myacgMasterLinks = waca.masterLinks;
     data.wacaCutoverAudit = waca.cutoverAudit ?? [];
+    data.wacaCutoverState = [waca.cutoverState ?? {
+      mode: waca.cutoverAudit?.length ? 'ORDER_DRIVEN_ACTIVE' : 'LEGACY_QUANTITY_ACTIVE',
+      updatedAt: new Date().toISOString(), sourceBackupFormatVersion: null,
+    }];
+    data.backupFormatVersion = WORKBENCH_BACKUP_FORMAT_VERSION;
+    Object.assign(data, await readDeadlineDurableBackup('next'));
+    const images = await getAllDashboardCategoryImages();
+    data.dashboardCategoryImages = DASHBOARD_IMAGE_CATEGORY_KEYS.map(categoryKey => ({
+      categoryKey, dataUrl: images[categoryKey] ?? '',
+    }));
   }
   return data;
 }
 
-export function serializeAndValidateWorkbenchBackup(data: Record<string, unknown[]>): { json: string; byteLength: number } {
+export function serializeAndValidateWorkbenchBackup(data: Record<string, unknown>): { json: string; byteLength: number } {
   for (const [key, value] of Object.entries(data)) {
+    if (key === 'backupFormatVersion' && value === WORKBENCH_BACKUP_FORMAT_VERSION) continue;
     if (!Array.isArray(value)) throw new Error(`備份集合 ${key} 格式錯誤`);
   }
 

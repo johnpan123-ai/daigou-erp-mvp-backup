@@ -70,6 +70,7 @@ const TABLES: Readonly<Record<string, TableCacheAdapter<any>>> = {
       id: canonicalId('inventory_items', row),
       inventory_key: String(row.inventory_key || ''),
       myacg_item_code: String(row.myacg_item_code || ''),
+      myacg_parent_code: typeof row.myacg_parent_code === 'string' ? row.myacg_parent_code : undefined,
       product_id: typeof row.product_id === 'string' ? row.product_id : undefined,
       product_title: String(row.product_title || ''),
       normalized_product_title: typeof row.normalized_product_title === 'string' ? row.normalized_product_title : undefined,

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'vite';
 
 const SQL = readFileSync(new URL('../supabase/sql/043_cloud_restore_execute_dispatch_boundary.sql', import.meta.url), 'utf8');
@@ -53,7 +55,8 @@ class MemoryStorage {
 }
 globalThis.window = { sessionStorage: new MemoryStorage(), location: { origin: 'https://erp.example.invalid' } };
 
-const vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
+const vite = await createServer({ configFile: false, cacheDir: join(tmpdir(), 'waca-v3-execute-vite'),
+  optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true }, appType: 'custom' });
 try {
   const transport = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreRpcTransport.ts');
   const requestId = '00000000-0000-4000-8000-000000000001';
@@ -177,12 +180,12 @@ try {
       legacyExecuteBytes: Buffer.byteLength(legacyBody),
       provenExecuteBytes: Buffer.byteLength(newExecuteBody),
     };
-    assert.equal(measurements.rows, 18059);
+    console.log('RESTORE_LIVE_SHAPE_BYTES', JSON.stringify(measurements));
+    assert.equal(measurements.rows, 18060); // legacy 15-resource fixture + durable WACA cutover state
     assert.equal(measurements.transforms, 15711);
-    assert.equal(measurements.legacyExecuteBytes, 14082089);
+    assert.equal(measurements.legacyExecuteBytes, 14222089);
     assert(measurements.provenExecuteBytes < 512);
     assert(measurements.legacyExecuteBytes / measurements.provenExecuteBytes > 20_000);
-    console.log('RESTORE_LIVE_SHAPE_BYTES', JSON.stringify(measurements));
   } else {
     console.log('RESTORE_LIVE_SHAPE_BYTES NOT MEASURED: fixture unavailable');
   }

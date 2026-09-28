@@ -230,13 +230,18 @@ export default function Inventory() {
           postCommitIssue = 'group-sync';
         }
       }
-      if (!postCommitIssue && currentMode === 'next') {
+      // The catalog is the authoritative GP → G evidence source in both
+      // environments. Persist it while the uploaded parent code is still
+      // available; a later WACA import must not require this file again.
+      if (!postCommitIssue && (currentMode === 'next' || cloudMode)) {
         try {
-          const variants = await dataProvider.getProductVariants({ raw: true });
-          const waca = await dataProvider.getNextWacaSnapshot();
+          const variants = await dataProvider.getAuthoritativeWacaVariants();
           const evidence = linksFromMyAcgInventory(itemsWithBatchMeta, variants, file.name, currentTimestamp);
-          const masterLinks = mergeMyAcgMasterLinks(waca.masterLinks, evidence.links);
-          await dataProvider.commitNextWacaSnapshot({ ...waca, masterLinks }, waca.revision, false);
+          if (evidence.links.length) {
+            const waca = await dataProvider.getNextWacaSnapshot();
+            const masterLinks = mergeMyAcgMasterLinks(waca.masterLinks, evidence.links);
+            await dataProvider.commitNextWacaSnapshot({ ...waca, masterLinks }, waca.revision, false);
+          }
         } catch (error) {
           console.error('[NEXT MyACG master link capture]', error);
           postCommitIssue = 'group-sync';
