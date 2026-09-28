@@ -23,6 +23,9 @@
     "test:erp2-promotion-guard": "node tests/erp2-promotion-guard.mjs",
     "test:staging-build-identity": "node tests/staging-build-identity.mjs",
     "test:promotion-sync-state": "node tests/promotion-sync-state.mjs",
+    "test:schema-reconciliation": "node tests/schema-reconciliation.mjs",
+    "test:schema-reconciliation-pg": "node tests/schema-reconciliation-pglite.mjs",
+    "schema:canonical-snapshot": "node tools/schema-reconciliation/generateCanonicalSnapshot.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:core": "node tests/core-regression.mjs",
@@ -126,6 +129,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",

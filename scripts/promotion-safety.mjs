@@ -42,7 +42,44 @@ export function assertCanonicalContract(contract) {
     || !gate.lineage.reconciliationTag || !/^[a-f0-9]{40}$/u.test(gate.lineage.reconciliationHead ?? '')) {
     failClosed('invalid accepted-lineage contract');
   }
+  if (!contract.schemaBaseline?.requiredBaselineId
+    || contract.schemaBaseline.evidenceContractVersion !== 1
+    || contract.schemaBaseline.preAdoptionMode !== 'READ_ONLY_RECONCILIATION'
+    || contract.schemaBaseline.postAdoptionLedger !== 'public.erp_schema_migration_ledger') {
+    failClosed('invalid schema-baseline contract');
+  }
   return { account, target, gate };
+}
+
+export function verifySchemaBaselineEvidence({ evidence, contract, candidate }) {
+  assertCanonicalContract(contract);
+  const required = contract.schemaBaseline.requiredBaselineId;
+  if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
+    || !['PRE_ADOPTION', 'POST_ADOPTION'].includes(evidence.mode)
+    || evidence.requiredBaselineId !== required
+    || evidence.projectRef !== CANONICAL_ERP2_TARGET.supabaseProject
+    || evidence.sourceHead !== candidate.head || evidence.checkpoint !== candidate.checkpointTag
+    || !/^[0-9a-f]{64}$/u.test(evidence.currentFingerprint ?? '')
+    || !/^[0-9a-f]{64}$/u.test(evidence.expectedFingerprint ?? '')
+    || evidence.currentFingerprint !== evidence.expectedFingerprint
+    || evidence.targetAfterDeltaFingerprint !== evidence.expectedFingerprint
+    || evidence.readyForApply !== true || !Array.isArray(evidence.blockers) || evidence.blockers.length !== 0
+    || !Array.isArray(evidence.migrations)
+    || evidence.migrations.some(item => item.state !== 'SATISFIED')) {
+    failClosed('schema reconciliation evidence is missing, stale, or not canonical');
+  }
+  if (evidence.mode === 'POST_ADOPTION') {
+    const record = evidence.baselineRecord;
+    if (record?.eventType !== 'BASELINE_ADOPTED' || record.eventKey !== required
+      || record.sourceHead !== candidate.head || record.checkpoint !== candidate.checkpointTag
+      || record.schemaFingerprintAfter !== evidence.currentFingerprint
+      || record.metadata?.historicalMigrationExecutionClaimed !== false) {
+      failClosed('post-adoption baseline ledger evidence mismatch');
+    }
+  } else if (evidence.migrationHistoryProvenance !== 'UNAVAILABLE') {
+    failClosed('pre-adoption evidence has inconsistent migration-history provenance');
+  }
+  return { result: 'PASS', mode: evidence.mode, baselineId: required, fingerprint: evidence.currentFingerprint };
 }
 
 export function validatePublicTarget(environment, target = CANONICAL_ERP2_TARGET) {

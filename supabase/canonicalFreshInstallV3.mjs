@@ -43,6 +43,7 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '044_waca_cloud_ledger.sql',
   '045_waca_cloud_atomic_restore_closure.sql',
   '046_waca_myacg_parent_evidence.sql',
+  '047_erp_schema_migration_ledger.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,

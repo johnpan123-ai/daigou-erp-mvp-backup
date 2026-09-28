@@ -18,6 +18,12 @@
       "accountId": "e0a58431cd5bcf0e01ec3438d531461a"
     }
   },
+  "schemaBaseline": {
+    "requiredBaselineId": "erp2-canonical-schema-v4",
+    "evidenceContractVersion": 1,
+    "preAdoptionMode": "READ_ONLY_RECONCILIATION",
+    "postAdoptionLedger": "public.erp_schema_migration_ledger"
+  },
   "environments": {
     "erp2": {
       "role": "ERP_2_CLOUD_CANDIDATE",

@@ -8,10 +8,11 @@ import {
   runGitAt,
   verifyArtifactIdentity,
   verifyPromotionIdentity,
+  verifySchemaBaselineEvidence,
 } from './promotion-safety.mjs';
 
 const fail = message => { throw new DeploymentGuardError(message); };
-const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir']);
+const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir', 'schema-evidence']);
 
 export function parseArguments(argv) {
   const args = new Map();
@@ -54,6 +55,7 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
   const candidateRoot = resolve(args.get('candidate-worktree') || guardRoot);
   const artifactRoot = resolve(candidateRoot, args.get('artifact-dir') || 'staging-release-artifacts/dist');
   const checkpointTag = args.get('checkpoint-tag') || fail('missing --checkpoint-tag');
+  const schemaEvidencePath = args.get('schema-evidence') || fail('missing --schema-evidence');
   const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
   const candidateGit = runGitAt(candidateRoot);
   const guardGit = candidateRoot === guardRoot ? candidateGit : runGitAt(guardRoot);
@@ -67,7 +69,11 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
     wrangler: (wranglerArgs, accountId) => runWrangler(candidateRoot, wranglerArgs, accountId),
   });
   const artifact = await verifyArtifactIdentity({ artifactRoot, proof, contract });
-  return { ...proof, artifact, candidateWorktree: candidateRoot, artifactRoot };
+  let schemaEvidence;
+  try { schemaEvidence = JSON.parse(await readFile(resolve(candidateRoot, schemaEvidencePath), 'utf8')); }
+  catch { fail('schema reconciliation evidence missing or invalid'); }
+  const schemaBaseline = verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate: proof.candidate });
+  return { ...proof, artifact, schemaBaseline, candidateWorktree: candidateRoot, artifactRoot };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

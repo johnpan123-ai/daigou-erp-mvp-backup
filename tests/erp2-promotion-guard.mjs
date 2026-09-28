@@ -11,6 +11,7 @@ import {
   verifyCloudflareIdentity,
   verifyPromotionIdentity,
   verifyRemoteCandidate,
+  verifySchemaBaselineEvidence,
 } from '../scripts/promotion-safety.mjs';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
@@ -106,6 +107,23 @@ const proof = verifyPromotionIdentity({
     : [{ name: CANONICAL_ERP2_TARGET.project, domains: [CANONICAL_ERP2_TARGET.domain] }],
 });
 assert.equal(proof.result, 'PASS');
+
+const baselineFingerprint = 'a'.repeat(64);
+const schemaEvidence = {
+  contractVersion: 1, mode: 'PRE_ADOPTION', requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
+  projectRef: CANONICAL_ERP2_TARGET.supabaseProject, sourceHead: head, checkpoint,
+  migrationHistoryProvenance: 'UNAVAILABLE', currentFingerprint: baselineFingerprint,
+  expectedFingerprint: baselineFingerprint, targetAfterDeltaFingerprint: baselineFingerprint,
+  readyForApply: true, blockers: [], migrations: [{ migrationId: 'fixture', state: 'SATISFIED' }],
+};
+assert.equal(verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate }).result, 'PASS');
+for (const evidence of [
+  { ...schemaEvidence, projectRef: 'wrong' },
+  { ...schemaEvidence, sourceHead: accepted },
+  { ...schemaEvidence, blockers: [{ migrationId: '044', state: 'UNKNOWN' }] },
+  { ...schemaEvidence, migrations: [{ migrationId: '044', state: 'NEEDS_APPLY' }] },
+]) assert.throws(() => verifySchemaBaselineEvidence({ evidence, contract, candidate }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
+console.log('PASS fail-closed: schema baseline evidence');
 
 const artifactRoot = await mkdtemp(join(tmpdir(), 'erp2-promotion-artifact-'));
 try {
