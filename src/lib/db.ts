@@ -2023,6 +2023,7 @@ const OPTIONAL_ATOMIC_IMPORT_COLLECTIONS = [
   ['wacaMappings', 'erp_waca_mappings_v1'],
   ['wacaImportBatches', 'erp_waca_import_batches_v1'],
   ['myacgMasterLinks', 'erp_myacg_master_links_v1'],
+  ['wacaCutoverAudit', 'erp_waca_cutover_audit_v2'],
 ] as const;
 
 /**
@@ -2079,6 +2080,7 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
     const items = records('wacaItems');
     const mappings = records('wacaMappings');
     const links = records('myacgMasterLinks');
+    const cutoverAudit = records('wacaCutoverAudit');
     const variants = records('productVariants');
     const unique = (values: unknown[], name: string) => {
       if (values.some(value => typeof value !== 'string' || !value) || new Set(values).size !== values.length) {
@@ -2089,6 +2091,7 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
     unique(items.map(row => row.key), '品項');
     unique(mappings.map(row => row.feature), '對照');
     unique(links.map(row => row.childCode), '主子關係');
+    unique(cutoverAudit.map(row => row.productVariantId), '切換稽核');
     const orderIds = new Set(orders.map(row => row.key));
     const variantIds = new Set(variants.map(row => row.id));
     if (items.some(row => !orderIds.has(row.orderKey) || (row.productVariantId && !variantIds.has(row.productVariantId)))) {
@@ -2098,6 +2101,11 @@ const validateAtomicImportPayload = (jsonString: string): AtomicImportEntry[] =>
         links.some(row => typeof row.mainCode !== 'string' || !row.mainCode
           || (row.productVariantId && !variantIds.has(row.productVariantId)))) {
       throw new Error('JSON 備份 WACA 商品對照關聯不完整。');
+    }
+    if (cutoverAudit.some(row => !variantIds.has(row.productVariantId)
+      || !Number.isFinite(Number(row.legacyWacaQuantity))
+      || !Number.isFinite(Number(row.newOrderDerivedQuantity)))) {
+      throw new Error('JSON 備份 WACA 切換稽核無效。');
     }
     const statusByOrder = new Map(orders.map(row => [row.key, row.status]));
     const auto = new Map<string, number>();
@@ -3795,6 +3803,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       wacaMappings: await this.get<unknown[]>('erp_waca_mappings_v1', []),
       wacaImportBatches: await this.get<unknown[]>('erp_waca_import_batches_v1', []),
       myacgMasterLinks: await this.get<unknown[]>('erp_myacg_master_links_v1', []),
+      wacaCutoverAudit: await this.get<unknown[]>('erp_waca_cutover_audit_v2', []),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

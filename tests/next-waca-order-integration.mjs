@@ -13,6 +13,8 @@ const { buildWacaMasterReference, linksFromMyAcgInventory, mergeMyAcgMasterLinks
   await vite.ssrLoadModule('/src/waca/masterReference.ts');
 const { repositoryFromSnapshot, snapshotFromRepository, validateNextWacaSnapshot } =
   await vite.ssrLoadModule('/src/waca/nextStorage.ts');
+const { buildWacaCutoverAudit, reconcileWacaReadback, purchaseRecordsWacaQuantity } =
+  await vite.ssrLoadModule('/src/waca/reconciliation.ts');
 try {
 
 const row = (value = {}) => ({
@@ -111,6 +113,22 @@ validateNextWacaSnapshot(recovered, variants);
 const restored = repositoryFromSnapshot(recovered, variants);
 assert.deepEqual(restored.autoQuantities, repo.autoQuantities);
 assert.equal(restored.manualAdjustments.get('vr'), 4);
+const audit = buildWacaCutoverAudit(variants.map(item => item.id === 'vr' ? { ...item, waca_auto_quantity: 10 } : item),
+  new Map([['vr', 10]]), new Map([['vr', 9]]), '2026-09-28T00:00:00Z');
+assert.equal(audit.find(item => item.productVariantId === 'vr').legacyWacaQuantity, 4,
+  'stored order-derived auto is excluded from legacy, while unknown pre-cutover manual is audited');
+const readback = {
+  revision: 1, orders: [{ key: 'WACA::READBACK', orderNumber: 'READBACK', status: '處理中', purchasedAt: '' }],
+  items: [{ key: 'WACA::READBACK::feature', orderKey: 'WACA::READBACK', feature: 'feature',
+    productVariantId: 'vr', quantity: 2 }],
+  mappings: [{ feature: 'feature', productVariantId: 'vr' }], batches: [], masterLinks: [], cutoverAudit: audit,
+};
+const readbackVariant = { ...variants[0], waca_auto_quantity: 2, waca_manual_adjustment: 0 };
+assert.equal(reconcileWacaReadback(readback, [readbackVariant]).status, 'PASS');
+assert.equal(reconcileWacaReadback(readback, [readbackVariant]).total, 1);
+assert.equal(purchaseRecordsWacaQuantity(readbackVariant, true), 2);
+assert.equal(reconcileWacaReadback(readback, [{ ...readbackVariant, waca_auto_quantity: 3 }]).issues[0].difference, -1);
+assert.equal(reconcileWacaReadback(readback, [{ ...readbackVariant, waca_manual_adjustment: 4 }]).status, 'PASS');
 assert.throws(() => validateNextWacaSnapshot({ ...recovered, orders: [] }, variants), /ORPHAN_ORDER/);
 assert.throws(() => validateNextWacaSnapshot({ ...recovered, items: [...recovered.items, recovered.items[0]] }, variants), /DUPLICATE/);
 console.log('PASS WACA idempotency, overlap, transitions, coupon, scoped matching, remap, delist and isolated snapshot recovery');

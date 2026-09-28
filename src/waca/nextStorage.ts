@@ -7,6 +7,7 @@ import {
   type WacaRow,
 } from './orderCore';
 import type { MyAcgMasterLink } from './masterReference';
+import { buildWacaCutoverAudit } from './reconciliation';
 
 export interface WacaBatch {
   id: string;
@@ -18,6 +19,20 @@ export interface WacaBatch {
   unchanged: number;
   result: WacaImportResult;
   conflictRows: WacaRow[];
+  reconciliation?: { status: 'PASS' | 'FAIL'; passed: number; total: number; effectiveQuantity: number; checkedAt: string };
+}
+
+export interface WacaCutoverAudit {
+  productVariantId: string;
+  sku: string;
+  productTitle: string;
+  variantTitle: string;
+  legacyWacaQuantity: number;
+  legacyAutoQuantity: number;
+  unverifiedPreCutoverManualQuantity: number;
+  newOrderDerivedQuantity: number;
+  difference: number;
+  cutoverAt: string;
 }
 
 export interface NextWacaSnapshot {
@@ -27,6 +42,7 @@ export interface NextWacaSnapshot {
   mappings: WacaMapping[];
   batches: WacaBatch[];
   masterLinks: MyAcgMasterLink[];
+  cutoverAudit?: WacaCutoverAudit[];
 }
 
 export const NEXT_WACA_KEYS = {
@@ -35,6 +51,7 @@ export const NEXT_WACA_KEYS = {
   mappings: 'erp_waca_mappings_v1',
   batches: 'erp_waca_import_batches_v1',
   masterLinks: 'erp_myacg_master_links_v1',
+  cutoverAudit: 'erp_waca_cutover_audit_v2',
   revision: 'erp_waca_revision_v1',
 } as const;
 
@@ -69,6 +86,7 @@ export function validateNextWacaSnapshot(snapshot: NextWacaSnapshot, variants: r
   unique(snapshot.mappings.map(row => row.feature), 'mappings');
   unique(snapshot.batches.map(row => row.id), 'batches');
   unique(snapshot.masterLinks.map(row => row.childCode), 'masterLinks');
+  unique((snapshot.cutoverAudit ?? []).map(row => row.productVariantId), 'cutoverAudit');
   const orderIds = new Set(snapshot.orders.map(row => row.key));
   const variantIds = new Set(variants.map(row => row.id));
   for (const item of snapshot.items) {
@@ -83,6 +101,9 @@ export function validateNextWacaSnapshot(snapshot: NextWacaSnapshot, variants: r
     if (link.productVariantId && !variantIds.has(link.productVariantId)) {
       throw new Error(`NEXT_WACA_ORPHAN_MASTER_LINK:${link.childCode}`);
     }
+  }
+  for (const row of snapshot.cutoverAudit ?? []) {
+    if (!variantIds.has(row.productVariantId)) throw new Error(`NEXT_WACA_ORPHAN_CUTOVER:${row.productVariantId}`);
   }
 }
 
@@ -104,6 +125,7 @@ export async function readNextWacaSnapshot(): Promise<NextWacaSnapshot> {
         mappings: rows<WacaMapping>(values.get(NEXT_WACA_KEYS.mappings), 'mappings'),
         batches: rows<WacaBatch>(values.get(NEXT_WACA_KEYS.batches), 'batches'),
         masterLinks: rows<MyAcgMasterLink>(values.get(NEXT_WACA_KEYS.masterLinks), 'masterLinks'),
+        cutoverAudit: rows<WacaCutoverAudit>(values.get(NEXT_WACA_KEYS.cutoverAudit), 'cutoverAudit'),
       });
       transaction.onerror = () => reject(transaction.error ?? new Error('NEXT_WACA_READ_FAILED'));
       transaction.onabort = () => reject(transaction.error ?? new Error('NEXT_WACA_READ_ABORTED'));
@@ -135,6 +157,7 @@ export function snapshotFromRepository(
     mappings: [...repo.mappings.values()],
     batches,
     masterLinks,
+    cutoverAudit: prior.cutoverAudit ?? [],
   };
 }
 
@@ -152,24 +175,39 @@ export async function commitNextWacaSnapshot(
       const store = transaction.objectStore('kv');
       const currentRevision = store.get(NEXT_WACA_KEYS.revision);
       const variantRequest = store.get('erp_product_variants');
-      let revisionReady = false, variantReady = false;
+      const beforeOrdersRequest = store.get(NEXT_WACA_KEYS.orders);
+      const beforeItemsRequest = store.get(NEXT_WACA_KEYS.items);
+      let revisionReady = false, variantReady = false, ordersReady = false, itemsReady = false;
       let failure: Error | null = null;
       const abort = (error: Error) => {
         failure = error;
         try { transaction.abort(); } catch { /* already closed */ }
       };
       const stage = () => {
-        if (!revisionReady || !variantReady) return;
+        if (!revisionReady || !variantReady || !ordersReady || !itemsReady) return;
         const revision = Number(currentRevision.result ?? 0);
         if (revision !== expectedRevision) { abort(new Error('NEXT_WACA_STALE_REVISION')); return; }
         const variants = rows<ProductVariant>(variantRequest.result, 'productVariants');
         try { validateNextWacaSnapshot(snapshot, variants); } catch (error) { abort(error as Error); return; }
         let nextVariants = variants;
+        let cutoverAudit = snapshot.cutoverAudit ?? [];
         if (updateAutoQuantity) {
           const repo = repositoryFromSnapshot(snapshot, variants);
+          if (!cutoverAudit.length && variants.length) {
+            const beforeOrders = rows<WacaOrder>(beforeOrdersRequest.result, 'orders');
+            const beforeItems = rows<WacaItem>(beforeItemsRequest.result, 'items');
+            const priorRepo = createWacaRepository();
+            priorRepo.orders = new Map(beforeOrders.map(row => [row.key, row]));
+            priorRepo.items = new Map(beforeItems.map(row => [row.key, row]));
+            recomputeWacaQuantities(priorRepo);
+            cutoverAudit = buildWacaCutoverAudit(
+              variants, priorRepo.autoQuantities, repo.autoQuantities, new Date().toISOString(),
+            );
+          }
           nextVariants = variants.map(variant => ({
             ...variant,
             waca_auto_quantity: repo.autoQuantities.get(variant.id) ?? 0,
+            waca_manual_adjustment: (snapshot.cutoverAudit ?? []).length ? (variant.waca_manual_adjustment ?? 0) : 0,
           }));
         }
         try {
@@ -178,6 +216,7 @@ export async function commitNextWacaSnapshot(
           store.put(snapshot.mappings, NEXT_WACA_KEYS.mappings);
           store.put(snapshot.batches, NEXT_WACA_KEYS.batches);
           store.put(snapshot.masterLinks, NEXT_WACA_KEYS.masterLinks);
+          store.put(cutoverAudit, NEXT_WACA_KEYS.cutoverAudit);
           if (updateAutoQuantity) store.put(nextVariants, 'erp_product_variants');
           store.put(revision + 1, NEXT_WACA_KEYS.revision);
         } catch (error) {
@@ -186,6 +225,8 @@ export async function commitNextWacaSnapshot(
       };
       currentRevision.onsuccess = () => { revisionReady = true; stage(); };
       variantRequest.onsuccess = () => { variantReady = true; stage(); };
+      beforeOrdersRequest.onsuccess = () => { ordersReady = true; stage(); };
+      beforeItemsRequest.onsuccess = () => { itemsReady = true; stage(); };
       transaction.oncomplete = () => resolve(expectedRevision + 1);
       transaction.onerror = () => reject(failure ?? transaction.error ?? new Error('NEXT_WACA_WRITE_FAILED'));
       transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('NEXT_WACA_WRITE_ABORTED'));

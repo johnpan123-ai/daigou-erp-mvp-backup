@@ -225,18 +225,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="sidebar-section-title">
             主選單
           </div>
-          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label="主頁面" onClick={() => setIsMobileMenuOpen(false)} />
+          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label={providerMode === 'next' ? '主頁' : '主頁面'} onClick={() => setIsMobileMenuOpen(false)} />
           {user && canViewPage('/inventory') && (
-            <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="商品清單匯入" onClick={() => setIsMobileMenuOpen(false)} />
+            <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label={providerMode === 'next' ? '買動漫匯入' : '商品清單匯入'} onClick={() => setIsMobileMenuOpen(false)} />
           )}
           {/* Hiding 訂單快速匯入 per request, but keeping code/page intact */}
           {/* {canViewPage('/orders-import') && (
             <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )} */}
-          <SidebarItem to="/purchase-records" state={{ resetSearch: Date.now() }} icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
           {providerMode === 'next' && (
-            <SidebarItem to="/waca" icon={<FileSpreadsheet size={20} />} label="WACA 訂單整合" onClick={() => setIsMobileMenuOpen(false)} />
+            <SidebarItem to="/waca" icon={<FileSpreadsheet size={20} />} label="WACA 匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )}
+          <SidebarItem to="/purchase-records" state={{ resetSearch: Date.now() }} icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />
           <SidebarItem to="/recent-purchases" icon={<History size={20} />} label="近期採購" onClick={() => setIsMobileMenuOpen(false)} />
           {canViewPage('/purchasing') && (
             <SidebarItem to="/purchasing" icon={<FileText size={20} />} label="採購總表" onClick={() => setIsMobileMenuOpen(false)} />

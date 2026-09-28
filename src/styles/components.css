@@ -44,6 +44,14 @@
   cursor: not-allowed;
 }
 
+/* Shared ERP import/action dimensions, matching the established catalog import control. */
+.btn-md {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .btn-primary {
   background-color: var(--color-primary);
   color: #ffffff;
@@ -62,6 +70,9 @@
 .btn-outline:hover:not(:disabled) {
   background-color: var(--color-bg-surface-active);
 }
+
+.file-upload-control { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.file-upload-selection { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; color: var(--color-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
 
 .btn-ghost {
   background-color: transparent;

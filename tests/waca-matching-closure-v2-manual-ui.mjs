@@ -36,7 +36,8 @@ try {
   ];
   assert.equal(await page.evaluate(async value => window.db.importData(JSON.stringify(value)), seed), true);
   await page.reload();
-  await page.getByRole('heading', { name: 'WACA 訂單整合' }).waitFor();
+  await page.getByRole('heading', { name: 'WACA 匯入' }).waitFor();
+  await page.locator('.waca-master-import > summary').click();
   const html = '<table><tr><th>主編號(多規格編號)</th><th>子編號(商品編號)</th><th>商品名稱</th><th>規格/項目</th></tr>'
     + '<tr><td>GP-A</td><td>G-RED</td><td>Product A</td><td>Red</td></tr>'
     + '<tr><td>GP-A</td><td>G-BLUE</td><td>Product A</td><td>Blue</td></tr></table>';
@@ -57,19 +58,19 @@ try {
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) });
   await page.getByRole('heading', { name: '匯入預覽：manual.xlsx' }).waitFor();
-  assert.match(await page.locator('.waca-metrics').last().innerText(), /1\s+待人工確認特徵/);
-  assert.match(await page.locator('.waca-metrics').last().innerText(), /1\s+未配對特徵/);
-  await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認匯入' }).click()]);
-  await page.getByText(/匯入完成：新增 2/).waitFor();
+  assert.match(await page.locator('[aria-label="WACA 匯入預覽摘要"]').innerText(), /2\s+待處理/);
+  await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
+  await page.getByText(/WACA 訂單已保存/).waitFor();
   await page.getByRole('button', { name: /待處理 2/ }).click();
   const ambiguous = page.locator('.waca-pending-card').filter({ hasText: 'GP-A' });
   await ambiguous.waitFor();
-  assert.match(await ambiguous.innerText(), /同一 GP 下有多個候選/);
+  assert.match(await ambiguous.innerText(), /找到多個可能規格/);
+  await ambiguous.locator('details > summary').click();
   assert.match(await ambiguous.innerText(), /G-RED／買動漫規格 Red／\s*ERP ProductVariant variant-red/);
   assert.match(await ambiguous.innerText(), /G-BLUE／買動漫規格 Blue／\s*ERP ProductVariant variant-blue/);
   const missing = page.locator('.waca-pending-card').filter({ hasText: 'GP-Z' });
-  assert.match(await missing.innerText(), /缺少買動漫 GP → G 原始證據/);
-  assert.match(await missing.innerText(), /沒有同 GP 的買動漫候選 G/);
+  assert.match(await missing.innerText(), /找不到對應商品/);
+  assert.match(await missing.innerText(), /找不到可安全確認的規格/);
   await ambiguous.locator('select').selectOption('variant-blue');
   await Promise.all([page.waitForEvent('download'), ambiguous.getByRole('button', { name: '確認對照' }).click()]);
   await page.getByText(/商品對照已保存/).waitFor();

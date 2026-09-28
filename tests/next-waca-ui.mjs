@@ -50,11 +50,12 @@ try {
   await page.waitForFunction(() => Boolean(window.db));
   assert.equal(await page.evaluate(async value => window.db.importData(JSON.stringify(value)), seed), true);
   await page.reload();
-  await page.getByRole('heading', { name: 'WACA 訂單整合' }).waitFor();
-  await page.getByRole('link', { name: 'WACA 訂單整合' }).waitFor();
+  await page.getByRole('heading', { name: 'WACA 匯入' }).waitFor();
+  await page.getByRole('link', { name: 'WACA 匯入' }).waitFor();
   assert.match(await page.locator('body').innerText(), /NEXT SANDBOX/);
 
   const myacgHtml = '<table><tr><th>主編號(多規格編號)</th><th>子編號(商品編號)</th><th>商品名稱</th><th>規格/項目</th></tr><tr><td>GP-A</td><td>G-RED</td><td>Product</td><td>Red</td></tr></table>';
+  await page.locator('.waca-master-import > summary').click();
   await page.getByLabel('選擇買動漫商品匯出檔').setInputFiles({
     name: 'myacg-source.xls', mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(myacgHtml),
   });
@@ -81,27 +82,31 @@ try {
     await page.getByRole('heading', { name: '匯入預覽：waca-sample.xlsx' }).waitFor();
   };
   await upload();
-  assert.match(await page.locator('.waca-equation').innerText(), /有效商品數量 2 = 已配對 2 \+ 待處理 0/);
-  assert.match(await page.locator('.waca-scroll').last().innerText(), /G-RED/);
+  assert.match(await page.locator('[aria-label="WACA 匯入預覽摘要"]').innerText(), /2\s+有效數量/);
+  await page.locator('.waca-group > summary').click();
+  assert.match(await page.locator('.waca-group').innerText(), /G-RED/);
   const [preImportBackup] = await Promise.all([
-    page.waitForEvent('download'), page.getByRole('button', { name: '確認匯入' }).click(),
+    page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click(),
   ]);
   assert.ok(preImportBackup.suggestedFilename().endsWith('.json'));
-  await page.getByText(/匯入完成：新增 1/).waitFor();
+  await page.getByText(/WACA 更新完成/).waitFor();
   let variants = await page.evaluate(() => window.db.getProductVariants({ raw: true }));
   assert.equal(variants.find(item => item.id === 'variant-a').waca_auto_quantity, 2);
-  assert.equal(variants.find(item => item.id === 'variant-a').waca_manual_adjustment, 4);
+  assert.equal(variants.find(item => item.id === 'variant-a').waca_manual_adjustment, 0);
   await page.goto(`${origin}/purchase-records`);
   const purchaseRow = page.getByRole('row').filter({ hasText: 'Product' }).first();
   await purchaseRow.waitFor();
-  assert.match(await purchaseRow.innerText(), /\b6\b/, 'purchase record must show WACA auto 2 + manual 4');
+  assert.match(await purchaseRow.innerText(), /\b2\b/, 'purchase record must show order-derived WACA quantity 2');
   await page.goto(`${origin}/waca`);
-  await page.getByRole('heading', { name: 'WACA 訂單整合' }).waitFor();
+  await page.getByRole('heading', { name: 'WACA 匯入' }).waitFor();
 
   await upload();
-  assert.match(await page.locator('.waca-metrics').last().innerText(), /未變更\s+1/);
+  assert.match(await page.locator('.waca-equation').innerText(), /未變更 1/);
+  assert.equal(await page.locator('.waca-group').count(), 0, 'unchanged groups are hidden by default');
+  await page.getByLabel('顯示未變更商品').check();
+  assert.equal(await page.locator('.waca-group').count(), 1);
   const [repeatBackup] = await Promise.all([
-    page.waitForEvent('download'), page.getByRole('button', { name: '確認匯入' }).click(),
+    page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click(),
   ]);
   const backup = JSON.parse(readFileSync(await repeatBackup.path(), 'utf8'));
   assert.equal(backup.wacaOrders.length, 1);
@@ -109,6 +114,7 @@ try {
   assert.equal(backup.wacaMappings.length, 1);
   assert.equal(backup.myacgMasterLinks.length, 1);
   assert.equal(backup.productVariants[0].waca_auto_quantity, 2);
+  assert.equal(backup.wacaCutoverAudit[0].unverifiedPreCutoverManualQuantity, 4);
   const workbenchBackup = await page.evaluate(async () => {
     const { collectWorkbenchBackupData } = await import('/src/lib/workbenchJsonBackup.ts');
     return collectWorkbenchBackupData(window.dataProvider);
@@ -130,7 +136,7 @@ try {
   assert.match(await restored.locator('.waca-panel').innerText(), /waca-sample.xlsx/);
   const restoredVariants = await restored.evaluate(() => window.db.getProductVariants({ raw: true }));
   assert.equal(restoredVariants.find(item => item.id === 'variant-a').waca_auto_quantity, 2);
-  assert.equal(restoredVariants.find(item => item.id === 'variant-a').waca_manual_adjustment, 4);
+  assert.equal(restoredVariants.find(item => item.id === 'variant-a').waca_manual_adjustment, 0);
   assert.equal((await restored.evaluate(() => window.db.getProductGroups())).length, 1);
   assert.equal((await restored.evaluate(() => window.db.getInventory())).length, 1);
   const restoredWaca = await restored.evaluate(async () => (await import('/src/waca/nextStorage.ts')).readNextWacaSnapshot());
@@ -156,7 +162,7 @@ try {
     buffer: XLSX.write(changedBook, { type: 'buffer', bookType: 'xlsx' }),
   });
   await page.getByRole('heading', { name: '匯入預覽：changed.xlsx' }).waitFor();
-  await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認匯入' }).click()]);
+  await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
   await page.getByText(/INJECTED_WACA_WRITE_FAILURE/).waitFor();
   await page.evaluate(() => window.__restoreWacaPut());
   variants = await page.evaluate(() => window.db.getProductVariants({ raw: true }));
@@ -166,22 +172,22 @@ try {
 
   const concurrent = await context.newPage();
   await concurrent.goto(`${origin}/waca`);
-  await concurrent.getByRole('heading', { name: 'WACA 訂單整合' }).waitFor();
+  await concurrent.getByRole('heading', { name: 'WACA 匯入' }).waitFor();
   await concurrent.getByLabel('選擇 WACA Excel').setInputFiles({
     name: 'concurrent.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: XLSX.write(changedBook, { type: 'buffer', bookType: 'xlsx' }),
   });
   await concurrent.getByRole('heading', { name: '匯入預覽：concurrent.xlsx' }).waitFor();
-  await Promise.all([concurrent.waitForEvent('download'), concurrent.getByRole('button', { name: '確認匯入' }).click()]);
-  await concurrent.getByText(/匯入完成：新增 0、更新 1/).waitFor();
-  await page.getByRole('button', { name: '確認匯入' }).click();
+  await Promise.all([concurrent.waitForEvent('download'), concurrent.getByRole('button', { name: '確認更新' }).click()]);
+  await concurrent.getByText(/WACA 更新完成/).waitFor();
+  await page.getByRole('button', { name: '確認更新' }).click();
   await page.getByText(/WACA 資料已變更，請重新預覽檔案/).waitFor();
   await page.getByRole('button', { name: '重新讀取' }).click();
   await page.getByRole('button', { name: '來源訂單' }).click();
   assert.match(await page.locator('.waca-panel').innerText(), /A-001/);
   variants = await page.evaluate(() => window.db.getProductVariants({ raw: true }));
   assert.equal(variants.find(item => item.id === 'variant-a').waca_auto_quantity, 3);
-  assert.equal(variants.find(item => item.id === 'variant-a').waca_manual_adjustment, 4);
+  assert.equal(variants.find(item => item.id === 'variant-a').waca_manual_adjustment, 0);
   await page.getByRole('button', { name: '商品對照' }).click();
   assert.match(await page.locator('.waca-panel').innerText(), /G-RED/);
   await page.getByRole('button', { name: '匯入紀錄' }).click();

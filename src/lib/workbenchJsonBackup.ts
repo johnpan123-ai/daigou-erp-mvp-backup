@@ -97,6 +97,7 @@ export async function collectWorkbenchBackupData(provider: BackupProvider): Prom
     data.wacaMappings = waca.mappings;
     data.wacaImportBatches = waca.batches;
     data.myacgMasterLinks = waca.masterLinks;
+    data.wacaCutoverAudit = waca.cutoverAudit ?? [];
   }
   return data;
 }

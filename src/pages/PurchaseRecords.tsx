@@ -43,6 +43,7 @@ import {
   fetchReadonlyCatalogText,
 } from '../lib/readonlyCatalogApi';
 import { getProviderMode } from '../providers/providerMode';
+import { purchaseRecordsWacaQuantity } from '../waca/reconciliation';
 import { readNextRawCollections } from '../lib/nextRawDbIntegrityProbe';
 import {
   assertNextFieldTestProductGroupsReadback,
@@ -526,12 +527,7 @@ export default function PurchaseRecords() {
           : (autoMyacg ?? (v as any).myacg_quantity ?? localMyacg);
         const v0Myacg = rawMyacg >= 0 ? rawMyacg : 0;
 
-        const localWaca = (v.waca_auto_quantity ?? 0) + (v.waca_manual_adjustment ?? 0);
-        const autoWaca = (v.waca_auto_quantity !== null && v.waca_auto_quantity !== undefined && v.waca_auto_quantity >= 0)
-          ? v.waca_auto_quantity + (v.waca_manual_adjustment ?? 0)
-          : null;
-        const rawWaca = autoWaca ?? (v as any).waca_quantity ?? localWaca;
-        const v0Waca = rawWaca >= 0 ? rawWaca : 0;
+        const v0Waca = purchaseRecordsWacaQuantity(v, providerMode === 'next');
 
         const groupPrivateOrderItems = privateOrderItemsByGroupId.get(groupId) ?? [];
         const localPrivate = groupPrivateOrderItems.filter(poi => poi && poi.product_variant_id === v.id).reduce((sum, item) => sum + (item.quantity || 0), 0);
