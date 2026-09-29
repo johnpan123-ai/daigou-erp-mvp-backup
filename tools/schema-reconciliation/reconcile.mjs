@@ -217,6 +217,7 @@ export function reconcileMigration(snapshot, effect) {
     state, historicalExecution: snapshot.migrationHistory?.entries?.[effect.migrationId]?.eventType === 'MIGRATION_APPLIED'
       && snapshot.migrationHistory.entries[effect.migrationId].result === 'PASS' ? 'PROVEN_APPLIED' : 'UNPROVEN',
     safeToApply, risk: effect.risk, dependencies: effect.dependencies,
+    dependencySources: effect.dependencySources,
     repairClosure: effect.repairClosure ?? null, repairs: effect.repairs ?? [],
     preconditions: pre, postconditions: post, detector,
   };
@@ -282,6 +283,18 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
       || (repair.state === EFFECT_STATES.NEEDS_APPLY && repair.safeToApply))) {
       item.coveredByRepair = repair.migrationId;
     }
+  }
+  for (const item of migrations) {
+    item.dependencyEvidence = item.dependencies.map(migrationId => {
+      const internal = byId.get(migrationId);
+      if (internal) return { migrationId, scope: 'PLANNER', state: internal.state,
+        safeToApply: internal.safeToApply };
+      const source = item.dependencySources.find(value => value.migrationId === migrationId);
+      if (!source) return { migrationId, scope: 'MISSING', resolution: 'UNRESOLVED' };
+      return { ...source, scope: 'SOURCE_REGISTRY', resolution: item.state === EFFECT_STATES.SATISFIED
+        ? 'NOT_REQUIRED_SATISFIED_EFFECT'
+        : item.safeToApply ? 'SATISFIED_BY_SAFE_PRECONDITIONS' : 'UNRESOLVED' };
+    });
   }
   const blockers = migrations.filter(item => !item.coveredByRepair
     && ([EFFECT_STATES.PARTIAL, EFFECT_STATES.CONFLICT, EFFECT_STATES.UNKNOWN].includes(item.state)

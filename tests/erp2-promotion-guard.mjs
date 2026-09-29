@@ -128,16 +128,24 @@ const schemaEvidence = sealSchemaEvidence({
   evidenceFingerprint: 'c'.repeat(64), readyForApply: true, blockers: [], applyPlan: [],
   migrations: [{
     migrationId: 'fixture', sourceFile: 'fixture.sql', sourceChecksum: 'd'.repeat(64), canonicalOrder: 1,
-    state: 'SATISFIED', safeToApply: false, dependencies: [], repairs: [], applyMethod: 'NO_APPLY',
+    state: 'SATISFIED', safeToApply: false, dependencies: [], dependencySources: [], dependencyEvidence: [],
+    repairs: [], applyMethod: 'NO_APPLY',
   }],
 });
-assert.equal(verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate, liveObservation, now }).result, 'PASS');
+const schemaRegistry = Object.fromEntries(schemaEvidence.migrations.map(item => [item.migrationId, {
+  sourceFile: item.sourceFile, sourceChecksum: item.sourceChecksum, canonicalOrder: item.canonicalOrder,
+  dependencies: item.dependencies, dependencySources: item.dependencySources,
+  repairClosure: item.repairClosure, repairs: item.repairs,
+}]));
+assert.equal(verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate, liveObservation,
+  migrationRegistry: schemaRegistry, now }).result, 'PASS');
 for (const evidence of [
   sealSchemaEvidence({ ...schemaEvidence, projectRef: 'wrong' }),
   sealSchemaEvidence({ ...schemaEvidence, sourceHead: accepted }),
   sealSchemaEvidence({ ...schemaEvidence, blockers: [{ migrationId: '044', state: 'UNKNOWN' }] }),
   sealSchemaEvidence({ ...schemaEvidence, migrations: [{ ...schemaEvidence.migrations[0], state: 'UNKNOWN' }] }),
-]) assert.throws(() => verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, now }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
+]) assert.throws(() => verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation,
+  migrationRegistry: schemaRegistry, now }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
 console.log('PASS fail-closed: schema baseline evidence');
 
 const artifactRoot = await mkdtemp(join(tmpdir(), 'erp2-promotion-artifact-'));

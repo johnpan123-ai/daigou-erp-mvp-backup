@@ -20,6 +20,8 @@ const migration = (migrationId, canonicalOrder, state, overrides = {}) => ({
   state,
   safeToApply: state === 'NEEDS_APPLY',
   dependencies: [],
+  dependencySources: [],
+  dependencyEvidence: [],
   repairs: [],
   repairClosure: null,
   coveredByRepair: null,
@@ -70,14 +72,29 @@ const makeEvidence = ({ migrations, mode = 'PRE_ADOPTION', capturedAt = nowIso,
 });
 
 const observe = (fingerprint = current, observedAt = nowIso) => ({ projectRef, fingerprint, observedAt });
+const registryFor = evidence => Object.fromEntries(evidence.migrations.map(item => [item.migrationId, {
+  sourceFile: item.sourceFile, sourceChecksum: item.sourceChecksum, canonicalOrder: item.canonicalOrder,
+  dependencies: item.dependencies, dependencySources: item.dependencySources,
+  repairClosure: item.repairClosure, repairs: item.repairs,
+}]));
 const pass = evidence => verifySchemaBaselineEvidence({ evidence, contract, candidate,
-  liveObservation: observe(evidence.currentFingerprint), now });
+  liveObservation: observe(evidence.currentFingerprint), migrationRegistry: registryFor(evidence), now });
 const blocked = (evidence, liveObservation = observe(evidence.currentFingerprint)) => assert.throws(
-  () => verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, now }),
+  () => verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation,
+    migrationRegistry: registryFor(evidence), now }),
   /DEPLOYMENT_GUARD_FAILED_CLOSED/u,
 );
 
-const safeDelta = [migration('018', 18, 'NEEDS_APPLY'), migration('026b', 26, 'SATISFIED')];
+const externalDependencies = ['001','002-core','011'].map((migrationId, index) => ({
+  migrationId, sourceFile: `${migrationId}_dependency.sql`, sourceChecksum: checksum(String(index + 3)),
+}));
+const safeDelta = [migration('018', 18, 'NEEDS_APPLY', {
+  dependencies: externalDependencies.map(item => item.migrationId),
+  dependencySources: externalDependencies,
+  dependencyEvidence: externalDependencies.map(item => ({ ...item, scope: 'SOURCE_REGISTRY',
+    resolution: 'SATISFIED_BY_SAFE_PRECONDITIONS' })),
+}),
+  migration('026b', 26, 'SATISFIED')];
 assert.deepEqual(pass(makeEvidence({ migrations: safeDelta })).applyDelta, ['018']);
 console.log('PASS A: PRE_ADOPTION permits current != canonical with an exact safe delta');
 
@@ -135,7 +152,7 @@ const baselineRecord = {
 const post = makeEvidence({ migrations: postMigrations, mode: 'POST_ADOPTION', currentFingerprint: canonical,
   baselineRecord });
 assert.equal(verifySchemaBaselineEvidence({ evidence: post, contract, candidate,
-  liveObservation: observe(canonical), now }).mode, 'POST_ADOPTION');
+  liveObservation: observe(canonical), migrationRegistry: registryFor(post), now }).mode, 'POST_ADOPTION');
 blocked(makeEvidence({ migrations: postMigrations, mode: 'POST_ADOPTION', baselineRecord: {
   ...baselineRecord, schemaFingerprintAfter: current,
 } }));

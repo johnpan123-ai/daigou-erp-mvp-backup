@@ -76,20 +76,33 @@ const ageOf = (value, now, label) => {
   return now - timestamp;
 };
 
-const verifyPlannerContract = evidence => {
+const verifyPlannerContract = (evidence, migrationRegistry) => {
   if (!Array.isArray(evidence.migrations) || !Array.isArray(evidence.applyPlan)
     || evidence.plannerIdentity !== buildPlannerIdentity(evidence)
     || evidence.deltaIdentity !== buildDeltaIdentity(evidence)
     || evidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(evidence)) {
     failClosed('schema planner evidence identity mismatch');
   }
+  if (!migrationRegistry || !exactJson(Object.keys(migrationRegistry), evidence.migrations.map(item => item.migrationId))) {
+    failClosed('schema planner registry scope mismatch');
+  }
   const ids = new Set();
   let lastOrder = -1;
   for (const item of evidence.migrations) {
     if (!item?.migrationId || ids.has(item.migrationId) || !SHA256_PATTERN.test(item.sourceChecksum ?? '')
       || !Number.isSafeInteger(item.canonicalOrder) || item.canonicalOrder <= lastOrder
-      || !Array.isArray(item.dependencies) || !Array.isArray(item.repairs)) {
+      || !Array.isArray(item.dependencies) || !Array.isArray(item.dependencySources)
+      || !Array.isArray(item.dependencyEvidence) || !Array.isArray(item.repairs)) {
       failClosed('schema planner migration identity is invalid');
+    }
+    const effect = migrationRegistry[item.migrationId];
+    if (effect.sourceFile !== item.sourceFile || effect.sourceChecksum !== item.sourceChecksum
+      || effect.canonicalOrder !== item.canonicalOrder
+      || !exactJson(effect.dependencies, item.dependencies)
+      || !exactJson(effect.dependencySources, item.dependencySources)
+      || (effect.repairClosure ?? null) !== (item.repairClosure ?? null)
+      || !exactJson(effect.repairs ?? [], item.repairs)) {
+      failClosed(`migration ${item.migrationId} does not match the candidate source registry`);
     }
     ids.add(item.migrationId); lastOrder = item.canonicalOrder;
   }
@@ -133,10 +146,20 @@ const verifyPreAdoption = ({ evidence, migrationsById }) => {
       }
       for (const dependencyId of item.dependencies) {
         const dependency = migrationsById.get(dependencyId);
-        if (!dependency || (dependency.state !== 'SATISFIED'
+        if (dependency && dependency.state !== 'SATISFIED'
           && !(dependency.state === 'NEEDS_APPLY' && dependency.safeToApply === true
-            && planIndex.get(dependencyId) < planIndex.get(item.migrationId)))) {
+            && planIndex.get(dependencyId) < planIndex.get(item.migrationId))) {
           failClosed(`migration ${item.migrationId} has an unsafe dependency`);
+        }
+        if (!dependency) {
+          const source = item.dependencySources.find(value => value.migrationId === dependencyId);
+          const resolution = item.dependencyEvidence.find(value => value.migrationId === dependencyId);
+          if (!source || !resolution || resolution.scope !== 'SOURCE_REGISTRY'
+            || resolution.resolution !== 'SATISFIED_BY_SAFE_PRECONDITIONS'
+            || resolution.sourceFile !== source.sourceFile || resolution.sourceChecksum !== source.sourceChecksum
+            || !SHA256_PATTERN.test(source.sourceChecksum ?? '')) {
+            failClosed(`migration ${item.migrationId} has an unproven external dependency`);
+          }
         }
       }
       continue;
@@ -170,7 +193,8 @@ const verifyPostAdoption = ({ evidence, required, candidate }) => {
   }
 };
 
-export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, now = Date.now() }) {
+export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, migrationRegistry,
+  now = Date.now() }) {
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
   if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
@@ -194,7 +218,7 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
     failClosed('schema snapshot identity is missing, stale, or mismatched');
   }
   verifyLiveObservation({ liveObservation, evidence, contract, now });
-  const migrationsById = verifyPlannerContract(evidence);
+  const migrationsById = verifyPlannerContract(evidence, migrationRegistry);
   if (evidence.mode === 'POST_ADOPTION') verifyPostAdoption({ evidence, required, candidate });
   else verifyPreAdoption({ evidence, migrationsById });
   return {

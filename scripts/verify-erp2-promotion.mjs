@@ -10,6 +10,7 @@ import {
   verifyPromotionIdentity,
   verifySchemaBaselineEvidence,
 } from './promotion-safety.mjs';
+import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 
 const fail = message => { throw new DeploymentGuardError(message); };
 const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir', 'schema-evidence']);
@@ -76,6 +77,7 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
     evidence: schemaEvidence,
     contract,
     candidate: proof.candidate,
+    migrationRegistry: await buildMigrationEffectRegistry(),
     liveObservation: {
       projectRef: environment.ERP2_LIVE_SCHEMA_PROJECT_REF,
       fingerprint: environment.ERP2_LIVE_SCHEMA_FINGERPRINT,

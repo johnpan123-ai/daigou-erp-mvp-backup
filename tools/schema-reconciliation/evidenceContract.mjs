@@ -22,6 +22,8 @@ export const migrationGuardProjection = migrations => migrations.map(item => ({
   state: item.state,
   safeToApply: item.safeToApply,
   dependencies: item.dependencies ?? [],
+  dependencySources: item.dependencySources ?? [],
+  dependencyEvidence: item.dependencyEvidence ?? [],
   dependencyBlocker: item.dependencyBlocker ?? null,
   repairClosure: item.repairClosure ?? null,
   repairs: item.repairs ?? [],

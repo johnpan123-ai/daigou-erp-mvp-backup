@@ -225,7 +225,7 @@ const liveObservation = { projectRef: evidence.projectRef, fingerprint: evidence
 const fixtureNow = Date.parse(evidence.snapshotIdentity.capturedAt);
 assert.equal(verifySchemaBaselineEvidence({ evidence, contract: fixtureContract, candidate: {
   head: evidence.sourceHead, checkpointTag: evidence.checkpoint,
-}, liveObservation, now: fixtureNow }).result, 'PASS');
+}, liveObservation, migrationRegistry: registry, now: fixtureNow }).result, 'PASS');
 const postAdoptionEvidence = sealSchemaEvidence({ ...evidence, mode: 'POST_ADOPTION', migrationHistoryProvenance: 'AVAILABLE',
   baselineRecord: {
     ...adoption, eventKey: contract.schemaBaseline.requiredBaselineId,
@@ -234,16 +234,16 @@ const postAdoptionEvidence = sealSchemaEvidence({ ...evidence, mode: 'POST_ADOPT
   } });
 assert.equal(verifySchemaBaselineEvidence({ evidence: postAdoptionEvidence, contract: fixtureContract, candidate: {
   head: evidence.sourceHead, checkpointTag: evidence.checkpoint,
-}, liveObservation, now: fixtureNow }).mode, 'POST_ADOPTION');
+}, liveObservation, migrationRegistry: registry, now: fixtureNow }).mode, 'POST_ADOPTION');
 assert.throws(() => verifySchemaBaselineEvidence({ evidence: sealSchemaEvidence({ ...evidence, currentFingerprint: '0'.repeat(64) }),
   contract: fixtureContract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint },
-  liveObservation, now: fixtureNow }), /FAILED_CLOSED/u);
+  liveObservation, migrationRegistry: registry, now: fixtureNow }), /FAILED_CLOSED/u);
 assert.throws(() => verifySchemaBaselineEvidence({ evidence: {
   ...postAdoptionEvidence,
   baselineRecord: { ...postAdoptionEvidence.baselineRecord,
     metadata: { historicalMigrationExecutionClaimed: true } },
 }, contract: fixtureContract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint },
-liveObservation, now: fixtureNow }), /FAILED_CLOSED/u);
+liveObservation, migrationRegistry: registry, now: fixtureNow }), /FAILED_CLOSED/u);
 console.log('PASS deployment guard accepts PRE/POST adoption proof and rejects stale or fabricated history');
 
 const observed = blank(); observed.completeness = { structural: false, tables: true, columns: false, constraints: false,
