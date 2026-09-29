@@ -6,8 +6,27 @@
 .settings-system-info-grid > div { min-width: 0; padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-base); }
 .settings-system-info-grid dt { font-size: 12px; color: var(--color-text-secondary); }
 .settings-system-info-grid dd { margin: 4px 0 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.settings-restore-card { gap: 16px; }
+.settings-restore-heading { gap: 16px; }
+.settings-cloud-restore-preview { display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg-base); }
+.settings-cloud-restore-preview__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.settings-cloud-restore-file-name { margin-top: 4px; overflow-wrap: anywhere; }
+.settings-cloud-restore-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.settings-cloud-restore-summary > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-surface); }
+.settings-cloud-restore-summary span { font-size: 12px; color: var(--color-text-secondary); }
+.settings-cloud-restore-summary strong { font-size: 15px; overflow-wrap: anywhere; }
+.settings-cloud-restore-warning { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px; border-radius: 8px; background: var(--color-warning-soft, #fff7e6); color: var(--color-text-primary); font-size: 13px; line-height: 1.5; }
+.settings-cloud-restore-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.settings-restore-notice { padding: 12px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.settings-restore-notice--success { color: var(--color-success, #15803d); background: var(--color-success-soft, #ecfdf3); }
+.settings-restore-notice--error { color: var(--color-danger, #b91c1c); background: var(--color-danger-soft, #fef2f2); }
 @media (max-width: 767px) {
   .kpi-grid.settings-data-grid { grid-template-columns: minmax(0, 1fr); }
   /* Existing desktop cards span two/three tracks; don't create implicit mobile tracks. */
   .settings-data-grid > .card { grid-column: 1 / -1 !important; min-width: 0; }
+  .settings-restore-heading { align-items: stretch; flex-direction: column; }
+  .settings-restore-heading .btn { width: 100%; }
+  .settings-cloud-restore-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-cloud-restore-actions { flex-direction: column-reverse; }
+  .settings-cloud-restore-actions .btn { width: 100%; }
 }

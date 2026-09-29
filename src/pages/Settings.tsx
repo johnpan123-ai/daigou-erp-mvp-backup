@@ -26,6 +26,11 @@ import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { SystemInformation } from '../components/layout/SystemInformation';
+import {
+  isCloudAtomicBackupDocument,
+  prepareCloudBackupForNextRestore,
+  type CloudBackupToNextCandidate,
+} from '../providers/cloud/cloudBackupToNext';
 import './Settings.css';
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
@@ -113,6 +118,13 @@ export default function Settings() {
   const [countLoadGate] = useState(() => new SettingsCountLoadGate());
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cloudRestoreCandidate, setCloudRestoreCandidate] = useState<{
+    rawText: string;
+    preview: CloudBackupToNextCandidate;
+  } | null>(null);
+  const [isPreparingCloudRestore, setIsPreparingCloudRestore] = useState(false);
+  const [isRestoringCloudBackup, setIsRestoringCloudBackup] = useState(false);
+  const [restoreNotice, setRestoreNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
   const testSnapshotInputRef = useRef<HTMLInputElement>(null);
   const [testSnapshotCandidate, setTestSnapshotCandidate] = useState<TestSnapshotCandidate | null>(null);
   const [testSnapshotMetadata, setTestSnapshotMetadata] = useState<TestSnapshotMetadata | null>(null);
@@ -226,8 +238,20 @@ export default function Settings() {
 
     try {
       const text = await file.text();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (isCloudAtomicBackupDocument(parsed)) {
+        if (currentMode !== 'next') {
+          throw new Error('Cloud Atomic Backup 跨環境還原只允許在 NEXT 本機沙盒執行。');
+        }
+        setIsPreparingCloudRestore(true);
+        setRestoreNotice(null);
+        const preview = await prepareCloudBackupForNextRestore(text, { fileName: file.name });
+        setCloudRestoreCandidate({ rawText: text, preview });
+        return;
+      }
+      setCloudRestoreCandidate(null);
       const { classifyWorkbenchBackup } = await import('../waca/backupFormat');
-      const backupKind = classifyWorkbenchBackup(JSON.parse(text) as Record<string, unknown>);
+      const backupKind = classifyWorkbenchBackup(parsed);
       if (backupKind === 'legacy-pre-waca' && !confirm(
         '此備份建立於 WACA 訂單系統啟用前。還原會以備份當時的 WACA 數量取代目前資料，並標記為需要匯入完整 WACA 歷史訂單。確定要還原嗎？',
       )) return;
@@ -241,10 +265,41 @@ export default function Settings() {
       } else {
         alert('還原失敗，資料未套用；匯入前的原有資料已完整保留。請確認 JSON 格式與必要集合。');
       }
-    } catch (err: any) {
-      alert(`還原失敗，資料未套用；匯入前的原有資料已完整保留。\n${err.message || err}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setCloudRestoreCandidate(null);
+      setRestoreNotice({ kind: 'error', message });
+      alert(`還原失敗，資料未套用；匯入前的原有資料已完整保留。\n${message}`);
     } finally {
+      setIsPreparingCloudRestore(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleConfirmCloudRestore = async () => {
+    if (!cloudRestoreCandidate || isRestoringCloudBackup) return;
+    const { preview, rawText } = cloudRestoreCandidate;
+    const confirmed = window.confirm(
+      `這會以「${preview.fileName}」取代目前 NEXT 本機資料。\n正式雲端不會被修改。\n\n確定繼續嗎？`,
+    );
+    if (!confirmed) return;
+    setIsRestoringCloudBackup(true);
+    setRestoreNotice(null);
+    try {
+      const success = await dataProvider.importData(rawText);
+      if (!success) throw new Error('原子還原未完成，原有 NEXT 資料已保留。');
+      await loadCounts();
+      setRestoreNotice({
+        kind: 'success',
+        message: `Cloud 備份已還原至 NEXT：${preview.summary.restoredTotalRows.toLocaleString()} 筆資料，必要關聯缺失 0。`,
+      });
+    } catch (error) {
+      setRestoreNotice({
+        kind: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsRestoringCloudBackup(false);
     }
   };
 
@@ -419,31 +474,81 @@ export default function Settings() {
               </button>
             </div>
 
-            {!isCloudRestoreDisabledMode(currentMode) ? <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
-              <div>
-                <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
-                <div className="text-xs text-muted">
-                  {isCloudRestoreDisabledMode(currentMode)
-                    ? 'Cloud Mode 暫不可使用；Local／Test Mode 仍可進行原子還原。'
-                    : '從先前的備份檔案還原資料 (會覆蓋現有資料)。'}
+            {!isCloudRestoreDisabledMode(currentMode) ? <div className="flex-col settings-action-card settings-restore-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+              <div className="flex items-center justify-between settings-restore-heading">
+                <div>
+                  <div className="font-medium" style={{ marginBottom: '4px' }}>匯入 JSON 還原</div>
+                  <div className="text-xs text-muted">
+                    {currentMode === 'next'
+                      ? '支援 NEXT JSON 與 Cloud Atomic Backup；所有資料只會寫入 NEXT 本機沙盒。'
+                      : '從先前的備份檔案還原資料 (會覆蓋現有資料)。'}
+                  </div>
                 </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleImportClick}
+                  disabled={isCloudRestoreDisabledMode(currentMode)}
+                  title={isCloudRestoreDisabledMode(currentMode) ? `Cloud Mode 暫停還原：${CLOUD_RESTORE_DISABLED_MESSAGE}` : undefined}
+                >
+                  <Upload size={16} /> {isPreparingCloudRestore ? '檢查備份中…' : '選擇備份檔'}
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".json"
+                  disabled={isCloudRestoreDisabledMode(currentMode) || isPreparingCloudRestore || isRestoringCloudBackup}
+                  style={{ display: 'none' }}
+                  data-testid="settings-restore-file-input"
+                />
               </div>
-              <button
-                className="btn btn-primary"
-                onClick={handleImportClick}
-                disabled={isCloudRestoreDisabledMode(currentMode)}
-                title={isCloudRestoreDisabledMode(currentMode) ? CLOUD_RESTORE_DISABLED_MESSAGE : undefined}
+
+              {cloudRestoreCandidate && <div className="settings-cloud-restore-preview" data-testid="cloud-restore-preview">
+                <div className="settings-cloud-restore-preview__header">
+                  <div>
+                    <div className="font-semibold">Cloud 備份相容性預覽</div>
+                    <div className="text-xs text-muted settings-cloud-restore-file-name">{cloudRestoreCandidate.preview.fileName}</div>
+                  </div>
+                  <span className="badge badge-success">可還原至 NEXT</span>
+                </div>
+                <div className="settings-cloud-restore-summary">
+                  <div><span>NEXT resources</span><strong data-testid="cloud-restore-resource-count">{cloudRestoreCandidate.preview.summary.targetResourceCount}</strong></div>
+                  <div><span>來源資料</span><strong>{cloudRestoreCandidate.preview.summary.sourceTotalRows.toLocaleString()} 筆</strong></div>
+                  <div><span>NEXT 還原資料</span><strong data-testid="cloud-restore-row-count">{cloudRestoreCandidate.preview.summary.restoredTotalRows.toLocaleString()} 筆</strong></div>
+                  <div><span>必要關聯缺失</span><strong data-testid="cloud-restore-orphan-count">{cloudRestoreCandidate.preview.summary.blockingOrphanCount}</strong></div>
+                  <div><span>WACA 訂單／品項</span><strong>{cloudRestoreCandidate.preview.summary.wacaOrderCount}／{cloudRestoreCandidate.preview.summary.wacaItemCount}</strong></div>
+                  <div><span>期限耐久資料</span><strong>{cloudRestoreCandidate.preview.summary.deadlineDurableCount} 筆</strong></div>
+                </div>
+                <div className="settings-cloud-restore-warning">
+                  <strong>{cloudRestoreCandidate.preview.summary.legacyWacaBackup ? '舊版 Cloud 備份' : '跨環境安全轉換'}</strong>
+                  <span>
+                    {cloudRestoreCandidate.preview.summary.legacyWacaBackup
+                      ? '此檔案建立於 WACA 訂單系統啟用前；會保留當時 WACA 數量並標記為需要重新建立訂單基準。'
+                      : 'Cloud 專用帳號與同步欄位不會帶入 NEXT；WACA 數量會由備份中的耐久訂單資料重新核對。'}
+                  </span>
+                  {(cloudRestoreCandidate.preview.summary.softDeletedSkippedCount > 0
+                    || cloudRestoreCandidate.preview.summary.softDeletedRetainedForIntegrityCount > 0) && <span>
+                    已排除 {cloudRestoreCandidate.preview.summary.softDeletedSkippedCount.toLocaleString()} 筆無關 tombstone；
+                    為維持歷史關聯保留 {cloudRestoreCandidate.preview.summary.softDeletedRetainedForIntegrityCount.toLocaleString()} 筆必要父資料。
+                  </span>}
+                  <span>正式 Cloud 不會被讀寫；首頁圖片歷史 metadata 不會匯入目前已停用的圖片功能。</span>
+                </div>
+                <div className="settings-cloud-restore-actions">
+                  <button className="btn btn-outline" onClick={() => setCloudRestoreCandidate(null)} disabled={isRestoringCloudBackup}>
+                    取消
+                  </button>
+                  <button className="btn btn-primary" onClick={handleConfirmCloudRestore} disabled={isRestoringCloudBackup} data-testid="cloud-restore-confirm">
+                    {isRestoringCloudBackup ? '正在原子還原…' : '確認還原至 NEXT'}
+                  </button>
+                </div>
+              </div>}
+
+              {restoreNotice && <div
+                className={`settings-restore-notice settings-restore-notice--${restoreNotice.kind}`}
+                data-testid={`cloud-restore-${restoreNotice.kind}`}
               >
-                <Upload size={16} /> {isCloudRestoreDisabledMode(currentMode) ? 'Cloud Mode 暫停還原' : '匯入還原'}
-              </button>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                accept=".json" 
-                disabled={isCloudRestoreDisabledMode(currentMode)}
-                style={{ display: 'none' }} 
-              />
+                {restoreNotice.message}
+              </div>}
             </div> : <CloudAtomicRestorePanel onAuthoritativeRefreshComplete={loadCounts} />}
 
           </div>

@@ -42,6 +42,10 @@ import {
 import { classifyWorkbenchBackup } from '../waca/backupFormat';
 import { readDeadlineDurableBackup, restoreDeadlineDurableBackup,
   validateDeadlineDurableBackup } from '../lib/closingDateSidecarBackup';
+import {
+  isCloudAtomicBackupDocument,
+  prepareCloudBackupForNextRestore,
+} from './cloud/cloudBackupToNext';
 
 export class StaleDataError extends Error {
   constructor(message = '資料已在其他分頁更新，請重新載入最新資料後再編輯。') {
@@ -337,10 +341,16 @@ class DynamicDataProvider implements IDataProvider {
     if (getProviderMode() !== 'next') {
       return this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
     }
-    const parsed = JSON.parse(jsonString) as Record<string, unknown>;
+    let effectiveJson = jsonString;
+    let parsed = JSON.parse(jsonString) as Record<string, unknown>;
+    if (isCloudAtomicBackupDocument(parsed)) {
+      const converted = await prepareCloudBackupForNextRestore(jsonString);
+      effectiveJson = converted.workbenchJson;
+      parsed = converted.workbenchData;
+    }
     const kind = classifyWorkbenchBackup(parsed);
     if (kind !== 'waca-v2') {
-      return this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
+      return this.guardedWrite(() => this.getActiveProvider().importData(effectiveJson));
     }
     // The sidecar lives in another IDB database. Validate it and stage it first,
     // then compensate if the core atomic import refuses the backup.
@@ -348,7 +358,7 @@ class DynamicDataProvider implements IDataProvider {
     const before = await readDeadlineDurableBackup('next');
     await restoreDeadlineDurableBackup('next', incoming);
     try {
-      const imported = await this.guardedWrite(() => this.getActiveProvider().importData(jsonString));
+      const imported = await this.guardedWrite(() => this.getActiveProvider().importData(effectiveJson));
       if (!imported) await restoreDeadlineDurableBackup('next', before);
       return imported;
     } catch (error) {
