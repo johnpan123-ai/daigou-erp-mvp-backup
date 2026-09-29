@@ -42,8 +42,21 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '042_cloud_restore_durable_execution_closure.sql',
   '043_cloud_restore_execute_dispatch_boundary.sql',
   '044_waca_cloud_ledger.sql',
+  '045c_waca_cloud_atomic_restore_semantic_closure.sql',
+  '046_waca_myacg_parent_evidence.sql',
+  '046b_waca_myacg_parent_compatibility_repair.sql',
+  '047_erp_schema_migration_ledger.sql',
+]);
+
+// Checksum-bearing source history. These artifacts remain reviewable and are
+// ordered for reconciliation, but failed/superseded entries are never executed
+// by the canonical fresh-install chain above.
+export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
+  ...CANONICAL_FRESH_INSTALL_V3.slice(0,
+    CANONICAL_FRESH_INSTALL_V3.indexOf('045c_waca_cloud_atomic_restore_semantic_closure.sql')),
   '045_waca_cloud_atomic_restore_closure.sql',
   '045b_waca_cloud_atomic_restore_compatibility_repair.sql',
+  '045c_waca_cloud_atomic_restore_semantic_closure.sql',
   '046_waca_myacg_parent_evidence.sql',
   '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql',
@@ -58,4 +71,6 @@ export const EXCLUDED_HISTORICAL_ARTIFACTS = Object.freeze({
   '007_create_dashboard_category_images_bucket.sql': 'Unused legacy Storage bucket; no current product dependency.',
   '013_fix_storage_category_images_policies.sql': 'Unused legacy Storage policy; no current product dependency.',
   '028_cloud_restore_schema_aware_safeupdate_delete.sql': 'Alternative inventory_key-PK restore writer; 029 supersedes its final contract.',
+  '045_waca_cloud_atomic_restore_closure.sql': 'Failed live attempt preserved as WACA_PATCH_ANCHOR_DRIFT; 045c supersedes it.',
+  '045b_waca_cloud_atomic_restore_compatibility_repair.sql': 'Failed live attempt preserved as WACA_045B_SEMANTIC_SOURCE_CONFLICT; 045c supersedes it.',
 });

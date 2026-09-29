@@ -12,7 +12,8 @@ Suggested order:
 2. `026b-inventory-preconditions-readonly.sql` — exact PK/backfill safety counts.
 3. `waca-restore-presence-readonly.sql` — quick WACA and Restore surface check.
 4. `018b-import-batches-acl-matrix-readonly.sql` — exact/extra/missing ACL evidence for Data API and privileged roles.
-5. `045b-waca-restore-compatibility-readonly.sql` — classifies the Restore surface as supported pre-045, supported post-045, or conflict.
+5. `045b-waca-restore-compatibility-readonly.sql` — historical read-only evidence for the failed 045b attempt.
+6. `045c-waca-restore-semantic-state-readonly.sql` — current behavior/catalog detector for pre-045, partial, compatible, canonical, or conflict states.
 6. `ledger-history-readonly.sql` — only after the snapshot confirms the project-owned ledger exists.
 
 Generate the candidate canonical target from the checked-in fresh-install chain in an isolated PostgreSQL 18 runtime:

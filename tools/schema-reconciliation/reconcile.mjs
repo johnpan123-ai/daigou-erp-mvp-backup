@@ -1,5 +1,7 @@
 import { fingerprintStructuralSnapshot, fingerprintValue, normalizeDefinition } from './schemaContract.mjs';
 import { SCHEMA_EVIDENCE_CONTRACT_VERSION, sealSchemaEvidence } from './evidenceContract.mjs';
+import { classifyRestoreFunctionState, RESTORE_FUNCTION_STATES,
+  restoreFactsFromStructuralSnapshot } from './restoreFunctionState.mjs';
 
 export const EFFECT_STATES = Object.freeze({
   SATISFIED: 'SATISFIED', NEEDS_APPLY: 'NEEDS_APPLY', PARTIAL: 'PARTIAL',
@@ -210,6 +212,22 @@ export function reconcileMigration(snapshot, effect) {
     else if (detector.state === 'STATE_D') state = EFFECT_STATES.CONFLICT;
     else if (detector.state === 'UNKNOWN') state = EFFECT_STATES.UNKNOWN;
     safeToApply = state === EFFECT_STATES.NEEDS_APPLY && detector.safeToApply;
+  } else if (effect.detector === 'wacaRestoreSemanticState') {
+    if (state === EFFECT_STATES.UNKNOWN) {
+      detector = { state: 'UNKNOWN', facts: null, safeToApply: false };
+    } else {
+    const facts = state === EFFECT_STATES.SATISFIED ? null : (snapshot.semanticEvidence?.wacaRestore
+      ?? restoreFactsFromStructuralSnapshot(snapshot));
+    const semanticState = state === EFFECT_STATES.SATISFIED
+      ? RESTORE_FUNCTION_STATES.CANONICAL : classifyRestoreFunctionState(facts);
+    detector = { state: semanticState, facts,
+      safeToApply: semanticState !== RESTORE_FUNCTION_STATES.CONFLICT };
+    if (semanticState === RESTORE_FUNCTION_STATES.CANONICAL) state = EFFECT_STATES.SATISFIED;
+    else if (semanticState === RESTORE_FUNCTION_STATES.CONFLICT) state = EFFECT_STATES.CONFLICT;
+    else state = EFFECT_STATES.NEEDS_APPLY;
+    safeToApply = state === EFFECT_STATES.NEEDS_APPLY && detector.safeToApply
+      && pre.every(item => item.result === 'MATCH');
+    }
   }
   return {
     migrationId: effect.migrationId, sourceFile: effect.sourceFile, sourceChecksum: effect.sourceChecksum,

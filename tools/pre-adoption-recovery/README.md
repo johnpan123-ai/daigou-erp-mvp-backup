@@ -1,6 +1,6 @@
 # ERP 2.0 pre-adoption recovery bridge
 
-This tool builds the temporary `PRE_ADOPTION_PARTIAL_STATE` recovery bundle required while Live is committed through 018 + 044 but still uses the legacy 15-resource snapshot RPC. It is not the normal 24-resource Cloud backup and must not be exposed as a routine Restore option.
+This tool builds the temporary `PRE_ADOPTION_PARTIAL_STATE` recovery bundle required while Live is committed through 018 + 044 + 018b, with 045/045b rolled back and the legacy 15-resource snapshot RPC still active. It is not the normal 24-resource Cloud backup and must not be exposed as a routine Restore option.
 
 ## Live capture (read-only)
 

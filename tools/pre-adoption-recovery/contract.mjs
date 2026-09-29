@@ -3,13 +3,14 @@ import { fingerprintStructuralSnapshot } from '../schema-reconciliation/schemaCo
 
 export const RECOVERY_BUNDLE_FORMAT_VERSION = 'erp2-pre-adoption-recovery-bundle-v1';
 export const RECOVERY_KIND = 'PRE_ADOPTION_PARTIAL_STATE';
-export const RECOVERY_COMPATIBILITY_VERSION = 'erp2-partial-through-044-v1';
+export const RECOVERY_COMPATIBILITY_VERSION = 'erp2-post-018b-pre-045c-v2';
 export const PARTIAL_STATE_MIGRATIONS = Object.freeze({
   '018': 'APPLIED_COMMITTED',
   '044': 'APPLIED_COMMITTED',
+  '018b': 'APPLIED_COMMITTED',
   '045': 'FAILED_ROLLED_BACK',
-  '018b': 'NOT_APPLIED',
-  '045b': 'NOT_APPLIED',
+  '045b': 'FAILED_ROLLED_BACK',
+  '045c': 'NOT_APPLIED',
   '046b': 'NOT_APPLIED',
   '047': 'NOT_APPLIED',
 });

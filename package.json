@@ -29,6 +29,8 @@
     "test:schema-reconciliation-pg": "node tests/schema-reconciliation-pglite.mjs",
     "test:erp2-046-isolated": "node tests/erp2-046-compatibility-isolated.mjs",
     "test:erp2-partial-apply-recovery": "node tests/erp2-partial-apply-recovery.mjs",
+    "test:erp2-one-shot-live-compatibility": "node tests/erp2-one-shot-live-compatibility.mjs",
+    "verify:erp2-one-shot-closure": "node scripts/verify-erp2-one-shot-closure.mjs",
     "test:pre-adoption-recovery-bundle": "node tests/pre-adoption-recovery-bundle.mjs",
     "test:pre-adoption-runtime-identity": "node tests/pre-adoption-runtime-identity.mjs",
     "schema:canonical-snapshot": "node tools/schema-reconciliation/generateCanonicalSnapshot.mjs",

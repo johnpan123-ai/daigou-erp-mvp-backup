@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { CANONICAL_FRESH_INSTALL_V3 } from '../../supabase/canonicalFreshInstallV3.mjs';
+import { ERP2_MIGRATION_SOURCE_ORDER_V3 } from '../../supabase/canonicalFreshInstallV3.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -213,7 +213,8 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   },
   '045': {
     sourceFile: '045_waca_cloud_atomic_restore_closure.sql', dependencies: ['043', '044'],
-    risk: 'HIGH_ATOMIC_RESTORE_PATCH', idempotency: 'DEFINITION_PATCH_GUARDED', repairClosure: '045b',
+    risk: 'HIGH_ATOMIC_RESTORE_PATCH', idempotency: 'FAILED_HISTORY_IMMUTABLE', repairClosure: '045c',
+    historicalAttempt: Object.freeze({ result: 'FAILED_ROLLED_BACK', code: 'WACA_PATCH_ANCHOR_DRIFT' }),
     preconditions: [...WACA_TABLES.map(name => table(name)), fn('erp_restore_proven_cloud_snapshot_attempt(uuid,uuid,uuid,uuid,uuid)')],
     postconditions: [
       q('trigger', 'public.waca_state.erp_cloud_restore_maintenance_guard'),
@@ -228,7 +229,11 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   },
   '045b': {
     sourceFile: '045b_waca_cloud_atomic_restore_compatibility_repair.sql', dependencies: ['043', '044'],
-    risk: 'HIGH_STATE_GUARDED_ATOMIC_RESTORE_REPAIR', idempotency: 'STATE_GUARDED_RERUN_SAFE', repairs: ['045'],
+    risk: 'HIGH_STATE_GUARDED_ATOMIC_RESTORE_REPAIR', idempotency: 'FAILED_HISTORY_IMMUTABLE',
+    repairs: ['045'], repairClosure: '045c',
+    historicalAttempt: Object.freeze({ result: 'FAILED_ROLLED_BACK',
+      code: 'WACA_045B_SEMANTIC_SOURCE_CONFLICT',
+      target: 'public.erp_cloud_restore_audit_dataset(jsonb)' }),
     allowPartialApply: true,
     preconditions: [
       ...WACA_TABLES.map(name => table(name)), table('import_batches'), table('dashboard_category_images'),
@@ -251,8 +256,44 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       fn('erp_restore_cloud_snapshot(uuid,text,jsonb,jsonb,text)', { definitionIncludes: ['resourcecount', '24'] }),
     ],
   },
+  '045c': {
+    sourceFile: '045c_waca_cloud_atomic_restore_semantic_closure.sql', dependencies: ['043', '044'],
+    risk: 'HIGH_SEMANTIC_STATE_GUARDED_ATOMIC_RESTORE_REPAIR',
+    idempotency: 'SEMANTIC_STATE_GUARDED_COMPLETE_REPLACEMENT', repairs: ['045', '045b'],
+    allowPartialApply: true, detector: 'wacaRestoreSemanticState',
+    preconditions: [
+      ...WACA_TABLES.map(name => table(name)), table('import_batches'), table('dashboard_category_images'),
+      fn('erp_restore_cloud_snapshot_attempt(uuid,uuid,uuid,text,jsonb,jsonb,text,text)', {
+        securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+        requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      }),
+      fn('erp_reconcile_cloud_restore_attempt(uuid,uuid)', {
+        securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+        requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=10s'],
+      }),
+      fn('erp_prove_cloud_restore_candidate_v2(jsonb,jsonb,text,text,uuid)', {
+        securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+        requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      }),
+      fn('erp_restore_proven_cloud_snapshot_attempt(uuid,uuid,uuid,uuid,uuid)', {
+        securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+        requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      }),
+    ],
+    postconditions: [
+      q('trigger', 'public.import_batches.erp_cloud_restore_maintenance_guard'),
+      q('trigger', 'public.waca_state.erp_cloud_restore_maintenance_guard'),
+      fn('erp_cloud_restore_validate_waca_dataset(jsonb)', { authenticatedExecute: false, anonExecute: false }),
+      fn('erp_cloud_restore_recompute_waca_quantities()', {
+        authenticatedExecute: false, anonExecute: false, definitionIncludes: ['waca_auto_quantity'],
+      }),
+      fn('erp_cloud_restore_snapshot()', { definitionIncludes: ['waca_orders', 'waca_state'] }),
+      fn('erp_cloud_restore_audit_dataset(jsonb)', { definitionIncludes: ['waca_order_items', 'waca_mappings'] }),
+      fn('erp_restore_cloud_snapshot(uuid,text,jsonb,jsonb,text)', { definitionIncludes: ['resourcecount', '24'] }),
+    ],
+  },
   '046': {
-    sourceFile: '046_waca_myacg_parent_evidence.sql', dependencies: ['020', '044', '045b'],
+    sourceFile: '046_waca_myacg_parent_evidence.sql', dependencies: ['020', '044', '045c'],
     risk: 'LOW_ADDITIVE_EVIDENCE_COLUMN', idempotency: 'SOURCE_DRIFT_GUARDED_ONE_TIME', repairClosure: '046b',
     preconditions: [table('inventory_items'), fn('erp_apply_field_mutations(text,jsonb)')],
     postconditions: [
@@ -262,7 +303,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
     ],
   },
   '046b': {
-    sourceFile: '046b_waca_myacg_parent_compatibility_repair.sql', dependencies: ['020', '044', '045b'],
+    sourceFile: '046b_waca_myacg_parent_compatibility_repair.sql', dependencies: ['020', '044', '045c'],
     risk: 'LOW_STATE_GUARDED_ACL_REPAIR', idempotency: 'STATE_GUARDED_RERUN_SAFE', repairs: ['046'],
     allowPartialApply: true,
     preconditions: [
@@ -404,7 +445,7 @@ export function extractSqlEffects(sql) {
 }
 
 export async function buildMigrationEffectRegistry() {
-  const order = new Map(CANONICAL_FRESH_INSTALL_V3.map((file, index) => [file, index]));
+  const order = new Map(ERP2_MIGRATION_SOURCE_ORDER_V3.map((file, index) => [file, index]));
   const result = {};
   for (const [migrationId, spec] of Object.entries(MIGRATION_EFFECT_SPECS)) {
     const path = new URL(`../../supabase/sql/${spec.sourceFile}`, import.meta.url);

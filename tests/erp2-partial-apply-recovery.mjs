@@ -12,10 +12,9 @@ const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
 const aclMatrixSql = await read('../tools/schema-reconciliation/sql/018b-import-batches-acl-matrix-readonly.sql');
-const restoreCompatibilitySql = await read('../tools/schema-reconciliation/sql/045b-waca-restore-compatibility-readonly.sql');
+const restoreCompatibilitySql = await read('../tools/schema-reconciliation/sql/045c-waca-restore-semantic-state-readonly.sql');
 const repairFiles = [
-  '018b_cloud_import_batch_acl_compatibility_repair.sql',
-  '045b_waca_cloud_atomic_restore_compatibility_repair.sql',
+  '045c_waca_cloud_atomic_restore_semantic_closure.sql',
   '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql',
 ];
@@ -48,9 +47,9 @@ async function capture(db) {
   return snapshot;
 }
 
-const oldPartialChain = CANONICAL_FRESH_INSTALL_V3.filter(file =>
-  !file.startsWith('018b_') && !file.startsWith('045b_'));
-const through044 = oldPartialChain.slice(0, oldPartialChain.indexOf('045_waca_cloud_atomic_restore_closure.sql'));
+const through044 = CANONICAL_FRESH_INSTALL_V3.slice(
+  0, CANONICAL_FRESH_INSTALL_V3.indexOf('045c_waca_cloud_atomic_restore_semantic_closure.sql'),
+);
 const controlFunctions = [
   'public.erp_restore_cloud_snapshot_attempt(uuid,uuid,uuid,text,jsonb,jsonb,text,text)',
   'public.erp_reconcile_cloud_restore_attempt(uuid,uuid)',
@@ -68,8 +67,6 @@ try {
 
   await apply(partialDb, through044, 'live-like-through-044');
   await partialDb.exec(`
-    grant maintain,references,trigger,truncate on table public.import_batches to anon;
-    grant maintain,references,trigger,truncate on table public.import_batches to authenticated;
     grant maintain,references,trigger,truncate on table public.inventory_items to anon;
     grant delete,insert,maintain,references,select,trigger,truncate,update
       on table public.inventory_items to authenticated;
@@ -80,13 +77,11 @@ try {
       values('fixture-batch',jsonb_build_object('key','fixture-batch'));
   `);
   const aclBefore = (await partialDb.query(aclMatrixSql)).rows[0].import_batches_acl_matrix;
-  assert.deepEqual(aclBefore.roles.find(role => role.role === 'anon').extra.toSorted(),
-    ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE'].toSorted());
-  assert.deepEqual(aclBefore.roles.find(role => role.role === 'authenticated').extra.toSorted(),
-    ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE'].toSorted());
+  assert.equal(aclBefore.roles.find(role => role.role === 'anon').status, 'PASS');
+  assert.equal(aclBefore.roles.find(role => role.role === 'authenticated').status, 'PASS');
   assert.equal(aclBefore.roles.find(role => role.role === 'postgres').status, 'PASS');
   assert.equal((await partialDb.query(restoreCompatibilitySql)).rows[0]
-    .waca_045b_compatibility.compatibilityState, 'PRE_045_SUPPORTED');
+    .waca_045c_semantic_state.compatibilityState, 'STATE_A_PRE_045');
   const beforeCounts = (await partialDb.query(`select
     (select count(*)::int from public.import_batches) import_batches,
     (select count(*)::int from public.waca_orders) waca_orders,
@@ -100,19 +95,19 @@ try {
   const registry = await buildMigrationEffectRegistry();
   const beforePlan = planSchemaDelta(await capture(partialDb), registry, { expectedSnapshot: canonical });
   const migration = id => beforePlan.migrations.find(item => item.migrationId === id);
-  assert.equal(migration('018').state, 'CONFLICT');
-  assert.equal(migration('018').coveredByRepair, '018b');
-  assert.equal(migration('018b').safeToApply, true);
+  assert.equal(migration('018').state, 'SATISFIED');
+  assert.equal(migration('018b').state, 'SATISFIED');
   assert.equal(migration('045').state, 'PARTIAL');
-  assert.equal(migration('045').coveredByRepair, '045b');
-  assert.equal(migration('045b').safeToApply, true);
+  assert.equal(migration('045').coveredByRepair, '045c');
+  assert.equal(migration('045b').coveredByRepair, '045c');
+  assert.equal(migration('045c').safeToApply, true);
   assert.equal(migration('046').state, 'CONFLICT');
   assert.equal(migration('046').coveredByRepair, '046b');
   assert.equal(migration('046b').safeToApply, true);
   assert.equal(migration('047').safeToApply, true);
   assert.equal(beforePlan.readyForApply, true);
-  assert.deepEqual(beforePlan.applyPlan.map(item => item.migrationId), ['018b','045b','046b','047']);
-  console.log('PASS exact partial-live planner delta = 018b -> 045b -> 046b -> 047');
+  assert.deepEqual(beforePlan.applyPlan.map(item => item.migrationId), ['045c','046b','047']);
+  console.log('PASS exact post-018b planner delta = 045c -> 046b -> 047');
 
   await apply(partialDb, repairFiles, 'partial-live-repair');
   const afterOnce = await capture(partialDb);
@@ -152,7 +147,7 @@ try {
   assert.equal(aclMatrix.roles.find(role => role.role === 'authenticated').status, 'PASS');
   assert.equal(aclMatrix.roles.find(role => role.role === 'postgres').status, 'PASS');
   assert.equal((await partialDb.query(restoreCompatibilitySql)).rows[0]
-    .waca_045b_compatibility.compatibilityState, 'POST_045_SUPPORTED');
+    .waca_045c_semantic_state.compatibilityState, 'STATE_D_CANONICAL');
   await partialDb.exec(`
     insert into auth.users(id,email) values('00000000-0000-4000-8000-000000000099','acl-owner@example.test');
     update public.profiles set role='owner' where user_id='00000000-0000-4000-8000-000000000099';
@@ -179,7 +174,7 @@ try {
   const finalPlan = planSchemaDelta(await capture(partialDb), registry, { expectedSnapshot: canonical });
   assert.equal(finalPlan.readyForApply, true);
   assert.deepEqual(finalPlan.applyPlan, []);
-  assert.ok(['018','018b','045','045b','046','046b','047']
+  assert.ok(['018','018b','045','045b','045c','046','046b','047']
     .every(id => finalPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
   console.log('PASS repair replay is idempotent and final schema converges to canonical fingerprint');
 
@@ -189,13 +184,13 @@ try {
     execute replace(s,'jsonb_object_keys(p_data)) <> 15','jsonb_object_keys(p_data)) <> 14');
   end$$;`);
   await assert.rejects(
-    driftDb.exec(await read('../supabase/sql/045b_waca_cloud_atomic_restore_compatibility_repair.sql')),
-    /WACA_045B_PRE_STATE_CONFLICT/u,
+    driftDb.exec(await read('../supabase/sql/045c_waca_cloud_atomic_restore_semantic_closure.sql')),
+    /WACA_045C_UNKNOWN_SEMANTIC_STATE/u,
   );
   await driftDb.exec('rollback;');
   assert.equal((await driftDb.query("select to_regprocedure('public.erp_cloud_restore_validate_waca_dataset(jsonb)') is null absent")).rows[0].absent, true);
   assert.equal((await driftDb.query("select not exists(select 1 from pg_trigger where tgrelid='public.import_batches'::regclass and tgname='erp_cloud_restore_maintenance_guard') absent")).rows[0].absent, true);
-  console.log('PASS unknown semantic drift fails closed and transaction leaves no partial 045b state');
+  console.log('PASS unknown semantic drift fails closed and transaction leaves no partial 045c state');
 } finally {
   await canonicalDb.close(); await partialDb.close(); await driftDb.close();
 }

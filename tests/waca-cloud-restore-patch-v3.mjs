@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import pg from 'pg';
 
 // Explicitly isolated only. A missing URL never falls back to Supabase or a
-// local main cluster. 045 is applied only to a disposable loopback database.
+// local main cluster. 045c is applied only to a disposable loopback database.
 const url = process.env.WACA_ISOLATED_PG_URL;
 if (!url) throw new Error('Set WACA_ISOLATED_PG_URL to the disposable PostgreSQL test database.');
 const target = new URL(url);
@@ -121,16 +121,8 @@ try {
     try { await client.query(readFileSync(`supabase/sql/${file}`, 'utf8')); }
     catch (error) { throw new Error(`Historical migration ${file} failed: ${error.message}`, { cause: error }); }
   }
-  const migration = readFileSync('supabase/sql/045_waca_cloud_atomic_restore_closure.sql', 'utf8');
-  try { await client.query(migration); }
-  catch (error) {
-    await client.query('rollback');
-    const { rows: diagnosis } = await client.query(`select pg_get_functiondef('public.erp_cloud_restore_audit_dataset(jsonb)'::regprocedure) as definition`);
-    const text = diagnosis[0].definition;
-    const at = text.indexOf('relspec(child_table');
-    console.error('Audit source anchor:', JSON.stringify(text.slice(at - 100, at + 80)));
-    throw error;
-  }
+  const migration = readFileSync('supabase/sql/045c_waca_cloud_atomic_restore_semantic_closure.sql', 'utf8');
+  await client.query(migration);
   // Apply the actual installed 020 CAS gateway source, not a mock whitelist.
   // Function-body validation is off because this disposable core fixture does
   // not contain unrelated 020 entity columns; 046 is a source-exact patch.
@@ -219,7 +211,7 @@ try {
   changed.product_variants[0].waca_auto_quantity += 1;
   await assert.rejects(() => client.query('select public.erp_cloud_restore_validate_waca_dataset($1::jsonb)', [changed]),
     /WACA_RESTORE_QUANTITY_MISMATCH/);
-  console.log('PASS isolated PostgreSQL: WACA 5x import, 4 injected import rollback points, 24-resource restore rollback, Restore-specific 023-026/028/030/035-043 plus 045 and actual-020 CAS 046; authenticated direct writer denied');
+  console.log('PASS isolated PostgreSQL: WACA 5x import, 4 injected import rollback points, 24-resource restore rollback, Restore-specific 023-026/028/030/035-043 plus semantic 045c and actual-020 CAS 046; authenticated direct writer denied');
 } finally {
   await client.end();
   await admin.query(`drop database ${databaseName}`);

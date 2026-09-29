@@ -27,7 +27,8 @@ const queryFiles = {
 };
 const migrationFiles = ['018_cloud_import_batch_canonical.sql', '044_waca_cloud_ledger.sql',
   '045_waca_cloud_atomic_restore_closure.sql', '018b_cloud_import_batch_acl_compatibility_repair.sql',
-  '045b_waca_cloud_atomic_restore_compatibility_repair.sql', '046b_waca_myacg_parent_compatibility_repair.sql',
+  '045b_waca_cloud_atomic_restore_compatibility_repair.sql',
+  '045c_waca_cloud_atomic_restore_semantic_closure.sql', '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql'];
 const currentQueryChecksums = async () => Object.fromEntries(await Promise.all(Object.entries(queryFiles)
   .map(async ([key, path]) => [key, recoverySha256(await readFile(path, 'utf8'))])));

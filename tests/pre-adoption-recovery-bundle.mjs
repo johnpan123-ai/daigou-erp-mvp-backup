@@ -31,13 +31,12 @@ assert.doesNotMatch(executablePartialExportSql,
   'live exporter must remain SELECT-only');
 const migrationFiles = ['018_cloud_import_batch_canonical.sql', '044_waca_cloud_ledger.sql',
   '045_waca_cloud_atomic_restore_closure.sql', '018b_cloud_import_batch_acl_compatibility_repair.sql',
-  '045b_waca_cloud_atomic_restore_compatibility_repair.sql', '046b_waca_myacg_parent_compatibility_repair.sql',
+  '045b_waca_cloud_atomic_restore_compatibility_repair.sql',
+  '045c_waca_cloud_atomic_restore_semantic_closure.sql', '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql'];
-const partialChain = CANONICAL_FRESH_INSTALL_V3
-  .filter(file => !file.startsWith('018b_') && !file.startsWith('045b_'))
-  .slice(0, CANONICAL_FRESH_INSTALL_V3
-    .filter(file => !file.startsWith('018b_') && !file.startsWith('045b_'))
-    .indexOf('045_waca_cloud_atomic_restore_closure.sql'));
+const partialChain = CANONICAL_FRESH_INSTALL_V3.slice(
+  0, CANONICAL_FRESH_INSTALL_V3.indexOf('045c_waca_cloud_atomic_restore_semantic_closure.sql'),
+);
 
 async function createDatabase() {
   const db = await PGlite.create({ extensions: { pgcrypto } });
@@ -51,10 +50,9 @@ async function createDatabase() {
     create publication supabase_realtime;
   `);
   for (const file of partialChain) await db.exec(await read(`../supabase/sql/${file}`));
-  // Reproduce the committed 018 / 044 live ACL state used by the fixed read-only evidence.
+  // Reproduce post-018b live state: import_batches ACL is already canonical;
+  // inventory_items still has the observed pre-046b grants.
   await db.exec(`
-    grant maintain,references,trigger,truncate on table public.import_batches to anon;
-    grant maintain,references,trigger,truncate on table public.import_batches to authenticated;
     grant maintain,references,trigger,truncate on table public.inventory_items to anon;
     grant delete,insert,maintain,references,select,trigger,truncate,update
       on table public.inventory_items to authenticated;

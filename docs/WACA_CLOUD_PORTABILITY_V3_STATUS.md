@@ -1,4 +1,4 @@
-# WACA Cloud portability v3 — source handoff (2026-09-28)
+# WACA Cloud portability v3 — one-shot compatibility source handoff (2026-09-29)
 
 This is a source-only candidate, not an authorization to apply SQL or deploy.
 The current Cloud Restore database contract is 24 tables (previously 15), plus
@@ -8,10 +8,16 @@ the Deadline Lookup browser sidecar section. The JSON backup format is v2.
 
 - `044_waca_cloud_ledger.sql`: owner-scoped RLS/Data API, seven WACA tables,
   atomic import/upsert/recompute/CAS, legacy 8 → order-derived 11 without adding.
-- `045_waca_cloud_atomic_restore_closure.sql`: extends the current Restore
+- `045c_waca_cloud_atomic_restore_semantic_closure.sql`: supersedes the two
+  rolled-back 045/045b attempts. It classifies the installed Restore surface
+  by behavior and catalog contracts, then installs complete canonical
+  definitions without source-text anchors. It extends the current Restore
   snapshot, manifest, proof, writer, integrity, rollback, and portability
   functions to 24 tables. The 041–043 dispatch source is unchanged; Execute
   remains 269 bytes in the client regression.
+- Historical `045_waca_cloud_atomic_restore_closure.sql` and
+  `045b_waca_cloud_atomic_restore_compatibility_repair.sql` remain immutable,
+  checksum-bearing failed evidence and are excluded from fresh execution.
 - `046_waca_myacg_parent_evidence.sql`: persists BuyAnime GP parent evidence
   through the existing field-CAS gateway.
 - Local and Cloud JSON format classification, legacy cutover state, modern WACA
@@ -22,7 +28,7 @@ the Deadline Lookup browser sidecar section. The JSON backup format is v2.
 - `supabase/canonicalFreshInstallV3.mjs` is the explicit empty-database source
   order. `tests/waca-fresh-install-chain-v3.mjs` installs the full product chain
   in an empty isolated PostgreSQL database, separately upgrades a populated
-  043 baseline through 044–046, compares tables/columns/constraints/indexes/
+  043 baseline through 044/045c/046/047, compares tables/columns/constraints/indexes/
   triggers/RLS/policies/function definitions and ACLs by SHA-256, then exports
   and atomically restores all 24 resources across those databases. The fresh
   import proves legacy 8 → order-derived 11, five replays without quantity
