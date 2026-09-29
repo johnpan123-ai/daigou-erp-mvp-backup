@@ -72,7 +72,16 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
   let schemaEvidence;
   try { schemaEvidence = JSON.parse(await readFile(resolve(candidateRoot, schemaEvidencePath), 'utf8')); }
   catch { fail('schema reconciliation evidence missing or invalid'); }
-  const schemaBaseline = verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate: proof.candidate });
+  const schemaBaseline = verifySchemaBaselineEvidence({
+    evidence: schemaEvidence,
+    contract,
+    candidate: proof.candidate,
+    liveObservation: {
+      projectRef: environment.ERP2_LIVE_SCHEMA_PROJECT_REF,
+      fingerprint: environment.ERP2_LIVE_SCHEMA_FINGERPRINT,
+      observedAt: environment.ERP2_LIVE_SCHEMA_OBSERVED_AT,
+    },
+  });
   return { ...proof, artifact, schemaBaseline, candidateWorktree: candidateRoot, artifactRoot };
 }
 

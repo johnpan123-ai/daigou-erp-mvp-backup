@@ -1,4 +1,5 @@
 import { fingerprintStructuralSnapshot, fingerprintValue, normalizeDefinition } from './schemaContract.mjs';
+import { SCHEMA_EVIDENCE_CONTRACT_VERSION, sealSchemaEvidence } from './evidenceContract.mjs';
 
 export const EFFECT_STATES = Object.freeze({
   SATISFIED: 'SATISFIED', NEEDS_APPLY: 'NEEDS_APPLY', PARTIAL: 'PARTIAL',
@@ -301,14 +302,22 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
   }));
   const baselineRecord = (snapshot.migrationHistory?.records ?? []).find(record => record.eventType === 'BASELINE_ADOPTED'
     && record.eventKey === options.requiredBaselineId && record.result === 'PASS') ?? null;
-  return {
-    contractVersion: 1,
+  return sealSchemaEvidence({
+    contractVersion: SCHEMA_EVIDENCE_CONTRACT_VERSION,
     mode: options.mode ?? 'PRE_ADOPTION',
     requiredBaselineId: options.requiredBaselineId ?? null,
     environment: options.environment ?? snapshot.identity?.environmentRole ?? 'UNKNOWN',
     projectRef: snapshot.identity?.projectRef ?? null,
     sourceHead: options.sourceHead ?? null,
     checkpoint: options.checkpoint ?? null,
+    snapshotIdentity: {
+      projectRef: snapshot.identity?.projectRef ?? null,
+      environmentRole: snapshot.identity?.environmentRole ?? null,
+      capturedAt: snapshot.capturedAt ?? null,
+      snapshotToolChecksum: options.snapshotToolChecksum ?? null,
+      schemaSnapshotChecksum: fingerprintValue(snapshot),
+      currentFingerprint,
+    },
     migrationHistoryProvenance: snapshot.migrationHistory?.available ? 'AVAILABLE' : 'UNAVAILABLE',
     currentFingerprint,
     expectedFingerprint: options.expectedSnapshot ? fingerprintStructuralSnapshot(options.expectedSnapshot) : null,
@@ -319,7 +328,7 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
     applyPlan,
     readyForApply,
     evidenceFingerprint: fingerprintValue({ snapshot, migrations: migrations.map(({ postconditions, preconditions, ...item }) => item) }),
-  };
+  });
 }
 
 export function formatReconciliationReport(plan) {

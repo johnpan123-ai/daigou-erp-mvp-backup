@@ -5,6 +5,7 @@ import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/mig
 import { detectInventoryBridgeState, EFFECT_STATES, planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
 import { fingerprintStructuralSnapshot, SCHEMA_SNAPSHOT_CONTRACT_VERSION } from '../tools/schema-reconciliation/schemaContract.mjs';
 import { verifySchemaBaselineEvidence } from '../scripts/promotion-safety.mjs';
+import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
 import { readdir } from 'node:fs/promises';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
@@ -41,6 +42,7 @@ console.log('PASS live query pack is SELECT-only');
 const blank = () => ({
   contractVersion: SCHEMA_SNAPSHOT_CONTRACT_VERSION,
   identity: { projectRef: 'rhfdjsklfrgpoqsaqpkn', environmentRole: 'PRODUCTION' },
+  capturedAt: '2026-09-29T04:00:00.000Z',
   migrationHistory: { available: false, entries: {} },
   completeness: { structural: true, tables: true, columns: true, constraints: true, indexes: true,
     triggers: true, functions: true, policies: true, grants: true, inventoryIntegrity: true },
@@ -111,7 +113,8 @@ console.log('PASS deterministic structural fingerprint ignores catalog ordering'
 
 const fullPlan = planSchemaDelta(canonical, registry, { expectedSnapshot: canonical,
   sourceHead: 'c12bd42567b9080d84051825f7c3ff2c955677e8', checkpoint: 'checkpoint-fixture',
-  requiredBaselineId: contract.schemaBaseline.requiredBaselineId });
+  requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
+  snapshotToolChecksum: contract.schemaBaseline.snapshotToolChecksum });
 assert.equal(fullPlan.readyForApply, true);
 assert.ok(fullPlan.migrations.every(item => item.state === EFFECT_STATES.SATISFIED));
 assert.ok(fullPlan.migrations.every(item => item.historicalExecution === 'UNPROVEN'));
@@ -214,28 +217,33 @@ assert.equal(adoption.metadata.classification, OPS_METADATA_CLASSIFICATION);
 assert.throws(() => createBaselineAdoptionRecord({ plan: partialPlan }), /BASELINE_ADOPTION_RECONCILIATION_REQUIRED/u);
 console.log('PASS baseline adoption never fabricates migration execution');
 
-const evidence = { ...fullPlan, mode: 'PRE_ADOPTION', requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
-  projectRef: 'rhfdjsklfrgpoqsaqpkn', sourceHead: 'c12bd42567b9080d84051825f7c3ff2c955677e8',
-  checkpoint: 'checkpoint-fixture' };
-assert.equal(verifySchemaBaselineEvidence({ evidence, contract, candidate: {
+const fixtureContract = structuredClone(contract);
+fixtureContract.schemaBaseline.canonicalFingerprint = fullPlan.expectedFingerprint;
+const evidence = fullPlan;
+const liveObservation = { projectRef: evidence.projectRef, fingerprint: evidence.currentFingerprint,
+  observedAt: evidence.snapshotIdentity.capturedAt };
+const fixtureNow = Date.parse(evidence.snapshotIdentity.capturedAt);
+assert.equal(verifySchemaBaselineEvidence({ evidence, contract: fixtureContract, candidate: {
   head: evidence.sourceHead, checkpointTag: evidence.checkpoint,
-} }).result, 'PASS');
-const postAdoptionEvidence = { ...evidence, mode: 'POST_ADOPTION', migrationHistoryProvenance: 'AVAILABLE',
+}, liveObservation, now: fixtureNow }).result, 'PASS');
+const postAdoptionEvidence = sealSchemaEvidence({ ...evidence, mode: 'POST_ADOPTION', migrationHistoryProvenance: 'AVAILABLE',
   baselineRecord: {
     ...adoption, eventKey: contract.schemaBaseline.requiredBaselineId,
     sourceHead: evidence.sourceHead, checkpoint: evidence.checkpoint,
     schemaFingerprintAfter: evidence.currentFingerprint,
-  } };
-assert.equal(verifySchemaBaselineEvidence({ evidence: postAdoptionEvidence, contract, candidate: {
+  } });
+assert.equal(verifySchemaBaselineEvidence({ evidence: postAdoptionEvidence, contract: fixtureContract, candidate: {
   head: evidence.sourceHead, checkpointTag: evidence.checkpoint,
-} }).mode, 'POST_ADOPTION');
-assert.throws(() => verifySchemaBaselineEvidence({ evidence: { ...evidence, currentFingerprint: '0'.repeat(64) },
-  contract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint } }), /FAILED_CLOSED/u);
+}, liveObservation, now: fixtureNow }).mode, 'POST_ADOPTION');
+assert.throws(() => verifySchemaBaselineEvidence({ evidence: sealSchemaEvidence({ ...evidence, currentFingerprint: '0'.repeat(64) }),
+  contract: fixtureContract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint },
+  liveObservation, now: fixtureNow }), /FAILED_CLOSED/u);
 assert.throws(() => verifySchemaBaselineEvidence({ evidence: {
   ...postAdoptionEvidence,
   baselineRecord: { ...postAdoptionEvidence.baselineRecord,
     metadata: { historicalMigrationExecutionClaimed: true } },
-}, contract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint } }), /FAILED_CLOSED/u);
+}, contract: fixtureContract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint },
+liveObservation, now: fixtureNow }), /FAILED_CLOSED/u);
 console.log('PASS deployment guard accepts PRE/POST adoption proof and rejects stale or fabricated history');
 
 const observed = blank(); observed.completeness = { structural: false, tables: true, columns: false, constraints: false,

@@ -2,6 +2,12 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { relative, resolve } from 'node:path';
+import {
+  applyPlanProjection,
+  buildDeltaIdentity,
+  buildPlannerIdentity,
+  buildSchemaEvidenceIdentity,
+} from '../tools/schema-reconciliation/evidenceContract.mjs';
 
 export const CANONICAL_ERP2_TARGET = Object.freeze({
   role: 'ERP_2_CLOUD_CANDIDATE',
@@ -43,15 +49,128 @@ export function assertCanonicalContract(contract) {
     failClosed('invalid accepted-lineage contract');
   }
   if (!contract.schemaBaseline?.requiredBaselineId
-    || contract.schemaBaseline.evidenceContractVersion !== 1
+    || contract.schemaBaseline.evidenceContractVersion !== 2
     || contract.schemaBaseline.preAdoptionMode !== 'READ_ONLY_RECONCILIATION'
-    || contract.schemaBaseline.postAdoptionLedger !== 'public.erp_schema_migration_ledger') {
+    || contract.schemaBaseline.postAdoptionLedger !== 'public.erp_schema_migration_ledger'
+    || !/^[0-9a-f]{64}$/u.test(contract.schemaBaseline.canonicalFingerprint ?? '')
+    || !/^[0-9a-f]{64}$/u.test(contract.schemaBaseline.snapshotToolChecksum ?? '')
+    || !Number.isSafeInteger(contract.schemaBaseline.snapshotMaxAgeMs)
+    || !Number.isSafeInteger(contract.schemaBaseline.liveObservationMaxAgeMs)) {
     failClosed('invalid schema-baseline contract');
   }
   return { account, target, gate };
 }
 
-export function verifySchemaBaselineEvidence({ evidence, contract, candidate }) {
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const migrationApplyProjection = item => ({
+  migrationId: item.migrationId,
+  sourceFile: item.sourceFile,
+  sourceChecksum: item.sourceChecksum,
+  canonicalOrder: item.canonicalOrder,
+  applyMethod: item.applyMethod,
+});
+const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const ageOf = (value, now, label) => {
+  const timestamp = Date.parse(value ?? '');
+  if (!Number.isFinite(timestamp) || timestamp > now + 60_000) failClosed(`${label} timestamp is invalid`);
+  return now - timestamp;
+};
+
+const verifyPlannerContract = evidence => {
+  if (!Array.isArray(evidence.migrations) || !Array.isArray(evidence.applyPlan)
+    || evidence.plannerIdentity !== buildPlannerIdentity(evidence)
+    || evidence.deltaIdentity !== buildDeltaIdentity(evidence)
+    || evidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(evidence)) {
+    failClosed('schema planner evidence identity mismatch');
+  }
+  const ids = new Set();
+  let lastOrder = -1;
+  for (const item of evidence.migrations) {
+    if (!item?.migrationId || ids.has(item.migrationId) || !SHA256_PATTERN.test(item.sourceChecksum ?? '')
+      || !Number.isSafeInteger(item.canonicalOrder) || item.canonicalOrder <= lastOrder
+      || !Array.isArray(item.dependencies) || !Array.isArray(item.repairs)) {
+      failClosed('schema planner migration identity is invalid');
+    }
+    ids.add(item.migrationId); lastOrder = item.canonicalOrder;
+  }
+  const exactDelta = evidence.migrations
+    .filter(item => item.state === 'NEEDS_APPLY' && item.safeToApply === true && !item.coveredByRepair)
+    .map(migrationApplyProjection);
+  if (!exactJson(applyPlanProjection(evidence.applyPlan), exactDelta)) {
+    failClosed('schema apply delta does not match planner evidence');
+  }
+  return new Map(evidence.migrations.map(item => [item.migrationId, item]));
+};
+
+const verifyLiveObservation = ({ liveObservation, evidence, contract, now }) => {
+  if (liveObservation?.projectRef !== CANONICAL_ERP2_TARGET.supabaseProject
+    || liveObservation.fingerprint !== evidence.currentFingerprint
+    || !SHA256_PATTERN.test(liveObservation.fingerprint ?? '')
+    || ageOf(liveObservation.observedAt, now, 'live schema observation') > contract.schemaBaseline.liveObservationMaxAgeMs) {
+    failClosed('fresh live schema observation is missing or mismatched');
+  }
+};
+
+const verifyPreAdoption = ({ evidence, migrationsById }) => {
+  if (evidence.migrationHistoryProvenance !== 'UNAVAILABLE') {
+    failClosed('pre-adoption evidence has inconsistent migration-history provenance');
+  }
+  const planIndex = new Map(evidence.applyPlan.map((item, index) => [item.migrationId, index]));
+  for (const item of evidence.migrations) {
+    if (item.state === 'PARTIAL' || item.state === 'UNKNOWN') {
+      failClosed(`pre-adoption migration ${item.migrationId} is not safely classified`);
+    }
+    if (item.state === 'SATISFIED') {
+      if (planIndex.has(item.migrationId) || item.applyMethod !== 'NO_APPLY') {
+        failClosed(`satisfied migration ${item.migrationId} is present in apply delta`);
+      }
+      continue;
+    }
+    if (item.state === 'NEEDS_APPLY') {
+      if (item.safeToApply !== true || item.dependencyBlocker || !planIndex.has(item.migrationId)
+        || item.applyMethod !== 'APPLY_SOURCE_MIGRATION_TRANSACTION') {
+        failClosed(`migration ${item.migrationId} is not a safe apply candidate`);
+      }
+      for (const dependencyId of item.dependencies) {
+        const dependency = migrationsById.get(dependencyId);
+        if (!dependency || (dependency.state !== 'SATISFIED'
+          && !(dependency.state === 'NEEDS_APPLY' && dependency.safeToApply === true
+            && planIndex.get(dependencyId) < planIndex.get(item.migrationId)))) {
+          failClosed(`migration ${item.migrationId} has an unsafe dependency`);
+        }
+      }
+      continue;
+    }
+    if (item.state !== 'CONFLICT' || !item.coveredByRepair || item.repairClosure !== item.coveredByRepair
+      || item.applyMethod !== 'SUPERSEDED_BY_COMPATIBILITY_REPAIR') {
+      failClosed(`migration ${item.migrationId} has an uncovered conflict`);
+    }
+    const repair = migrationsById.get(item.coveredByRepair);
+    if (!repair || !repair.repairs.includes(item.migrationId)
+      || (repair.state !== 'SATISFIED'
+        && !(repair.state === 'NEEDS_APPLY' && repair.safeToApply === true && planIndex.has(repair.migrationId)))) {
+      failClosed(`migration ${item.migrationId} supersession proof is invalid`);
+    }
+  }
+};
+
+const verifyPostAdoption = ({ evidence, required, candidate }) => {
+  if (evidence.currentFingerprint !== evidence.expectedFingerprint
+    || evidence.migrationHistoryProvenance !== 'AVAILABLE'
+    || evidence.applyPlan.length !== 0
+    || evidence.migrations.some(item => item.state !== 'SATISFIED' || item.applyMethod !== 'NO_APPLY')) {
+    failClosed('post-adoption schema is not fully canonical');
+  }
+  const record = evidence.baselineRecord;
+  if (record?.eventType !== 'BASELINE_ADOPTED' || record.eventKey !== required
+    || record.sourceHead !== candidate.head || record.checkpoint !== candidate.checkpointTag
+    || record.schemaFingerprintAfter !== evidence.currentFingerprint
+    || record.metadata?.historicalMigrationExecutionClaimed !== false) {
+    failClosed('post-adoption baseline ledger evidence mismatch');
+  }
+};
+
+export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, now = Date.now() }) {
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
   if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
@@ -59,27 +178,31 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate }) 
     || evidence.requiredBaselineId !== required
     || evidence.projectRef !== CANONICAL_ERP2_TARGET.supabaseProject
     || evidence.sourceHead !== candidate.head || evidence.checkpoint !== candidate.checkpointTag
-    || !/^[0-9a-f]{64}$/u.test(evidence.currentFingerprint ?? '')
-    || !/^[0-9a-f]{64}$/u.test(evidence.expectedFingerprint ?? '')
-    || evidence.currentFingerprint !== evidence.expectedFingerprint
+    || !SHA256_PATTERN.test(evidence.currentFingerprint ?? '')
+    || evidence.expectedFingerprint !== contract.schemaBaseline.canonicalFingerprint
     || evidence.targetAfterDeltaFingerprint !== evidence.expectedFingerprint
     || evidence.readyForApply !== true || !Array.isArray(evidence.blockers) || evidence.blockers.length !== 0
-    || !Array.isArray(evidence.migrations)
-    || evidence.migrations.some(item => item.state !== 'SATISFIED')) {
+    || !SHA256_PATTERN.test(evidence.evidenceFingerprint ?? '')) {
     failClosed('schema reconciliation evidence is missing, stale, or not canonical');
   }
-  if (evidence.mode === 'POST_ADOPTION') {
-    const record = evidence.baselineRecord;
-    if (record?.eventType !== 'BASELINE_ADOPTED' || record.eventKey !== required
-      || record.sourceHead !== candidate.head || record.checkpoint !== candidate.checkpointTag
-      || record.schemaFingerprintAfter !== evidence.currentFingerprint
-      || record.metadata?.historicalMigrationExecutionClaimed !== false) {
-      failClosed('post-adoption baseline ledger evidence mismatch');
-    }
-  } else if (evidence.migrationHistoryProvenance !== 'UNAVAILABLE') {
-    failClosed('pre-adoption evidence has inconsistent migration-history provenance');
+  const snapshot = evidence.snapshotIdentity;
+  if (snapshot?.projectRef !== evidence.projectRef || snapshot.environmentRole !== 'PRODUCTION'
+    || snapshot.currentFingerprint !== evidence.currentFingerprint
+    || snapshot.snapshotToolChecksum !== contract.schemaBaseline.snapshotToolChecksum
+    || !SHA256_PATTERN.test(snapshot.schemaSnapshotChecksum ?? '')
+    || ageOf(snapshot.capturedAt, now, 'schema snapshot') > contract.schemaBaseline.snapshotMaxAgeMs) {
+    failClosed('schema snapshot identity is missing, stale, or mismatched');
   }
-  return { result: 'PASS', mode: evidence.mode, baselineId: required, fingerprint: evidence.currentFingerprint };
+  verifyLiveObservation({ liveObservation, evidence, contract, now });
+  const migrationsById = verifyPlannerContract(evidence);
+  if (evidence.mode === 'POST_ADOPTION') verifyPostAdoption({ evidence, required, candidate });
+  else verifyPreAdoption({ evidence, migrationsById });
+  return {
+    result: 'PASS', mode: evidence.mode, baselineId: required,
+    currentFingerprint: evidence.currentFingerprint,
+    targetAfterDeltaFingerprint: evidence.targetAfterDeltaFingerprint,
+    applyDelta: evidence.applyPlan.map(item => item.migrationId),
+  };
 }
 
 export function validatePublicTarget(environment, target = CANONICAL_ERP2_TARGET) {

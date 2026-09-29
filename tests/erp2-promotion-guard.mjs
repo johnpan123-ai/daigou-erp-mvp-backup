@@ -13,6 +13,7 @@ import {
   verifyRemoteCandidate,
   verifySchemaBaselineEvidence,
 } from '../scripts/promotion-safety.mjs';
+import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 const accepted = contract.githubPreDeployGate.acceptedHead;
@@ -108,21 +109,35 @@ const proof = verifyPromotionIdentity({
 });
 assert.equal(proof.result, 'PASS');
 
-const baselineFingerprint = 'a'.repeat(64);
-const schemaEvidence = {
-  contractVersion: 1, mode: 'PRE_ADOPTION', requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
+const baselineFingerprint = contract.schemaBaseline.canonicalFingerprint;
+const observedAt = '2026-09-29T04:00:00.000Z';
+const now = Date.parse(observedAt);
+const liveObservation = {
+  projectRef: CANONICAL_ERP2_TARGET.supabaseProject, fingerprint: baselineFingerprint, observedAt,
+};
+const schemaEvidence = sealSchemaEvidence({
+  contractVersion: 2, mode: 'PRE_ADOPTION', requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
   projectRef: CANONICAL_ERP2_TARGET.supabaseProject, sourceHead: head, checkpoint,
   migrationHistoryProvenance: 'UNAVAILABLE', currentFingerprint: baselineFingerprint,
   expectedFingerprint: baselineFingerprint, targetAfterDeltaFingerprint: baselineFingerprint,
-  readyForApply: true, blockers: [], migrations: [{ migrationId: 'fixture', state: 'SATISFIED' }],
-};
-assert.equal(verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate }).result, 'PASS');
+  snapshotIdentity: {
+    projectRef: CANONICAL_ERP2_TARGET.supabaseProject, environmentRole: 'PRODUCTION', capturedAt: observedAt,
+    snapshotToolChecksum: contract.schemaBaseline.snapshotToolChecksum,
+    schemaSnapshotChecksum: 'b'.repeat(64), currentFingerprint: baselineFingerprint,
+  },
+  evidenceFingerprint: 'c'.repeat(64), readyForApply: true, blockers: [], applyPlan: [],
+  migrations: [{
+    migrationId: 'fixture', sourceFile: 'fixture.sql', sourceChecksum: 'd'.repeat(64), canonicalOrder: 1,
+    state: 'SATISFIED', safeToApply: false, dependencies: [], repairs: [], applyMethod: 'NO_APPLY',
+  }],
+});
+assert.equal(verifySchemaBaselineEvidence({ evidence: schemaEvidence, contract, candidate, liveObservation, now }).result, 'PASS');
 for (const evidence of [
-  { ...schemaEvidence, projectRef: 'wrong' },
-  { ...schemaEvidence, sourceHead: accepted },
-  { ...schemaEvidence, blockers: [{ migrationId: '044', state: 'UNKNOWN' }] },
-  { ...schemaEvidence, migrations: [{ migrationId: '044', state: 'NEEDS_APPLY' }] },
-]) assert.throws(() => verifySchemaBaselineEvidence({ evidence, contract, candidate }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
+  sealSchemaEvidence({ ...schemaEvidence, projectRef: 'wrong' }),
+  sealSchemaEvidence({ ...schemaEvidence, sourceHead: accepted }),
+  sealSchemaEvidence({ ...schemaEvidence, blockers: [{ migrationId: '044', state: 'UNKNOWN' }] }),
+  sealSchemaEvidence({ ...schemaEvidence, migrations: [{ ...schemaEvidence.migrations[0], state: 'UNKNOWN' }] }),
+]) assert.throws(() => verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, now }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
 console.log('PASS fail-closed: schema baseline evidence');
 
 const artifactRoot = await mkdtemp(join(tmpdir(), 'erp2-promotion-artifact-'));

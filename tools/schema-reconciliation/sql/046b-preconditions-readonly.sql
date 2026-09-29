@@ -32,6 +32,9 @@ identity_state as (
   select count(*)::integer overload_count,
     count(*) filter(where to_regprocedure('public.erp_apply_field_mutations(text,jsonb)')=p.oid)::integer canonical_signature_count,
     coalesce(bool_and(case when to_regprocedure('public.erp_apply_field_mutations(text,jsonb)')=p.oid then
+      pg_get_functiondef(p.oid) like '%v_create_allowed := ARRAY[''inventory_key'',''myacg_item_code'',''myacg_parent_code'',''product_id''%'
+      else false end),false) target_satisfied,
+    coalesce(bool_and(case when to_regprocedure('public.erp_apply_field_mutations(text,jsonb)')=p.oid then
       pg_get_userbyid(p.proowner)='postgres' and p.prosecdef and pg_get_function_result(p.oid)='jsonb'
       and coalesce(p.proconfig,'{}'::text[]) @> array['search_path=""']
       and has_function_privilege('authenticated',p.oid,'EXECUTE')
@@ -77,12 +80,39 @@ select jsonb_build_object(
     and row_integrity.null_inventory_key_count=0 and row_integrity.duplicate_inventory_key_count=0
     and references_state.dependent_fk_count=0
     then 'PASS' else 'BLOCK' end,
+  'state',case
+    when identity_state.table_owner is distinct from 'postgres'
+      or identity_state.primary_key is distinct from array['id']
+      or not identity_state.id_canonical or not identity_state.inventory_key_canonical
+      or not identity_state.inventory_key_unique
+      or row_integrity.null_id_count<>0 or row_integrity.duplicate_id_count<>0
+      or row_integrity.null_inventory_key_count<>0 or row_integrity.duplicate_inventory_key_count<>0
+      or references_state.dependent_fk_count<>0
+      then 'BLOCKED'
+    when parent_column.found_count>1 or not parent_column.compatible
+      or parent_index.found_count>1 or not parent_index.compatible
+      or function_state.overload_count<>1 or function_state.canonical_signature_count<>1
+      or not function_state.source_compatible
+      or not (acl_state.anon_privileges <@ array['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE'])
+      or not (acl_state.authenticated_privileges <@ array['DELETE','INSERT','MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE'])
+      or not ('SELECT'=any(acl_state.authenticated_privileges))
+      or cardinality(acl_state.public_privileges)<>0
+      then 'CONFLICT'
+    when parent_column.found_count=1 and parent_index.found_count=1
+      and function_state.target_satisfied
+      and cardinality(acl_state.anon_privileges)=0
+      and acl_state.authenticated_privileges=array['SELECT']
+      and cardinality(acl_state.public_privileges)=0
+      then 'ALREADY_SATISFIED'
+    else 'SAFE_TO_CREATE'
+  end,
   'tableOwner',identity_state.table_owner,'primaryKey',identity_state.primary_key,
   'idCanonical',identity_state.id_canonical,'inventoryKeyCanonical',identity_state.inventory_key_canonical,
   'inventoryKeyUnique',identity_state.inventory_key_unique,
   'parentColumnPresent',parent_column.found_count=1,'parentColumnCompatible',parent_column.compatible,
   'parentIndexPresent',parent_index.found_count=1,'parentIndexCompatible',parent_index.compatible,
   'functionOverloadCount',function_state.overload_count,'functionSourceCompatible',function_state.source_compatible,
+  'functionTargetSatisfied',function_state.target_satisfied,
   'anonPrivileges',acl_state.anon_privileges,'authenticatedPrivileges',acl_state.authenticated_privileges,
   'publicPrivileges',acl_state.public_privileges,'rowCount',row_integrity.row_count,
   'nullIdCount',row_integrity.null_id_count,'duplicateIdCount',row_integrity.duplicate_id_count,

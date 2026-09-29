@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { buildMigrationEffectRegistry } from './migrationEffectRegistry.mjs';
@@ -45,9 +46,11 @@ if (expectedSnapshot) assertSnapshotShape(expectedSnapshot);
 const mode = args.get('mode') ?? 'PRE_ADOPTION';
 if (!['PRE_ADOPTION', 'POST_ADOPTION'].includes(mode)) throw new Error('SCHEMA_RECONCILIATION_MODE_INVALID');
 const registry = await buildMigrationEffectRegistry();
+const snapshotToolSource = await readFile(new URL('./sql/live-schema-snapshot-readonly.sql', import.meta.url));
+const snapshotToolChecksum = createHash('sha256').update(snapshotToolSource).digest('hex');
 const plan = planSchemaDelta(snapshot, registry, {
   expectedSnapshot, sourceHead: args.get('source-head') ?? null, checkpoint: args.get('checkpoint') ?? null,
-  requiredBaselineId: args.get('baseline-id') ?? null, mode,
+  requiredBaselineId: args.get('baseline-id') ?? null, mode, snapshotToolChecksum,
 });
 console.log(formatReconciliationReport(plan));
 if (args.has('json')) await writeFile(resolve(args.get('json')), `${JSON.stringify(plan, null, 2)}\n`, 'utf8');

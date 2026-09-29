@@ -122,6 +122,7 @@ try {
   const preflight = (await sql.query(read('tools/schema-reconciliation/sql/046b-preconditions-readonly.sql')))
     .rows[0].waca_parent_repair_preconditions;
   assert.equal(preflight.result, 'PASS');
+  assert.equal(preflight.state, 'SAFE_TO_CREATE');
   assert.equal(Number(preflight.rowCount), 5568);
   assert.deepEqual(preflight.primaryKey, ['id']);
 
