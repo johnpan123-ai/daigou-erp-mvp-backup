@@ -58,6 +58,10 @@ assert.doesNotThrow(() => assertCanonicalDeadlineRuntimeIdentity(identityInput({
 }), target));
 assert.throws(() => assertCanonicalDeadlineCloudflareProof({ ...cloudflareProof, accountId: 'wrong-account' }, target),
   /CLOUDFLARE_ACCOUNT_MISMATCH/u);
+assert.throws(() => assertCanonicalDeadlineCloudflareProof({ ...cloudflareProof, project: 'wrong-project' }, target),
+  /PAGES_PROJECT_MISMATCH/u);
+assert.throws(() => assertCanonicalDeadlineCloudflareProof({ ...cloudflareProof, domain: 'wrong.pages.dev' }, target),
+  /PAGES_DOMAIN_MISMATCH/u);
 blocks(identityInput({ systemOverrides: { 'Cloudflare Project': 'wrong-project' } }), 'PAGES_PROJECT_MISMATCH');
 blocks(identityInput({ systemOverrides: { 'Supabase Project': 'wrong-project-ref' } }), 'SUPABASE_PROJECT_MISMATCH');
 blocks(identityInput({ systemOverrides: { 'Public Fingerprint': 'WRONG' } }), 'PUBLIC_FINGERPRINT_MISMATCH');

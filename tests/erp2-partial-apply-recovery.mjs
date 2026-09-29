@@ -7,7 +7,7 @@ import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/mig
 import { planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
 import { fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/schemaContract.mjs';
 
-const EXPECTED_FINGERPRINT = '6775a09526b7c55b8dd96d0d1d83dba12954f5d1c8d6dde8503d647f133a963b';
+const EXPECTED_FINGERPRINT = 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77';
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');

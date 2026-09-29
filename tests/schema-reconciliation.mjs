@@ -3,12 +3,20 @@ import { readFile } from 'node:fs/promises';
 import { createBaselineAdoptionRecord, OPS_METADATA_CLASSIFICATION } from '../tools/schema-reconciliation/baselineContract.mjs';
 import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import { detectInventoryBridgeState, EFFECT_STATES, planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
-import { fingerprintStructuralSnapshot, SCHEMA_SNAPSHOT_CONTRACT_VERSION } from '../tools/schema-reconciliation/schemaContract.mjs';
+import {
+  diffStructuralSnapshots,
+  fingerprintLegacyStructuralSnapshotV1,
+  fingerprintStructuralSnapshot,
+  reconcileFingerprintEvidence,
+  SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+  SCHEMA_SNAPSHOT_CONTRACT_VERSION,
+} from '../tools/schema-reconciliation/schemaContract.mjs';
 import { verifySchemaBaselineEvidence } from '../scripts/promotion-safety.mjs';
 import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
 import { readdir } from 'node:fs/promises';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
+assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
 assert.deepEqual(Object.keys(registry), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047']);
 for (const effect of Object.values(registry)) {
@@ -124,6 +132,52 @@ const reordered = structuredClone(canonical);
 reordered.schemas.reverse();
 assert.equal(fingerprintStructuralSnapshot(canonical), fingerprintStructuralSnapshot(reordered));
 console.log('PASS deterministic structural fingerprint ignores catalog ordering');
+
+const presentationOnly = structuredClone(canonical);
+presentationOnly.identity = { ...presentationOnly.identity, databaseName: 'environment-local', currentUser: 'other-owner' };
+presentationOnly.capturedAt = '2030-01-01T00:00:00.000Z';
+for (const table of Object.values(presentationOnly.tables)) table.owner = 'environment_local_owner';
+for (const value of Object.values(presentationOnly.functions)) value.owner = 'environment_local_owner';
+const firstFunction = Object.keys(presentationOnly.functions).sort()[0];
+presentationOnly.functions[firstFunction].definition = `  ${presentationOnly.functions[firstFunction].definition
+  .toUpperCase().replaceAll(',', ' , ')}  `;
+const presentationDiff = diffStructuralSnapshots(canonical, presentationOnly);
+assert.equal(SCHEMA_FINGERPRINT_CONTRACT_VERSION, 2);
+assert.equal(presentationDiff.classification, 'B_CANONICALIZATION_OR_ENVIRONMENT_ONLY');
+assert.equal(presentationDiff.semanticEqual, true);
+assert.equal(presentationDiff.semanticDifferences.length, 0);
+assert.ok(presentationDiff.environmentDifferences.length > 0);
+assert.ok(presentationDiff.normalizationDifferences.length > 0);
+assert.equal(presentationDiff.beforeFingerprint, presentationDiff.afterFingerprint);
+console.log('PASS fingerprint v2 excludes owners/environment identity and normalizes catalog SQL formatting');
+
+const semanticDrift = structuredClone(canonical);
+semanticDrift.tables['public.inventory_items'].columns.inventory_key.dataType = 'uuid';
+semanticDrift.tables['public.inventory_items'].rls = !semanticDrift.tables['public.inventory_items'].rls;
+const semanticDiff = diffStructuralSnapshots(canonical, semanticDrift);
+assert.equal(semanticDiff.classification, 'A_TRUE_LIVE_SCHEMA_DIFFERENCE');
+assert.equal(semanticDiff.semanticEqual, false);
+assert.ok(semanticDiff.semanticDifferences.some(item => item.category === 'COLUMN_TYPE'));
+assert.ok(semanticDiff.semanticDifferences.some(item => item.category === 'RLS_POLICY'));
+assert.notEqual(semanticDiff.beforeFingerprint, semanticDiff.afterFingerprint);
+console.log('PASS true column/RLS drift changes the fingerprint and is reported by structural path');
+
+const hashOnly = reconcileFingerprintEvidence({
+  expectedFingerprint: '3d11870badd0e65065b5a20763d7e42e2ff2d904c497b1dbeb2fe13d0df0bc75',
+  currentSnapshot: canonical,
+});
+assert.equal(hashOnly.result, 'BLOCKED');
+assert.equal(hashOnly.status, 'OLD_SCHEMA_SNAPSHOT_REQUIRED');
+console.log('PASS a historical hash without its snapshot cannot be misrepresented as a semantic diff');
+
+const legacyEvidenceComparison = reconcileFingerprintEvidence({
+  expectedFingerprint: fingerprintLegacyStructuralSnapshotV1(canonical),
+  expectedSnapshot: canonical,
+  currentSnapshot: presentationOnly,
+});
+assert.equal(legacyEvidenceComparison.expectedFingerprintContract, 'V1_LEGACY_EVIDENCE');
+assert.equal(legacyEvidenceComparison.semanticEqual, true);
+console.log('PASS a supplied legacy-v1 snapshot is identity-checked then compared with semantic fingerprint v2');
 
 const fullPlan = planSchemaDelta(canonical, registry, { expectedSnapshot: canonical,
   sourceHead: 'c12bd42567b9080d84051825f7c3ff2c955677e8', checkpoint: 'checkpoint-fixture',

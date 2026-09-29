@@ -8,14 +8,15 @@ import {
   buildRecoveryBundle,
   RECOVERY_KIND,
   recoverySha256,
+  verifyDeadlineSidecar,
   verifyRecoveryBundle,
 } from '../tools/pre-adoption-recovery/contract.mjs';
 import { loadProductContracts } from '../tools/pre-adoption-recovery/productContracts.mjs';
 import { buildDeadlineSidecarReadScript } from '../tools/pre-adoption-recovery/deadlineSidecarReadScript.mjs';
 import { CANONICAL_ERP2_TARGET } from '../scripts/promotion-safety.mjs';
 
-const LIVE_PARTIAL_FINGERPRINT = '84ed86f61075e3f5d8958444f249cf0308ff90a1f9673c944aaafae4c606194d';
-const CANONICAL_FINGERPRINT = '6775a09526b7c55b8dd96d0d1d83dba12954f5d1c8d6dde8503d647f133a963b';
+const LIVE_PARTIAL_FINGERPRINT = 'e5c80e331720a2c02c301f43fe0ce536c6ee91a76c3b24851231d7f3131ef650';
+const CANONICAL_FINGERPRINT = 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77';
 const SOURCE_HEAD = '936905e337bcdf18ef10b9d4ef00e9b7f147df09';
 const CHECKPOINT = 'checkpoint-20260929-erp2-partial-apply-recovery-v1';
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
@@ -146,6 +147,17 @@ try {
     deadlineApplyBatches: [{ id: 'apply-redacted-1', idempotencyKey: 'idem-redacted-1' }],
     deadlineApplyItems: [{ id: 'apply-item-redacted-1', applyBatchId: 'apply-redacted-1' }],
   };
+  const deadlineVerification = verifyDeadlineSidecar(deadlineSidecar, contracts);
+  assert.deepEqual(deadlineVerification.counts, {
+    deadlineVerifiedMappings: 1, deadlineApplyBatches: 1, deadlineApplyItems: 1,
+  });
+  assert.equal(deadlineVerification.totalRows, 3);
+  assert.match(deadlineVerification.checksum, /^[0-9a-f]{64}$/u);
+  assert.throws(() => verifyDeadlineSidecar({
+    ...deadlineSidecar,
+    deadlineApplyItems: [{ id: 'orphan-item', applyBatchId: 'missing-batch' }],
+  }, contracts), /RECOVERY_DEADLINE_INTEGRITY_FAILED/u);
+  console.log('PASS downloaded Deadline JSON is verified locally by registry, relationships, counts and checksum');
   const bundle = await buildRecoveryBundle({
     liveExport,
     deadlineSidecar,

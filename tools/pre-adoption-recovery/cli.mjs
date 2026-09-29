@@ -1,7 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { buildRecoveryBundle, recoverySha256, stableRecoveryJson, verifyRecoveryBundle } from './contract.mjs';
+import {
+  buildRecoveryBundle, recoverySha256, stableRecoveryJson,
+  verifyDeadlineSidecar, verifyRecoveryBundle,
+} from './contract.mjs';
 import { buildDeadlineSidecarReadScript } from './deadlineSidecarReadScript.mjs';
 import { loadProductContracts } from './productContracts.mjs';
 import { verifyCloudflareIdentity } from '../../scripts/promotion-safety.mjs';
@@ -36,8 +39,8 @@ const currentMigrationSources = async () => Promise.all(migrationFiles.map(async
   id: file.split('_', 1)[0], file, checksum: recoverySha256(await readFile(resolve('supabase/sql', file), 'utf8')),
 })));
 
-if (!['build', 'verify', 'deadline-script'].includes(command)) {
-  throw new Error('USAGE: node tools/pre-adoption-recovery/cli.mjs <build|verify|deadline-script> [options]');
+if (!['assemble', 'build', 'verify', 'deadline-script', 'deadline-verify'].includes(command)) {
+  throw new Error('USAGE: node tools/pre-adoption-recovery/cli.mjs <assemble|build|verify|deadline-script|deadline-verify> [options]');
 }
 
 const contracts = await loadProductContracts(process.cwd());
@@ -59,6 +62,15 @@ if (command === 'verify') {
     throw new Error('RECOVERY_SOURCE_CHECKSUM_MISMATCH');
   }
   console.log(JSON.stringify({ result: 'PASS', ...result }, null, 2));
+  process.exit(0);
+}
+
+if (command === 'deadline-verify') {
+  const verified = verifyDeadlineSidecar(await readJson(option('deadline-sidecar')), contracts);
+  console.log(JSON.stringify({
+    result: verified.result, checksum: verified.checksum,
+    counts: verified.counts, totalRows: verified.totalRows,
+  }, null, 2));
   process.exit(0);
 }
 

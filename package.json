@@ -33,6 +33,7 @@
     "verify:erp2-one-shot-closure": "node scripts/verify-erp2-one-shot-closure.mjs",
     "test:pre-adoption-recovery-bundle": "node tests/pre-adoption-recovery-bundle.mjs",
     "test:pre-adoption-runtime-identity": "node tests/pre-adoption-runtime-identity.mjs",
+    "schema:fingerprint": "node tools/schema-reconciliation/fingerprint-cli.mjs",
     "schema:canonical-snapshot": "node tools/schema-reconciliation/generateCanonicalSnapshot.mjs",
     "lint": "eslint .",
     "preview": "vite preview",

@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
-import { fingerprintStructuralSnapshot } from '../schema-reconciliation/schemaContract.mjs';
+import {
+  fingerprintStructuralSnapshot,
+  SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+} from '../schema-reconciliation/schemaContract.mjs';
 
-export const RECOVERY_BUNDLE_FORMAT_VERSION = 'erp2-pre-adoption-recovery-bundle-v1';
+export const RECOVERY_BUNDLE_FORMAT_VERSION = 'erp2-pre-adoption-recovery-bundle-v2';
 export const RECOVERY_KIND = 'PRE_ADOPTION_PARTIAL_STATE';
 export const RECOVERY_COMPATIBILITY_VERSION = 'erp2-post-018b-pre-045c-v2';
 export const PARTIAL_STATE_MIGRATIONS = Object.freeze({
@@ -85,6 +88,19 @@ const normalizeDeadline = (input, resources, contracts) => {
   catch { fail('RECOVERY_DEADLINE_INTEGRITY_FAILED'); }
   return normalized;
 };
+
+export function verifyDeadlineSidecar(input, contracts) {
+  const sets = resourceSets(contracts);
+  const deadlineSidecar = normalizeDeadline(input, sets.deadline, contracts);
+  const counts = Object.fromEntries(sets.deadline.map(row => [
+    row.backupKey, deadlineSidecar[row.backupKey].length,
+  ]));
+  return {
+    result: 'PASS', deadlineSidecar, counts,
+    totalRows: Object.values(counts).reduce((sum, count) => sum + count, 0),
+    checksum: recoverySha256(deadlineSidecar),
+  };
+}
 
 const assertInventoryIdentity = rows => {
   const ids = rows.map(row => String(row.id ?? '').toLowerCase());
@@ -221,7 +237,7 @@ export async function buildRecoveryBundle(input, contracts) {
     data: coreByCollection,
   };
   const supplement = normalizeTableSection(liveExport.partialStateSupplement, sets.supplement, 'RECOVERY_SUPPLEMENT');
-  const deadline = normalizeDeadline(input.deadlineSidecar, sets.deadline, contracts);
+  const deadline = verifyDeadlineSidecar(input.deadlineSidecar, contracts).deadlineSidecar;
   assertWacaState(supplement);
   assertRelations(tableData(cloudLegacyBackup, supplement, sets), contracts.cloudRestoreRelations);
 
@@ -238,6 +254,7 @@ export async function buildRecoveryBundle(input, contracts) {
   }
   const schemaEvidence = {
     structuralSnapshot: canonicalize(input.schemaSnapshot),
+    schemaFingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
     captureEvidence: canonicalize(liveExport.captureEvidence),
     sourceSchemaFingerprint: sourceFingerprint,
     canonicalTargetFingerprint: identity.canonicalTargetFingerprint,
@@ -260,6 +277,7 @@ export async function buildRecoveryBundle(input, contracts) {
     capturedAt: liveExport.capturedAt,
     sourceProjectRef: identity.sourceProjectRef,
     sourceEnvironmentRole: identity.sourceEnvironmentRole,
+    schemaFingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
     sourceSchemaFingerprint: sourceFingerprint,
     canonicalTargetFingerprint: identity.canonicalTargetFingerprint,
     sourceGitHead: identity.sourceGitHead,
@@ -280,6 +298,7 @@ export async function verifyRecoveryBundle(bundle, contracts) {
     'RECOVERY_BUNDLE_TOP_LEVEL_INVALID');
   const manifestKeys = ['formatVersion', 'recoveryKind', 'compatibilityVersion', 'createdAt', 'capturedAt',
     'sourceProjectRef', 'sourceEnvironmentRole', 'sourceSchemaFingerprint', 'canonicalTargetFingerprint',
+    'schemaFingerprintContractVersion',
     'sourceGitHead', 'checkpoint', 'resources', 'totalRows', 'sectionChecksums', 'partialStateMigrations',
     'retirementConditions', 'bundleChecksum'];
   exactKeys(bundle.manifest, manifestKeys, 'RECOVERY_MANIFEST_INVALID');
@@ -290,6 +309,7 @@ export async function verifyRecoveryBundle(bundle, contracts) {
     || !SHA256.test(bundle.manifest.sourceSchemaFingerprint)
     || !SHA256.test(bundle.manifest.canonicalTargetFingerprint)
     || !SHA256.test(bundle.manifest.bundleChecksum)
+    || bundle.manifest.schemaFingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
     || Number.isNaN(Date.parse(bundle.manifest.createdAt))
     || Number.isNaN(Date.parse(bundle.manifest.capturedAt))) fail('RECOVERY_MANIFEST_IDENTITY_INVALID');
   if (stableRecoveryJson(bundle.manifest.partialStateMigrations) !== stableRecoveryJson(PARTIAL_STATE_MIGRATIONS)) {
@@ -308,13 +328,15 @@ export async function verifyRecoveryBundle(bundle, contracts) {
   const coreByTable = Object.fromEntries(sets.core.map(row => [row.cloud,
     normalizeRows(coreData[row.backupKey], `RECOVERY_CORE_${row.cloud}`)]));
   const supplement = normalizeTableSection(bundle.partialStateSupplement, sets.supplement, 'RECOVERY_SUPPLEMENT');
-  const deadline = normalizeDeadline(bundle.deadlineSidecar, sets.deadline, contracts);
+  const deadline = verifyDeadlineSidecar(bundle.deadlineSidecar, contracts).deadlineSidecar;
   assertInventoryIdentity(coreByTable.inventory_items);
   exactKeys(bundle.schemaEvidence, ['structuralSnapshot', 'captureEvidence', 'sourceSchemaFingerprint',
+    'schemaFingerprintContractVersion',
     'canonicalTargetFingerprint', 'partialStateMigrations', 'snapshotQueryChecksums', 'migrationSources'],
   'RECOVERY_SCHEMA_EVIDENCE_INVALID');
   assertCaptureEvidence(bundle.schemaEvidence.captureEvidence, coreByTable.inventory_items);
   if (bundle.schemaEvidence.canonicalTargetFingerprint !== bundle.manifest.canonicalTargetFingerprint
+    || bundle.schemaEvidence.schemaFingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
     || stableRecoveryJson(bundle.schemaEvidence.partialStateMigrations) !== stableRecoveryJson(PARTIAL_STATE_MIGRATIONS)
     || !SHA256.test(bundle.schemaEvidence.snapshotQueryChecksums?.structuralSnapshot)
     || !SHA256.test(bundle.schemaEvidence.snapshotQueryChecksums?.partialStateExport)

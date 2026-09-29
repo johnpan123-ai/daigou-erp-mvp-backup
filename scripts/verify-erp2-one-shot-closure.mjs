@@ -29,7 +29,7 @@ for (const file of [...portable, ...(process.env.WACA_ISOLATED_PG_URL ? native :
 console.log(JSON.stringify({
   result: 'PASS',
   exactRemainingDelta: ['045c','046b','047'],
-  canonicalFingerprint: '6775a09526b7c55b8dd96d0d1d83dba12954f5d1c8d6dde8503d647f133a963b',
+  canonicalFingerprint: 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77',
   nativePostgreSQL: process.env.WACA_ISOLATED_PG_URL ? 'PASS' : 'UNAVAILABLE',
   executed,
   liveMutation: 0,
