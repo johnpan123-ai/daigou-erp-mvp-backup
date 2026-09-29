@@ -6,6 +6,7 @@ import {
   verifyDeadlineSidecar, verifyRecoveryBundle,
 } from './contract.mjs';
 import { buildDeadlineSidecarReadScript } from './deadlineSidecarReadScript.mjs';
+import { exportDeadlineSidecarFromCdp } from './realBrowserDeadlineExporter.mjs';
 import { loadProductContracts } from './productContracts.mjs';
 import { verifyCloudflareIdentity } from '../../scripts/promotion-safety.mjs';
 import { runReadonlyWrangler } from '../../scripts/verify-erp2-promotion.mjs';
@@ -15,6 +16,12 @@ const command = args.shift();
 const option = name => {
   const index = args.indexOf(`--${name}`);
   if (index < 0 || !args[index + 1]) throw new Error(`OPTION_REQUIRED:${name}`);
+  return args[index + 1];
+};
+const optionalOption = name => {
+  const index = args.indexOf(`--${name}`);
+  if (index < 0) return null;
+  if (!args[index + 1] || args[index + 1].startsWith('--')) throw new Error(`OPTION_REQUIRED:${name}`);
   return args[index + 1];
 };
 const readJson = async path => JSON.parse(await readFile(resolve(path), 'utf8'));
@@ -39,8 +46,8 @@ const currentMigrationSources = async () => Promise.all(migrationFiles.map(async
   id: file.split('_', 1)[0], file, checksum: recoverySha256(await readFile(resolve('supabase/sql', file), 'utf8')),
 })));
 
-if (!['assemble', 'build', 'verify', 'deadline-script', 'deadline-verify'].includes(command)) {
-  throw new Error('USAGE: node tools/pre-adoption-recovery/cli.mjs <assemble|build|verify|deadline-script|deadline-verify> [options]');
+if (!['assemble', 'build', 'verify', 'deadline-script', 'deadline-browser-export', 'deadline-verify'].includes(command)) {
+  throw new Error('USAGE: node tools/pre-adoption-recovery/cli.mjs <assemble|build|verify|deadline-script|deadline-browser-export|deadline-verify> [options]');
 }
 
 const contracts = await loadProductContracts(process.cwd());
@@ -90,6 +97,19 @@ if (command === 'deadline-script') {
     identityMode: 'WRANGLER_ACCOUNT_PROJECT_PLUS_RUNTIME_SYSTEM_INFORMATION',
     cloudflare: cloudflareProof,
   }, null, 2));
+  process.exit(0);
+}
+if (command === 'deadline-browser-export') {
+  const contract = await readJson(resolve(repoRoot, 'config/erp-environment-identity.json'));
+  const cloudflareProof = verifyCloudflareIdentity({
+    contract,
+    wrangler: (wranglerArgs, accountId) => runReadonlyWrangler(repoRoot, wranglerArgs, accountId),
+  });
+  const cdpUrl = optionalOption('cdp-url') ?? process.env.ERP2_CHROME_CDP_URL ?? 'http://127.0.0.1:9222';
+  const result = await exportDeadlineSidecarFromCdp({
+    cdpUrl, contracts, cloudflareProof, output,
+  });
+  console.log(JSON.stringify(result, null, 2));
   process.exit(0);
 }
 if (git('status', '--porcelain')) throw new Error('RECOVERY_SOURCE_WORKTREE_DIRTY');

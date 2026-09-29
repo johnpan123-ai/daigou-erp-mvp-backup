@@ -14,6 +14,16 @@ C. The page downloads `erp2-deadline-durable-recovery.json`. The helper reads on
 
 D. Run `deadline-verify` locally. Keep the file outside Git; retain its checksum and store counts as recovery evidence.
 
+For unattended operation, use a Chrome instance that was explicitly started with a loopback-only DevTools endpoint and already has the formal ERP2 Settings tab open. The exporter connects with Playwright `connectOverCDP`, rejects isolated evaluators and non-loopback endpoints, verifies the live page identity, reads only the three durable stores in a `readonly` transaction, and writes the JSON directly from the local process:
+
+```powershell
+$env:ERP2_CHROME_CDP_URL = 'http://127.0.0.1:9222'
+npm run recovery:deadline-browser-export -- `
+  --output C:\secure-recovery\erp2-deadline-durable-recovery.json
+```
+
+The active everyday Chrome profile is never copied or modified. If Chrome was not already launched with remote debugging, this command fails closed with `CDP_CONNECTION_UNAVAILABLE`; it does not inspect cookies, clone profile data, create a database, or fall back to an isolated browser context.
+
 E. Run `assemble` with the existing streamed SQL export, live structural snapshot, and verified Deadline JSON. The command creates the Actual Recovery Bundle directly; Luna must not splice JSON manually.
 
 F. Run `verify` on the assembled bundle, then preserve the bundle path, checksum, 26-resource count, and total row count for the Recovery Gate report.
