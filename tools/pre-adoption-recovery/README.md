@@ -6,7 +6,7 @@ This tool builds the temporary `PRE_ADOPTION_PARTIAL_STATE` recovery bundle requ
 
 1. Run `tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql` in the confirmed `rhfdjsklfrgpoqsaqpkn` SQL Editor and export the one JSON cell.
 2. Run `tools/pre-adoption-recovery/sql/export-partial-state-readonly.sql` in the same confirmed project and export the one JSON cell.
-3. Generate the read-only Deadline helper outside the repository, then run it only in the authenticated ERP 2.0 runtime browser console. It reads the Cloud Deadline IndexedDB with a `readonly` transaction and downloads the three durable arrays; it does not include analysis/cache stores:
+3. Generate the read-only Deadline helper outside the repository while the authenticated `hippo-erp` Wrangler profile can read the canonical Cloudflare account and Pages project. Run the generated helper from the authenticated ERP 2.0 **Settings** page after its System Information fingerprint is visible. Generation embeds the read-only Wrangler account/project/domain proof; runtime execution cross-checks the exact Pages domain plus the displayed Cloudflare project, Supabase ref, and public fingerprint. If the deployed artifact already has `erp-build-identity.json`, its checksum and target identity are verified too. The historical `STAGING` / `PRODUCTION` runtime label is informational and is not used as an allow/deny signal. The helper then reads the Cloud Deadline IndexedDB with a `readonly` transaction and downloads the three durable arrays; it does not include analysis/cache stores:
 
 ```powershell
 node tools/pre-adoption-recovery/cli.mjs deadline-script `
@@ -14,6 +14,8 @@ node tools/pre-adoption-recovery/cli.mjs deadline-script `
 ```
 
 Do not paste the downloaded business data into chat or commit it to Git.
+
+The helper refuses a wrong account, project, domain, Supabase ref, fingerprint, target role, tampered build manifest, missing System Information evidence, or missing IndexedDB catalog entry. A pre-build-identity runtime may omit the manifest only when the Wrangler proof, exact domain, and runtime System Information all match. It checks the catalog before `indexedDB.open`, so a missing Deadline database is never created by the export path.
 4. Build the bundle to an explicit path outside the Git worktree:
 
 ```powershell

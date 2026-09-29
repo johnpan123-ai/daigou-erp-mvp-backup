@@ -36,7 +36,7 @@ const parseJson = output => {
   fail('Wrangler did not return valid JSON');
 };
 
-const runWrangler = (root, argv, accountId) => {
+export const runReadonlyWrangler = (root, argv, accountId) => {
   if (argv.some(value => !/^[a-zA-Z0-9-]+$/u.test(value))) fail('unsafe Wrangler argument');
   const entry = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
   try {
@@ -67,7 +67,7 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
     guardGit,
     guardCheckpointTag: args.get('guard-checkpoint-tag'),
     environment,
-    wrangler: (wranglerArgs, accountId) => runWrangler(candidateRoot, wranglerArgs, accountId),
+    wrangler: (wranglerArgs, accountId) => runReadonlyWrangler(candidateRoot, wranglerArgs, accountId),
   });
   const artifact = await verifyArtifactIdentity({ artifactRoot, proof, contract });
   let schemaEvidence;

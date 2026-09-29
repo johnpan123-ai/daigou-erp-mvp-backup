@@ -12,6 +12,7 @@ import {
 } from '../tools/pre-adoption-recovery/contract.mjs';
 import { loadProductContracts } from '../tools/pre-adoption-recovery/productContracts.mjs';
 import { buildDeadlineSidecarReadScript } from '../tools/pre-adoption-recovery/deadlineSidecarReadScript.mjs';
+import { CANONICAL_ERP2_TARGET } from '../scripts/promotion-safety.mjs';
 
 const LIVE_PARTIAL_FINGERPRINT = '84ed86f61075e3f5d8958444f249cf0308ff90a1f9673c944aaafae4c606194d';
 const CANONICAL_FINGERPRINT = '6775a09526b7c55b8dd96d0d1d83dba12954f5d1c8d6dde8503d647f133a963b';
@@ -113,7 +114,11 @@ const counts = async (db, tables) => Object.fromEntries(await Promise.all(tables
 ])));
 
 const contracts = await loadProductContracts();
-const deadlineReadScript = buildDeadlineSidecarReadScript(contracts);
+const deadlineReadScript = buildDeadlineSidecarReadScript(contracts, { cloudflareProof: {
+  accountId: CANONICAL_ERP2_TARGET.accountId,
+  project: CANONICAL_ERP2_TARGET.project,
+  domain: CANONICAL_ERP2_TARGET.domain,
+} });
 assert.match(deadlineReadScript, /transaction\(Object\.values\(stores\), 'readonly'\)/u);
 assert.match(deadlineReadScript, /indexedDB\.databases\(\)/u);
 assert.match(deadlineReadScript, /request\.onupgradeneeded/u);

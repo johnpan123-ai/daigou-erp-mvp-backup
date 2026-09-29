@@ -4,6 +4,8 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import { buildRecoveryBundle, recoverySha256, stableRecoveryJson, verifyRecoveryBundle } from './contract.mjs';
 import { buildDeadlineSidecarReadScript } from './deadlineSidecarReadScript.mjs';
 import { loadProductContracts } from './productContracts.mjs';
+import { verifyCloudflareIdentity } from '../../scripts/promotion-safety.mjs';
+import { runReadonlyWrangler } from '../../scripts/verify-erp2-promotion.mjs';
 
 const args = process.argv.slice(2);
 const command = args.shift();
@@ -64,8 +66,17 @@ const repoRoot = resolve(git('rev-parse', '--show-toplevel'));
 const insideRepo = !relative(repoRoot, output).startsWith('..') && !isAbsolute(relative(repoRoot, output));
 if (insideRepo) throw new Error('RECOVERY_OUTPUT_MUST_BE_OUTSIDE_GIT_WORKTREE');
 if (command === 'deadline-script') {
-  await writeFile(output, buildDeadlineSidecarReadScript(contracts), { flag: 'wx' });
-  console.log(JSON.stringify({ result: 'PASS', output, mode: 'READ_ONLY_INDEXEDDB' }, null, 2));
+  const contract = await readJson(resolve(repoRoot, 'config/erp-environment-identity.json'));
+  const cloudflareProof = verifyCloudflareIdentity({
+    contract,
+    wrangler: (wranglerArgs, accountId) => runReadonlyWrangler(repoRoot, wranglerArgs, accountId),
+  });
+  await writeFile(output, buildDeadlineSidecarReadScript(contracts, { cloudflareProof }), { flag: 'wx' });
+  console.log(JSON.stringify({
+    result: 'PASS', output, mode: 'READ_ONLY_INDEXEDDB',
+    identityMode: 'WRANGLER_ACCOUNT_PROJECT_PLUS_RUNTIME_SYSTEM_INFORMATION',
+    cloudflare: cloudflareProof,
+  }, null, 2));
   process.exit(0);
 }
 if (git('status', '--porcelain')) throw new Error('RECOVERY_SOURCE_WORKTREE_DIRTY');
