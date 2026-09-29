@@ -130,7 +130,7 @@ const verifyPreAdoption = ({ evidence, migrationsById }) => {
   }
   const planIndex = new Map(evidence.applyPlan.map((item, index) => [item.migrationId, index]));
   for (const item of evidence.migrations) {
-    if (item.state === 'PARTIAL' || item.state === 'UNKNOWN') {
+    if (item.state === 'UNKNOWN') {
       failClosed(`pre-adoption migration ${item.migrationId} is not safely classified`);
     }
     if (item.state === 'SATISFIED') {
@@ -164,7 +164,7 @@ const verifyPreAdoption = ({ evidence, migrationsById }) => {
       }
       continue;
     }
-    if (item.state !== 'CONFLICT' || !item.coveredByRepair || item.repairClosure !== item.coveredByRepair
+    if (!['PARTIAL','CONFLICT'].includes(item.state) || !item.coveredByRepair || item.repairClosure !== item.coveredByRepair
       || item.applyMethod !== 'SUPERSEDED_BY_COMPATIBILITY_REPAIR') {
       failClosed(`migration ${item.migrationId} has an uncovered conflict`);
     }

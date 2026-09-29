@@ -44,7 +44,7 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
   '018': {
     sourceFile: '018_cloud_import_batch_canonical.sql', dependencies: ['001', '002-core', '011'],
-    risk: 'LOW_ADDITIVE', idempotency: 'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',
+    risk: 'LOW_ADDITIVE', idempotency: 'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY', repairClosure: '018b',
     preconditions: [fn('is_owner(uuid)'), fn('is_editor(uuid)')],
     postconditions: [
       table('import_batches', { rls: true }), column('import_batches', 'id', 'uuid', { nullable: false }),
@@ -57,6 +57,27 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       ...['select_policy', 'insert_policy', 'update_policy', 'delete_policy']
         .map(name => q('policy', `public.import_batches.${name}`)),
       q('tableGrant', 'public.import_batches.authenticated', ['DELETE', 'INSERT', 'SELECT', 'UPDATE']),
+    ],
+  },
+  '018b': {
+    sourceFile: '018b_cloud_import_batch_acl_compatibility_repair.sql', dependencies: ['001', '002-core', '011'],
+    risk: 'LOW_TARGETED_ACL_REPAIR', idempotency: 'STATE_GUARDED_RERUN_SAFE', repairs: ['018'],
+    allowPartialApply: true,
+    preconditions: [
+      table('import_batches', { rls: true }), q('tableOwner', 'public.import_batches', 'postgres'),
+      q('primaryKey', 'public.import_batches', ['id']),
+      ...['select_policy', 'insert_policy', 'update_policy', 'delete_policy']
+        .map(name => q('policy', `public.import_batches.${name}`)),
+      q('tableGrantSubset', 'public.import_batches.anon', ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE']),
+      q('tableGrantSubset', 'public.import_batches.authenticated',
+        ['DELETE','INSERT','MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']),
+      q('tableGrantContains', 'public.import_batches.authenticated', ['DELETE','INSERT','SELECT','UPDATE']),
+      q('tableGrant', 'public.import_batches.public', []),
+    ],
+    postconditions: [
+      q('tableGrant', 'public.import_batches.authenticated', ['DELETE','INSERT','SELECT','UPDATE'], { mismatchIsMissing: true }),
+      q('tableGrant', 'public.import_batches.anon', [], { mismatchIsMissing: true }),
+      q('tableGrant', 'public.import_batches.public', []),
     ],
   },
   '026b': {
@@ -192,7 +213,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   },
   '045': {
     sourceFile: '045_waca_cloud_atomic_restore_closure.sql', dependencies: ['043', '044'],
-    risk: 'HIGH_ATOMIC_RESTORE_PATCH', idempotency: 'DEFINITION_PATCH_GUARDED',
+    risk: 'HIGH_ATOMIC_RESTORE_PATCH', idempotency: 'DEFINITION_PATCH_GUARDED', repairClosure: '045b',
     preconditions: [...WACA_TABLES.map(name => table(name)), fn('erp_restore_proven_cloud_snapshot_attempt(uuid,uuid,uuid,uuid,uuid)')],
     postconditions: [
       q('trigger', 'public.waca_state.erp_cloud_restore_maintenance_guard'),
@@ -205,8 +226,33 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       fn('erp_restore_cloud_snapshot(uuid,text,jsonb,jsonb,text)', { definitionIncludes: ['resourcecount', '24'] }),
     ],
   },
+  '045b': {
+    sourceFile: '045b_waca_cloud_atomic_restore_compatibility_repair.sql', dependencies: ['043', '044'],
+    risk: 'HIGH_STATE_GUARDED_ATOMIC_RESTORE_REPAIR', idempotency: 'STATE_GUARDED_RERUN_SAFE', repairs: ['045'],
+    allowPartialApply: true,
+    preconditions: [
+      ...WACA_TABLES.map(name => table(name)), table('import_batches'), table('dashboard_category_images'),
+      fn('erp_restore_proven_cloud_snapshot_attempt(uuid,uuid,uuid,uuid,uuid)', {
+        definitionIncludes: ['p_proof_id', 'rpc=execute event=db-entry'],
+      }),
+      q('functionDefinitionCompatible', 'public.erp_cloud_restore_audit_dataset(jsonb)', true, {
+        variants: ['jsonb_object_keys(p_data)) <> 15', 'jsonb_object_keys(p_data)) <> 24'],
+      }),
+    ],
+    postconditions: [
+      q('trigger', 'public.import_batches.erp_cloud_restore_maintenance_guard'),
+      q('trigger', 'public.waca_state.erp_cloud_restore_maintenance_guard'),
+      fn('erp_cloud_restore_validate_waca_dataset(jsonb)', { authenticatedExecute: false, anonExecute: false }),
+      fn('erp_cloud_restore_recompute_waca_quantities()', {
+        authenticatedExecute: false, anonExecute: false, definitionIncludes: ['waca_auto_quantity'],
+      }),
+      fn('erp_cloud_restore_snapshot()', { definitionIncludes: ['waca_orders', 'waca_state'] }),
+      fn('erp_cloud_restore_audit_dataset(jsonb)', { definitionIncludes: ['waca_order_items', 'waca_mappings'] }),
+      fn('erp_restore_cloud_snapshot(uuid,text,jsonb,jsonb,text)', { definitionIncludes: ['resourcecount', '24'] }),
+    ],
+  },
   '046': {
-    sourceFile: '046_waca_myacg_parent_evidence.sql', dependencies: ['020', '044', '045'],
+    sourceFile: '046_waca_myacg_parent_evidence.sql', dependencies: ['020', '044', '045b'],
     risk: 'LOW_ADDITIVE_EVIDENCE_COLUMN', idempotency: 'SOURCE_DRIFT_GUARDED_ONE_TIME', repairClosure: '046b',
     preconditions: [table('inventory_items'), fn('erp_apply_field_mutations(text,jsonb)')],
     postconditions: [
@@ -216,7 +262,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
     ],
   },
   '046b': {
-    sourceFile: '046b_waca_myacg_parent_compatibility_repair.sql', dependencies: ['020', '044', '045'],
+    sourceFile: '046b_waca_myacg_parent_compatibility_repair.sql', dependencies: ['020', '044', '045b'],
     risk: 'LOW_STATE_GUARDED_ACL_REPAIR', idempotency: 'STATE_GUARDED_RERUN_SAFE', repairs: ['046'],
     allowPartialApply: true,
     preconditions: [

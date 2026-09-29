@@ -28,6 +28,7 @@
     "test:schema-reconciliation": "node tests/schema-reconciliation.mjs",
     "test:schema-reconciliation-pg": "node tests/schema-reconciliation-pglite.mjs",
     "test:erp2-046-isolated": "node tests/erp2-046-compatibility-isolated.mjs",
+    "test:erp2-partial-apply-recovery": "node tests/erp2-partial-apply-recovery.mjs",
     "schema:canonical-snapshot": "node tools/schema-reconciliation/generateCanonicalSnapshot.mjs",
     "lint": "eslint .",
     "preview": "vite preview",

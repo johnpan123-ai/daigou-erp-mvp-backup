@@ -116,6 +116,22 @@ const superseded = [
 assert.deepEqual(pass(makeEvidence({ migrations: superseded })).applyDelta, ['046b']);
 console.log('PASS E: explicit 046 -> 046b safe supersession is accepted');
 
+const partialApplyRepairs = [
+  migration('018', 18, 'CONFLICT', { safeToApply: false, repairClosure: '018b', coveredByRepair: '018b',
+    applyMethod: 'SUPERSEDED_BY_COMPATIBILITY_REPAIR' }),
+  migration('018b', 19, 'NEEDS_APPLY', { repairs: ['018'] }),
+  migration('045', 45, 'PARTIAL', { safeToApply: false, repairClosure: '045b', coveredByRepair: '045b',
+    applyMethod: 'SUPERSEDED_BY_COMPATIBILITY_REPAIR' }),
+  migration('045b', 46, 'NEEDS_APPLY', { repairs: ['045'] }),
+  migration('046', 47, 'CONFLICT', { safeToApply: false, repairClosure: '046b', coveredByRepair: '046b',
+    applyMethod: 'SUPERSEDED_BY_COMPATIBILITY_REPAIR' }),
+  migration('046b', 48, 'NEEDS_APPLY', { repairs: ['046'] }),
+  migration('047', 49, 'NEEDS_APPLY'),
+];
+assert.deepEqual(pass(makeEvidence({ migrations: partialApplyRepairs })).applyDelta,
+  ['018b','045b','046b','047']);
+console.log('PASS E2: 018/045/046 partial-state conflicts are accepted only through explicit repair closures');
+
 blocked(makeEvidence({ migrations: safeDelta, targetAfterDeltaFingerprint: current }));
 console.log('PASS F: non-canonical target-after-delta blocks');
 
@@ -158,4 +174,4 @@ blocked(makeEvidence({ migrations: postMigrations, mode: 'POST_ADOPTION', baseli
 } }));
 console.log('PASS POST_ADOPTION extension: canonical current state and valid baseline adoption proof are mandatory');
 
-console.log(JSON.stringify({ result: 'PASS', cases: 10, liveMutation: 0 }));
+console.log(JSON.stringify({ result: 'PASS', cases: 11, liveMutation: 0 }));

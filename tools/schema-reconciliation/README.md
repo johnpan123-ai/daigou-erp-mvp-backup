@@ -11,7 +11,9 @@ Suggested order:
 1. `live-schema-snapshot-readonly.sql` — complete structural catalog snapshot.
 2. `026b-inventory-preconditions-readonly.sql` — exact PK/backfill safety counts.
 3. `waca-restore-presence-readonly.sql` — quick WACA and Restore surface check.
-4. `ledger-history-readonly.sql` — only after the snapshot confirms the project-owned ledger exists.
+4. `018b-import-batches-acl-matrix-readonly.sql` — exact/extra/missing ACL evidence for Data API and privileged roles.
+5. `045b-waca-restore-compatibility-readonly.sql` — classifies the Restore surface as supported pre-045, supported post-045, or conflict.
+6. `ledger-history-readonly.sql` — only after the snapshot confirms the project-owned ledger exists.
 
 Generate the candidate canonical target from the checked-in fresh-install chain in an isolated PostgreSQL 18 runtime:
 
@@ -34,6 +36,11 @@ node tools/schema-reconciliation/cli.mjs `
 ```
 
 An incomplete snapshot fails closed. `PARTIAL`, `CONFLICT`, and `UNKNOWN` block Apply. A `NEEDS_APPLY` result is safe only when all declared structural and data preconditions pass.
+
+The only exception is an explicit, checksum-bound compatibility closure in the
+candidate registry. A covered `PARTIAL` or `CONFLICT` remains visible in the
+evidence, but the original migration is omitted from the delta and only its
+state-guarded repair may be planned. Uncovered or unknown states still block.
 
 The project-owned ledger introduced by migration 047 is environment-local, non-portable operational metadata. It is deliberately excluded from the 24-resource business Backup/Restore contract. `BASELINE_ADOPTED` records a reconciled state and never fabricates historical migration execution; later real executions use `MIGRATION_APPLIED`.
 

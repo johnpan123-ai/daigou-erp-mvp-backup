@@ -10,7 +10,7 @@ import { readdir } from 'node:fs/promises';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 const registry = await buildMigrationEffectRegistry();
-assert.deepEqual(Object.keys(registry), ['018','026b','027','029','030','041','042','043','044','045','046','046b','047']);
+assert.deepEqual(Object.keys(registry), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','046','046b','047']);
 for (const effect of Object.values(registry)) {
   assert.match(effect.sourceChecksum, /^[0-9a-f]{64}$/u);
   assert.ok(effect.sourceEffects.transactionWrapped);
@@ -26,7 +26,12 @@ assert.ok(registry['044'].sourceEffects.tables.find(value => value.name === 'wac
   .some(value => value.referencedTable === 'public.waca_orders'));
 assert.ok(registry['026b'].sourceEffects.identityRewrites.some(value => value.table === 'inventory_items'));
 assert.ok(registry['043'].sourceEffects.functionAcl.some(value => value.action === 'GRANT'));
+assert.equal(registry['018'].repairClosure, '018b');
+assert.deepEqual(registry['018b'].repairs, ['018']);
+assert.equal(registry['045'].repairClosure, '045b');
+assert.deepEqual(registry['045b'].repairs, ['045']);
 assert.deepEqual(registry['046b'].repairs, ['046']);
+assert.equal(registry['046b'].dependencies.includes('045b'), true);
 assert.equal(registry['047'].dependencies.includes('046b'), true);
 console.log('PASS migration effect registry is checksum-bound to parsed SQL source');
 
