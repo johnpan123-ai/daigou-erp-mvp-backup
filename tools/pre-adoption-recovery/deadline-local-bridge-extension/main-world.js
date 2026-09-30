@@ -20,9 +20,19 @@
     document.querySelectorAll('[aria-label="系統資訊"] dt'),
   ).map(term => [term.textContent?.trim() ?? '', term.nextElementSibling?.textContent?.trim() ?? '']));
 
+  const waitForSystemInformation = async (timeoutMs = 30_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const system = systemInformation();
+      if (system['Cloudflare Project'] && system['Supabase Project'] && system['Public Fingerprint']) return system;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    fail('RUNTIME_IDENTITY_UNAVAILABLE');
+  };
+
   const assertRuntimeIdentity = async expected => {
     if (location.origin !== ERP2_ORIGIN || location.pathname !== '/settings') fail('PAGES_DOMAIN_MISMATCH');
-    const system = systemInformation();
+    const system = await waitForSystemInformation();
     if (expected?.domain !== location.hostname || expected?.project !== system['Cloudflare Project']) fail('PAGES_PROJECT_MISMATCH');
     if (expected?.supabaseProject !== system['Supabase Project']) fail('SUPABASE_PROJECT_MISMATCH');
     if (expected?.publicFingerprint !== system['Public Fingerprint']) fail('PUBLIC_FINGERPRINT_MISMATCH');

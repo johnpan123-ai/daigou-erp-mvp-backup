@@ -46,11 +46,11 @@ try {
       return;
     }
     const instrumentation = url.pathname === '/settings'
-      ? `<script>window.__deadlineTransactionModes=[];const original=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(names,mode,options){window.__deadlineTransactionModes.push(mode??'readonly');return original.call(this,names,mode,options);};</script>`
+      ? `<script>window.__deadlineTransactionModes=[];const original=IDBDatabase.prototype.transaction;IDBDatabase.prototype.transaction=function(names,mode,options){window.__deadlineTransactionModes.push(mode??'readonly');return original.call(this,names,mode,options);};setTimeout(()=>document.body.insertAdjacentHTML('beforeend',${JSON.stringify(`<section aria-label="系統資訊"><dl>${systemRows}</dl></section>`)}),250);</script>`
       : '';
     await route.fulfill({
       status: 200, contentType: 'text/html; charset=utf-8',
-      body: `<!doctype html>${instrumentation}<section aria-label="系統資訊"><dl>${systemRows}</dl></section>`,
+      body: `<!doctype html><body>${instrumentation}${url.pathname === '/settings' ? '' : `<section aria-label="系統資訊"><dl>${systemRows}</dl></section>`}</body>`,
     });
   });
   await page.goto(`https://${target.domain}/bootstrap`, { waitUntil: 'domcontentloaded' });
