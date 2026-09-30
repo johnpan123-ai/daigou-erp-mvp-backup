@@ -20,19 +20,25 @@
     document.querySelectorAll('[aria-label="系統資訊"] dt'),
   ).map(term => [term.textContent?.trim() ?? '', term.nextElementSibling?.textContent?.trim() ?? '']));
 
-  const waitForSystemInformation = async (timeoutMs = 30_000) => {
+  const waitForSystemInformation = async (expected, timeoutMs = 30_000) => {
     const deadline = Date.now() + timeoutMs;
+    let latest = {};
     while (Date.now() < deadline) {
-      const system = systemInformation();
-      if (system['Cloudflare Project'] && system['Supabase Project'] && system['Public Fingerprint']) return system;
+      latest = systemInformation();
+      if (latest['Cloudflare Project'] === expected.project
+        && latest['Supabase Project'] === expected.supabaseProject
+        && latest['Public Fingerprint'] === expected.publicFingerprint) return latest;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    fail('RUNTIME_IDENTITY_UNAVAILABLE');
+    if (!latest['Cloudflare Project'] || !latest['Supabase Project'] || !latest['Public Fingerprint']) {
+      fail('RUNTIME_IDENTITY_UNAVAILABLE');
+    }
+    return latest;
   };
 
   const assertRuntimeIdentity = async expected => {
     if (location.origin !== ERP2_ORIGIN || location.pathname !== '/settings') fail('PAGES_DOMAIN_MISMATCH');
-    const system = await waitForSystemInformation();
+    const system = await waitForSystemInformation(expected);
     if (expected?.domain !== location.hostname || expected?.project !== system['Cloudflare Project']) fail('PAGES_PROJECT_MISMATCH');
     if (expected?.supabaseProject !== system['Supabase Project']) fail('SUPABASE_PROJECT_MISMATCH');
     if (expected?.publicFingerprint !== system['Public Fingerprint']) fail('PUBLIC_FINGERPRINT_MISMATCH');
