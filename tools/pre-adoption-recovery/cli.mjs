@@ -7,6 +7,7 @@ import {
 } from './contract.mjs';
 import { buildDeadlineSidecarReadScript } from './deadlineSidecarReadScript.mjs';
 import { exportDeadlineSidecarFromCdp } from './realBrowserDeadlineExporter.mjs';
+import { runDeadlineLocalBridge } from './deadlineLocalBridgeServer.mjs';
 import { loadProductContracts } from './productContracts.mjs';
 import { verifyCloudflareIdentity } from '../../scripts/promotion-safety.mjs';
 import { runReadonlyWrangler } from '../../scripts/verify-erp2-promotion.mjs';
@@ -46,8 +47,8 @@ const currentMigrationSources = async () => Promise.all(migrationFiles.map(async
   id: file.split('_', 1)[0], file, checksum: recoverySha256(await readFile(resolve('supabase/sql', file), 'utf8')),
 })));
 
-if (!['assemble', 'build', 'verify', 'deadline-script', 'deadline-browser-export', 'deadline-verify'].includes(command)) {
-  throw new Error('USAGE: node tools/pre-adoption-recovery/cli.mjs <assemble|build|verify|deadline-script|deadline-browser-export|deadline-verify> [options]');
+if (!['assemble', 'build', 'verify', 'deadline-script', 'deadline-browser-export', 'deadline-local-bridge', 'deadline-verify'].includes(command)) {
+  throw new Error('USAGE: node tools/pre-adoption-recovery/cli.mjs <assemble|build|verify|deadline-script|deadline-browser-export|deadline-local-bridge|deadline-verify> [options]');
 }
 
 const contracts = await loadProductContracts(process.cwd());
@@ -108,6 +109,28 @@ if (command === 'deadline-browser-export') {
   const cdpUrl = optionalOption('cdp-url') ?? process.env.ERP2_CHROME_CDP_URL ?? 'http://127.0.0.1:9222';
   const result = await exportDeadlineSidecarFromCdp({
     cdpUrl, contracts, cloudflareProof, output,
+  });
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(0);
+}
+if (command === 'deadline-local-bridge') {
+  const contract = await readJson(resolve(repoRoot, 'config/erp-environment-identity.json'));
+  const cloudflareProof = verifyCloudflareIdentity({
+    contract,
+    wrangler: (wranglerArgs, accountId) => runReadonlyWrangler(repoRoot, wranglerArgs, accountId),
+  });
+  const portValue = optionalOption('port');
+  const timeoutValue = optionalOption('timeout-ms');
+  const port = portValue == null ? undefined : Number(portValue);
+  const timeoutMs = timeoutValue == null ? undefined : Number(timeoutValue);
+  if ((port != null && (!Number.isSafeInteger(port) || port < 1024 || port > 65535))
+    || (timeoutMs != null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000))) {
+    throw new Error('DEADLINE_LOCAL_BRIDGE_OPTION_INVALID');
+  }
+  const result = await runDeadlineLocalBridge({
+    output, contracts, cloudflareProof,
+    ...(port == null ? {} : { port }),
+    ...(timeoutMs == null ? {} : { timeoutMs }),
   });
   console.log(JSON.stringify(result, null, 2));
   process.exit(0);

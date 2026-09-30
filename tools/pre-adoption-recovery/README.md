@@ -14,6 +14,25 @@ C. The page downloads `erp2-deadline-durable-recovery.json`. The helper reads on
 
 D. Run `deadline-verify` locally. Keep the file outside Git; retain its checksum and store counts as recovery evidence.
 
+When Full CDP is intentionally disabled, the supported replacement is the minimal MV3 extension in
+`tools/pre-adoption-recovery/deadline-local-bridge-extension`. It is restricted to the canonical ERP2
+Settings origin and a loopback-only receiver. The MAIN-world script performs the same fail-closed identity
+checks and one `readonly` IndexedDB transaction. An isolated content script forwards deterministic,
+checksummed chunks through the extension service worker; the local receiver reassembles and verifies the
+canonical JSON before creating the file. No Cookie, browser credential, Authorization header, clipboard,
+console row dump, Blob click, or download-event polling is used.
+
+Start the receiver before reloading the canonical Settings page with the unpacked extension enabled:
+
+```powershell
+npm run recovery:deadline-local-bridge -- `
+  --output C:\secure-recovery\erp2-deadline-durable-recovery.json
+```
+
+The receiver binds only `127.0.0.1:45173`, uses a one-time session token, writes with create-only semantics,
+and exits after one verified transfer. Loading or reloading the unpacked extension is an explicit user action;
+the tool never modifies another Chrome profile or extension.
+
 For unattended operation, use a Chrome instance that was explicitly started with a loopback-only DevTools endpoint and already has the formal ERP2 Settings tab open. The exporter connects with Playwright `connectOverCDP`, rejects isolated evaluators and non-loopback endpoints, verifies the live page identity, reads only the three durable stores in a `readonly` transaction, and writes the JSON directly from the local process:
 
 ```powershell

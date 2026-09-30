@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "ERP2 Deadline Readonly Recovery Bridge",
+  "version": "1.0.0",
+  "description": "One-shot, read-only ERP2 Deadline durable recovery export to a loopback receiver.",
+  "host_permissions": [
+    "https://hippo-erp-realtime-preview.pages.dev/settings*",
+    "http://127.0.0.1:45173/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://hippo-erp-realtime-preview.pages.dev/settings*"],
+      "js": ["main-world.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://hippo-erp-realtime-preview.pages.dev/settings*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ]
+}
