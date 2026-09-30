@@ -97,6 +97,10 @@ const safeDelta = [migration('018', 18, 'NEEDS_APPLY', {
   migration('026b', 26, 'SATISFIED')];
 assert.deepEqual(pass(makeEvidence({ migrations: safeDelta })).applyDelta, ['018']);
 console.log('PASS A: PRE_ADOPTION permits current != canonical with an exact safe delta');
+assert.deepEqual(pass(makeEvidence({ migrations: safeDelta, migrationHistoryProvenance: 'AVAILABLE' })).applyDelta, ['018']);
+blocked(makeEvidence({ migrations: safeDelta, migrationHistoryProvenance: 'AVAILABLE',
+  baselineRecord: { eventType: 'BASELINE_ADOPTED' } }));
+console.log('PASS A2: PRE_ADOPTION accepts an empty 047 ledger but blocks an existing baseline');
 
 blocked(makeEvidence({ migrations: [migration('044', 44, 'PARTIAL', { safeToApply: false })] }));
 console.log('PASS B: PARTIAL blocks');
@@ -176,4 +180,4 @@ blocked(makeEvidence({ migrations: postMigrations, mode: 'POST_ADOPTION', baseli
 } }));
 console.log('PASS POST_ADOPTION extension: canonical current state and valid baseline adoption proof are mandatory');
 
-console.log(JSON.stringify({ result: 'PASS', cases: 11, liveMutation: 0 }));
+console.log(JSON.stringify({ result: 'PASS', cases: 12, liveMutation: 0 }));

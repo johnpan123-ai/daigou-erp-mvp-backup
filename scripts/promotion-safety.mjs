@@ -125,9 +125,10 @@ const verifyLiveObservation = ({ liveObservation, evidence, contract, now }) => 
 };
 
 const verifyPreAdoption = ({ evidence, migrationsById }) => {
-  if (evidence.migrationHistoryProvenance !== 'UNAVAILABLE') {
+  if (!['UNAVAILABLE','AVAILABLE'].includes(evidence.migrationHistoryProvenance)) {
     failClosed('pre-adoption evidence has inconsistent migration-history provenance');
   }
+  if (evidence.baselineRecord) failClosed('pre-adoption evidence already contains a baseline adoption record');
   const planIndex = new Map(evidence.applyPlan.map((item, index) => [item.migrationId, index]));
   for (const item of evidence.migrations) {
     if (item.state === 'UNKNOWN') {
