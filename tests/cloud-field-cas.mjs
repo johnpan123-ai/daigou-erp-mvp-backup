@@ -11,6 +11,9 @@ const clone = value => structuredClone(value);
 
 const vite = await createServer({ root: ROOT, configFile: false, cacheDir: `${ROOT}/.vite-cache/cloud-field-cas-test`,
   mode: 'experimental',
+  // SSR-only unit harness has no browser entries. Do not start a background
+  // HTML dependency scan that races teardown after every assertion passed.
+  optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true }, appType: 'custom' });
 try {
   const cas = await vite.ssrLoadModule('/src/providers/cloud/cloudFieldCas.ts');

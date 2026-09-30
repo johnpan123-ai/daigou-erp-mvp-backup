@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "defaultClassification": "SCHEMA_SENSITIVE_OR_UNREVIEWED",
+  "schemaSensitivePrefixes": [
+    "supabase/", "migrations/", "tools/schema-reconciliation/",
+    "tools/pre-adoption-recovery/", "src/providers/", "src/backup/",
+    "src/lib/", "src/auth/", "src/waca/"
+  ],
+  "schemaContractFiles": ["config/erp-environment-identity.json"],
+  "uiFiles": [
+    "src/components/layout/AppLayout.tsx", "src/pages/Inventory.tsx",
+    "src/pages/WacaIntegration.tsx"
+  ],
+  "purePresentationFiles": ["src/waca/providerSupport.ts"],
+  "releaseControlFiles": [
+    "scripts/promotion-safety.mjs", "scripts/verify-erp2-promotion.mjs",
+    "scripts/post-adoption-descendant.mjs", "config/erp2-non-schema-release-policy.json"
+  ],
+  "nonRuntimePrefixes": ["tests/", "docs/"],
+  "stylePrefixes": ["src/styles/", "src/pages/", "src/components/"]
+}

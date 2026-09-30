@@ -30,7 +30,7 @@ export function parseArguments(argv) {
 
 const parseJson = output => {
   const clean = stripVTControlCharacters(String(output)).trim();
-  const start = clean.search(/[\[{]/u);
+  const start = clean.search(/[[{]/u);
   try { if (start >= 0) return JSON.parse(clean.slice(start)); }
   catch { /* Fail closed below. */ }
   fail('Wrangler did not return valid JSON');
@@ -77,6 +77,7 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
     evidence: schemaEvidence,
     contract,
     candidate: proof.candidate,
+    candidateGit,
     migrationRegistry: await buildMigrationEffectRegistry(),
     liveObservation: {
       projectRef: environment.ERP2_LIVE_SCHEMA_PROJECT_REF,

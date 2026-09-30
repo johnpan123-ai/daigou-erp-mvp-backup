@@ -8,6 +8,7 @@ import {
   buildPlannerIdentity,
   buildSchemaEvidenceIdentity,
 } from '../tools/schema-reconciliation/evidenceContract.mjs';
+import { verifySafeDescendant } from './post-adoption-descendant.mjs';
 
 export const CANONICAL_ERP2_TARGET = Object.freeze({
   role: 'ERP_2_CLOUD_CANDIDATE',
@@ -178,7 +179,7 @@ const verifyPreAdoption = ({ evidence, migrationsById }) => {
   }
 };
 
-const verifyPostAdoption = ({ evidence, required, candidate }) => {
+const verifyPostAdoption = ({ evidence, required, candidate, candidateGit }) => {
   if (evidence.currentFingerprint !== evidence.expectedFingerprint
     || evidence.migrationHistoryProvenance !== 'AVAILABLE'
     || evidence.applyPlan.length !== 0
@@ -187,14 +188,21 @@ const verifyPostAdoption = ({ evidence, required, candidate }) => {
   }
   const record = evidence.baselineRecord;
   if (record?.eventType !== 'BASELINE_ADOPTED' || record.eventKey !== required
-    || record.sourceHead !== candidate.head || record.checkpoint !== candidate.checkpointTag
+    || record.result !== 'PASS' || record.supabaseProjectRef !== CANONICAL_ERP2_TARGET.supabaseProject
+    || record.environmentRole !== 'PRODUCTION'
     || record.schemaFingerprintAfter !== evidence.currentFingerprint
     || record.metadata?.historicalMigrationExecutionClaimed !== false) {
     failClosed('post-adoption baseline ledger evidence mismatch');
   }
+  if (record.sourceHead === candidate.head && record.checkpoint === candidate.checkpointTag) {
+    return { result: 'PASS', mode: 'EXACT_BASELINE', baselineHead: record.sourceHead,
+      baselineCheckpoint: record.checkpoint, schemaBaselineMutated: false };
+  }
+  if (typeof candidateGit !== 'function') failClosed('descendant deployment requires actual Git evidence');
+  return verifySafeDescendant({ git: candidateGit, candidate, baselineRecord: record });
 };
 
-export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, migrationRegistry,
+export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, migrationRegistry, candidateGit,
   now = Date.now() }) {
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
@@ -220,13 +228,15 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
   }
   verifyLiveObservation({ liveObservation, evidence, contract, now });
   const migrationsById = verifyPlannerContract(evidence, migrationRegistry);
-  if (evidence.mode === 'POST_ADOPTION') verifyPostAdoption({ evidence, required, candidate });
-  else verifyPreAdoption({ evidence, migrationsById });
+  const deploymentLineage = evidence.mode === 'POST_ADOPTION'
+    ? verifyPostAdoption({ evidence, required, candidate, candidateGit }) : null;
+  if (evidence.mode !== 'POST_ADOPTION') verifyPreAdoption({ evidence, migrationsById });
   return {
     result: 'PASS', mode: evidence.mode, baselineId: required,
     currentFingerprint: evidence.currentFingerprint,
     targetAfterDeltaFingerprint: evidence.targetAfterDeltaFingerprint,
     applyDelta: evidence.applyPlan.map(item => item.migrationId),
+    deploymentLineage,
   };
 }
 

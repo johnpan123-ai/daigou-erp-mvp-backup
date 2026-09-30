@@ -169,6 +169,7 @@ const postMigrations = [migration('047', 47, 'SATISFIED')];
 const baselineRecord = {
   eventType: 'BASELINE_ADOPTED', eventKey: contract.schemaBaseline.requiredBaselineId,
   sourceHead: candidate.head, checkpoint: candidate.checkpointTag, schemaFingerprintAfter: canonical,
+  result: 'PASS', supabaseProjectRef: projectRef, environmentRole: 'PRODUCTION',
   metadata: { historicalMigrationExecutionClaimed: false },
 };
 const post = makeEvidence({ migrations: postMigrations, mode: 'POST_ADOPTION', currentFingerprint: canonical,

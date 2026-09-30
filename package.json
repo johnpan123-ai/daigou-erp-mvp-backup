@@ -24,6 +24,7 @@
     "deploy:erp2": "node scripts/deploy-erp2-pages.mjs",
     "test:erp2-promotion-guard": "node tests/erp2-promotion-guard.mjs",
     "test:erp2-pre-adoption-guard": "node tests/erp2-pre-adoption-guard.mjs",
+    "test:erp2-descendant-guard": "node tests/erp2-post-adoption-descendant.mjs",
     "test:staging-build-identity": "node tests/staging-build-identity.mjs",
     "test:promotion-sync-state": "node tests/promotion-sync-state.mjs",
     "test:schema-reconciliation": "node tests/schema-reconciliation.mjs",
