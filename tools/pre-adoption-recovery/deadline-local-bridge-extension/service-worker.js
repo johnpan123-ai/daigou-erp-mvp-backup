@@ -41,9 +41,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const { bridgeToken: _privateToken, ...publicSession } = session;
       return publicSession;
     }
-    if (message.kind !== 'FORWARD') fail('MESSAGE_KIND_REJECTED');
     const session = sessions.get(tabId);
     if (!session || message.payload?.sessionId !== session.sessionId) fail('SESSION_MISMATCH');
+    if (message.kind === 'FORWARD_ERROR') {
+      return receiverRequest('/v1/error', { token: session.bridgeToken, body: message.payload });
+    }
+    if (message.kind !== 'FORWARD') fail('MESSAGE_KIND_REJECTED');
     const route = {
       ERP2_DEADLINE_BRIDGE_META: '/v1/meta',
       ERP2_DEADLINE_BRIDGE_CHUNK: '/v1/chunk',

@@ -106,6 +106,11 @@ export async function runDeadlineLocalBridge({
       }
       if (request.method !== 'POST' || request.headers['x-erp2-deadline-bridge-token'] !== bridgeToken) fail('SESSION_TOKEN_MISMATCH');
       const body = await readJsonBody(request);
+      if (url.pathname === '/v1/error') {
+        if (body?.protocol !== DEADLINE_LOCAL_BRIDGE_PROTOCOL || body?.sessionId !== sessionId
+          || typeof body?.code !== 'string' || body.code.length > 240) fail('REMOTE_ERROR_INVALID');
+        fail(`REMOTE_MAIN_WORLD_ERROR:${body.code}`);
+      }
       if (url.pathname === '/v1/meta') {
         if (accumulator) fail('TRANSFER_ALREADY_STARTED');
         accumulator = createDeadlineBridgeAccumulator(body, { sessionId, expected, contracts });

@@ -42,7 +42,7 @@ try {
     const url = new URL(route.request().url());
     if (url.hostname !== target.domain) { await route.continue(); return; }
     if (url.pathname === '/erp-build-identity.json') {
-      await route.fulfill({ status: 404, contentType: 'text/plain', body: 'not found' });
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><p>SPA fallback</p>' });
       return;
     }
     const instrumentation = url.pathname === '/settings'

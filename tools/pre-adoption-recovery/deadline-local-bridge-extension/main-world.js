@@ -29,13 +29,14 @@
     const response = await fetch('/erp-build-identity.json', {
       method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' },
     });
-    if (response.ok) {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (response.ok && contentType.includes('application/json')) {
       const manifest = await response.json();
       const target = manifest?.target;
       if (manifest?.schemaVersion !== 2 || target?.accountId !== expected.accountId
         || target?.project !== expected.project || target?.supabaseProject !== expected.supabaseProject
         || target?.publicFingerprint !== expected.publicFingerprint) fail('MANIFEST_IDENTITY_MISMATCH');
-    } else if (response.status !== 404) fail('MANIFEST_READ_FAILED');
+    } else if (!response.ok && response.status !== 404) fail('MANIFEST_READ_FAILED');
     return system;
   };
 

@@ -44,6 +44,12 @@ window.addEventListener('message', async event => {
     return;
   }
   if (!session || event.data.sessionId !== session.sessionId) return;
+  if (event.data.type === 'ERP2_DEADLINE_BRIDGE_MAIN_ERROR') {
+    await chrome.runtime.sendMessage({
+      protocol: PROTOCOL, kind: 'FORWARD_ERROR', payload: event.data,
+    }).catch(() => null);
+    return;
+  }
   if (!['ERP2_DEADLINE_BRIDGE_META', 'ERP2_DEADLINE_BRIDGE_CHUNK', 'ERP2_DEADLINE_BRIDGE_COMPLETE'].includes(event.data.type)) return;
   if (transferId == null && event.data.type === 'ERP2_DEADLINE_BRIDGE_META') transferId = event.data.transferId;
   if (!transferId || event.data.transferId !== transferId) { failClosed('TRANSFER_MISMATCH'); return; }
