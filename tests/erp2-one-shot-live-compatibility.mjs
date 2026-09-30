@@ -7,7 +7,7 @@ import { fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/sc
 import { CANONICAL_RESTORE_RESOURCES, classifyRestoreFunctionState, CORE_RESTORE_RESOURCES,
   RESTORE_FUNCTION_STATES } from '../tools/schema-reconciliation/restoreFunctionState.mjs';
 
-const EXPECTED_FINGERPRINT = 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77';
+const EXPECTED_FINGERPRINT = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
@@ -88,6 +88,7 @@ try {
     '046_waca_myacg_parent_evidence.sql',
     '046b_waca_myacg_parent_compatibility_repair.sql',
     '047_erp_schema_migration_ledger.sql',
+    '048_erp2_live_canonical_contract_reconciliation.sql',
   ], 'formatting-variant-tail');
   assert.equal(fingerprintStructuralSnapshot(await capture(formattingDb)), EXPECTED_FINGERPRINT);
   console.log('PASS two formatting variants with identical semantics converge through 045c');
@@ -128,6 +129,7 @@ try {
   await apply(liveLikeDb, [
     '046b_waca_myacg_parent_compatibility_repair.sql',
     '047_erp_schema_migration_ledger.sql',
+    '048_erp2_live_canonical_contract_reconciliation.sql',
   ], 'remaining-delta');
   assert.equal(fingerprintStructuralSnapshot(await capture(liveLikeDb)), EXPECTED_FINGERPRINT);
   await liveLikeDb.exec(closureSql);

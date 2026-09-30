@@ -138,6 +138,7 @@ try {
   await apply(['046b_waca_myacg_parent_compatibility_repair.sql']);
   assert.equal(fingerprintStructuralSnapshot(await capture()), repairedFingerprint);
   await apply(['047_erp_schema_migration_ledger.sql']);
+  await apply(['048_erp2_live_canonical_contract_reconciliation.sql']);
 
   const postflight = (await sql.query(read('tools/schema-reconciliation/sql/046b-postflight-readonly.sql')))
     .rows[0].waca_parent_repair_postflight;

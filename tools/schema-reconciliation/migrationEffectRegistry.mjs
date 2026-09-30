@@ -353,6 +353,58 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       }),
     ],
   },
+  '048': {
+    sourceFile: '048_erp2_live_canonical_contract_reconciliation.sql', dependencies: ['047'],
+    risk: 'MEDIUM_STATE_GUARDED_SCHEMA_AND_ACL_RECONCILIATION',
+    idempotency: 'STATE_GUARDED_RERUN_SAFE', allowPartialApply: true,
+    preconditions: [
+      ...['bundle_components','dashboard_category_images','erp_cloud_restore_epoch','japan_package_items',
+        'japan_packages','outbound_shipment_items','outbound_shipments','private_order_items','private_orders',
+        'product_categories','product_groups','product_variants','profiles','purchase_batch_items','purchase_batches',
+        'sales_order_items','sales_orders'].map(name => table(name)),
+      fn('is_owner(uuid)'), fn('is_editor(uuid)'),
+      ...['bundle_components','dashboard_category_images','japan_package_items','japan_packages',
+        'outbound_shipment_items','outbound_shipments','private_order_items','private_orders','product_categories',
+        'product_groups','product_variants','purchase_batch_items','purchase_batches','sales_order_items','sales_orders']
+        .flatMap(name => [
+          q('tableGrantSubset', `public.${name}.anon`, ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE']),
+          q('tableGrantSubset', `public.${name}.authenticated`,
+            ['DELETE','INSERT','MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']),
+        ]),
+      q('tableGrantSubset', 'public.profiles.anon', ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE']),
+      q('tableGrantSubset', 'public.profiles.authenticated', ['MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE']),
+      q('tableGrantSubset', 'public.erp_cloud_restore_epoch.anon', ['MAINTAIN','REFERENCES','TRIGGER','TRUNCATE']),
+      q('tableGrantSubset', 'public.erp_cloud_restore_epoch.authenticated', ['MAINTAIN','REFERENCES','SELECT','TRIGGER','TRUNCATE']),
+    ],
+    postconditions: [
+      column('product_groups','proxy_agent','text',{ nullable: true }),
+      column('product_groups','show_in_purchase_list','boolean',{ nullable: false }),
+      column('product_groups','purchase_date','date',{ nullable: true }),
+      column('purchase_batches','date','date',{ nullable: true }),
+      column('product_variants','private_manual_adjustment','integer',{ nullable: true }),
+      column('product_variants','purchased_manual_adjustment','integer',{ nullable: true }),
+      q('foreignKey','public.private_orders',true,{ columns:['product_group_id'], referencedTable:'public.product_groups',
+        referencedColumns:['id'], onDelete:'CASCADE', mismatchIsMissing:true }),
+      q('foreignKey','public.purchase_batches',true,{ columns:['product_group_id'], referencedTable:'public.product_groups',
+        referencedColumns:['id'], onDelete:'CASCADE', mismatchIsMissing:true }),
+      ...['inventory_items','private_order_items','product_categories','product_groups','product_variants',
+        'purchase_batch_items','purchase_batches'].map(name => q('policy',`public.${name}.select_policy`)),
+      ...['insert_policy','update_policy','delete_policy'].flatMap(name => [
+        q('policy',`public.sales_orders.${name}`), q('policy',`public.sales_order_items.${name}`),
+      ]),
+      ...['bundle_components','dashboard_category_images','japan_package_items','japan_packages',
+        'outbound_shipment_items','outbound_shipments','private_order_items','private_orders','product_categories',
+        'product_groups','product_variants','purchase_batch_items','purchase_batches','sales_order_items','sales_orders']
+        .flatMap(name => [
+          q('tableGrant',`public.${name}.anon`,[],{ mismatchIsMissing:true }),
+          q('tableGrant',`public.${name}.authenticated`,['DELETE','INSERT','SELECT','UPDATE'],{ mismatchIsMissing:true }),
+        ]),
+      q('tableGrant','public.profiles.anon',[],{ mismatchIsMissing:true }),
+      q('tableGrant','public.profiles.authenticated',['SELECT'],{ mismatchIsMissing:true }),
+      q('tableGrant','public.erp_cloud_restore_epoch.anon',[],{ mismatchIsMissing:true }),
+      q('tableGrant','public.erp_cloud_restore_epoch.authenticated',['SELECT'],{ mismatchIsMissing:true }),
+    ],
+  },
 });
 
 const extractBalanced = (sql, start) => {

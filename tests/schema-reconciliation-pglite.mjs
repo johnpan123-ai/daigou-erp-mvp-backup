@@ -112,11 +112,14 @@ try {
   const once = fingerprintStructuralSnapshot(await capture(compatibility));
   await apply(compatibility, ['046b_waca_myacg_parent_compatibility_repair.sql'], 'live-like-repair-replay');
   assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), once);
-  await apply(compatibility, ['047_erp_schema_migration_ledger.sql'], 'live-like-ledger');
+  await apply(compatibility, [
+    '047_erp_schema_migration_ledger.sql',
+    '048_erp2_live_canonical_contract_reconciliation.sql',
+  ], 'live-like-ledger-and-contract');
   const repairedSnapshot = await capture(compatibility);
   assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), fingerprintStructuralSnapshot(freshSnapshot));
   const repairedPlan = planSchemaDelta(repairedSnapshot, registry, { expectedSnapshot: freshSnapshot });
-  assert.ok(['046','046b','047'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
+  assert.ok(['046','046b','047','048'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
   console.log('PASS live-like 046 conflict repairs idempotently, unblocks 047, and converges to fresh target');
 
   const owner = '00000000-0000-4000-8000-000000000099';

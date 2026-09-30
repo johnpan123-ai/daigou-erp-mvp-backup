@@ -24,7 +24,7 @@
     "fingerprintContractVersion": 2,
     "preAdoptionMode": "READ_ONLY_RECONCILIATION",
     "postAdoptionLedger": "public.erp_schema_migration_ledger",
-    "canonicalFingerprint": "fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77",
+    "canonicalFingerprint": "bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317",
     "snapshotToolChecksum": "b1dee6229b88bf54cd63c3553f7e13d7aa60f2152275245fed933ea0ab700e62",
     "snapshotMaxAgeMs": 86400000,
     "liveObservationMaxAgeMs": 7200000

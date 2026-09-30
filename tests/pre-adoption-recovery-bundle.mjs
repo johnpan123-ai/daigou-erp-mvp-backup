@@ -16,7 +16,7 @@ import { buildDeadlineSidecarReadScript } from '../tools/pre-adoption-recovery/d
 import { CANONICAL_ERP2_TARGET } from '../scripts/promotion-safety.mjs';
 
 const LIVE_PARTIAL_FINGERPRINT = 'e5c80e331720a2c02c301f43fe0ce536c6ee91a76c3b24851231d7f3131ef650';
-const CANONICAL_FINGERPRINT = 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77';
+const CANONICAL_FINGERPRINT = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
 const SOURCE_HEAD = '936905e337bcdf18ef10b9d4ef00e9b7f147df09';
 const CHECKPOINT = 'checkpoint-20260929-erp2-partial-apply-recovery-v1';
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
@@ -34,7 +34,7 @@ const migrationFiles = ['018_cloud_import_batch_canonical.sql', '044_waca_cloud_
   '045_waca_cloud_atomic_restore_closure.sql', '018b_cloud_import_batch_acl_compatibility_repair.sql',
   '045b_waca_cloud_atomic_restore_compatibility_repair.sql',
   '045c_waca_cloud_atomic_restore_semantic_closure.sql', '046b_waca_myacg_parent_compatibility_repair.sql',
-  '047_erp_schema_migration_ledger.sql'];
+  '047_erp_schema_migration_ledger.sql', '048_erp2_live_canonical_contract_reconciliation.sql'];
 const partialChain = CANONICAL_FRESH_INSTALL_V3.slice(
   0, CANONICAL_FRESH_INSTALL_V3.indexOf('045c_waca_cloud_atomic_restore_semantic_closure.sql'),
 );

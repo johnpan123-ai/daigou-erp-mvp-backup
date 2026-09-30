@@ -128,10 +128,11 @@ const partialApplyRepairs = [
     applyMethod: 'SUPERSEDED_BY_COMPATIBILITY_REPAIR' }),
   migration('046b', 49, 'NEEDS_APPLY', { repairs: ['046'] }),
   migration('047', 50, 'NEEDS_APPLY'),
+  migration('048', 51, 'NEEDS_APPLY'),
 ];
 assert.deepEqual(pass(makeEvidence({ migrations: partialApplyRepairs })).applyDelta,
-  ['045c','046b','047']);
-console.log('PASS E2: post-018b 045/045b failures converge only through explicit 045c and 046b closures');
+  ['045c','046b','047','048']);
+console.log('PASS E2: post-018b failures converge through explicit 045c/046b closures and 048 canonical reconciliation');
 
 blocked(makeEvidence({ migrations: safeDelta, targetAfterDeltaFingerprint: current }));
 console.log('PASS F: non-canonical target-after-delta blocks');

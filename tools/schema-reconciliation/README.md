@@ -46,3 +46,24 @@ state-guarded repair may be planned. Uncovered or unknown states still block.
 The project-owned ledger introduced by migration 047 is environment-local, non-portable operational metadata. It is deliberately excluded from the 24-resource business Backup/Restore contract. `BASELINE_ADOPTED` records a reconciled state and never fabricates historical migration execution; later real executions use `MIGRATION_APPLIED`.
 
 In post-adoption mode, also export `ledger-history-readonly.sql` and add `--ledger-history <file> --mode POST_ADOPTION`. Supabase SQL Editor JSON exports may be either a single row/cell wrapper or the direct JSON value; the CLI accepts both.
+
+## Post-migration Live reconciliation
+
+When a fresh Live snapshot differs from the checked-in target, generate the
+reviewable A/B/C/D/E classification before changing the canonical contract:
+
+```powershell
+node tools/schema-reconciliation/live-reconciliation-cli.mjs `
+  --source canonical-schema.json `
+  --live live-schema.json `
+  --output live-schema-reconciliation.json
+```
+
+The ordered registry in `liveSchemaReconciliationRegistry.mjs` records the
+caller/writer, migration origin, portability class, security impact and
+resolution for each reviewed path. Unmatched differences are `UNKNOWN` and
+block promotion. A difference classified as environment-local must also
+disappear from the canonical projection; otherwise the report changes it to
+`UNKNOWN` and fails closed. Migration 048 is the state-guarded portable
+closure for the reviewed product-contract and security differences. It does
+not apply environment-local or legacy Dashboard-image changes.

@@ -7,6 +7,7 @@ const portable = [
   'tests/schema-reconciliation.mjs',
   'tests/schema-reconciliation-pglite.mjs',
   'tests/erp2-pre-adoption-guard.mjs',
+  'tests/post-migration-canonical-reconciliation.mjs',
   'tests/waca-backup-cutover-v3.mjs',
   'tests/durable-resource-registry-v3.mjs',
   'tests/cloud-backup-next-restore-e2e.mjs',
@@ -28,8 +29,8 @@ for (const file of [...portable, ...(process.env.WACA_ISOLATED_PG_URL ? native :
 
 console.log(JSON.stringify({
   result: 'PASS',
-  exactRemainingDelta: ['045c','046b','047'],
-  canonicalFingerprint: 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77',
+  exactRemainingDelta: ['045c','046b','047','048'],
+  canonicalFingerprint: 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317',
   nativePostgreSQL: process.env.WACA_ISOLATED_PG_URL ? 'PASS' : 'UNAVAILABLE',
   executed,
   liveMutation: 0,

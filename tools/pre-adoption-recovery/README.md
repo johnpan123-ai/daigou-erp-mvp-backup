@@ -77,7 +77,7 @@ node tools/pre-adoption-recovery/cli.mjs assemble `
   --project-ref rhfdjsklfrgpoqsaqpkn `
   --environment-role ERP_2_PRODUCTION `
   --expected-current-fingerprint e5c80e331720a2c02c301f43fe0ce536c6ee91a76c3b24851231d7f3131ef650 `
-  --canonical-fingerprint fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77 `
+  --canonical-fingerprint bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317 `
   --checkpoint checkpoint-20260929-erp2-pre-adoption-recovery-bundle-v1
 ```
 

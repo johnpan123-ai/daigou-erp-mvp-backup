@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  isEnvironmentLocalFunction,
+  isEnvironmentLocalPolicy,
+} from './liveSchemaReconciliationRegistry.mjs';
 
 export const SCHEMA_SNAPSHOT_CONTRACT_VERSION = 1;
 export const SCHEMA_FINGERPRINT_CONTRACT_VERSION = 2;
@@ -20,6 +24,49 @@ const sha256 = value => createHash('sha256').update(String(value)).digest('hex')
  * those presentation differences are not schema drift.
  */
 const normalizeSql = value => {
+  const source = String(value ?? '').replace(/\r\n?/gu, '\n');
+  let result = '';
+  let quote = null;
+  let pendingSpace = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      result += character;
+      if (character === quote) {
+        if (source[index + 1] === quote) {
+          result += source[index + 1];
+          index += 1;
+        } else quote = null;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      if (pendingSpace && result && !/[\s(,=]$/u.test(result)) result += ' ';
+      pendingSpace = false;
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      pendingSpace = true;
+      continue;
+    }
+    if (/[(),=]/u.test(character)) {
+      result = result.replace(/\s+$/u, '');
+      result += character;
+      pendingSpace = false;
+      continue;
+    }
+    if (pendingSpace && result && !/[\s(,=]$/u.test(result)) result += ' ';
+    pendingSpace = false;
+    result += character.toLowerCase();
+  }
+  return result.trim().replace(/\bextensions\.digest\b/giu, 'digest');
+};
+
+// Exact fingerprint-v2 normalizer used before the reconciliation contract.
+// Kept only so the original 170-item evidence can be classified reproducibly.
+const normalizeObservedSqlV2 = value => {
   const source = String(value ?? '');
   let result = '';
   let quote = null;
@@ -88,12 +135,21 @@ const canonicalizeValue = (value, key = '', path = []) => {
   ]));
 };
 
+const canonicalizeConstraintArray = value => value
+  .filter(item => item?.type !== 'n')
+  .map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const { name: _catalogName, ...semantic } = item;
+    return semantic;
+  });
+
 const canonicalizeSemanticValue = (value, key = '', path = []) => {
   if (value === null || typeof value !== 'object') {
     return typeof value === 'string' && SQL_VALUE_KEYS.test(key) ? normalizeSql(value) : value;
   }
   if (Array.isArray(value)) {
-    const normalized = value.map(item => canonicalizeSemanticValue(item, key, path));
+    const projected = key === 'constraints' ? canonicalizeConstraintArray(value) : value;
+    const normalized = projected.map(item => canonicalizeSemanticValue(item, key, path));
     return shouldSortArray(path)
       ? normalized.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
       : normalized;
@@ -103,12 +159,70 @@ const canonicalizeSemanticValue = (value, key = '', path = []) => {
     .map(name => [name, canonicalizeSemanticValue(value[name], name, [...path, name])]));
 };
 
+const canonicalizeObservedSemanticValueV2 = (value, key = '', path = []) => {
+  if (value === null || typeof value !== 'object') {
+    return typeof value === 'string' && SQL_VALUE_KEYS.test(key) ? normalizeObservedSqlV2(value) : value;
+  }
+  if (Array.isArray(value)) {
+    const normalized = value.map(item => canonicalizeObservedSemanticValueV2(item, key, path));
+    return shouldSortArray(path)
+      ? normalized.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+      : normalized;
+  }
+  return Object.fromEntries(Object.keys(value).sort()
+    .filter(name => !TRANSIENT_KEYS.has(name) && !ENVIRONMENT_LOCAL_KEYS.has(name))
+    .map(name => [name, canonicalizeObservedSemanticValueV2(value[name], name, [...path, name])]));
+};
+
+const reconciliationProjection = snapshot => {
+  const projected = structuredClone(snapshot);
+  for (const signature of Object.keys(projected.functions ?? {})) {
+    if (isEnvironmentLocalFunction(signature)) delete projected.functions[signature];
+  }
+  if (projected.functions?.['public.handle_new_user()']) {
+    delete projected.functions['public.handle_new_user()'].definition;
+  }
+  for (const [tableName, table] of Object.entries(projected.tables ?? {})) {
+    for (const policyName of Object.keys(table.policies ?? {})) {
+      if (isEnvironmentLocalPolicy(policyName)) delete table.policies[policyName];
+    }
+    if (tableName !== 'public.dashboard_category_images') continue;
+    delete table.columns?.local_id;
+    delete table.columns?.version;
+    delete table.indexes?.['public.idx_dashboard_category_images_deleted_at'];
+    if (table.policies?.select_policy) delete table.policies.select_policy.roles;
+    if (table.policies?.delete_policy) delete table.policies.delete_policy.using;
+    if (table.policies?.insert_policy) delete table.policies.insert_policy.withCheck;
+    if (table.policies?.update_policy) {
+      delete table.policies.update_policy.using;
+      delete table.policies.update_policy.withCheck;
+    }
+  }
+  return projected;
+};
+
 /** The only canonical projection used for schema fingerprints. */
 export const canonicalizeStructuralSnapshot = snapshot => {
   if (snapshot?.contractVersion !== SCHEMA_SNAPSHOT_CONTRACT_VERSION) {
     throw new Error('SCHEMA_SNAPSHOT_CONTRACT_UNSUPPORTED');
   }
+  const projected = reconciliationProjection(snapshot);
   return canonicalizeSemanticValue({
+    snapshotContractVersion: snapshot.contractVersion,
+    fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+    schemas: projected.schemas ?? [],
+    tables: projected.tables ?? {},
+    functions: projected.functions ?? {},
+  });
+};
+
+// Frozen pre-reconciliation projection used only to classify the 2026-09-30
+// evidence set. It must not be used for promotion fingerprints.
+export const canonicalizeObservedStructuralSnapshotV2 = snapshot => {
+  if (snapshot?.contractVersion !== SCHEMA_SNAPSHOT_CONTRACT_VERSION) {
+    throw new Error('SCHEMA_SNAPSHOT_CONTRACT_UNSUPPORTED');
+  }
+  return canonicalizeObservedSemanticValueV2({
     snapshotContractVersion: snapshot.contractVersion,
     fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
     schemas: snapshot.schemas ?? [],
@@ -263,6 +377,12 @@ export function diffStructuralSnapshots(beforeSnapshot, afterSnapshot) {
       'server version', 'migration history', 'integrity and row-count evidence',
     ],
   };
+}
+
+export function diffObservedStructuralSnapshotsV2(beforeSnapshot, afterSnapshot) {
+  const before = canonicalizeObservedStructuralSnapshotV2(beforeSnapshot);
+  const after = canonicalizeObservedStructuralSnapshotV2(afterSnapshot);
+  return collectDifferences(before, after);
 }
 
 export function reconcileFingerprintEvidence({ expectedSnapshot, currentSnapshot, expectedFingerprint }) {

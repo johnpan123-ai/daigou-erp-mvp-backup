@@ -18,7 +18,7 @@ import { readdir } from 'node:fs/promises';
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
-assert.deepEqual(Object.keys(registry), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047']);
+assert.deepEqual(Object.keys(registry), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048']);
 for (const effect of Object.values(registry)) {
   assert.match(effect.sourceChecksum, /^[0-9a-f]{64}$/u);
   assert.ok(effect.sourceEffects.transactionWrapped);
@@ -50,6 +50,7 @@ assert.deepEqual(registry['045c'].repairs, ['045','045b']);
 assert.deepEqual(registry['046b'].repairs, ['046']);
 assert.equal(registry['046b'].dependencies.includes('045c'), true);
 assert.equal(registry['047'].dependencies.includes('046b'), true);
+assert.equal(registry['048'].dependencies.includes('047'), true);
 console.log('PASS migration effect registry is checksum-bound to parsed SQL source');
 
 for (const file of await readdir(new URL('../tools/schema-reconciliation/sql/', import.meta.url))) {

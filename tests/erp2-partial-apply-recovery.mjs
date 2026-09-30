@@ -7,7 +7,7 @@ import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/mig
 import { planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
 import { fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/schemaContract.mjs';
 
-const EXPECTED_FINGERPRINT = 'fb920b22a907ce234af478ceff7fbbed98ec61d27813536c545590c1ac21cf77';
+const EXPECTED_FINGERPRINT = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
@@ -17,6 +17,7 @@ const repairFiles = [
   '045c_waca_cloud_atomic_restore_semantic_closure.sql',
   '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql',
+  '048_erp2_live_canonical_contract_reconciliation.sql',
 ];
 
 async function createDatabase() {
@@ -106,8 +107,8 @@ try {
   assert.equal(migration('046b').safeToApply, true);
   assert.equal(migration('047').safeToApply, true);
   assert.equal(beforePlan.readyForApply, true);
-  assert.deepEqual(beforePlan.applyPlan.map(item => item.migrationId), ['045c','046b','047']);
-  console.log('PASS exact post-018b planner delta = 045c -> 046b -> 047');
+  assert.deepEqual(beforePlan.applyPlan.map(item => item.migrationId), ['045c','046b','047','048']);
+  console.log('PASS exact post-018b planner delta = 045c -> 046b -> 047 -> 048');
 
   await apply(partialDb, repairFiles, 'partial-live-repair');
   const afterOnce = await capture(partialDb);
