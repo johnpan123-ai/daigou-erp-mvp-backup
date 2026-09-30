@@ -9,6 +9,7 @@ import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
 import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
 import { ERP_SYSTEM_SHORT_NAME, ERP_SYSTEM_VERSION } from './erpSystemIdentity';
 import { GlobalSyncControl } from './GlobalSyncControl';
+import { supportsWacaProvider } from '../../waca/providerSupport';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 import '../../styles/workspace.css';
 
@@ -225,15 +226,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="sidebar-section-title">
             主選單
           </div>
-          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label={providerMode === 'next' ? '主頁' : '主頁面'} onClick={() => setIsMobileMenuOpen(false)} />
+          <SidebarItem to="/dashboard" icon={<LayoutDashboard size={20} />} label="主頁" onClick={() => setIsMobileMenuOpen(false)} />
           {user && canViewPage('/inventory') && (
-            <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label={providerMode === 'next' ? '買動漫匯入' : '商品清單匯入'} onClick={() => setIsMobileMenuOpen(false)} />
+            <SidebarItem to="/inventory" icon={<PackageSearch size={20} />} label="買動漫匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           {/* Hiding 訂單快速匯入 per request, but keeping code/page intact */}
           {/* {canViewPage('/orders-import') && (
             <SidebarItem to="/orders-import" icon={<ListOrdered size={20} />} label="訂單快速匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )} */}
-          {providerMode === 'next' && (
+          {supportsWacaProvider(providerMode, supabaseEnvironment.projectRef) && canViewPage('/waca') && (
             <SidebarItem to="/waca" icon={<FileSpreadsheet size={20} />} label="WACA 匯入" onClick={() => setIsMobileMenuOpen(false)} />
           )}
           <SidebarItem to="/purchase-records" state={{ resetSearch: Date.now() }} icon={<Receipt size={20} />} label="訂購紀錄表" onClick={() => setIsMobileMenuOpen(false)} />

@@ -1316,7 +1316,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       <PageHeader className="inventory-header">
         <div className="inventory-title-left">
           <div className="inventory-title-area">
-            <h1>{currentMode === 'next' ? '買動漫匯入' : '商品主檔'}</h1>
+        <h1>買動漫匯入</h1>
             <p>管理全部商品庫存，以 SKU 為基礎。</p>
           </div>
           <div className="inventory-header-buttons">

@@ -4,6 +4,7 @@ import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { FileUploadButton } from '../components/FileUploadButton';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode } from '../providers/providerMode';
+import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { normalizeProductTitle, type InventoryItem, type ProductGroup, type ProductVariant } from '../lib/db';
 import { productGroupDisplayName } from '../lib/productGroupDisplayName';
@@ -22,6 +23,7 @@ import {
 } from '../waca/nextStorage';
 import { parseWacaWorkbook } from '../waca/workbookParser';
 import { reconcileWacaReadback } from '../waca/reconciliation';
+import { supportsWacaProvider } from '../waca/providerSupport';
 import './WacaIntegration.css';
 
 type Tab = 'import' | 'orders' | 'mappings' | 'history' | 'pending';
@@ -50,6 +52,8 @@ const statusText: Record<string, string> = {
 
 const quantity = (value: number) => value.toLocaleString('zh-TW');
 const isPending = (item: WacaItem) => !item.productVariantId;
+const readErrorText = (cause: unknown): string => cause && typeof cause === 'object' && 'message' in cause
+  ? String(cause.message) : String(cause);
 
 export default function WacaIntegration() {
   const [tab, setTab] = useState<Tab>('import');
@@ -70,21 +74,24 @@ export default function WacaIntegration() {
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    const [nextSnapshot, nextVariants, nextInventory, nextGroups] = await Promise.all([
+    // Cloud groups wait for the existing atomic catalog pull. Read its inventory
+    // evidence afterwards so the first visit cannot pair fresh variants with old cache.
+    const nextGroups = await dataProvider.getProductGroups();
+    const [nextSnapshot, nextVariants, nextInventory] = await Promise.all([
       dataProvider.getNextWacaSnapshot(),
       dataProvider.getAuthoritativeWacaVariants(),
       dataProvider.getInventory(),
-      dataProvider.getProductGroups(),
     ]);
     setSnapshot(nextSnapshot);
     setVariants(nextVariants);
     setInventory(nextInventory);
     setGroups(nextGroups);
+    setError('');
   }, []);
 
   useEffect(() => {
-    if (!['next', 'cloud', 'fallback'].includes(getProviderMode())) return;
-    void Promise.resolve().then(load).catch(cause => setError(String(cause)));
+    if (!supportsWacaProvider(getProviderMode(), supabaseEnvironment.projectRef)) return;
+    void Promise.resolve().then(load).catch(cause => setError(readErrorText(cause)));
   }, [load]);
 
   const masterState = useMemo(() => {
@@ -373,6 +380,7 @@ export default function WacaIntegration() {
   const mappingsPanel = useMemo(() => <>
     <h2>WACA 商品對照</h2>
     <p>對照記錄會用於後續匯入；人工重配會回算已保存的歷史訂單。</p>
+    {snapshot && !mappingItems.length && <p>目前沒有 WACA 商品對照。匯入訂單後會顯示配對結果。</p>}
     <div className="waca-scroll"><table><thead><tr><th>WACA 商品／規格</th><th>ERP 對應商品／規格／SKU</th><th>狀態</th><th>人工確認</th></tr></thead><tbody>
       {mappingItems.map(item => {
         const mapping = repo?.mappings.get(item.feature);
@@ -393,15 +401,16 @@ export default function WacaIntegration() {
       })}
     </tbody></table></div>
   </>, [mappingItems, repo, choicesFor, evidenceByChildCode, variantById, displayNameForVariant,
-    explanationFor, selectedVariant, busy, manualMap]);
+    explanationFor, selectedVariant, busy, manualMap, snapshot]);
 
-  if (getProviderMode() !== 'next') return <PageShell><p>WACA 匯入目前只在 NEXT 4192 開放。</p></PageShell>;
+  if (!supportsWacaProvider(getProviderMode(), supabaseEnvironment.projectRef)) return <PageShell><p>請使用 ERP 2.0 雲端或 NEXT 本機環境開啟 WACA 匯入。</p></PageShell>;
   return <PageShell className="waca-page">
     <PageHeader className="waca-heading">
       <div><h1>WACA 匯入</h1><p>日常只需匯入一份 WACA 訂單 Excel。確認後會更新訂單、重算數量並自動對帳。</p></div>
-      <button className="btn btn-md btn-outline" onClick={() => void load().catch(cause => setError(String(cause)))} disabled={busy}><RefreshCw size={16} /> 重新讀取</button>
+      <button className="btn btn-md btn-outline" onClick={() => void load().catch(cause => setError(readErrorText(cause)))} disabled={busy}><RefreshCw size={16} /> 重新讀取</button>
     </PageHeader>
     {error && <div className="waca-notice waca-error" role="alert"><span className="badge badge-danger">需確認</span> {error}</div>}
+    {!snapshot && !error && <p role="status">正在讀取 WACA 訂單資料…</p>}
     {message && <div className="waca-notice" role="status"><span className="badge badge-success">已完成</span> {message}</div>}
     {snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED' &&
       <div className="waca-notice" role="status">目前顯示的是舊備份當時的 WACA 數量。請匯入完整 WACA 歷史訂單；確認更新後，系統會重新計算並取代舊數量。</div>}
@@ -494,6 +503,7 @@ export default function WacaIntegration() {
       </details>
     </section>}
     {tab === 'orders' && <section className="waca-panel"><h2>WACA 來源訂單</h2>
+      {snapshot && !orders.length && <p>目前沒有 WACA 訂單。匯入 WACA Excel 後會顯示在這裡。</p>}
       <div className="waca-scroll"><table><thead><tr><th>訂單編號</th><th>購買日期</th><th>狀態</th><th>品項</th><th>有效已配對數量</th></tr></thead><tbody>
         {orders.map(order => {
           const orderItems = itemsByOrder.get(order.key) ?? [];
@@ -512,6 +522,7 @@ export default function WacaIntegration() {
     {(tab === 'mappings' || visitedMappings) && <section hidden={tab !== 'mappings'}
       className={tab === 'mappings' ? 'waca-panel' : undefined}>{mappingsPanel}</section>}
     {tab === 'history' && <section className="waca-panel"><h2>WACA 匯入紀錄</h2>
+      {snapshot && !snapshot.batches.length && <p>目前沒有 WACA 匯入紀錄。</p>}
       <div className="waca-scroll"><table><thead><tr><th>匯入時間</th><th>檔案</th><th>訂單</th><th>商品列</th><th>新增</th><th>更新</th><th>未變更</th><th>取消／失敗</th><th>已配對</th><th>待處理</th><th>有效數量</th><th>數量對帳</th></tr></thead><tbody>
         {[...(snapshot?.batches ?? [])].reverse().map(batch => <tr key={batch.id}><td>{batch.importedAt}</td><td>{batch.fileName}</td>
           <td>{batch.result.ordersTotal}</td><td>{batch.result.productRows}</td><td>{batch.inserted}</td><td>{batch.updated}</td><td>{batch.unchanged}</td>
