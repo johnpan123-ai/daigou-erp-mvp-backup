@@ -257,6 +257,9 @@ const parseRemoteRefs = output => new Map(String(output).trim().split(/\r?\n/u).
   return [ref, head];
 }));
 
+const remoteTagCommit = (refs, tagName) => refs.get(`refs/tags/${tagName}^{}`)
+  ?? refs.get(`refs/tags/${tagName}`);
+
 const assertRefName = (git, kind, name) => {
   try { git(['check-ref-format', `refs/${kind}/${name}`]); }
   catch { failClosed(`invalid ${kind === 'heads' ? 'branch' : 'tag'} name`); }
@@ -310,9 +313,9 @@ export function verifyRemoteCandidate({ contract, git, checkpointTag, label = 'c
   ]);
   const refs = parseRemoteRefs(output);
   if (refs.get(`refs/heads/${local.branch}`) !== local.head) failClosed(`${label} remote branch HEAD mismatch`);
-  if (refs.get(`refs/tags/${checkpointTag}^{}`) !== local.head) failClosed(`${label} remote checkpoint mismatch or missing`);
-  if (refs.get(`refs/tags/${gate.acceptedTag}^{}`) !== gate.acceptedHead) failClosed('remote accepted baseline mismatch or missing');
-  if (refs.get(`refs/tags/${gate.lineage.reconciliationTag}^{}`) !== gate.lineage.reconciliationHead) {
+  if (remoteTagCommit(refs, checkpointTag) !== local.head) failClosed(`${label} remote checkpoint mismatch or missing`);
+  if (remoteTagCommit(refs, gate.acceptedTag) !== gate.acceptedHead) failClosed('remote accepted baseline mismatch or missing');
+  if (remoteTagCommit(refs, gate.lineage.reconciliationTag) !== gate.lineage.reconciliationHead) {
     failClosed('remote reconciliation checkpoint mismatch or missing');
   }
   return { ...local, remoteBranchHead: local.head, remoteCheckpointPeeledHead: local.head };

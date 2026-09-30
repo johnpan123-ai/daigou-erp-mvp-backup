@@ -29,6 +29,7 @@ function gitFixture(overrides = {}) {
     head, branch, checkpointHead: head, remoteHead: head, dirty: '',
     acceptedRemote: accepted, reconciledRemote: reconciled,
     acceptedLocal: accepted, reconciledLocal: reconciled,
+    lightweightCheckpoint: false, lightweightAccepted: false, lightweightReconciled: false,
     remoteUrl: 'https://github.com/johnpan123-ai/daigou-erp-mvp-backup.git',
     directAncestor: false, reconciledAncestor: true,
     ...overrides,
@@ -46,9 +47,9 @@ function gitFixture(overrides = {}) {
     if (argv[0] === 'remote') return state.remoteUrl;
     if (argv[0] === 'ls-remote') return [
       state.remoteHead && `${state.remoteHead}\trefs/heads/${state.branch}`,
-      state.checkpointHead && `${state.checkpointHead}\trefs/tags/${checkpoint}^{}`,
-      state.acceptedRemote && `${state.acceptedRemote}\trefs/tags/${acceptedTag}^{}`,
-      state.reconciledRemote && `${state.reconciledRemote}\trefs/tags/${reconciledTag}^{}`,
+      state.checkpointHead && `${state.checkpointHead}\trefs/tags/${checkpoint}${state.lightweightCheckpoint ? '' : '^{}'}`,
+      state.acceptedRemote && `${state.acceptedRemote}\trefs/tags/${acceptedTag}${state.lightweightAccepted ? '' : '^{}'}`,
+      state.reconciledRemote && `${state.reconciledRemote}\trefs/tags/${reconciledTag}${state.lightweightReconciled ? '' : '^{}'}`,
     ].filter(Boolean).join('\n');
     if (argv[0] === '--no-replace-objects') {
       const ancestor = argv.at(-2);
@@ -64,6 +65,13 @@ const positiveGit = gitFixture();
 const candidate = verifyRemoteCandidate({ contract, git: positiveGit.git, checkpointTag: checkpoint });
 assert.equal(candidate.lineageMode, 'RECONCILED_CHECKPOINT_DESCENDANT');
 assert.equal(candidate.remoteCheckpointPeeledHead, head);
+const lightweightCandidate = verifyRemoteCandidate({
+  contract,
+  git: gitFixture({ lightweightCheckpoint: true, lightweightAccepted: true, lightweightReconciled: true }).git,
+  checkpointTag: checkpoint,
+});
+assert.equal(lightweightCandidate.remoteCheckpointPeeledHead, head);
+console.log('PASS lightweight and annotated remote checkpoint tags resolve to the same commit contract');
 
 const cloudflare = verifyCloudflareIdentity({ contract, wrangler: argv => argv[0] === 'whoami'
   ? { loggedIn: true, accounts: [{ id: CANONICAL_ERP2_TARGET.accountId }] }
