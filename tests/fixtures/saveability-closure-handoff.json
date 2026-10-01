@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "task": "ERP2 P1 saveability / private atomic / Cloud Catalog closure",
+  "baseHead": "450eba3f95dfb5ada5f35e4df113be01d997784a",
+  "baseCheckpoint": "checkpoint-20261001-cloud-mutation-field-contract-closure-v2",
+  "recoveryTag": "backup-20261001-before-p1-saveability-atomic-catalog-v1",
+  "candidateCheckpoint": "checkpoint-20261001-erp2-p1-saveability-atomic-catalog-v1",
+  "classification": "SCHEMA_SENSITIVE_ADDITIVE_CANDIDATE_NOT_SAFE_DESCENDANT",
+  "migrationReview": {
+    "isolated048BaselineDelta": ["049", "050", "051"],
+    "liveDelta": "UNVERIFIED_REQUIRES_FRESH_SELECT_ONLY_EVIDENCE",
+    "previousAdoptedBaseline": "erp2-canonical-schema-v4",
+    "previousFingerprint": "bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317",
+    "candidateBaselineId": "erp2-canonical-schema-v5-saveability",
+    "candidateCanonicalFingerprint": "0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef",
+    "liveBaselineMutated": false,
+    "previousExecutedMigrationSourcesChanged": false,
+    "evidence": "tests/saveability-migration-source.mjs"
+  },
+  "rpcs": {
+    "private": "erp_apply_private_order_transaction(uuid,jsonb)",
+    "privateReadonlyReconcile": "erp_reconcile_private_order_transaction(uuid,jsonb)",
+    "catalog": "erp_apply_catalog_transaction(uuid,jsonb)",
+    "related": "erp_apply_related_transaction(uuid,jsonb)"
+  },
+  "durability": {
+    "newTables": 0,
+    "newDurableBusinessResources": 0,
+    "businessBackupResources": 24,
+    "deadlineSidecarDurableStores": 3,
+    "replay": "Reuses actor-scoped erp_idempotency_keys: existing non-portable operational metadata, not business backup truth",
+    "pendingFormIntent": "EPHEMERAL session/memory only; exact key and frozen command survive response loss/reload"
+  },
+  "matrix": {
+    "path": "tests/fixtures/saveability-matrix.json",
+    "scope": "11 primary pages, shared modals, batch/context actions, explicitly classified historical tools",
+    "automaticCoverage": "Source wiring plus provider/domain/native persistence contracts; not every UI button E2E",
+    "manualOnly": ["Deadline real catalogue choice / judgement", "Pending delist browser scratchpad mark", "Pending delist browser scratchpad unmark"],
+    "cloudDisabled": ["Local inventory rollback", "Legacy order CSV import", "NEXT-only bulk closing-date maintenance", "Local clear all", "Local clear purchase records", "Legacy title parser maintenance", "Local JSON restore", "Cloud-to-NEXT restore confirmation"],
+    "multiResourcePolicies": {
+      "privateOrder": "One transaction: header + whole desired details + CAS + replay; read-only result probe before replay",
+      "catalog": "One transaction: groups/categories/variants; CAS verifies the four-table planning dependency snapshot",
+      "purchaseDelete": "One transaction: parent + children; reject any package dependency",
+      "packageDelete": "One transaction: parent + children; reject outbound dependencies",
+      "manualPackageEdit": "One transaction: item + outbound mirrors + parent status derivation",
+      "duplicateVariantDelete": "All selected variants or none; reference and quantity/manual-adjustment guards",
+      "inventoryImport": "Explicit staged recoverable workflow; inventory is committed first, later catalog/evidence failure is reported as committed plus follow-up",
+      "japanAddOrEdit": "Mutually exclusive one-write branches; not sequential commits",
+      "waca": "Existing ledger/recompute atomic contract retained; optional NEXT receipt annotation is derived audit"
+    }
+  },
+  "nextStep": [
+    "Luna: verify fixed HEAD/checkpoint/artifact and fresh SELECT-only live schema/history",
+    "Recompute the exact live delta; do not assume the isolated 049/050/051 plan is live evidence",
+    "Review additive RPC ACL/transaction source, prepare recovery, obtain authorized live apply",
+    "Immediate per-migration postflight, full canonical comparison, backup/isolated restore, new baseline evidence without rewriting v4 history",
+    "Only after schema gate and deployment guard PASS consider the exact artifact deploy",
+    "User controlled acceptance; first live business operations remain outside this source task"
+  ],
+  "liveSafety": {"migrationApply": 0, "sqlMutation": 0, "baselineMutation": 0, "businessWrite": 0, "restore": 0, "deploy": 0}
+}

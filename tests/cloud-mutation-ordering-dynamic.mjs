@@ -77,7 +77,8 @@ try {
 
     supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-user' } } }, error: null });
     supabase.rpc = async (name, args) => {
-      const table = args?.p_entity;
+      const table = args?.p_entity ?? (name==='erp_apply_related_transaction' && args.p_request.family==='variant-delete'?'product_variants':undefined);
+      const operations=args?.p_operations ?? args?.p_request?.operations?.[table] ?? [];
       calls.push({ table, operation: 'rpc', name });
       if (failNext && failNext.table === table && failNext.operation === 'rpc') {
         failNext = null;
@@ -96,7 +97,7 @@ try {
       }
       const rows = server.get(table) || [];
       const next = new Map(rows.map(row => [row.id, row]));
-      for (const operation of args?.p_operations || []) {
+      for (const operation of operations) {
         const current = next.get(operation.id);
         if (operation.kind === 'create') {
           next.set(operation.id, {

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { classifyDescendantFile, verifySafeDescendant } from '../scripts/post-adoption-descendant.mjs';
 import { verifySchemaBaselineEvidence } from '../scripts/promotion-safety.mjs';
 import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
+const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url)));
 
 const baseline = '5cbf5137cb7a2e6fd6244606692feca5ba42521a';
 const uiCandidate = '8a8564a4155e39be2bcf53a066e6adfe73152503';
@@ -12,7 +13,7 @@ const checkpoint = 'checkpoint-20260930-erp2-cloud-waca-ui-sidebar-parity-v1';
 const git = args => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
   env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' } });
 const readGit = (head, file) => { try { return git(['show', `${head}:${file}`]); } catch { return null; } };
-const baselineRecord = { eventType: 'BASELINE_ADOPTED', eventKey: 'erp2-canonical-schema-v4',
+const baselineRecord = { eventType: 'BASELINE_ADOPTED', eventKey: contract.schemaBaseline.requiredBaselineId,
   sourceHead: baseline, checkpoint: baselineCheckpoint, result: 'PASS',
   environmentRole: 'PRODUCTION',
   supabaseProjectRef: 'rhfdjsklfrgpoqsaqpkn', metadata: { historicalMigrationExecutionClaimed: false } };
@@ -80,7 +81,6 @@ blocked('migration checksum even if omitted from changed-file list', args => arg
 blocked('canonical checksum even if omitted from changed-file list', args => args[0] === 'show'
   && args[1] === `${uiCandidate}:tools/schema-reconciliation/schemaContract.mjs` ? offlineGit(args) + '\n// altered\n' : offlineGit(args));
 
-const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url)));
 const fingerprint = contract.schemaBaseline.canonicalFingerprint;
 const now = Date.now(); const observedAt = new Date(now).toISOString();
 const migration = { migrationId: '047', sourceFile: '047_fixture.sql', sourceChecksum: 'a'.repeat(64),

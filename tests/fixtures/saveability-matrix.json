@@ -1,0 +1,1834 @@
+{
+  "schemaVersion": 1,
+  "scope": "11 primary pages plus shared forms, context/batch actions and the legacy deep link",
+  "countingRule": "One source-defined logical handler; repeated call sites merge. Parametric fields share a handler; 123 editable persistence fields are separately tested. Read-only navigation/export and ephemeral layout preferences are not business editable actions.",
+  "coverageDisclaimer": "AUTOMATED_CONTRACT_PASS is combined source wiring + automated provider/domain/native persistence evidence, NOT a claim every UI action was clicked. Human live acceptance and catalogue/manual choices remain explicitly scoped.",
+  "counts": {
+    "totalEditableActions": 63,
+    "automaticallyTested": 52,
+    "pass": 52,
+    "fail": 0,
+    "manualOnly": 3,
+    "unsupportedByProductDesign": 8
+  },
+  "noBusinessMutationPages": [
+    "Dashboard",
+    "Recent Purchases"
+  ],
+  "excludedDiagnosticActions": [
+    "src/pages/Inventory.tsx::handleVariantGuardFaultInjection"
+  ],
+  "reviewedNonUserHandlers": [
+    {
+      "id": "src/pages/Inventory.tsx::createPreImportBackup",
+      "methods": [
+        "saveLastImportBackup"
+      ],
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/catalog-atomic-isolated.mjs",
+        "tests/inventory-cloud-import-flow.mjs"
+      ]
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::loadData",
+      "methods": [
+        "saveProductVariants"
+      ],
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ]
+    }
+  ],
+  "providerBoundaries": 41,
+  "editableEntities": 15,
+  "editableFields": 123,
+  "actions": [
+    {
+      "id": "Deadline::apply",
+      "page": "訂購紀錄表",
+      "action": "Deadline selection/apply",
+      "cloud": "EXISTING_FIELD_CAS_AND_DURABLE_SIDECAR",
+      "status": "MANUAL_ONLY",
+      "evidence": [
+        "tests/closing-date-resolution-sidecar-storage.mjs",
+        "tests/closing-date-workbench-ui.mjs"
+      ],
+      "reason": "Real catalogue selection and user judgement require manual acceptance; isolated domain/storage tests are separate evidence."
+    },
+    {
+      "id": "PendingDelist::handleMarkProcessed",
+      "page": "待下架商品",
+      "action": "handleMarkProcessed",
+      "cloud": "BROWSER_ONLY_SCRATCHPAD",
+      "status": "MANUAL_ONLY",
+      "reason": "Source explicitly defines non-business browser scratchpad; not Cloud durable truth."
+    },
+    {
+      "id": "PendingDelist::handleUnmarkProcessed",
+      "page": "待下架商品",
+      "action": "handleUnmarkProcessed",
+      "cloud": "BROWSER_ONLY_SCRATCHPAD",
+      "status": "MANUAL_ONLY",
+      "reason": "Source explicitly defines non-business browser scratchpad; not Cloud durable truth."
+    },
+    {
+      "id": "src/components/CloudAtomicRestorePanel.tsx::execute",
+      "page": "CloudAtomicRestorePanel",
+      "action": "execute",
+      "file": "src/components/CloudAtomicRestorePanel.tsx",
+      "methods": [
+        "restoreCloudSnapshot"
+      ],
+      "callSites": [
+        {
+          "method": "restoreCloudSnapshot",
+          "line": 598
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/cloud-backup-next-restore-e2e.mjs",
+        "tests/waca-cloud-restore-patch-v3.mjs"
+      ],
+      "boundaries": [
+        "Atomic Restore lifecycle"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/components/PrivateOrderTab.tsx::handleDeleteOrder",
+      "page": "PrivateOrderTab",
+      "action": "handleDeleteOrder",
+      "file": "src/components/PrivateOrderTab.tsx",
+      "methods": [
+        "savePrivateOrderTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "savePrivateOrderTransaction",
+          "line": 43
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/private-order-atomic-isolated.mjs"
+      ],
+      "boundaries": [
+        "Private Order atomic transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/components/PurchaseBatchModal.tsx::performBatchSubmit",
+      "page": "PurchaseBatchModal",
+      "action": "performBatchSubmit",
+      "file": "src/components/PurchaseBatchModal.tsx",
+      "methods": [
+        "savePurchaseBatchTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "savePurchaseBatchTransaction",
+          "line": 586
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/purchase-batch-submit-ui.mjs",
+        "tests/cloud-purchase-batch-provider-integration.mjs"
+      ],
+      "boundaries": [
+        "Purchase batch transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/components/PurchaseBatchTab.tsx::handleDeleteBatch",
+      "page": "PurchaseBatchTab",
+      "action": "handleDeleteBatch",
+      "file": "src/components/PurchaseBatchTab.tsx",
+      "methods": [
+        "applyRelatedTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyRelatedTransaction",
+          "line": 106
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs"
+      ],
+      "boundaries": [
+        "Related atomic form/delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/DuplicateVariants.tsx::handleDelete",
+      "page": "DuplicateVariants",
+      "action": "handleDelete",
+      "file": "src/pages/DuplicateVariants.tsx",
+      "methods": [
+        "applyRelatedTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyRelatedTransaction",
+          "line": 302
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs"
+      ],
+      "boundaries": [
+        "Related atomic form/delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/Inventory.tsx::handleCreatePurchaseRecords",
+      "page": "Inventory",
+      "action": "handleCreatePurchaseRecords",
+      "file": "src/pages/Inventory.tsx",
+      "methods": [
+        "createPurchaseRecordFromInventory"
+      ],
+      "callSites": [
+        {
+          "method": "createPurchaseRecordFromInventory",
+          "line": 365
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/catalog-atomic-isolated.mjs",
+        "tests/inventory-cloud-import-flow.mjs"
+      ],
+      "boundaries": [
+        "Catalog atomic transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/Inventory.tsx::handleFileChange",
+      "page": "Inventory",
+      "action": "handleFileChange",
+      "file": "src/pages/Inventory.tsx",
+      "methods": [
+        "upsertInventory",
+        "syncProductGroupsWithInventory",
+        "commitNextWacaSnapshot"
+      ],
+      "callSites": [
+        {
+          "method": "upsertInventory",
+          "line": 210
+        },
+        {
+          "method": "syncProductGroupsWithInventory",
+          "line": 229
+        },
+        {
+          "method": "commitNextWacaSnapshot",
+          "line": 244
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/catalog-atomic-isolated.mjs",
+        "tests/inventory-cloud-import-flow.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS",
+        "Catalog atomic transaction",
+        "erp_commit_waca_snapshot"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true,
+      "multiWritePolicy": "Staged recoverable import: Catalog commit is authoritative; later sync/evidence failure explicitly says committed + follow-up, never all-success"
+    },
+    {
+      "id": "src/pages/Inventory.tsx::handleImportSingleGroup",
+      "page": "Inventory",
+      "action": "handleImportSingleGroup",
+      "file": "src/pages/Inventory.tsx",
+      "methods": [
+        "createPurchaseRecordFromInventory"
+      ],
+      "callSites": [
+        {
+          "method": "createPurchaseRecordFromInventory",
+          "line": 383
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/catalog-atomic-isolated.mjs",
+        "tests/inventory-cloud-import-flow.mjs"
+      ],
+      "boundaries": [
+        "Catalog atomic transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/Inventory.tsx::handleRollbackBackup",
+      "page": "Inventory",
+      "action": "handleRollbackBackup",
+      "file": "src/pages/Inventory.tsx",
+      "methods": [
+        "restoreBackup"
+      ],
+      "callSites": [
+        {
+          "method": "restoreBackup",
+          "line": 347
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "Fail-closed disabled Cloud local-first helpers"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleAddCardItem",
+      "page": "JapanPackageDetail",
+      "action": "handleAddCardItem",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "applyJapanPackageTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyJapanPackageTransaction",
+          "line": 1026
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Japan package transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleAddManualPackageItem",
+      "page": "JapanPackageDetail",
+      "action": "handleAddManualPackageItem",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "applyJapanPackageTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyJapanPackageTransaction",
+          "line": 1103
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Japan package transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleBatchImportSubmit",
+      "page": "JapanPackageDetail",
+      "action": "handleBatchImportSubmit",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "applyJapanPackageTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyJapanPackageTransaction",
+          "line": 939
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Japan package transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleBulkToggleCheck",
+      "page": "JapanPackageDetail",
+      "action": "handleBulkToggleCheck",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "applyJapanPackageTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyJapanPackageTransaction",
+          "line": 370
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Japan package transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleDeleteItem",
+      "page": "JapanPackageDetail",
+      "action": "handleDeleteItem",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "applyRelatedTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyRelatedTransaction",
+          "line": 774
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Related atomic form/delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleQuickUpdateStatus",
+      "page": "JapanPackageDetail",
+      "action": "handleQuickUpdateStatus",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "saveJapanPackages"
+      ],
+      "callSites": [
+        {
+          "method": "saveJapanPackages",
+          "line": 288
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::handleSavePkgDetails",
+      "page": "JapanPackageDetail",
+      "action": "handleSavePkgDetails",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "saveJapanPackages"
+      ],
+      "callSites": [
+        {
+          "method": "saveJapanPackages",
+          "line": 748
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackageDetail.tsx::saveManualItemEdit",
+      "page": "JapanPackageDetail",
+      "action": "saveManualItemEdit",
+      "file": "src/pages/JapanPackageDetail.tsx",
+      "methods": [
+        "applyRelatedTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyRelatedTransaction",
+          "line": 1203
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Related atomic form/delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/JapanPackagesList.tsx::handleAddSubmit",
+      "page": "JapanPackagesList",
+      "action": "handleAddSubmit",
+      "file": "src/pages/JapanPackagesList.tsx",
+      "methods": [
+        "saveJapanPackages",
+        "applyJapanPackageTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "saveJapanPackages",
+          "line": 317
+        },
+        {
+          "method": "applyJapanPackageTransaction",
+          "line": 367
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS",
+        "Japan package transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true,
+      "multiWritePolicy": "Mutually exclusive branches: edit = one field-CAS call; create = one atomic Japan RPC. Not sequential writes."
+    },
+    {
+      "id": "src/pages/JapanPackagesList.tsx::handleDeletePackage",
+      "page": "JapanPackagesList",
+      "action": "handleDeletePackage",
+      "file": "src/pages/JapanPackagesList.tsx",
+      "methods": [
+        "applyRelatedTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyRelatedTransaction",
+          "line": 415
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/related-saveability-isolated.mjs",
+        "tests/cloud-japan-package-provider-integration.mjs"
+      ],
+      "boundaries": [
+        "Related atomic form/delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/OrdersImport.tsx::handleConfirmImport",
+      "page": "OrdersImport",
+      "action": "handleConfirmImport",
+      "file": "src/pages/OrdersImport.tsx",
+      "methods": [
+        "saveProductGroups",
+        "saveProductVariants",
+        "saveSalesOrders",
+        "saveSalesOrderItems",
+        "saveImportBatches"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 308
+        },
+        {
+          "method": "saveProductVariants",
+          "line": 309
+        },
+        {
+          "method": "saveSalesOrders",
+          "line": 311
+        },
+        {
+          "method": "saveSalesOrderItems",
+          "line": 323
+        },
+        {
+          "method": "saveImportBatches",
+          "line": 350
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS",
+        "Fail-closed disabled Cloud local-first helpers"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false,
+      "multiWritePolicy": "Cloud blocked before first write; retained local historical tool"
+    },
+    {
+      "id": "src/pages/OutboundShipmentDetail.tsx::deleteShipment",
+      "page": "OutboundShipmentDetail",
+      "action": "deleteShipment",
+      "file": "src/pages/OutboundShipmentDetail.tsx",
+      "methods": [
+        "deleteOutboundShipmentTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "deleteOutboundShipmentTransaction",
+          "line": 900
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/cloud-outbound-shipment-provider-integration.mjs",
+        "tests/outbound-receiving-save-race.mjs"
+      ],
+      "boundaries": [
+        "Outbound delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/OutboundShipmentDetail.tsx::saveHeader",
+      "page": "OutboundShipmentDetail",
+      "action": "saveHeader",
+      "file": "src/pages/OutboundShipmentDetail.tsx",
+      "methods": [
+        "saveOutboundShipments"
+      ],
+      "callSites": [
+        {
+          "method": "saveOutboundShipments",
+          "line": 1010
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/cloud-outbound-shipment-provider-integration.mjs",
+        "tests/outbound-receiving-save-race.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/OutboundShipmentDetail.tsx::saveItems",
+      "page": "OutboundShipmentDetail",
+      "action": "saveItems",
+      "file": "src/pages/OutboundShipmentDetail.tsx",
+      "methods": [
+        "saveOutboundShipmentItems"
+      ],
+      "callSites": [
+        {
+          "method": "saveOutboundShipmentItems",
+          "line": 618
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/cloud-outbound-shipment-provider-integration.mjs",
+        "tests/outbound-receiving-save-race.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/OutboundShipmentDetail.tsx::updateStatus",
+      "page": "OutboundShipmentDetail",
+      "action": "updateStatus",
+      "file": "src/pages/OutboundShipmentDetail.tsx",
+      "methods": [
+        "saveOutboundShipments"
+      ],
+      "callSites": [
+        {
+          "method": "saveOutboundShipments",
+          "line": 1028
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/cloud-outbound-shipment-provider-integration.mjs",
+        "tests/outbound-receiving-save-race.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/OutboundShipmentsList.tsx::handleCreate",
+      "page": "OutboundShipmentsList",
+      "action": "handleCreate",
+      "file": "src/pages/OutboundShipmentsList.tsx",
+      "methods": [
+        "saveOutboundShipments"
+      ],
+      "callSites": [
+        {
+          "method": "saveOutboundShipments",
+          "line": 167
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleAddNewVariant",
+      "page": "PurchaseManagement",
+      "action": "handleAddNewVariant",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "saveProductVariants"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductVariants",
+          "line": 730
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleAddPrivateOrderSubmit",
+      "page": "PurchaseManagement",
+      "action": "handleAddPrivateOrderSubmit",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "savePrivateOrderTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "savePrivateOrderTransaction",
+          "line": 1455
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Private Order atomic transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleApplyMasterCostToAll",
+      "page": "PurchaseManagement",
+      "action": "handleApplyMasterCostToAll",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "updateProductVariantPatchBulk"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatchBulk",
+          "line": 1503
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleApplyMasterCostToCategory",
+      "page": "PurchaseManagement",
+      "action": "handleApplyMasterCostToCategory",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "updateProductVariantPatchBulk"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatchBulk",
+          "line": 1568
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleDeleteBatch",
+      "page": "PurchaseManagement",
+      "action": "handleDeleteBatch",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "applyRelatedTransaction"
+      ],
+      "callSites": [
+        {
+          "method": "applyRelatedTransaction",
+          "line": 216
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "Related atomic form/delete transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleDeleteVariant",
+      "page": "PurchaseManagement",
+      "action": "handleDeleteVariant",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "deleteProductVariant"
+      ],
+      "callSites": [
+        {
+          "method": "deleteProductVariant",
+          "line": 802
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleManualFieldBlur",
+      "page": "PurchaseManagement",
+      "action": "handleManualFieldBlur",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "updateProductVariantPatch"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatch",
+          "line": 683
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleMoveVariant",
+      "page": "PurchaseManagement",
+      "action": "handleMoveVariant",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "saveProductVariants"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductVariants",
+          "line": 777
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleSaveBundleComponents",
+      "page": "PurchaseManagement",
+      "action": "handleSaveBundleComponents",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "saveBundleComponentsForVariant"
+      ],
+      "callSites": [
+        {
+          "method": "saveBundleComponentsForVariant",
+          "line": 558
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleUpdateDefaultJpyCost",
+      "page": "PurchaseManagement",
+      "action": "handleUpdateDefaultJpyCost",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "updateProductVariantPatch"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatch",
+          "line": 829
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleUpdateDefaultTwdCost",
+      "page": "PurchaseManagement",
+      "action": "handleUpdateDefaultTwdCost",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "updateProductVariantPatch"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatch",
+          "line": 873
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseManagement.tsx::handleUpdatePlatformDemand",
+      "page": "PurchaseManagement",
+      "action": "handleUpdatePlatformDemand",
+      "file": "src/pages/PurchaseManagement.tsx",
+      "methods": [
+        "updateProductVariantPatch"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatch",
+          "line": 1266
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/saveability-native-ui.mjs",
+        "tests/cloud-mutation-inline-ui.mjs",
+        "tests/full-postgrest-write-matrix.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleAutoLookupDeadlines",
+      "page": "PurchaseRecords",
+      "action": "handleAutoLookupDeadlines",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 2197
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleBatchApply",
+      "page": "PurchaseRecords",
+      "action": "handleBatchApply",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 1680
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleBatchDelete",
+      "page": "PurchaseRecords",
+      "action": "handleBatchDelete",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "deleteProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "deleteProductGroups",
+          "line": 2357
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_delete_product_group_trees"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleBatchUpdateShowInPurchaseList",
+      "page": "PurchaseRecords",
+      "action": "handleBatchUpdateShowInPurchaseList",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 2436
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleDeleteGroup",
+      "page": "PurchaseRecords",
+      "action": "handleDeleteGroup",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "deleteProductGroup"
+      ],
+      "callSites": [
+        {
+          "method": "deleteProductGroup",
+          "line": 2340
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_delete_product_group_trees"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleNextFieldTestClearClosingDates",
+      "page": "PurchaseRecords",
+      "action": "handleNextFieldTestClearClosingDates",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 2394
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "NEXT_ONLY_HIDDEN",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/next-bulk-closing-date-clear.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handlePaste",
+      "page": "PurchaseRecords",
+      "action": "handlePaste",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 2254
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleUpdateAgent",
+      "page": "PurchaseRecords",
+      "action": "handleUpdateAgent",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 383
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleUpdateGroupField",
+      "page": "PurchaseRecords",
+      "action": "handleUpdateGroupField",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 1622
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleUpdateGroupPlatformDemand",
+      "page": "PurchaseRecords",
+      "action": "handleUpdateGroupPlatformDemand",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "updateProductVariantPatch"
+      ],
+      "callSites": [
+        {
+          "method": "updateProductVariantPatch",
+          "line": 2322
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/PurchaseRecords.tsx::handleUpdateWacaMeta",
+      "page": "PurchaseRecords",
+      "action": "handleUpdateWacaMeta",
+      "file": "src/pages/PurchaseRecords.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 1559
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs",
+        "tests/cloud-realtime-draft-catchup.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/Purchasing.tsx::handleBatchRemove",
+      "page": "Purchasing",
+      "action": "handleBatchRemove",
+      "file": "src/pages/Purchasing.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 470
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/Purchasing.tsx::handleSingleRemove",
+      "page": "Purchasing",
+      "action": "handleSingleRemove",
+      "file": "src/pages/Purchasing.tsx",
+      "methods": [
+        "saveProductGroups"
+      ],
+      "callSites": [
+        {
+          "method": "saveProductGroups",
+          "line": 441
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/full-postgrest-write-matrix.mjs",
+        "tests/manual-authoritative-refresh.mjs"
+      ],
+      "boundaries": [
+        "erp_apply_field_mutations / field CAS"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/Settings.tsx::handleClear",
+      "page": "Settings",
+      "action": "handleClear",
+      "file": "src/pages/Settings.tsx",
+      "methods": [
+        "clearData"
+      ],
+      "callSites": [
+        {
+          "method": "clearData",
+          "line": 327
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "Fail-closed disabled Cloud local-first helpers"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false
+    },
+    {
+      "id": "src/pages/Settings.tsx::handleClearPurchaseRecords",
+      "page": "Settings",
+      "action": "handleClearPurchaseRecords",
+      "file": "src/pages/Settings.tsx",
+      "methods": [
+        "clearPurchaseRecords"
+      ],
+      "callSites": [
+        {
+          "method": "clearPurchaseRecords",
+          "line": 314
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "Fail-closed disabled Cloud local-first helpers"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false
+    },
+    {
+      "id": "src/pages/Settings.tsx::handleConfirmCloudRestore",
+      "page": "Settings",
+      "action": "handleConfirmCloudRestore",
+      "file": "src/pages/Settings.tsx",
+      "methods": [
+        "importData"
+      ],
+      "callSites": [
+        {
+          "method": "importData",
+          "line": 291
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "Local / NEXT atomic restore"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false
+    },
+    {
+      "id": "src/pages/Settings.tsx::handleFileChange",
+      "page": "Settings",
+      "action": "handleFileChange",
+      "file": "src/pages/Settings.tsx",
+      "methods": [
+        "importData"
+      ],
+      "callSites": [
+        {
+          "method": "importData",
+          "line": 260
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "Local / NEXT atomic restore"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false
+    },
+    {
+      "id": "src/pages/Settings.tsx::inline:reparseProductTitles",
+      "page": "Settings",
+      "action": "inline:reparseProductTitles",
+      "file": "src/pages/Settings.tsx",
+      "methods": [
+        "reparseProductTitles"
+      ],
+      "callSites": [
+        {
+          "method": "reparseProductTitles",
+          "line": 605
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "INTENTIONALLY_DISABLED_WITH_REASON",
+      "status": "UNSUPPORTED_BY_PRODUCT_DESIGN",
+      "evidence": [
+        "tests/saveability-matrix.mjs"
+      ],
+      "boundaries": [
+        "Fail-closed disabled Cloud local-first helpers"
+      ],
+      "automaticCoverage": "N/A",
+      "requiresHumanLiveAcceptance": false
+    },
+    {
+      "id": "src/pages/Settings.tsx::inline:reparseProductVariants",
+      "page": "Settings",
+      "action": "inline:reparseProductVariants",
+      "file": "src/pages/Settings.tsx",
+      "methods": [
+        "reparseProductVariants"
+      ],
+      "callSites": [
+        {
+          "method": "reparseProductVariants",
+          "line": 581
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/waca-backup-cutover-v3.mjs",
+        "tests/cloud-backup-next-restore-e2e.mjs",
+        "tests/catalog-atomic-isolated.mjs"
+      ],
+      "boundaries": [
+        "Catalog atomic transaction"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/WacaIntegration.tsx::confirmImport",
+      "page": "WacaIntegration",
+      "action": "confirmImport",
+      "file": "src/pages/WacaIntegration.tsx",
+      "methods": [
+        "commitNextWacaSnapshot"
+      ],
+      "callSites": [
+        {
+          "method": "commitNextWacaSnapshot",
+          "line": 245
+        },
+        {
+          "method": "commitNextWacaSnapshot",
+          "line": 253
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/waca-pending-reimport.mjs",
+        "tests/waca-cloud-ui-parity.mjs",
+        "tests/waca-postgrest-isolated-v3.mjs"
+      ],
+      "boundaries": [
+        "erp_commit_waca_snapshot"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/WacaIntegration.tsx::confirmMasterLinks",
+      "page": "WacaIntegration",
+      "action": "confirmMasterLinks",
+      "file": "src/pages/WacaIntegration.tsx",
+      "methods": [
+        "commitNextWacaSnapshot"
+      ],
+      "callSites": [
+        {
+          "method": "commitNextWacaSnapshot",
+          "line": 298
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/waca-pending-reimport.mjs",
+        "tests/waca-cloud-ui-parity.mjs",
+        "tests/waca-postgrest-isolated-v3.mjs"
+      ],
+      "boundaries": [
+        "erp_commit_waca_snapshot"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/WacaIntegration.tsx::manualMap",
+      "page": "WacaIntegration",
+      "action": "manualMap",
+      "file": "src/pages/WacaIntegration.tsx",
+      "methods": [
+        "commitNextWacaSnapshot"
+      ],
+      "callSites": [
+        {
+          "method": "commitNextWacaSnapshot",
+          "line": 330
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/waca-pending-reimport.mjs",
+        "tests/waca-cloud-ui-parity.mjs",
+        "tests/waca-postgrest-isolated-v3.mjs"
+      ],
+      "boundaries": [
+        "erp_commit_waca_snapshot"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    },
+    {
+      "id": "src/pages/WacaIntegration.tsx::resolveConflict",
+      "page": "WacaIntegration",
+      "action": "resolveConflict",
+      "file": "src/pages/WacaIntegration.tsx",
+      "methods": [
+        "commitNextWacaSnapshot"
+      ],
+      "callSites": [
+        {
+          "method": "commitNextWacaSnapshot",
+          "line": 373
+        }
+      ],
+      "uiAudit": "SOURCE_WIRING_REVIEWED",
+      "next": "SUPPORTED",
+      "cloud": "SUPPORTED_SOURCE_PENDING_MIGRATION",
+      "status": "AUTOMATED_CONTRACT_PASS",
+      "evidence": [
+        "tests/waca-pending-reimport.mjs",
+        "tests/waca-cloud-ui-parity.mjs",
+        "tests/waca-postgrest-isolated-v3.mjs"
+      ],
+      "boundaries": [
+        "erp_commit_waca_snapshot"
+      ],
+      "automaticCoverage": "UI wiring inspection + real provider/domain tests + native persistence contract (not every button E2E)",
+      "requiresHumanLiveAcceptance": true
+    }
+  ]
+}

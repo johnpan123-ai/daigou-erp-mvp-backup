@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   cacheDir: '.vite-cache/inventory-cloud-import-test',
-  optimizeDeps: { noDiscovery: true, include: [] },
+  optimizeDeps: { noDiscovery: true, include: ['react','react-dom/client','react/jsx-runtime','react-router-dom','lucide-react','@supabase/supabase-js'] },
   define: {
     'import.meta.env.VITE_SUPABASE_URL': JSON.stringify('https://rhfdjsklfrgpoqsaqpkn.supabase.co'),
     'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify('isolated-no-network-public-key'),
