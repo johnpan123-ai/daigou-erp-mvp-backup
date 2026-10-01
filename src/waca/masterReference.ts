@@ -110,8 +110,9 @@ export function buildWacaMasterReference(
     for (const variant of candidates) result.push({
       mainCode: link.mainCode, childCode: link.childCode, variantId: variant.id,
       productGroupId: variant.product_group_id ?? '',
-      productTitle: link.productTitle || variant.product_title,
+      productTitle: variant.product_title || link.productTitle || '',
       variantTitle: link.variantTitle || variant.raw_variant_name || variant.variant_name,
+      variantTitles: [link.variantTitle, variant.raw_variant_name ?? '', variant.variant_name].filter(Boolean),
       active: (variant as ProductVariant & { deleted_at?: string | null }).deleted_at == null,
       sourceFile: link.sourceFile,
     });
@@ -121,6 +122,7 @@ export function buildWacaMasterReference(
     result.push({ mainCode: '', childCode: variant.myacg_item_code, variantId: variant.id,
       productGroupId: variant.product_group_id ?? '', productTitle: variant.product_title,
       variantTitle: variant.raw_variant_name || variant.variant_name,
+      variantTitles: [variant.raw_variant_name ?? '', variant.variant_name].filter(Boolean),
       active: (variant as ProductVariant & { deleted_at?: string | null }).deleted_at == null,
       sourceFile: '',
     });

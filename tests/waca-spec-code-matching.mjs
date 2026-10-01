@@ -21,7 +21,7 @@ try {
   ];
   const signed = row('G07592374', '複製簽套組', 3);
   const cap = row('G07592378', 'Noah棒球帽');
-  const blank = row('', 'Noah棒球帽', 9, { orderNumber: 'MISSING-SPEC' });
+  const blank = row('', '', 9, { orderNumber: 'MISSING-SPEC' });
   const fields = ['訂單狀態', '訂單編號', '購買日期', '商品編號', '品名', '多規格名稱一',
     '多規格名稱二', '規格編號', '訂單商品數量', '小計'];
   const book = XLSX.utils.book_new();
@@ -33,7 +33,7 @@ try {
   assert.equal(parsed.rows[1].specCode, 'G07592378');
   assert.equal(matchWacaItem(signed, master).candidate.variantId, 'signed');
   assert.equal(matchWacaItem(cap, master).candidate.variantId, 'cap');
-  assert.equal(matchWacaItem(blank, master).diagnostic, 'SPEC_CODE_MISSING');
+  assert.equal(matchWacaItem(blank, master).diagnostic, 'AMBIGUOUS_VARIANT');
   assert.equal(matchWacaItem({ ...cap, specCode: 'NOT-IN-ERP' }, master).kind, 'UNMATCHED');
   assert.equal(matchWacaItem({ ...cap, productCode: '' }, master).candidate.variantId, 'cap');
   const warning = matchWacaItem({ ...cap, spec1: 'Changed name', productTitle: 'Changed title' }, master);
@@ -42,7 +42,7 @@ try {
   const repo = createWacaRepository();
   const first = importWacaRows(parsed.rows, repo, master, 'first');
   assert.equal(first.errors.length, 0);
-  assert.equal(first.unmatched, 1);
+  assert.equal(first.multipleCandidates, 1);
   assert.equal(repo.autoQuantities.get('signed'), 3);
   assert.equal(repo.autoQuantities.get('cap'), 1);
   for (let at = 0; at < 5; at++) {
@@ -113,7 +113,7 @@ try {
   assert.deepEqual(restored.autoQuantities, repo.autoQuantities);
   assert.deepEqual(backup.cutoverAudit, initial.cutoverAudit);
   const ui = readFileSync('src/pages/WacaIntegration.tsx', 'utf8');
-  assert.match(ui, /normalizeWacaText\(item\.specCode\)/u);
+  assert.match(ui, /indexWacaMaster\(masterState\.master\)/u);
   assert.match(ui, /pendingImport\.result\.quantityChanges/u, 'preview must include old wrong target decreases');
   console.log('PASS parser, A/B/C/D spec identity, no product fallback, names warning, statuses, legacy AUTO/MANUAL revalidation, historical rematch, quantities, 5x idempotency, restore and preview');
 } finally { await vite.close(); }

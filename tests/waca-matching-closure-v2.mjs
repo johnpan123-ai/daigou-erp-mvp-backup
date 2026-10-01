@@ -19,7 +19,7 @@ const vite = await createServer({ configFile: false, cacheDir: '.vite-cache', se
 try {
   const { parseWacaWorkbook } = await vite.ssrLoadModule('/src/waca/workbookParser.ts');
   const { isWacaDiscount, matchWacaItem, wacaFeature, importWacaRows, createWacaRepository,
-    normalizeWacaText } =
+    normalizeWacaText, wacaSpecNamesMatch } =
     await vite.ssrLoadModule('/src/waca/orderCore.ts');
   const { buildWacaMasterReference, linksFromMyAcgInventory, mergeMyAcgMasterLinks } =
     await vite.ssrLoadModule('/src/waca/masterReference.ts');
@@ -58,16 +58,16 @@ try {
   assert.equal(waca.rows.length, 127);
   assert.equal(productRows.length, 115);
   assert.equal(features.length, 60);
-  // This pre-fix workbook contains historical rows without a specification
-  // code. Preserve them as pending instead of reviving the old parent fallback.
-  assert.equal(autoRows.length + productRows.filter(r => matchWacaItem(r, master).kind !== 'AUTO_MATCH').length, 115);
+  // Blank-spec rows use exact labels INSIDE a proven group, not a parent→SKU fallback.
+  assert.equal(autoRows.length, 115);
+  assert.equal(autoFeatures.length, 60);
   const kaela = features.find(row => row.productCode === 'GP00392293' && row.spec1 === '親簽套組');
   assert.equal(matchWacaItem({ ...kaela, specCode: 'G07487795', spec1: '複製簽套組' }, master).candidate?.childCode, 'G07487795');
   const withoutHistoricKaela = master.filter(item => item.childCode !== 'G07487794');
   assert.equal(matchWacaItem({ ...kaela, specCode: 'G07487794' }, withoutHistoricKaela).diagnostic, 'VARIANT_NOT_IN_ERP');
   const unknownGp = { ...kaela, productCode: 'GP-NOT-OBSERVED' };
   assert.equal(matchWacaItem({ ...unknownGp, specCode: 'G07487794' }, master).candidate?.childCode, 'G07487794');
-  assert.equal(matchWacaItem({ ...unknownGp, specCode: '' }, master).diagnostic, 'SPEC_CODE_MISSING');
+  assert.equal(matchWacaItem({ ...unknownGp, specCode: '' }, master).diagnostic, 'MASTER_EVIDENCE_MISSING');
   const absentErp = links.find(link => !link.productVariantId && link.variantTitle && link.productTitle);
   assert.ok(absentErp, 'source GP → G evidence must survive when ERP lacks the G');
   assert.equal(matchWacaItem({ ...kaela, productCode: absentErp.mainCode, productTitle: absentErp.productTitle,
@@ -87,11 +87,13 @@ try {
   let falsePositiveCount = 0;
   for (const row of productRows) {
     const candidate = matchWacaItem(row, master).candidate;
-    if (!row.specCode.trim()) assert.equal(matchWacaItem(row, master).diagnostic, 'SPEC_CODE_MISSING');
-    if (candidate && (!candidate.variantId
-      || normalizeWacaText(row.specCode) !== normalizeWacaText(candidate.childCode))) falsePositiveCount += 1;
+    const match = matchWacaItem(row, master);
+    if (candidate && (!candidate.variantId || (row.specCode.trim()
+      ? normalizeWacaText(row.specCode) !== normalizeWacaText(candidate.childCode)
+      : match.resolution === 'SPEC_NAME_EXACT_UNIQUE' ? !wacaSpecNamesMatch(row, candidate)
+        : match.resolution !== 'UNIQUE_PARENT_VARIANT' || match.candidates.length !== 1))) falsePositiveCount += 1;
   }
-  assert.equal(falsePositiveCount, 0, 'every auto match must use the explicit specification code');
+  assert.equal(falsePositiveCount, 0, 'every auto match needs explicit SKU or unique parent-scoped evidence');
   const pending = featureMatch.filter(item => item.match.kind !== 'AUTO_MATCH').map(({ row, match }) => ({
     code: row.productCode, title: row.productTitle, spec: [row.spec1, row.spec2].filter(Boolean).join(' / '),
     reason: match.diagnostic, candidates: match.candidates.map(candidate => ({

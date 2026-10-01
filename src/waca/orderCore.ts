@@ -23,6 +23,7 @@ export interface MasterVariant {
   variantTitle: string;
   active: boolean;
   sourceFile?: string;
+  variantTitles?: readonly string[];
 }
 
 export interface WacaMapping {
@@ -35,7 +36,13 @@ export interface WacaMapping {
   historicalProductTitle: string;
   historicalVariantTitle: string;
   masterStatus: 'ACTIVE' | 'MISSING_FROM_LATEST_MASTER';
+  /** Optional JSON provenance; older backups remain readable. */
+  resolution?: WacaResolution;
 }
+
+export type WacaResolution = 'SPEC_CODE_EXACT' | 'SPEC_NAME_EXACT_UNIQUE' | 'UNIQUE_PARENT_VARIANT'
+  | 'MANUAL_CONFIRMED_MAPPING' | 'PENDING_AMBIGUOUS' | 'PENDING_PRODUCT_MISSING'
+  | 'PENDING_NAME_CONFLICT' | 'PENDING_SPEC_NAME' | 'CONFLICT_MANUAL_VS_SPEC';
 
 export interface WacaOrder {
   key: string;
@@ -59,7 +66,10 @@ export interface WacaItem {
   match: 'AUTO_MATCH' | 'MANUAL_MATCH' | 'UNMATCHED' | 'MANUAL_REVIEW';
   diagnostic: 'MASTER_EVIDENCE_MISSING' | 'MASTER_GROUP_LINK_MISSING' | 'VARIANT_NOT_MATCHED'
     | 'MULTIPLE_VARIANT_CANDIDATES' | 'VARIANT_NOT_IN_ERP' | 'PRODUCT_NOT_IN_MASTER' | 'NAME_CONFLICT'
-    | 'SPEC_CODE_MISSING' | 'SPEC_CODE_CONFLICT' | null;
+    | 'SPEC_CODE_MISSING' | 'SPEC_CODE_CONFLICT' | 'AMBIGUOUS_VARIANT' | 'PARENT_AMBIGUOUS'
+    | 'PARENT_NAME_CONFLICT' | 'SPEC_NAME_NOT_MATCHED' | 'SOURCE_SPEC_IDENTITY_CONFLICT' | null;
+  resolution?: WacaResolution;
+  candidateCount?: number;
 }
 
 export interface WacaRepository {
@@ -121,6 +131,43 @@ export interface WacaMatch {
   candidate: MasterVariant | null;
   candidates: MasterVariant[];
   diagnostic: WacaItem['diagnostic'];
+  resolution: WacaResolution;
+}
+
+type ResolutionRow = Pick<WacaRow, 'productCode' | 'specCode' | 'productTitle' | 'spec1' | 'spec2'>;
+export interface WacaMasterIndex {
+  byChild: Map<string, MasterVariant[]>;
+  byMain: Map<string, MasterVariant[]>;
+  byGroup: Map<string, MasterVariant[]>;
+  byVariant: Map<string, MasterVariant>;
+}
+
+/** Built once per catalogue/import, never once per tab or order row. */
+export function indexWacaMaster(master: readonly MasterVariant[]): WacaMasterIndex {
+  const result: WacaMasterIndex = { byChild: new Map(), byMain: new Map(), byGroup: new Map(), byVariant: new Map() };
+  const add = (map: Map<string, MasterVariant[]>, key: string, value: MasterVariant) => {
+    if (key) { const rows = map.get(key) ?? []; rows.push(value); map.set(key, rows); }
+  };
+  for (const variant of master) {
+    if (!variant.active) continue;
+    add(result.byChild, normalizeWacaText(variant.childCode), variant);
+    add(result.byMain, normalizeWacaText(variant.mainCode), variant);
+    add(result.byGroup, variant.productGroupId, variant);
+    if (variant.variantId) result.byVariant.set(variant.variantId, variant);
+  }
+  return result;
+}
+
+const uniqueVariants = (rows: readonly MasterVariant[]): MasterVariant[] =>
+  [...new Map(rows.filter(row => row.variantId).map(row => [row.variantId, row])).values()];
+
+/** Lossless renderings of the two source fields, not fuzzy punctuation removal. */
+export function wacaSpecNamesMatch(row: Pick<WacaRow, 'spec1' | 'spec2'>, candidate: MasterVariant): boolean {
+  const parts = [row.spec1, row.spec2].map(normalizeWacaText).filter(Boolean);
+  if (!parts.length) return false;
+  const names = new Set([parts.join(' '), parts.join(' / ')]);
+  return [candidate.variantTitle, ...(candidate.variantTitles ?? [])]
+    .some(title => names.has(normalizeWacaText(title)));
 }
 
 const specification = (value: string): string => normalizeWacaText(value)
@@ -135,50 +182,136 @@ const verifiesTitle = (row: Pick<WacaRow, 'productTitle'>, candidate: MasterVari
 };
 
 export function matchWacaItem(
-  row: Pick<WacaRow, 'specCode' | 'productTitle' | 'spec1' | 'spec2'>, master: readonly MasterVariant[],
+  row: ResolutionRow, master: readonly MasterVariant[] | WacaMasterIndex,
 ): WacaMatch {
-  // 商品編號 is parent evidence only. A missing 規格編號 is never guessed.
+  const index = Array.isArray(master) ? indexWacaMaster(master) : master as WacaMasterIndex;
+  const pending = (diagnostic: WacaItem['diagnostic'], resolution: WacaResolution,
+    candidates: MasterVariant[] = []): WacaMatch => ({
+    kind: resolution === 'PENDING_AMBIGUOUS' ? 'MANUAL_REVIEW' : 'UNMATCHED',
+    candidate: null, candidates, diagnostic, resolution,
+  });
+  // Presence is independent of equality: productCode === specCode is still an explicit SKU.
   const code = normalizeWacaText(row.specCode);
-  if (!code) return { kind: 'UNMATCHED', candidate: null, candidates: [], diagnostic: 'SPEC_CODE_MISSING' };
-  const direct = master.filter(item => normalizeWacaText(item.childCode) === code && item.active);
-  const resolved = direct.filter(item => item.variantId);
-  if (!resolved.length) return { kind: 'UNMATCHED', candidate: null, candidates: direct, diagnostic: 'VARIANT_NOT_IN_ERP' };
-  if (resolved.length !== 1) return { kind: 'MANUAL_REVIEW', candidate: null, candidates: resolved, diagnostic: 'MULTIPLE_VARIANT_CANDIDATES' };
+  if (!code) {
+    const parentCode = normalizeWacaText(row.productCode);
+    // A child code may identify a GROUP, never a selected child. Enumerate the whole group.
+    const anchors = [...(index.byMain.get(parentCode) ?? []), ...(index.byChild.get(parentCode) ?? [])];
+    const groupIds = new Set(anchors.map(v => v.productGroupId).filter(Boolean));
+    if (!groupIds.size) return pending('MASTER_EVIDENCE_MISSING', 'PENDING_PRODUCT_MISSING');
+    if (groupIds.size !== 1) return pending('PARENT_AMBIGUOUS', 'PENDING_AMBIGUOUS');
+    const groupId = [...groupIds][0];
+    const all = index.byGroup.get(groupId) ?? [];
+    if (!normalizeWacaText(row.productTitle) || !all.some(v => v.productTitle && verifiesTitle(row, v))) {
+      return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
+    }
+    const candidates = uniqueVariants(all);
+    if (!candidates.length) return pending('VARIANT_NOT_IN_ERP', 'PENDING_PRODUCT_MISSING');
+    const knownChildren = [...all, ...anchors.flatMap(v => v.mainCode
+      ? index.byMain.get(normalizeWacaText(v.mainCode)) ?? [] : [])];
+    const wantedSpec = [row.spec1, row.spec2].map(normalizeWacaText).filter(Boolean).join(' / ');
+    if (wantedSpec) {
+      // No punctuation, dates, colours, sizes or meaning-bearing tokens are removed.
+      const exact = candidates.filter(v => wacaSpecNamesMatch(row, v));
+      if (knownChildren.some(v => !v.variantId && wacaSpecNamesMatch(row, v))) {
+        return pending('VARIANT_NOT_IN_ERP', 'PENDING_PRODUCT_MISSING', candidates);
+      }
+      if (exact.length === 1) {
+        if (!exact[0].productTitle || !verifiesTitle(row, exact[0])) {
+          return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
+        }
+        return { kind: 'AUTO_MATCH', candidate: exact[0], candidates,
+          diagnostic: null, resolution: 'SPEC_NAME_EXACT_UNIQUE' };
+      }
+      return pending(exact.length > 1 ? 'AMBIGUOUS_VARIANT' : 'SPEC_NAME_NOT_MATCHED',
+        exact.length > 1 ? 'PENDING_AMBIGUOUS' : 'PENDING_SPEC_NAME', candidates);
+    }
+    // Known children absent from ERP make a claim of a single variant unsafe.
+    const incomplete = knownChildren.some(child => !child.variantId);
+    if (incomplete) return pending('VARIANT_NOT_IN_ERP', 'PENDING_PRODUCT_MISSING', candidates);
+    if (candidates.length !== 1) return pending('AMBIGUOUS_VARIANT', 'PENDING_AMBIGUOUS', candidates);
+    if (!candidates[0].productTitle || !verifiesTitle(row, candidates[0])) {
+      return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
+    }
+    return { kind: 'AUTO_MATCH', candidate: candidates[0], candidates,
+      diagnostic: null, resolution: 'UNIQUE_PARENT_VARIANT' };
+  }
+  const direct = index.byChild.get(code) ?? [];
+  const resolved = uniqueVariants(direct);
+  if (!resolved.length) return pending('VARIANT_NOT_IN_ERP', 'PENDING_PRODUCT_MISSING', direct);
+  if (resolved.length !== 1) return pending('MULTIPLE_VARIANT_CANDIDATES', 'PENDING_AMBIGUOUS', resolved);
   const candidate = resolved[0];
   const wantedSpec = [row.spec1, row.spec2].map(specification).filter(Boolean).join('');
   const nameConflict = !verifiesTitle(row, candidate)
     || Boolean(wantedSpec && specification(candidate.variantTitle) && wantedSpec !== specification(candidate.variantTitle));
   return { kind: 'AUTO_MATCH', candidate, candidates: resolved,
+    resolution: 'SPEC_CODE_EXACT',
     diagnostic: nameConflict ? 'NAME_CONFLICT'
       : candidate.mainCode && !candidate.productGroupId ? 'MASTER_GROUP_LINK_MISSING' : null };
 }
 
-function resolveWacaItem(item: WacaItem, repo: WacaRepository, master: readonly MasterVariant[], importId: string): void {
+/** Do not count an unresolved old blank line again alongside stronger source lines. */
+function sourceSpecConflicts(repo: WacaRepository): Set<string> {
+  const explicit = new Set<string>();
+  for (const item of repo.items.values()) {
+    if (normalizeWacaText(item.specCode)) explicit.add(itemKey(item.orderKey, legacyWacaFeature(item)));
+  }
+  return new Set([...repo.items.values()].filter(item => !normalizeWacaText(item.specCode)
+    && explicit.has(itemKey(item.orderKey, legacyWacaFeature(item)))).map(item => item.key));
+}
+
+function resolveWacaItem(item: WacaItem, repo: WacaRepository, master: WacaMasterIndex, importId: string,
+  sourceConflicts?: ReadonlySet<string>): void {
   const code = normalizeWacaText(item.specCode);
-  const mapping = repo.mappings.get(item.feature);
+  if (!code && sourceConflicts?.has(item.key)) {
+    // Keep the durable row and every decision/audit. A split cannot be guessed.
+    item.productVariantId = null;
+    item.match = 'MANUAL_REVIEW';
+    item.diagnostic = 'SOURCE_SPEC_IDENTITY_CONFLICT';
+    item.resolution = 'PENDING_AMBIGUOUS';
+    item.candidateCount = 0;
+    return;
+  }
+  const currentMapping = repo.mappings.get(item.feature);
+  // An earlier blank-spec confirmation is weaker than a newly supplied explicit code.
+  const blankMapping = code ? repo.mappings.get(wacaFeature({ ...item, specCode: '' })) : undefined;
+  const mapping = currentMapping?.method === 'MANUAL' ? currentMapping
+    : blankMapping?.method === 'MANUAL' ? blankMapping : currentMapping;
   const match = matchWacaItem(item, master);
   if (mapping?.method === 'MANUAL') {
-    const target = master.find(candidate => candidate.variantId === mapping.productVariantId
-      && normalizeWacaText(candidate.childCode) === code);
+    const targets = master.byChild.get(normalizeWacaText(mapping.myacgVariantId)) ?? [];
+    const target = targets.find(candidate => candidate.variantId === mapping.productVariantId);
+    const canonicalTarget = master.byVariant.get(mapping.productVariantId);
     const conflict = code && (normalizeWacaText(mapping.myacgVariantId) !== code
-      || master.some(candidate => candidate.variantId === mapping.productVariantId
-        && normalizeWacaText(candidate.childCode) !== code));
-    item.productVariantId = code && !conflict && target ? mapping.productVariantId : null;
+      || (canonicalTarget && normalizeWacaText(canonicalTarget.childCode) !== code));
+    const parentCandidates = match.candidates;
+    // A permanent, feature-bound manual decision is parent evidence too. Validate
+    // its current canonical target and the originally confirmed source title.
+    const verifiedParent = !code && target && target.productGroupId
+      && normalizeWacaText(mapping.historicalProductTitle) === normalizeWacaText(item.productTitle)
+      && (parentCandidates.some(v => v.variantId === target.variantId) || mapping.myacgMainId);
+    item.productVariantId = !conflict && target && (code || verifiedParent) ? mapping.productVariantId : null;
     item.match = item.productVariantId ? 'MANUAL_MATCH' : conflict ? 'MANUAL_REVIEW' : 'UNMATCHED';
-    item.diagnostic = !code ? 'SPEC_CODE_MISSING' : conflict ? 'SPEC_CODE_CONFLICT'
-      : !target ? 'VARIANT_NOT_IN_ERP' : match.diagnostic === 'NAME_CONFLICT' ? 'NAME_CONFLICT' : null;
+    item.diagnostic = conflict ? 'SPEC_CODE_CONFLICT' : !target ? 'VARIANT_NOT_IN_ERP'
+      : item.productVariantId ? (match.diagnostic === 'NAME_CONFLICT' ? 'NAME_CONFLICT' : null) : match.diagnostic;
+    item.resolution = conflict ? 'CONFLICT_MANUAL_VS_SPEC' : item.productVariantId
+      ? code ? 'SPEC_CODE_EXACT' : 'MANUAL_CONFIRMED_MAPPING' : match.resolution;
+    item.candidateCount = match.candidates.filter(v => v.variantId).length;
     return;
   }
   item.productVariantId = match.candidate?.variantId ?? null;
   item.match = match.kind;
   item.diagnostic = match.diagnostic;
+  item.resolution = match.resolution;
+  item.candidateCount = match.candidates.filter(v => v.variantId).length;
   if (match.candidate && (mapping?.productVariantId !== match.candidate.variantId
-    || normalizeWacaText(mapping.myacgVariantId) !== code)) {
+    || normalizeWacaText(mapping.myacgVariantId) !== normalizeWacaText(match.candidate.childCode)
+    || mapping.resolution !== match.resolution)) {
     repo.mappings.set(item.feature, {
       feature: item.feature, myacgMainId: match.candidate.mainCode, myacgVariantId: match.candidate.childCode,
       productVariantId: match.candidate.variantId, method: 'AUTO', confirmedAt: importId,
       historicalProductTitle: item.productTitle, historicalVariantTitle: match.candidate.variantTitle,
       masterStatus: 'ACTIVE',
+      resolution: match.resolution,
     });
   }
 }
@@ -200,20 +333,40 @@ export function recomputeWacaQuantities(repo: WacaRepository): Map<string, numbe
 export const wacaDisplayQuantity = (repo: WacaRepository, variantId: string): number =>
   (repo.autoQuantities.get(variantId) ?? 0) + (repo.manualAdjustments.get(variantId) ?? 0);
 
-export function setWacaMapping(repo: WacaRepository, mapping: WacaMapping): void {
-  repo.mappings.set(mapping.feature, mapping);
+export function setWacaMapping(repo: WacaRepository, mapping: WacaMapping,
+  master?: readonly MasterVariant[] | WacaMasterIndex, confirmedParentId?: string): void {
+  const index = master ? Array.isArray(master) ? indexWacaMaster(master) : master as WacaMasterIndex : undefined;
+  const conflicts = sourceSpecConflicts(repo);
+  const affected = [...repo.items.values()].filter(item => item.feature === mapping.feature);
+  if (affected.length && affected.every(item => conflicts.has(item.key))) {
+    throw new Error('同一訂單已有明確規格列；請先核對來源空白規格列，避免重複計量。');
+  }
+  if ([...repo.items.values()].some(item => item.feature === mapping.feature && !normalizeWacaText(item.specCode))) {
+    if (!index || mapping.method !== 'MANUAL' || affected.filter(item => !conflicts.has(item.key)).some(item => {
+      const match = matchWacaItem(item, index);
+      const candidates = match.candidates.length ? match.candidates
+        : confirmedParentId ? index.byGroup.get(confirmedParentId) ?? [] : [];
+      return !candidates.some(v => v.variantId === mapping.productVariantId
+        && normalizeWacaText(v.childCode) === normalizeWacaText(mapping.myacgVariantId));
+    })) {
+      throw new Error('WACA_MANUAL_MAPPING_PARENT_MISMATCH');
+    }
+  }
+  repo.mappings.set(mapping.feature, { ...mapping, resolution: 'MANUAL_CONFIRMED_MAPPING' });
   for (const item of repo.items.values()) {
     if (item.feature !== mapping.feature) continue;
-    if (!normalizeWacaText(item.specCode)
-      || normalizeWacaText(item.specCode) !== normalizeWacaText(mapping.myacgVariantId)) {
+    if (index) { resolveWacaItem(item, repo, index, mapping.confirmedAt, conflicts); continue; }
+    if (!normalizeWacaText(item.specCode) || normalizeWacaText(item.specCode) !== normalizeWacaText(mapping.myacgVariantId)) {
       item.productVariantId = null;
       item.match = 'MANUAL_REVIEW';
       item.diagnostic = normalizeWacaText(item.specCode) ? 'SPEC_CODE_CONFLICT' : 'SPEC_CODE_MISSING';
+      item.resolution = 'CONFLICT_MANUAL_VS_SPEC';
       continue;
     }
     item.productVariantId = mapping.productVariantId;
     item.match = mapping.method === 'MANUAL' ? 'MANUAL_MATCH' : 'AUTO_MATCH';
     item.diagnostic = null;
+    item.resolution = 'SPEC_CODE_EXACT';
   }
   recomputeWacaQuantities(repo);
 }
@@ -251,6 +404,7 @@ export interface WacaImportResult {
 export function importWacaRows(
   rows: readonly WacaRow[], repo: WacaRepository, master: readonly MasterVariant[], importId: string,
 ): WacaImportResult {
+  const masterIndex = indexWacaMaster(master);
   const grouped = new Map<string, WacaRow[]>();
   const errors: string[] = [];
   let discountIgnored = 0;
@@ -266,19 +420,39 @@ export function importWacaRows(
   }
 
   const before = new Map(repo.autoQuantities);
+  const incomingCodes = new Map<string, { codes: Set<string>; blank: boolean }>();
+  for (const [orderKey, orderRows] of grouped) {
+    if (new Set(orderRows.map(row => parseWacaStatus(row.orderStatus))).size !== 1) continue;
+    for (const row of orderRows) {
+      if (isWacaDiscount(row)) continue;
+      const identity = itemKey(orderKey, legacyWacaFeature(row));
+      const evidence = incomingCodes.get(identity) ?? { codes: new Set<string>(), blank: false };
+      const code = normalizeWacaText(row.specCode);
+      if (code) evidence.codes.add(code); else evidence.blank = true;
+      incomingCodes.set(identity, evidence);
+    }
+  }
   // Upgrade only the in-memory candidate, committed through the existing atomic
   // import boundary. Preserve manual mapping/audit records at their old feature.
   const keyedItems = new Map<string, WacaItem>();
   const keyByIdentity = new Map<string, string>();
+  const existingExplicit = new Set([...repo.items.values()].filter(item => normalizeWacaText(item.specCode))
+    .map(item => itemKey(item.orderKey, legacyWacaFeature(item))));
   for (const prior of repo.items.values()) {
-    const feature = wacaFeature(prior);
+    // A uniquely strengthened source field upgrades the SAME durable SQL key.
+    // Do not keep an old blank line alongside its newly identified child.
+    const evidence = incomingCodes.get(itemKey(prior.orderKey, legacyWacaFeature(prior)));
+    const projected = !normalizeWacaText(prior.specCode) && evidence && !evidence.blank && evidence.codes.size === 1
+      && !existingExplicit.has(itemKey(prior.orderKey, legacyWacaFeature(prior)))
+      ? { ...prior, specCode: [...evidence.codes][0] } : prior;
+    const feature = wacaFeature(projected);
     const identity = itemKey(prior.orderKey, feature);
     if (keyByIdentity.has(identity)) throw new Error('WACA_ITEM_IDENTITY_CONFLICT');
     const mapping = repo.mappings.get(prior.feature);
     if (mapping?.method === 'MANUAL' && !repo.mappings.has(feature)) repo.mappings.set(feature, { ...mapping, feature });
     // Cloud RPC upserts by the durable key; never replace an existing key,
     // otherwise the old SQL row would survive and be counted a second time.
-    keyedItems.set(prior.key, { ...prior, feature });
+    keyedItems.set(prior.key, { ...projected, feature });
     keyByIdentity.set(identity, prior.key);
   }
   repo.items = keyedItems;
@@ -314,7 +488,7 @@ export function importWacaRows(
       // Legacy manual decisions are evidence, not permission to override SKU.
       const legacy = repo.mappings.get(legacyWacaFeature(row));
       if (legacy?.method === 'MANUAL' && !repo.mappings.has(feature)) repo.mappings.set(feature, { ...legacy, feature });
-      resolveWacaItem(item, repo, master, importId);
+      resolveWacaItem(item, repo, masterIndex, importId);
       const matchKind = item.match;
       const prior = repo.items.get(keyForItem);
       if (!prior) inserted += 1;
@@ -329,8 +503,15 @@ export function importWacaRows(
   }
   // Revalidate every saved line, including previously wrong AUTO matches and
   // orders omitted from this file. Quantities/statuses are never incremented.
+  const sourceConflicts = sourceSpecConflicts(repo);
+  matched = 0; unmatched = 0; multipleCandidates = 0; mappingMissing = 0;
   for (const item of repo.items.values()) {
-    resolveWacaItem(item, repo, master, importId);
+    resolveWacaItem(item, repo, masterIndex, importId, sourceConflicts);
+    if (!importedItemKeys.has(item.key)) continue;
+    if (item.match === 'UNMATCHED') unmatched += 1;
+    else if (item.match === 'MANUAL_REVIEW') multipleCandidates += 1;
+    else matched += 1;
+    if (item.diagnostic === 'MASTER_EVIDENCE_MISSING') mappingMissing += 1;
   }
   recomputeWacaQuantities(repo);
   const quantityChanges = [...new Set([...before.keys(), ...repo.autoQuantities.keys()])].sort().map(variantId => ({

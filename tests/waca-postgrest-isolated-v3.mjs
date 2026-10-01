@@ -112,7 +112,7 @@ try {
   // Old durable item keys must survive feature normalization: the RPC upserts
   // keys rather than deleting omitted rows, so rekeying would double count.
   vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
-  const { importWacaRows, normalizeWacaText } = await vite.ssrLoadModule('/src/waca/orderCore.ts');
+  const { importWacaRows, normalizeWacaText, setWacaMapping } = await vite.ssrLoadModule('/src/waca/orderCore.ts');
   const { repositoryFromSnapshot, snapshotFromRepository } = await vite.ssrLoadModule('/src/waca/nextStorage.ts');
   const signedId = '00000000-0000-4000-8000-000000000011';
   const capId = '00000000-0000-4000-8000-000000000012';
@@ -138,7 +138,7 @@ try {
     p_snapshot: seeded, p_expected_revision: saved.data.revision, p_update_auto_quantity: true,
   }, owner);
   assert.equal(seed.status, 200, 'isolated old wrong mapping seed');
-  const inputs = [row('G001', 'Test variant', 3), capRow, row('', 'Cap', 9, { orderNumber: 'BLANK-SPEC' }),
+  const inputs = [row('G001', 'Test variant', 3), capRow, row('', '', 9, { orderNumber: 'BLANK-SPEC' }),
     row('G002', 'Cap', 7, { orderNumber: 'CANCEL', orderStatus: '取消' }),
     row('G002', 'Cap', 8, { orderNumber: 'FAIL', orderStatus: '失敗' })];
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -162,9 +162,49 @@ try {
     const back = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
     assert.equal(back.items.find(item => item.key === oldKey).productVariantId, capId);
     assert.equal(back.items.find(item => item.specCode === '').productVariantId, '');
-    assert.equal(back.items.find(item => item.specCode === '').diagnostic, 'SPEC_CODE_MISSING');
+    assert.equal(back.items.find(item => item.specCode === '').diagnostic, 'AMBIGUOUS_VARIANT');
     assert.deepEqual(back.cutoverAudit, saved.data.cutoverAudit, 'historical audit remains unchanged');
   }
+  // Blank-spec manual decisions and their provenance survive the unchanged JSON
+  // Cloud contract; a newly explicit code reuses the key and cannot override audit.
+  const current = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
+  const repo = repositoryFromSnapshot(current, variants);
+  const blankItem = [...repo.items.values()].find(item => !item.specCode);
+  const decision = { feature: blankItem.feature, myacgMainId: 'GP-TEST', myacgVariantId: 'G002',
+    productVariantId: capId, method: 'MANUAL', confirmedAt: 'manual-confirmed',
+    historicalProductTitle: 'Test group', historicalVariantTitle: 'Cap', masterStatus: 'ACTIVE' };
+  setWacaMapping(repo, decision, master);
+  let revision = current.revision;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    importWacaRows(inputs, repo, master, `BLANK-MANUAL-${attempt}`);
+    const committed = await call('/rpc/erp_commit_waca_snapshot', {
+      p_snapshot: snapshotFromRepository(current, repo, current.batches), p_expected_revision: revision,
+      p_update_auto_quantity: true,
+    }, owner);
+    assert.equal(committed.status, 200, JSON.stringify(committed.data));
+    revision = committed.data.revision;
+    const back = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
+    assert.equal(back.items.find(item => item.key === blankItem.key).resolution, 'MANUAL_CONFIRMED_MAPPING');
+    assert.equal(back.mappings.find(m => m.feature === blankItem.feature).resolution, 'MANUAL_CONFIRMED_MAPPING');
+    assert.equal((await sql.query('select waca_auto_quantity q from public.product_variants where id=$1', [capId])).rows[0].q, 10);
+  }
+  const beforeUpgrade = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
+  const upgraded = repositoryFromSnapshot(beforeUpgrade, variants);
+  importWacaRows([row('G001', '', 9, { orderNumber: 'BLANK-SPEC' })], upgraded, master, 'stronger-explicit');
+  assert.equal(upgraded.items.size, 5);
+  assert.equal(upgraded.items.get(blankItem.key).resolution, 'CONFLICT_MANUAL_VS_SPEC');
+  assert.equal(upgraded.autoQuantities.get(capId), 1);
+  const committed = await call('/rpc/erp_commit_waca_snapshot', {
+    p_snapshot: snapshotFromRepository(beforeUpgrade, upgraded, beforeUpgrade.batches),
+    p_expected_revision: beforeUpgrade.revision, p_update_auto_quantity: true,
+  }, owner);
+  assert.equal(committed.status, 200, JSON.stringify(committed.data));
+  const finalRead = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
+  assert.equal(finalRead.items.length, 5, 'blank→explicit must not create a sixth durable SQL row');
+  assert.equal(finalRead.items.find(item => item.key === blankItem.key).productVariantId, '');
+  assert.equal(finalRead.items.find(item => item.key === blankItem.key).resolution, 'CONFLICT_MANUAL_VS_SPEC');
+  assert.equal(finalRead.mappings.find(m => m.feature === blankItem.feature).productVariantId, capId);
+  console.log('PASS isolated Cloud evidence v2: manual blank 5x, provenance read-back, new explicit conflict, unchanged audit and immutable SQL keys');
   console.log('PASS isolated PostgREST spec-code rematch, stable legacy SQL keys, signed=3/cap=1, blank pending, status rules and 5x idempotency');
   console.log('PASS isolated PostgREST 16.4: owner/anon/non-owner ACL, RPC 5x idempotency, 8→11, CAS, direct-write deny');
 } finally {

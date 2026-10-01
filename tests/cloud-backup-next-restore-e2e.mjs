@@ -109,12 +109,14 @@ try {
     product_variant_id: uuid(12), quantity: 11,
     payload: { key: `${orderKey}::${feature}`, orderKey, feature, productCode: 'G-CLOUD-1',
       productTitle: 'Cloud → NEXT 商品', spec1: '通常版', spec2: '', specCode: '', quantity: 11,
-      subtotal: 1100, productVariantId: uuid(12), match: 'DIRECT_G', diagnostic: null },
+      subtotal: 1100, productVariantId: uuid(12), match: 'MANUAL_MATCH', diagnostic: null,
+      resolution: 'MANUAL_CONFIRMED_MAPPING', candidateCount: 1 },
   }));
   seed.wacaMappings.push(withAudit({
     id: uuid(82), feature, product_variant_id: uuid(12),
     payload: { feature, myacgMainId: 'GP-CLOUD-1', myacgVariantId: 'G-CLOUD-1',
-      productVariantId: uuid(12), method: 'AUTO', confirmedAt: '2026-09-29', masterStatus: 'ACTIVE' },
+      productVariantId: uuid(12), method: 'MANUAL', confirmedAt: '2026-09-29', masterStatus: 'ACTIVE',
+      resolution: 'MANUAL_CONFIRMED_MAPPING', historicalProductTitle: 'Cloud → NEXT 商品', historicalVariantTitle: '通常版' },
   }));
   seed.myacgMasterLinks.push(withAudit({
     id: uuid(83), child_code: 'G-CLOUD-1', main_code: 'GP-CLOUD-1', product_variant_id: uuid(12),
@@ -279,6 +281,11 @@ try {
   assert.equal(state.variant.waca_manual_adjustment, 2);
   assert.deepEqual(state.waca, { orders: 1, items: 1, mappings: 1, batches: 1, links: 1, audit: 1, state: 'ORDER_DRIVEN_ACTIVE' });
   assert.deepEqual(state.deadline, { deadlineVerifiedMappings: 1, deadlineApplyBatches: 1, deadlineApplyItems: 1 });
+  const provenance = await page.evaluate(async () => {
+    const s = await window.dataProvider.getNextWacaSnapshot();
+    return { item: s.items[0].resolution, mapping: s.mappings[0].resolution, candidates: s.items[0].candidateCount };
+  });
+  assert.deepEqual(provenance, { item: 'MANUAL_CONFIRMED_MAPPING', mapping: 'MANUAL_CONFIRMED_MAPPING', candidates: 1 });
   assert.equal(state.sandbox.dbName, 'daigou-erp-db-next-v1');
   assert.equal(state.sandbox.storagePrefix, '__hippo_next_sandbox__::');
   assert.equal(state.databases.includes('daigou-erp-db-next-v1'), true);

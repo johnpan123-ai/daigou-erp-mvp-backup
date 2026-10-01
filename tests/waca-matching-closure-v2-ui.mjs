@@ -98,7 +98,7 @@ try {
     cells => cells.some(cell => cell.textContent.trim() === '0')), false, '0→0 and unchanged rows are hidden');
   const multiSkuGroup = page.locator('.waca-group').filter({ hasText: 'RAISE A SUILEN' }).first();
   await multiSkuGroup.locator('summary').click();
-  const skus = (await multiSkuGroup.locator('tbody td small').allTextContents()).map(value => value.replace('SKU ', ''));
+  const skus = (await multiSkuGroup.locator('tbody td small:first-of-type').allTextContents()).map(value => value.replace('SKU ', ''));
   assert.deepEqual(skus, [...skus].sort(new Intl.Collator('en', { numeric: true, sensitivity: 'base' }).compare));
   const previewTitles = await page.locator('.waca-group summary strong').allTextContents();
   assert.equal(previewTitles.some(title => /【小河馬日本代購】|預購\s*\d{2}年\d{1,2}月/u.test(title)), false);
@@ -106,7 +106,7 @@ try {
     === 'Hololive 綺々羅々ヴィヴィ 誕生日記念2026');
   assert.ok(canonical);
   assert.ok(previewTitles.includes(canonical.normalized_title || canonical.title));
-  assert.match((await page.locator('.waca-tech').first().textContent()).slice(0, 300), /原始 WACA：預購 27年/);
+  assert.match((await page.locator('.waca-resolution-details').textContent()).slice(0, 300), /原始 WACA：預購 27年/);
   for (const width of [1366, 1280, 390]) {
     await page.setViewportSize({ width, height: 850 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,

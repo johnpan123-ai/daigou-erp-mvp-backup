@@ -34,7 +34,7 @@ assert.equal(matchWacaItem(row({ productCode: 'G-RED', specCode: 'G-BLUE', spec1
 assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master).candidate?.variantId, 'vr');
 assert.equal(matchWacaItem(row({ specCode: 'G-MISSING' }), master).diagnostic, 'VARIANT_NOT_IN_ERP');
 assert.equal(matchWacaItem(row({ spec1: 'Green' }), master).diagnostic, 'NAME_CONFLICT');
-assert.equal(matchWacaItem(row({ specCode: '' }), master).diagnostic, 'SPEC_CODE_MISSING');
+assert.equal(matchWacaItem(row({ specCode: '' }), master).resolution, 'SPEC_NAME_EXACT_UNIQUE');
 assert.equal(matchWacaItem(row({ productTitle: 'Unrelated Figure' }), master).diagnostic, 'NAME_CONFLICT');
 assert.equal(matchWacaItem(row({ productCode: 'GP-B', specCode: 'G-OTHER' }), master).candidate?.variantId, 'vo');
 assert.equal(isWacaDiscount(row({ productCode: 'CoUpOn' })), true);
@@ -221,7 +221,7 @@ if (!existsSync(sample) || !existsSync(source) || !existsSync(snapshotFile)) {
   const known = productRows.find(item => item.productCode === 'GP00379558' && item.spec1 === '我們團長的壓克力立牌');
   assert.ok(known);
   const knownMatch = matchWacaItem(known, reference);
-  if (!normalizeWacaText(known.specCode)) assert.equal(knownMatch.diagnostic, 'SPEC_CODE_MISSING');
+  if (!normalizeWacaText(known.specCode)) assert.equal(knownMatch.resolution, 'SPEC_NAME_EXACT_UNIQUE');
   else if (knownMatch.candidate) assert.equal(normalizeWacaText(knownMatch.candidate.childCode), normalizeWacaText(known.specCode));
   const actualRepo = createWacaRepository();
   const imported = importWacaRows(waca.rows, actualRepo, reference, 'real-sample');

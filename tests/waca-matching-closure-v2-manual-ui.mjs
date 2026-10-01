@@ -61,14 +61,14 @@ try {
   assert.match(await page.locator('[aria-label="WACA 匯入預覽摘要"]').innerText(), /2\s+待處理/);
   await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
   await page.getByText(/WACA 訂單已保存/).waitFor();
-  await page.getByRole('button', { name: /待處理 2/ }).click();
-  const ambiguous = page.locator('.waca-pending-card').filter({ hasText: 'GP-A' });
+  await page.getByRole('navigation', { name: 'WACA 功能' }).getByRole('button', { name: /待處理/ }).click();
+  const ambiguous = page.locator('.waca-pending-card').filter({ hasText: 'WACA 商品：GP-A' });
   await ambiguous.waitFor();
-  assert.match(await ambiguous.innerText(), /找到多個可能規格/);
+  assert.match(await ambiguous.innerText(), /有 2 個可能規格/);
   await ambiguous.locator('details > summary').click();
   assert.match(await ambiguous.innerText(), /G-RED／買動漫規格 Red／\s*ERP ProductVariant variant-red/);
   assert.match(await ambiguous.innerText(), /G-BLUE／買動漫規格 Blue／\s*ERP ProductVariant variant-blue/);
-  const missing = page.locator('.waca-pending-card').filter({ hasText: 'GP-Z' });
+  const missing = page.locator('.waca-pending-card').filter({ hasText: 'WACA 商品：GP-Z' });
   assert.match(await missing.innerText(), /找不到對應商品/);
   assert.match(await missing.innerText(), /找不到可安全確認的規格/);
   await ambiguous.locator('select').selectOption('variant-blue');
@@ -79,6 +79,17 @@ try {
   const variants = await page.evaluate(() => window.db.getProductVariants({ raw: true }));
   assert.equal(variants.find(item => item.id === 'variant-blue').waca_auto_quantity, 1);
   assert.equal(variants.find(item => item.id === 'variant-red').waca_auto_quantity, 0);
+  // Unproven parents are NEVER automatically searched across groups. A human
+  // can explicitly select a group, then one of that group's variants, once.
+  await missing.getByLabel('商品群組 GP-Z Unknown').selectOption('group-a');
+  await missing.getByLabel('處理 GP-Z Unknown').selectOption('variant-red');
+  await Promise.all([page.waitForEvent('download'), missing.getByRole('button', { name: '確認對照' }).click()]);
+  await page.getByText(/商品對照已保存/).waitFor();
+  const snapshot = await page.evaluate(async () => (await import('/src/waca/nextStorage.ts')).readNextWacaSnapshot());
+  assert.equal(snapshot.items.find(item => item.productCode === 'GP-Z').resolution, 'MANUAL_CONFIRMED_MAPPING');
+  await page.reload();
+  await page.getByRole('button', { name: '來源訂單', exact: true }).click();
+  assert.equal((await page.evaluate(() => window.db.getProductVariants({ raw: true }))).find(v => v.id === 'variant-red').waca_auto_quantity, 1);
   await context.close();
   console.log('PASS manual confirmation UI: scoped candidates, provenance, zero-candidate message, permanent mapping and quantity recompute');
 } finally {

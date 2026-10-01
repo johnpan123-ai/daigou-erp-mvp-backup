@@ -9,7 +9,7 @@ import { parseMyAcgFile } from '../utils/myacgParser';
 import { normalizeProductTitle, type InventoryItem, type ProductGroup, type ProductVariant } from '../lib/db';
 import { productGroupDisplayName } from '../lib/productGroupDisplayName';
 import {
-  cloneWacaRepository, importWacaRows, normalizeWacaText,
+  cloneWacaRepository, importWacaRows, indexWacaMaster,
   matchWacaItem, refreshWacaMasterStatus, setWacaMapping, wacaFeature, wacaOrderKey,
   type MasterVariant, type WacaImportResult, type WacaItem, type WacaRow, type WacaStatus,
 } from '../waca/orderCore';
@@ -50,6 +50,22 @@ const statusText: Record<string, string> = {
   NAME_CONFLICT: '商品名稱需要確認',
   SPEC_CODE_MISSING: '缺少規格編號，請確認來源訂單',
   SPEC_CODE_CONFLICT: '人工對照與規格編號不一致，請確認',
+  AMBIGUOUS_VARIANT: '規格編號空白，商品有多個可能規格，請人工確認一次',
+  PARENT_AMBIGUOUS: '商品編號對應多個商品群組，請確認來源資料',
+  PARENT_NAME_CONFLICT: '商品編號與商品名稱不一致，請確認來源資料',
+  SPEC_NAME_NOT_MATCHED: '規格名稱沒有唯一對應，請人工確認一次',
+  SOURCE_SPEC_IDENTITY_CONFLICT: '同一訂單已有明確規格列；請先核對舊空白規格列，避免重複計量',
+};
+
+const resolutionText = (item: WacaItem): string => {
+  if (!item.productVariantId) return item.diagnostic === 'AMBIGUOUS_VARIANT'
+    ? `待處理：規格編號空白且商品有 ${item.candidateCount ?? '多'} 個可能規格`
+    : `待處理：${statusText[item.diagnostic ?? ''] ?? '規格需要確認'}`;
+  if (item.resolution === 'SPEC_CODE_EXACT') return '規格編號精確配對';
+  if (item.match === 'MANUAL_MATCH') return '人工確認對照';
+  if (item.resolution === 'SPEC_NAME_EXACT_UNIQUE') return '依規格名稱唯一配對';
+  if (item.resolution === 'UNIQUE_PARENT_VARIANT') return '無規格商品／唯一規格自動配對';
+  return '已配對';
 };
 
 const quantity = (value: number) => value.toLocaleString('zh-TW');
@@ -69,6 +85,7 @@ export default function WacaIntegration() {
   const [showUnchanged, setShowUnchanged] = useState(false);
   const [pendingLinks, setPendingLinks] = useState<PendingLinks | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<Record<string, string>>({});
+  const [selectedParent, setSelectedParent] = useState<Record<string, string>>({});
   const [selectedStatus, setSelectedStatus] = useState<Record<string, WacaStatus>>({});
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,35 +155,25 @@ export default function WacaIntegration() {
       return true;
     });
   }, [items]);
-  const masterByCode = useMemo(() => {
-    const byCode = new Map<string, MasterVariant[]>();
-    for (const candidate of masterState.master) {
-      if (!candidate.active) continue;
-      const codes = new Set([normalizeWacaText(candidate.mainCode), normalizeWacaText(candidate.childCode)]);
-      for (const code of codes) {
-        if (!code) continue;
-        const candidates = byCode.get(code) ?? [];
-        candidates.push(candidate);
-        byCode.set(code, candidates);
-      }
-    }
-    return byCode;
-  }, [masterState.master]);
+  const masterIndex = useMemo(() => indexWacaMaster(masterState.master), [masterState.master]);
   const evidenceByChildCode = useMemo(() => new Map(masterState.links.map(link => [link.childCode, link])), [masterState.links]);
-  const explanationByFeature = useMemo(() => new Map(mappingItems.map(item => {
-    const code = normalizeWacaText(item.specCode);
-    const match = matchWacaItem({
-      productTitle: item.productTitle, spec1: item.spec1, spec2: item.spec2,
-      specCode: item.specCode,
-    }, masterByCode.get(code) ?? []);
-    return [item.feature, match.diagnostic ? statusText[match.diagnostic] : '已找到安全候選'] as const;
-  })), [mappingItems, masterByCode]);
+  const matchByFeature = useMemo(() => new Map(mappingItems.map(item =>
+    [item.feature, matchWacaItem(item, masterIndex)] as const)), [mappingItems, masterIndex]);
   const latestBatch = snapshot?.batches.at(-1);
   const matchedFeatures = mappingItems.filter(item => item.productVariantId).length;
   const manualFeatures = mappingItems.filter(item => item.match === 'MANUAL_MATCH').length;
   const multipleFeatures = mappingItems.filter(item => item.diagnostic === 'MULTIPLE_VARIANT_CANDIDATES').length;
   const previewFeatures = useMemo(() => pendingImport
     ? [...new Map(pendingImport.items.map(item => [item.feature, item])).values()] : [], [pendingImport]);
+  const previewReasons = useMemo(() => {
+    const reasons = new Map<string, Set<string>>();
+    for (const item of pendingImport?.items ?? []) {
+      if (!item.productVariantId) continue;
+      const values = reasons.get(item.productVariantId) ?? new Set<string>();
+      values.add(resolutionText(item)); reasons.set(item.productVariantId, values);
+    }
+    return reasons;
+  }, [pendingImport]);
   const previewGroups = useMemo(() => {
     if (!pendingImport) return [];
     const touched = new Set([...pendingImport.items.map(item => item.productVariantId),
@@ -306,19 +313,20 @@ export default function WacaIntegration() {
   };
 
   const choicesFor = useCallback((item: WacaItem) => {
-    const code = normalizeWacaText(item.specCode);
-    return code ? (masterByCode.get(code) ?? [])
-      .filter(candidate => normalizeWacaText(candidate.childCode) === code) : [];
-  }, [masterByCode]);
+    if (item.diagnostic === 'SOURCE_SPEC_IDENTITY_CONFLICT') return [];
+    const choices = matchByFeature.get(item.feature)?.candidates ?? [];
+    if (item.specCode.trim() || choices.length) return choices;
+    return masterIndex.byGroup.get(selectedParent[item.feature] ?? '') ?? [];
+  }, [matchByFeature, masterIndex, selectedParent]);
 
   const explanationFor = useCallback((item: WacaItem) => {
-    return explanationByFeature.get(item.feature) ?? '規格需要確認';
-  }, [explanationByFeature]);
+    return resolutionText(item);
+  }, []);
 
   const manualMap = useCallback(async (item: WacaItem) => {
     if (!snapshot) return;
     const chosen = choicesFor(item).find(row => row.variantId === selectedVariant[item.feature]);
-    if (!chosen || !chosen.variantId) { setError('請先選擇與 WACA 規格編號一致、且 ERP 存在的規格。'); return; }
+    if (!chosen || !chosen.variantId) { setError('請先選擇已確認商品底下的規格；有規格編號時必須與編號一致。'); return; }
     setBusy(true); setError('');
     try {
       const current = await dataProvider.getNextWacaSnapshot();
@@ -326,11 +334,11 @@ export default function WacaIntegration() {
       await dataProvider.exportData();
       const candidate = repositoryFromSnapshot(current, variants);
       setWacaMapping(candidate, {
-        feature: item.feature, myacgMainId: chosen.mainCode, myacgVariantId: chosen.childCode,
+        feature: item.feature, myacgMainId: chosen.mainCode || item.productCode, myacgVariantId: chosen.childCode,
         productVariantId: chosen.variantId, method: 'MANUAL', confirmedAt: new Date().toISOString(),
         historicalProductTitle: item.productTitle, historicalVariantTitle: chosen.variantTitle,
         masterStatus: 'ACTIVE',
-      });
+      }, masterIndex, selectedParent[item.feature]);
       await dataProvider.commitNextWacaSnapshot(
         snapshotFromRepository(current, candidate, current.batches, masterState.links), current.revision, true,
       );
@@ -338,7 +346,19 @@ export default function WacaIntegration() {
       setMessage('商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
-  }, [snapshot, choicesFor, selectedVariant, variants, masterState.links, load]);
+  }, [snapshot, choicesFor, selectedVariant, selectedParent, variants, masterState.links, masterIndex, load]);
+
+  const parentConfirmation = useCallback((item: WacaItem) => item.diagnostic !== 'SOURCE_SPEC_IDENTITY_CONFLICT' && !item.specCode.trim()
+    && !matchByFeature.get(item.feature)?.candidates.length ? <label>先人工確認商品群組
+      <select aria-label={`商品群組 ${item.productCode} ${item.spec1}`} value={selectedParent[item.feature] ?? ''}
+        onChange={event => {
+          setSelectedParent(previous => ({ ...previous, [item.feature]: event.target.value }));
+          setSelectedVariant(previous => ({ ...previous, [item.feature]: '' }));
+        }}>
+        <option value="">尚未確認商品群組</option>
+        {groups.filter(group => masterIndex.byGroup.has(group.id)).map(group =>
+          <option key={group.id} value={group.id}>{productGroupDisplayName(group)}</option>)}
+      </select></label> : null, [matchByFeature, selectedParent, groups, masterIndex]);
 
   const conflicts = useMemo(() => {
     const result: Array<{ batch: WacaBatch; orderKey: string; rows: WacaRow[] }> = [];
@@ -394,22 +414,22 @@ export default function WacaIntegration() {
         const mapping = repo?.mappings.get(item.feature);
         const choices = choicesFor(item);
         const evidence = mapping && evidenceByChildCode.get(mapping.myacgVariantId);
-        const target = mapping ? variantById.get(mapping.productVariantId) : undefined;
+        const target = item.productVariantId ? variantById.get(item.productVariantId) : undefined;
         return <tr key={item.feature}><td>{displayNameForVariant(item.productVariantId, item.productTitle)}<small>{item.spec1} {item.spec2}</small>
             <details className="waca-tech"><summary>原始 WACA 資料</summary><small>{item.productTitle}／{item.productCode}</small></details></td>
           <td>{target ? <>{displayNameForVariant(target.id, target.product_title)}<small>{target.variant_name}／SKU {target.myacg_item_code}</small></> : statusText[item.diagnostic ?? ''] ?? '待對照'}</td>
-          <td>{mapping ? `${mapping.method === 'AUTO' ? '已自動確認' : '人工確認'}${mapping.masterStatus === 'ACTIVE' ? '' : '／商品暫不可用'}` : '未確認'}
+          <td>{resolutionText(item)}
             {mapping && <details className="waca-tech"><summary>查看技術資訊</summary><small>GP {mapping.myacgMainId}／G {mapping.myacgVariantId}</small>
               {evidence && <small>來源：{evidence.sourceFile}</small>}</details>}</td>
-          <td><small>{explanationFor(item)}</small><select aria-label={`對照 ${item.productCode} ${item.spec1}`} value={selectedVariant[item.feature] ?? ''} onChange={event => setSelectedVariant(previous => ({ ...previous, [item.feature]: event.target.value }))}>
-            <option value="">選擇同 GP 規格</option>
+          <td><small>{explanationFor(item)}</small>{parentConfirmation(item)}<select aria-label={`對照 ${item.productCode} ${item.spec1}`} value={selectedVariant[item.feature] ?? ''} onChange={event => setSelectedVariant(previous => ({ ...previous, [item.feature]: event.target.value }))}>
+            <option value="">選擇此商品的規格</option>
             {choices.filter(choice => choice.variantId).map(choice => <option key={choice.variantId} value={choice.variantId}>{displayNameForVariant(choice.variantId, choice.productTitle)}／{choice.variantTitle}／{choice.childCode}</option>)}
           </select><button className="btn btn-outline" disabled={busy || !selectedVariant[item.feature]} onClick={() => void manualMap(item)}>保存</button></td>
         </tr>;
       })}
     </tbody></table></div>
   </>, [mappingItems, repo, choicesFor, evidenceByChildCode, variantById, displayNameForVariant,
-    explanationFor, selectedVariant, busy, manualMap, snapshot]);
+    explanationFor, parentConfirmation, selectedVariant, busy, manualMap, snapshot]);
 
   if (!supportsWacaProvider(getProviderMode(), supabaseEnvironment.projectRef)) return <PageShell><p>請使用 ERP 2.0 雲端或 NEXT 本機環境開啟 WACA 匯入。</p></PageShell>;
   return <PageShell className="waca-page">
@@ -473,18 +493,20 @@ export default function WacaIntegration() {
             {showUnchanged ? `、未變更 ${group.unchanged}` : ''}</span></summary>
           <div className="waca-scroll"><table><thead><tr><th>規格／SKU</th><th>原 WACA → 新 WACA</th><th>變化</th></tr></thead><tbody>
             {group.children.map(({ variant, before, after, delta }) => <tr key={variant.id}>
-              <td><strong>{variant.variant_name || '標準規格'}</strong><small>SKU {variant.myacg_item_code}</small></td>
+              <td><strong>{variant.variant_name || '標準規格'}</strong><small>SKU {variant.myacg_item_code}</small>
+                {[...(previewReasons.get(variant.id) ?? [])]
+                  .map(reason => <small key={reason}>{reason}</small>)}</td>
               <td className="waca-quantity-pair">{before} <span aria-hidden="true">→</span> {after}</td>
               <td className={delta > 0 ? 'waca-increase' : delta < 0 ? 'waca-decrease' : 'waca-unchanged'}>{delta > 0 ? `+${delta}` : delta}</td>
             </tr>)}
           </tbody></table></div>
         </details>)}</div>
-        <details className="waca-tech"><summary>查看技術資訊與商品列明細</summary>
+        <details className="waca-resolution-details"><summary>查看每筆商品的配對理由（含待處理）</summary>
           <p>有效數量 {pendingImport.result.effectiveQuantity} = 已配對 {pendingImport.result.matchedEffectiveQuantity} + 待處理 {pendingImport.result.unmatchedPendingQuantity}</p>
           <div className="waca-scroll"><table><thead><tr><th>訂單</th><th>商品</th><th>規格</th><th>數量</th><th>結果</th></tr></thead><tbody>
             {pendingImport.items.map(item => <tr key={item.key}><td>{item.orderKey.replace('WACA::', '')}</td>
               <td>{displayNameForVariant(item.productVariantId, item.productTitle)}<small>原始 WACA：{item.productTitle}／{item.productCode}</small></td><td>{item.spec1} {item.spec2}</td><td>{item.quantity}</td>
-              <td>{item.productVariantId ? '已配對' : statusText[item.diagnostic ?? ''] ?? '規格需要確認'}</td>
+              <td>{resolutionText(item)}{item.productVariantId && <small>SKU {variantById.get(item.productVariantId)?.myacg_item_code}</small>}</td>
             </tr>)}
           </tbody></table></div>
         </details>
@@ -554,13 +576,14 @@ export default function WacaIntegration() {
         <strong>{item.productTitle}／{item.spec1} {item.spec2}</strong>
         <p>WACA 商品：{item.productCode}</p>
         <p>訂單 {item.orderKey.replace('WACA::', '')}，數量 {item.quantity}</p>
-        <p>{statusText[item.diagnostic ?? ''] ?? '待人工確認'}</p>
+        <p>{resolutionText(item)}</p>
+        {parentConfirmation(item)}
         {choicesFor(item).length ? <details className="waca-tech"><summary>查看可能規格與技術資訊</summary><ul>{choicesFor(item).map(choice => <li key={`${choice.childCode}::${choice.variantId}`}>
           {choice.mainCode || '直接 G'} → {choice.childCode}／買動漫規格 {choice.variantTitle || '未提供'}／
           ERP ProductVariant {choice.variantId || '不存在'}／證據 {choice.sourceFile || 'ERP G 編號'}
         </li>)}</ul></details> : <p>找不到可安全確認的規格，請在買動漫商品主檔檢查。</p>}
         <select aria-label={`處理 ${item.productCode} ${item.spec1}`} value={selectedVariant[item.feature] ?? ''} onChange={event => setSelectedVariant(previous => ({ ...previous, [item.feature]: event.target.value }))}>
-          <option value="">選擇同 GP 規格</option>
+          <option value="">選擇此商品的規格</option>
           {choicesFor(item).filter(choice => choice.variantId).map(choice => <option key={choice.variantId} value={choice.variantId}>{displayNameForVariant(choice.variantId, choice.productTitle)}／{choice.variantTitle}／{choice.childCode}</option>)}
         </select>
         <button className="btn btn-outline" disabled={busy || !selectedVariant[item.feature]} onClick={() => void manualMap(item)}>確認對照</button>

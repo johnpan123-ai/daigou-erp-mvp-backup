@@ -99,9 +99,10 @@ try {
   assert.equal(await page.locator('.waca-group').count(), 1);
   assert.equal(await page.locator('.waca-group summary strong').innerText(), '代理版 GSC 換裝玩偶 BanG Dream! Morfonica');
   await page.locator('.waca-group summary').click();
-  assert.deepEqual(await page.locator('.waca-group tbody td small').allTextContents(), ['SKU G2', 'SKU G10']);
+  assert.deepEqual(await page.locator('.waca-group tbody td small:first-of-type').allTextContents(), ['SKU G2', 'SKU G10']);
+  assert.equal(await page.getByText('規格編號精確配對', { exact: true }).count(), 2);
   await page.getByLabel('顯示未變更商品').check();
-  assert.deepEqual(await page.locator('.waca-group tbody td small').allTextContents(), ['SKU G1', 'SKU G2', 'SKU G10']);
+  assert.deepEqual(await page.locator('.waca-group tbody td small:first-of-type').allTextContents(), ['SKU G1', 'SKU G2', 'SKU G10']);
   assert.equal((await page.evaluate(() => window.wacaUiFixture.calls())).commits, 0, 'preview is readonly');
   for (const width of [1366, 1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
