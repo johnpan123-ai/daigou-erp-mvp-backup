@@ -5,6 +5,8 @@ import { productGroupDisplayName } from '../lib/productGroupDisplayName';
 import { CopyProductNameButton } from '../components/CopyProductNameButton';
 import { sortJapanPackageDisplayGroups, type JapanPackageDisplaySort } from '../components/japanPackageDisplaySort';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
+import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
@@ -190,6 +192,7 @@ export default function JapanPackageDetail() {
   });
   const [isAddingManualItem, setIsAddingManualItem] = useState<boolean>(false);
   const [editingManualItemId, setEditingManualItemId] = useState<string | null>(null);
+  const manualEditBase=useRef<JapanPackageItem|null>(null);
   const [isSavingManualEdit, setIsSavingManualEdit] = useState(false);
   const [manualEditForm, setManualEditForm] = useState({
     sku: '',
@@ -265,41 +268,6 @@ export default function JapanPackageDetail() {
     });
   };
 
-  const checkAndAutoUpdateStatus = async (updatedItems: JapanPackageItem[]) => {
-    if (!pkg) return;
-    const totalQty = updatedItems.reduce((sum, item) => sum + item.quantity, 0);
-    const checkedQty = updatedItems.filter(item => item.checked).reduce((sum, item) => sum + item.quantity, 0);
-    const isCompleted = totalQty > 0 && checkedQty === totalQty;
-
-    let targetStatus = pkg.status;
-    if (isCompleted) {
-      targetStatus = 'confirmed';
-    } else if (pkg.status === 'confirmed') {
-      targetStatus = 'arrived';
-    }
-
-    if (targetStatus !== pkg.status) {
-      let arrivedAtVal = pkg.arrived_at;
-      if (targetStatus === 'arrived' && !arrivedAtVal) {
-        arrivedAtVal = new Date().toISOString().split('T')[0];
-      }
-      const updatedPkg: JapanPackage = {
-        ...pkg,
-        status: targetStatus,
-        arrived_at: arrivedAtVal,
-        updated_at: new Date().toISOString()
-      };
-      try {
-        const allPkgs = await dataProvider.getJapanPackages();
-        const updatedList = allPkgs.map(p => p.id === id ? updatedPkg : p);
-        await dataProvider.saveJapanPackages(updatedList);
-        setPkg(updatedPkg);
-        setPkgForm(prev => ({ ...prev, status: targetStatus, arrived_at: arrivedAtVal || '' }));
-      } catch (err) {
-        console.error('Auto status update failed:', err);
-      }
-    }
-  };
 
   const handleQuickUpdateStatus = async (newStatus: string) => {
     if (!pkg) return;
@@ -318,14 +286,14 @@ export default function JapanPackageDetail() {
       const allPkgs = await dataProvider.getJapanPackages();
       const updatedList = allPkgs.map(p => p.id === id ? updatedPkg : p);
       await dataProvider.saveJapanPackages(updatedList);
-      setPkg(updatedPkg);
+      setPkg((await dataProvider.getJapanPackages()).find(p=>p.id===id)??updatedPkg);
       setPkgForm(prev => ({ ...prev, status: newStatus as any, arrived_at: arrivedAtVal || '' }));
     } catch (err) {
       if (err instanceof StaleDataError) {
         alert(err.message);
         await loadData(id || '');
       } else {
-        alert('狀態更新失敗，請重試！');
+        alert(cloudMutationFailureMessage(err));
       }
     } finally {
       setIsSaving(false);
@@ -778,14 +746,14 @@ export default function JapanPackageDetail() {
       const allPkgs = await dataProvider.getJapanPackages();
       const updatedList = allPkgs.map(p => p.id === id ? updatedPkg : p);
       await dataProvider.saveJapanPackages(updatedList);
-      setPkg(updatedPkg);
+      setPkg((await dataProvider.getJapanPackages()).find(p=>p.id===id)??updatedPkg);
       alert('保存包裹成功！');
     } catch (err) {
       if (err instanceof StaleDataError) {
         alert(err.message);
         await loadData(id || '');
       } else {
-        alert('保存失敗，請重試！');
+        alert(cloudMutationFailureMessage(err));
       }
     } finally {
       setIsSaving(false);
@@ -800,14 +768,15 @@ export default function JapanPackageDetail() {
   const handleDeleteItem = async (itemId: string) => {
     if (!window.confirm('確定要從包裹中移除此商品嗎？')) return;
     try {
-      const allItems = await dataProvider.getJapanPackageItems();
-      const updatedAllItems = allItems.filter(item => item.id !== itemId);
-      await dataProvider.saveJapanPackageItems(updatedAllItems);
+      const original=packageItems.find(item=>item.id===itemId);if(!original)return;
+      await submitRelatedIntent({family:'package-item-delete',rootId:itemId,collections:[
+        {entity:'japan_package_items',base:[original],next:[]},
+      ]},command=>dataProvider.applyRelatedTransaction(command));
       const updatedPackageItems = packageItems.filter(item => item.id !== itemId);
       setPackageItems(updatedPackageItems);
-      await checkAndAutoUpdateStatus(updatedPackageItems);
+      await loadData(id||'');
     } catch (e) {
-      alert('移除商品失敗！');
+      alert(cloudMutationFailureMessage(e));
     }
   };
 
@@ -1150,6 +1119,7 @@ export default function JapanPackageDetail() {
   };
 
   const startEditingManualItem = (item: JapanPackageItem) => {
+    manualEditBase.current=structuredClone(item);
     if (!isDirectManualPackageItem(item)) return;
     setEditingManualItemId(item.id);
     setManualEditForm({
@@ -1165,13 +1135,13 @@ export default function JapanPackageDetail() {
     if (!editingManualItemId || isSavingManualEdit) return;
 
     const productTitle = manualEditForm.productTitle.trim();
-    const quantity = Number.parseInt(manualEditForm.quantity, 10);
+    const quantity = Number(manualEditForm.quantity);
     const twdPrice = manualEditForm.twdPrice.trim() === '' ? undefined : Number(manualEditForm.twdPrice);
     if (!productTitle) {
       alert('請輸入商品名稱！');
       return;
     }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
       alert('數量必須大於 0！');
       return;
     }
@@ -1186,7 +1156,7 @@ export default function JapanPackageDetail() {
         dataProvider.getJapanPackageItems(),
         dataProvider.getOutboundShipmentItems()
       ]);
-      const original = freshPackageItems.find(item => item.id === editingManualItemId);
+      const original = manualEditBase.current;
       if (!original || !isDirectManualPackageItem(original)) {
         alert('此商品已不存在或已有其他資料關聯，無法編輯。');
         await loadData(id || '');
@@ -1226,19 +1196,20 @@ export default function JapanPackageDetail() {
         updated_at: now
       } : item);
 
-      await dataProvider.saveJapanPackageItems(updatedAllPackageItems);
-      if (updatedAllOutboundItems.some((item, index) => item !== freshOutboundItems[index])) {
-        await dataProvider.saveOutboundShipmentItems(updatedAllOutboundItems);
-      }
+      await submitRelatedIntent({family:'manual-package-edit',rootId:original.id,collections:[
+        {entity:'japan_package_items',base:[original],next:[updatedItem]},
+        {entity:'outbound_shipment_items',base:freshOutboundItems.filter(i=>i.japan_package_item_id===original.id),
+          next:updatedAllOutboundItems.filter(i=>i.japan_package_item_id===original.id)},
+      ]},command=>dataProvider.applyRelatedTransaction(command));
 
       const updatedCurrentItems = packageItems.map(item => item.id === updatedItem.id ? updatedItem : item);
       setAllPackageItems(updatedAllPackageItems);
       setPackageItems(updatedCurrentItems);
-      await checkAndAutoUpdateStatus(updatedCurrentItems);
+      await loadData(id||'');
       setEditingManualItemId(null);
     } catch (error) {
       console.error(error);
-      alert('商品更新失敗，已重新讀取目前資料。');
+      alert(cloudMutationFailureMessage(error));
       await loadData(id || '');
     } finally {
       setIsSavingManualEdit(false);

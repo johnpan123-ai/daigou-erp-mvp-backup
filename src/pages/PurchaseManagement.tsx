@@ -19,6 +19,8 @@ import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 import { writeTextToClipboard } from '../lib/safeClipboard';
 import { getProviderMode } from '../providers/providerMode';
 import { CloudMutationBoundaryError, cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
+import { stableFormIntent, readFormIntent, clearFormIntent, type PrivateOrderTransactionCommand } from '../providers/cloud/privateOrderTransaction';
+import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -208,10 +210,10 @@ function MobilePurchaseBatchTab({
   const handleDeleteBatch = async (batch: PurchaseBatch) => {
     if (!window.confirm(`確定刪除此採購批次？底下明細也會一起刪除。`)) return;
     try {
-      const allBatches = await dataProvider.getPurchaseBatches();
-      const allItems = await dataProvider.getPurchaseBatchItems();
-      await dataProvider.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
-      await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
+      await submitRelatedIntent({family:'purchase-delete',rootId:batch.id,collections:[
+        {entity:'purchase_batches',base:[batch],next:[]},
+        {entity:'purchase_batch_items',base:batchItems.filter(i=>i.purchase_batch_id===batch.id),next:[]},
+      ]},command=>dataProvider.applyRelatedTransaction(command));
       onRefresh();
     } catch (err) {
       if (err instanceof StaleDataError) {
@@ -219,7 +221,7 @@ function MobilePurchaseBatchTab({
         onRefresh();
         return;
       }
-      throw err;
+      alert(cloudMutationFailureMessage(err));
     }
   };
 
@@ -1001,6 +1003,11 @@ export default function PurchaseManagement() {
   const [showOtherActionsMenu, setShowOtherActionsMenu] = useState(false);
   const otherActionsMenuRef = useRef<HTMLDivElement>(null);
   const [editingPoId, setEditingPoId] = useState<string | null>(null);
+  const poBase=useRef<{order?:PrivateOrder;items:PrivateOrderItem[]}>({items:[]});
+  const poSavingRef=useRef(false);
+  const [poSaving,setPoSaving]=useState(false);
+  const poUncertain=useRef<PrivateOrderTransactionCommand|null>(null);
+  const [poNeedsVerification,setPoNeedsVerification]=useState(false);
   const [poForm, setPoForm] = useState({ customer_name: '', contact: '', note: '' });
   const [poLines, setPoLines] = useState<{ variant_id: string, quantity: number, amount: number | string, note: string }[]>([]);
 
@@ -1352,7 +1359,18 @@ export default function PurchaseManagement() {
   };
 
   // --- Modal Logic: Private Order ---
+  const resumePrivateIntent=(scope:string):boolean=>{
+    const pending=readFormIntent<PrivateOrderTransactionCommand>(scope);if(!pending)return false;
+    poUncertain.current=pending;poBase.current={order:pending.baseOrder,items:pending.baseItems};
+    setEditingPoId(pending.baseOrder?.id??null);setPoNeedsVerification(true);
+    setPoForm({customer_name:pending.order.customer_name,contact:pending.order.contact??'',note:pending.order.note??''});
+    setPoLines(variants.map(v=>{const item=pending.items.find(i=>i.product_variant_id===v.id);
+      return {variant_id:v.id,quantity:item?.quantity??0,amount:item?.amount??0,note:item?.note??''};}));
+    setShowPrivateOrderModal(true);return true;
+  };
   const openPrivateOrderModal = () => {
+    if(group && resumePrivateIntent(`private-form:${group.id}:new`))return;
+    poBase.current={items:[]}; poUncertain.current=null; setPoNeedsVerification(false);
     setEditingPoId(null);
     setPoForm({ customer_name: '', contact: '', note: '' });
     setPoLines(variants.map(v => ({ variant_id: v.id, quantity: 0, amount: 0, note: '' })));
@@ -1360,6 +1378,9 @@ export default function PurchaseManagement() {
   };
 
   const handleEditOrder = (order: PrivateOrder) => {
+    if(group && resumePrivateIntent(`private-form:${group.id}:${order.id}`))return;
+    poBase.current={order:structuredClone(order),items:structuredClone(privateOrderItems.filter(i=>i.private_order_id===order.id))};
+    poUncertain.current=null; setPoNeedsVerification(false);
     setEditingPoId(order.id);
     setPoForm({ customer_name: order.customer_name, contact: order.contact || '', note: order.note || '' });
     
@@ -1408,102 +1429,38 @@ export default function PurchaseManagement() {
   };
 
   const handleAddPrivateOrderSubmit = async () => {
+    if (poSavingRef.current || !group || !poForm.customer_name.trim()) return;
     const validLines = poLines.filter(l => l.quantity > 0);
-    if (!group || !poForm.customer_name.trim() || validLines.length === 0) return;
-    
-    const allPOs = await dataProvider.getPrivateOrders();
-    const allPOItems = await dataProvider.getPrivateOrderItems();
-
-    if (editingPoId) {
-      const idx = allPOs.findIndex(o => o.id === editingPoId);
-      if (idx !== -1) {
-        allPOs[idx] = { ...allPOs[idx], customer_name: poForm.customer_name, contact: poForm.contact, note: poForm.note };
-      }
-      
-      const originalPoItems = allPOItems.filter(i => i.private_order_id === editingPoId);
-      const idsToDelete: string[] = [];
-      const updatedItems: PrivateOrderItem[] = [];
-      
-      // Group originalPoItems by variant_id
-      const originalPoItemsByVariant: Record<string, PrivateOrderItem[]> = {};
-      originalPoItems.forEach(item => {
-        if (!originalPoItemsByVariant[item.product_variant_id]) {
-          originalPoItemsByVariant[item.product_variant_id] = [];
-        }
-        originalPoItemsByVariant[item.product_variant_id].push(item);
-      });
-      
-      validLines.forEach(line => {
-        const existingItems = originalPoItemsByVariant[line.variant_id] || [];
-        if (existingItems.length > 0) {
-          const keptId = existingItems[0].id;
-          updatedItems.push({
-            id: keptId,
-            private_order_id: editingPoId,
-            product_variant_id: line.variant_id,
-            quantity: line.quantity,
-            amount: typeof line.amount === 'string' ? (parseFloat(line.amount) || 0) : (line.amount || 0),
-            note: line.note
-          });
-          if (existingItems.length > 1) {
-            for (let i = 1; i < existingItems.length; i++) {
-              idsToDelete.push(existingItems[i].id);
-            }
-          }
-        } else {
-          updatedItems.push({
-            id: crypto.randomUUID(),
-            private_order_id: editingPoId,
-            product_variant_id: line.variant_id,
-            quantity: line.quantity,
-            amount: typeof line.amount === 'string' ? (parseFloat(line.amount) || 0) : (line.amount || 0),
-            note: line.note
-          });
-        }
-      });
-      
-      const validVariantIds = new Set(validLines.map(l => l.variant_id));
-      originalPoItems.forEach(item => {
-        if (!validVariantIds.has(item.product_variant_id)) {
-          idsToDelete.push(item.id);
-        }
-      });
-      
-      if (idsToDelete.length > 0) {
-        await dataProvider.deletePrivateOrderItems(idsToDelete);
-      }
-      
-      const freshAllPOItems = await dataProvider.getPrivateOrderItems();
-      const otherPOItems = freshAllPOItems.filter(i => i.private_order_id !== editingPoId);
-      
-      await dataProvider.savePrivateOrders(allPOs);
-      await dataProvider.savePrivateOrderItems([...otherPOItems, ...updatedItems]);
-    } else {
-      const newPoId = crypto.randomUUID();
-      const newPo: PrivateOrder = {
-        id: newPoId,
-        product_group_id: group.id,
-        customer_name: poForm.customer_name,
-        contact: poForm.contact,
-        note: poForm.note,
-        created_at: new Date().toISOString().slice(0, 10)
-      };
-
-      const newItems: PrivateOrderItem[] = validLines.map(line => ({
-        id: crypto.randomUUID(),
-        private_order_id: newPoId,
-        product_variant_id: line.variant_id,
-        quantity: line.quantity,
-        amount: typeof line.amount === 'string' ? (parseFloat(line.amount) || 0) : (line.amount || 0),
-        note: line.note
-      }));
-      
-      await dataProvider.savePrivateOrders([...allPOs, newPo]);
-      await dataProvider.savePrivateOrderItems([...allPOItems, ...newItems]);
+    if (!editingPoId && !validLines.length) { alert('請至少填寫一筆登記品項。'); return; }
+    if (poLines.some(l => !Number.isSafeInteger(l.quantity) || l.quantity < 0
+      || (l.quantity > 0 && (!Number.isFinite(Number(l.amount)) || Number(l.amount) < 0)))) {
+      alert('數量須為非負整數；有效品項的金額不可為負數。'); return;
     }
-    
-    setShowPrivateOrderModal(false);
-    await loadData();
+    const scope = `private-form:${group.id}:${editingPoId || 'new'}`;
+    const command = poUncertain.current ?? stableFormIntent<PrivateOrderTransactionCommand>(scope,
+      {poForm,poLines,base:poBase.current}, key => {
+        const orderId = editingPoId ?? crypto.randomUUID();
+        const order:PrivateOrder = {...poBase.current.order, id:orderId, product_group_id:group.id,
+          ...poForm, created_at:poBase.current.order?.created_at ?? new Date().toISOString()};
+        return {idempotencyKey:key, order, baseOrder:poBase.current.order, baseItems:poBase.current.items,
+          items:validLines.map(line => {
+            const existing=poBase.current.items.find(i=>i.product_variant_id===line.variant_id);
+            return {...existing, id:existing?.id ?? crypto.randomUUID(), private_order_id:orderId,
+              product_variant_id:line.variant_id, quantity:line.quantity, amount:Number(line.amount), note:line.note};
+          })};
+      });
+    poSavingRef.current=true; setPoSaving(true);
+    try {
+      const reconciled=poUncertain.current ? await dataProvider.reconcilePrivateOrderTransaction(command) : false;
+      if(!reconciled)await dataProvider.savePrivateOrderTransaction(command);
+      clearFormIntent(scope); poUncertain.current=null; setPoNeedsVerification(false);
+      setShowPrivateOrderModal(false);
+      try { await loadData(); } catch { alert('私下登記已提交，畫面同步尚未完成；請重新整理，不要重複新增。'); }
+    } catch(error) {
+      if(error instanceof CloudMutationBoundaryError) { poUncertain.current=command; setPoNeedsVerification(true); }
+      else {clearFormIntent(scope);poUncertain.current=null;setPoNeedsVerification(false);}
+      alert(cloudMutationFailureMessage(error));
+    } finally { poSavingRef.current=false; setPoSaving(false); }
   };
 
   // --- Modal Logic: Purchase Batch ---
@@ -1556,7 +1513,7 @@ export default function PurchaseManagement() {
       alert('已成功更新所有規格預設單價！');
     } catch (err: any) {
       console.error('批量更新失敗：', err);
-      alert(`更新失敗！資料已回復到更新前的狀態。`);
+      alert(cloudMutationFailureMessage(err));
     } finally {
       setIsApplyingMasterCost(false);
     }
@@ -1623,7 +1580,7 @@ export default function PurchaseManagement() {
       alert(`已成功更新分類「${bulkMasterCategory}」下的預設單價！`);
     } catch (err: any) {
       console.error('分類批量更新失敗：', err);
-      alert(`更新失敗！資料已回復到更新前的狀態。`);
+      alert(cloudMutationFailureMessage(err));
     } finally {
       setIsApplyingMasterCost(false);
     }
@@ -4096,10 +4053,12 @@ export default function PurchaseManagement() {
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#9d174d', margin: 0 }}>{editingPoId ? '編輯私下登記' : '新增私下登記'}</h2>
                 <p style={{ margin: '4px 0 0', color: '#9f1239', fontSize: '13px' }}>記錄個別買家的私人需求，不會建立採購批次。</p>
               </div>
-              <button className="btn btn-ghost" style={{ padding: '4px' }} onClick={() => setShowPrivateOrderModal(false)}><X size={20} /></button>
+              <button className="btn btn-ghost" style={{ padding: '4px' }} disabled={poSaving || poNeedsVerification} onClick={() => setShowPrivateOrderModal(false)}><X size={20} /></button>
             </div>
             
             <div style={{ padding: '16px' }}>
+              {poNeedsVerification && <p role="status">這筆儲存結果尚待查證。草稿已鎖定，請查證同一筆結果，不要另外新增。</p>}
+              <fieldset disabled={poSaving || poNeedsVerification} style={{border:0,padding:0,margin:0,minWidth:0}}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px', color: '#475569' }}>買家名稱 *</label>
@@ -4171,10 +4130,10 @@ export default function PurchaseManagement() {
                   ))}
                 </tbody>
               </table>
-
+              </fieldset>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button className="btn btn-outline" style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1' }} onClick={() => setShowPrivateOrderModal(false)}>取消</button>
-                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff' }} onClick={handleAddPrivateOrderSubmit} disabled={!poForm.customer_name.trim()}>儲存</button>
+                <button className="btn btn-outline" disabled={poSaving || poNeedsVerification} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1' }} onClick={() => setShowPrivateOrderModal(false)}>取消</button>
+                <button className="btn btn-primary" style={{ padding: '8px 16px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#fff' }} onClick={handleAddPrivateOrderSubmit} disabled={poSaving || !poForm.customer_name.trim()}>{poSaving ? '儲存中…' : poNeedsVerification ? '查證同一筆儲存結果' : '儲存'}</button>
               </div>
             </div>
           </div>

@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { stableFormIntent, readFormIntent, clearFormIntent, type PrivateOrderTransactionCommand } from '../providers/cloud/privateOrderTransaction';
+import { cloudMutationFailureMessage, CloudMutationBoundaryError } from '../providers/cloud/cloudFieldCas';
 import type { PrivateOrder, PrivateOrderItem, ProductVariant } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
 import { ChevronRight, ChevronDown, Trash2, Edit2 } from 'lucide-react';
@@ -16,6 +18,7 @@ interface PrivateOrderTabProps {
 export default function PrivateOrderTab({ orders, orderItems, variants, onRefresh, onEditOrder, getDisplayProductName }: PrivateOrderTabProps) {
   const { isMobile } = useViewport();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const deleting=useRef(new Set<string>());
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedIds);
@@ -27,20 +30,20 @@ export default function PrivateOrderTab({ orders, orderItems, variants, onRefres
   const handleDeleteOrder = async (order: PrivateOrder) => {
     if (!window.confirm(`確定刪除此私下登記？底下明細也會一起刪除。`)) return;
 
-    const allOrders = await dataProvider.getPrivateOrders();
-    const allItems = await dataProvider.getPrivateOrderItems();
-    const itemIdsToDelete = allItems.filter(i => i.private_order_id === order.id).map(i => i.id);
-
-    // Reuse deletePrivateOrderItems (already correctly deletes from Supabase, not just
-    // local) instead of savePrivateOrderItems, which is upsert-only and never removes rows
-    // from the cloud -- previously the item rows would silently survive on Supabase and get
-    // pulled back on the next sync/refresh even after this "deletion".
-    if (itemIdsToDelete.length > 0) {
-      await dataProvider.deletePrivateOrderItems(itemIdsToDelete);
-    }
-    await dataProvider.savePrivateOrders(allOrders.filter(o => o.id !== order.id));
-
-    onRefresh();
+    if(deleting.current.has(order.id)) return;
+    deleting.current.add(order.id);
+    const scope=`private-delete:${order.id}`;
+    const baseItems=orderItems.filter(i=>i.private_order_id===order.id);
+    const pending=readFormIntent<PrivateOrderTransactionCommand>(scope);
+    const command=pending??stableFormIntent<PrivateOrderTransactionCommand>(scope,{order,baseItems},key=>({
+      idempotencyKey:key,order,baseOrder:order,baseItems,items:[],remove:true,
+    }));
+    try {
+      const reconciled=pending ? await dataProvider.reconcilePrivateOrderTransaction(command) : false;
+      if(!reconciled)await dataProvider.savePrivateOrderTransaction(command);
+      clearFormIntent(scope); onRefresh();
+    } catch(error){ if(!(error instanceof CloudMutationBoundaryError))clearFormIntent(scope);alert(cloudMutationFailureMessage(error)); }
+    finally { deleting.current.delete(order.id); }
   };
 
   const variantMap = new Map(variants.map(v => [v.id, v]));

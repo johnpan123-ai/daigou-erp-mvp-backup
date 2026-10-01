@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { dataProvider } from '../providers/dataProvider';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import {
   isVariantDestructiveSyncGuardError,
   isVariantSyncGuardAcceptanceUiEnabled,
@@ -366,7 +367,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       setSelectedSkus(new Set());
       await loadItems(); // Refresh the "Added" status
     } catch (e) {
-      alert('建立失敗');
+      alert(cloudMutationFailureMessage(e));
       console.error(e);
     }
   };
@@ -389,7 +390,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
 
       await loadItems(); // 重新整理狀態
     } catch (e) {
-      alert('建立失敗');
+      alert(cloudMutationFailureMessage(e));
       console.error(e);
     }
   };

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { normalizeProductTitle } from '../lib/db';
 import { dataProvider } from '../providers/dataProvider';
+import { getProviderMode } from '../providers/providerMode';
 import type { ProductGroup, ProductVariant, SalesOrder, SalesOrderItem, ImportBatch } from '../lib/db';
 import { Upload, ListOrdered, X, CheckCircle, AlertTriangle, FileBox, FileText, ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import { parseMyAcgOrderFile } from '../utils/myacgParser';
@@ -31,6 +32,8 @@ interface ImportReport {
 }
 
 export default function OrdersImport() {
+  const cloudLegacyDisabled=['cloud','fallback'].includes(getProviderMode());
+  const cloudLegacyReason='這是舊版買動漫訂單 CSV 工具，僅支援本機歷史資料。雲端商品請使用「買動漫匯入」，WACA 訂單請使用「WACA 匯入」。';
   const [isImporting, setIsImporting] = useState(false);
   const [report, setReport] = useState<ImportReport | null>(null);
   const [isConfirmed, setIsConfirmed] = useState(false);
@@ -64,10 +67,12 @@ export default function OrdersImport() {
   };
 
   const handleImportClick = () => {
+    if(cloudLegacyDisabled){alert(cloudLegacyReason);return;}
     fileInputRef.current?.click();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if(cloudLegacyDisabled){alert(cloudLegacyReason);return;}
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -294,6 +299,7 @@ export default function OrdersImport() {
   };
 
   const handleConfirmImport = async () => {
+    if(cloudLegacyDisabled){alert(cloudLegacyReason);return;}
     if (!report) return;
     
     setIsImporting(true);
@@ -386,6 +392,7 @@ export default function OrdersImport() {
 
   return (
     <div className="import-container">
+      {cloudLegacyDisabled && <p role="status">{cloudLegacyReason}</p>}
       <input 
         type="file" 
         ref={fileInputRef} 
@@ -870,7 +877,7 @@ export default function OrdersImport() {
                 <p className="import-card-desc">支援 CSV 格式，最大檔案大小 10MB</p>
               </div>
               <div className="import-card-btn-area">
-                <button className="btn-import-primary" onClick={handleImportClick} disabled={isImporting}>
+                <button className="btn-import-primary" onClick={handleImportClick} disabled={isImporting || cloudLegacyDisabled}>
                   <Upload size={16} /> <span>{isImporting ? '處理中...' : '匯入檔案'}</span>
                 </button>
               </div>
@@ -892,7 +899,7 @@ export default function OrdersImport() {
                 <p className="import-card-desc">選擇匯入檔案並預覽內容，確認後即可匯入系統</p>
               </div>
               <div className="import-card-btn-area">
-                <button className="btn-import-secondary" onClick={handleImportClick} disabled={isImporting}>
+                <button className="btn-import-secondary" onClick={handleImportClick} disabled={isImporting || cloudLegacyDisabled}>
                   <ListOrdered size={16} style={{ color: '#2563eb' }} /> <span style={{ color: '#2563eb' }}>選擇可匯入檔案</span>
                 </button>
               </div>
@@ -1197,7 +1204,7 @@ export default function OrdersImport() {
               ) : (
                 <>
                   <button className="btn btn-ghost" onClick={() => setReport(null)} disabled={isImporting}>取消</button>
-                  <button className="btn btn-primary" onClick={handleConfirmImport} disabled={isImporting}>
+                  <button className="btn btn-primary" onClick={handleConfirmImport} disabled={isImporting || cloudLegacyDisabled}>
                     {isImporting ? '寫入中...' : '確認匯入'}
                   </button>
                 </>

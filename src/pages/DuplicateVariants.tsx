@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useViewport } from '../contexts/ViewportContext';
 import { dataProvider } from '../providers/dataProvider';
+import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import type {
   ProductVariant, ProductGroup, ProductCategory,
   PurchaseBatch, PurchaseBatchItem, PrivateOrderItem, SalesOrderItem
@@ -295,13 +297,13 @@ export default function DuplicateVariants() {
 
     setDeletingSetKey(set.key);
     try {
-      for (const t of targets) {
-        await dataProvider.deleteProductVariant(t.v.id);
-      }
+      await submitRelatedIntent({family:'variant-delete',rootId:targets[0].v.id,collections:[
+        {entity:'product_variants',base:targets.map(t=>t.v),next:[]},
+      ]},command=>dataProvider.applyRelatedTransaction(command));
       await loadData();
     } catch (err) {
       console.error('[DuplicateVariants] delete failed:', err);
-      alert('刪除失敗：' + ((err as Error).message || err));
+      alert(cloudMutationFailureMessage(err));
       await loadData();
     } finally {
       setDeletingSetKey(null);

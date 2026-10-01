@@ -192,7 +192,12 @@ export class CloudMutationBoundaryError extends Error {
     this.detail = detail;
   }
 }
+/** Only explicit, fixed user-language validation errors may reach UI verbatim. */
+export class SaveabilityError extends Error {
+  constructor(message:string){super(message);this.name='SaveabilityError';}
+}
 export function cloudMutationFailureMessage(error: unknown): string {
+  if(error instanceof SaveabilityError || error instanceof CloudFieldMutationError)return error.message;
   if (error instanceof CloudMutationBoundaryError) {
     return error.state === 'committed-readback-pending'
       ? '已儲存至雲端，但資料讀回尚未完成。請同步後確認，勿重複提交。'

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PackageOpen, Plus, Search } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import type {
   BundleComponent,
   JapanPackageItem,
@@ -162,11 +163,13 @@ export default function OutboundShipmentsList() {
       updated_at: new Date().toISOString(),
     };
     const updated = [newShipment, ...shipments];
-    await dataProvider.saveOutboundShipments(updated);
-    setShipments(updated);
-    setShowCreateForm(false);
-    setNewTitle('');
-    openShipment(newShipment.id);
+    try {
+      await dataProvider.saveOutboundShipments(updated);
+      setShipments(await dataProvider.getOutboundShipments());
+      setShowCreateForm(false);
+      setNewTitle('');
+      openShipment(newShipment.id);
+    } catch(error){alert(cloudMutationFailureMessage(error));}
   };
 
   const statusCounts = useMemo(() => {

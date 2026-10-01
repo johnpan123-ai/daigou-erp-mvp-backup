@@ -1,4 +1,8 @@
 import { reportStorageWriteFailure } from './storageGuard';
+import { RELATED_STORAGE,relatedWriteEntities,mergeRelatedCollections,type RelatedTransactionCommand } from '../providers/cloud/relatedTransaction';
+import { createPurchaseRecordFromInventory as createCatalogRecords, reparseProductVariants as reparseCatalogVariants,
+  syncProductGroupsWithInventory as syncCatalogGroups, type CatalogAlgorithmContext } from './catalogAlgorithms';
+import { mergePrivateOrderState, type PrivateOrderTransactionCommand } from '../providers/cloud/privateOrderTransaction';
 
 export interface InventoryItem {
   id?: string;
@@ -543,6 +547,8 @@ export interface DatabaseAdapter {
   getPurchaseBatchItems(): Promise<PurchaseBatchItem[]>;
   savePurchaseBatchItems(items: PurchaseBatchItem[]): Promise<void>;
   savePurchaseBatchTransaction(batches: PurchaseBatch[], items: PurchaseBatchItem[]): Promise<void>;
+  savePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<void>;
+  applyRelatedTransaction(command: RelatedTransactionCommand): Promise<void>;
 
   getPrivateOrders(): Promise<PrivateOrder[]>;
   savePrivateOrders(orders: PrivateOrder[]): Promise<void>;
@@ -1801,6 +1807,24 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     return loadData<PrivateOrder[]>('erp_private_orders', []);
   }
 
+  async applyRelatedTransaction(command:RelatedTransactionCommand):Promise<void> {
+    const entries=Object.entries(RELATED_STORAGE);
+    const before=entries.map(([,key])=>localStorage.getItem(key));
+    const current=Object.fromEntries(entries.map(([entity,key])=>[entity,loadData<Record<string,unknown>[]>(key,[])]));
+    const next=mergeRelatedCollections(current,command);
+    const writes=relatedWriteEntities(command);
+    try{entries.filter(([entity])=>writes.has(entity)).forEach(([entity,key])=>saveData(key,next[entity]));}
+    catch(error){entries.forEach(([,key],i)=>before[i]===null?localStorage.removeItem(key):localStorage.setItem(key,before[i]!));throw error;}
+  }
+
+  async savePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<void> {
+    const keys=['erp_private_orders','erp_private_order_items'];
+    const before=keys.map(k=>localStorage.getItem(k));
+    const next=mergePrivateOrderState(loadData<PrivateOrder[]>(keys[0],[]), loadData<PrivateOrderItem[]>(keys[1],[]), command);
+    try { saveData(keys[0],next.orders); saveData(keys[1],next.items); }
+    catch(error){ keys.forEach((k,i)=>before[i]===null ? localStorage.removeItem(k) : localStorage.setItem(k,before[i]!)); throw error; }
+  }
+
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {
     saveData('erp_private_orders', orders);
   }
@@ -2815,513 +2839,18 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     };
   }
 
-  async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
-    const allInventory = await this.getInventory();
-    const targetItems = allInventory.filter(i => itemCodes.includes(i.myacg_item_code));
-    if (targetItems.length === 0) return;
-
-    const groups = await this.getProductGroups();
-    const categories = await this.getProductCategories();
-    const variants = await this.getProductVariants();
-
-    let groupsUpdated = false;
-    let categoriesUpdated = false;
-    let variantsUpdated = false;
-
-    // Group targets by product_title to parse their names together
-    const itemsByTitle: Record<string, typeof targetItems> = {};
-    for (const item of targetItems) {
-      if (!itemsByTitle[item.product_title]) itemsByTitle[item.product_title] = [];
-      itemsByTitle[item.product_title].push(item);
-    }
-
-    for (const title of Object.keys(itemsByTitle)) {
-      const itemsInGroup = itemsByTitle[title];
-      
-      // 1. Group
-      let group = groups.find(g => g.title === title);
-      if (!group) {
-        group = {
-          id: crypto.randomUUID(),
-          title: title,
-          normalized_title: normalizeProductTitle(title),
-          listing_type: determineListingType(title),
-          priority: 'Low',
-          purchase_date: '',
-          closing_date: '',
-          release_month: '',
-          has_official_site: false,
-          product_url: '',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        groups.push(group);
-        groupsUpdated = true;
-      } else {
-        // Just in case it's an old group without normalized_title
-        if (!group.normalized_title) {
-          group.normalized_title = normalizeProductTitle(title);
-          group.listing_type = determineListingType(title);
-          groupsUpdated = true;
-        }
-      }
-
-      // We should resolve specs using ALL variants in this group + new items
-      const existingVars = variants.filter(v => v.product_group_id === group!.id);
-      const allRawNames = [
-        ...existingVars.map(v => v.raw_variant_name || ''),
-        ...itemsInGroup.map(i => i.raw_variant_name)
-      ].filter(Boolean);
-      
-      const resolvedSpecs = resolveMyacgSpecs(allRawNames);
-
-      for (const item of itemsInGroup) {
-        const spec = resolvedSpecs[item.raw_variant_name] || { category_label: null, variant_label: item.raw_variant_name };
-
-        // 2. Category
-        let categoryId: string | undefined = undefined;
-        if (spec.category_label) {
-          let category = categories.find(c => c.product_group_id === group!.id && c.title === spec.category_label);
-          if (!category) {
-            category = {
-              id: crypto.randomUUID(),
-              product_group_id: group.id,
-              title: spec.category_label,
-              sort_order: categories.filter(c => c.product_group_id === group!.id).length
-            };
-            categories.push(category);
-            categoriesUpdated = true;
-          }
-          categoryId = category.id;
-        }
-
-        // 3. Variant
-        let variant = findMatchingVariant(item, variants, group!.id);
-        if (!variant) {
-          variant = {
-            id: crypto.randomUUID(),
-            product_group_id: group.id,
-            product_category_id: categoryId,
-            myacg_item_code: item.myacg_item_code,
-            product_title: item.product_title,
-            variant_name: spec.variant_label,
-            raw_variant_name: item.raw_variant_name,
-            myacg_auto_quantity: 0,
-            effective_myacg_quantity: 0,
-            waca_auto_quantity: 0,
-            note: '',
-            sort_order: variants.filter(v => v.product_group_id === group!.id).length
-          };
-          variants.push(variant);
-          variantsUpdated = true;
-        } else {
-          if (
-            variant.variant_name !== spec.variant_label ||
-            variant.product_category_id !== categoryId ||
-            variant.product_title !== item.product_title ||
-            variant.raw_variant_name !== item.raw_variant_name
-          ) {
-            variant.variant_name = spec.variant_label;
-            variant.raw_variant_name = item.raw_variant_name;
-            variant.product_title = item.product_title;
-            variant.product_category_id = categoryId;
-            variantsUpdated = true;
-          }
-        }
-      }
-      
-      // Update existing variants that were already in the group
-      for (const existingVar of existingVars) {
-        const invItem = findMatchingInventoryItem(existingVar, targetItems);
-        const rawName = invItem ? invItem.raw_variant_name : existingVar.raw_variant_name;
-        if (rawName) {
-          const spec = resolvedSpecs[rawName];
-          if (spec) {
-            let categoryId: string | undefined = undefined;
-            if (spec.category_label) {
-              let category = categories.find(c => c.product_group_id === group!.id && c.title === spec.category_label);
-              if (!category) {
-                category = {
-                  id: crypto.randomUUID(),
-                  product_group_id: group!.id,
-                  title: spec.category_label,
-                  sort_order: categories.filter(c => c.product_group_id === group!.id).length
-                };
-                categories.push(category);
-                categoriesUpdated = true;
-              }
-              categoryId = category.id;
-            }
-
-            let updated = false;
-            if (existingVar.variant_name !== spec.variant_label) {
-              existingVar.variant_name = spec.variant_label;
-              updated = true;
-            }
-            if (existingVar.product_category_id !== categoryId) {
-              existingVar.product_category_id = categoryId;
-              updated = true;
-            }
-            if (invItem && existingVar.product_title !== invItem.product_title) {
-              existingVar.product_title = invItem.product_title;
-              updated = true;
-            }
-            if (invItem && existingVar.raw_variant_name !== invItem.raw_variant_name) {
-              existingVar.raw_variant_name = invItem.raw_variant_name;
-              updated = true;
-            }
-            if (updated) {
-              variantsUpdated = true;
-            }
-          }
-        }
-      }
-
-      // Update Category sort_order for this group
-      for (const cat of categories.filter(c => c.product_group_id === group.id)) {
-        const variantsInCat = variants.filter(v => v.product_group_id === group.id && v.product_category_id === cat.id);
-        let minSort = 9999;
-        for (const v of variantsInCat) {
-            const invItem = findMatchingInventoryItem(v, targetItems);
-            const vSort = (invItem?.import_sort_index ?? v.sort_order ?? 9999);
-            if (vSort < minSort) minSort = vSort;
-        }
-        cat.sort_order = minSort;
-      }
-    }
-
-    if (groupsUpdated) await this.saveProductGroups(groups);
-    if (categoriesUpdated) await this.saveProductCategories(categories);
-    if (variantsUpdated) await this.saveProductVariants(variants);
+  private catalogContext(): CatalogAlgorithmContext {
+    return {
+      getInventory:()=>this.getInventory(),getProductGroups:()=>this.getProductGroups(),getProductCategories:()=>this.getProductCategories(),
+      getProductVariants:options=>this.getProductVariants(options),saveProductGroups:rows=>this.saveProductGroups(rows),
+      saveProductCategories:rows=>this.saveProductCategories(rows),saveProductVariants:rows=>this.saveProductVariants(rows),
+      readVariantSyncGuardSnapshot:()=>this.readVariantSyncGuardSnapshot(),computeVariantDedupe:rows=>this.computeVariantDedupe(rows),
+      assertVariantSyncCandidateSafe:(before,after,empty)=>this.assertVariantSyncCandidateSafe(before,after,empty),
+    };
   }
-
-  async reparseProductVariants(): Promise<void> {
-    const allInventory = await this.getInventory();
-    const inventoryMap = new Map(allInventory.map(i => [i.myacg_item_code, i]));
-
-    const groups = await this.getProductGroups();
-    const categories = await this.getProductCategories();
-    const variants = await this.getProductVariants({ recalc: true });
-
-    let categoriesUpdated = false;
-    let variantsUpdated = false;
-
-    for (const group of groups) {
-      const groupVariants = variants.filter(v => v.product_group_id === group.id);
-      
-      groupVariants.forEach(v => {
-        const invItem = inventoryMap.get(v.myacg_item_code);
-        if (invItem) {
-          if (v.raw_variant_name !== invItem.raw_variant_name || v.product_title !== invItem.product_title) {
-            v.raw_variant_name = invItem.raw_variant_name;
-            v.product_title = invItem.product_title;
-            variantsUpdated = true;
-          }
-        }
-      });
-
-      const allRawNames = groupVariants.map(v => v.raw_variant_name || '').filter(Boolean);
-      const resolvedSpecs = resolveMyacgSpecs(allRawNames);
-
-      for (const v of groupVariants) {
-        if (!v.raw_variant_name) continue;
-        const spec = resolvedSpecs[v.raw_variant_name];
-        if (!spec) continue;
-
-        let categoryId: string | undefined = undefined;
-        if (spec.category_label) {
-          let category = categories.find(c => c.product_group_id === group.id && c.title === spec.category_label);
-          if (!category) {
-            category = {
-              id: crypto.randomUUID(),
-              product_group_id: group.id,
-              title: spec.category_label,
-              sort_order: categories.filter(c => c.product_group_id === group.id).length
-            };
-            categories.push(category);
-            categoriesUpdated = true;
-          }
-          categoryId = category.id;
-        } else {
-          categoryId = undefined; // Nullify category for single items
-        }
-
-        if (v.variant_name !== spec.variant_label || v.product_category_id !== categoryId) {
-          v.variant_name = spec.variant_label;
-          v.product_category_id = categoryId;
-          variantsUpdated = true;
-        }
-      }
-    }
-
-    // Clean up empty categories (optional, but good practice)
-    const activeCategoryIds = new Set(variants.map(v => v.product_category_id).filter(Boolean));
-    const activeCategories = categories.filter(c => activeCategoryIds.has(c.id));
-    if (activeCategories.length !== categories.length) {
-      categories.splice(0, categories.length, ...activeCategories);
-      categoriesUpdated = true;
-    }
-
-    if (categoriesUpdated) await this.saveProductCategories(categories);
-    if (variantsUpdated) await this.saveProductVariants(variants);
-  }
-
-  async syncProductGroupsWithInventory(): Promise<{ filledVariantsCount: number, affectedGroupsCount: number, upgradedSkusCount: number }> {
-    const verifiedSource = await this.readVariantSyncGuardSnapshot();
-    const allInventory = await this.getInventory();
-    const groups = await this.getProductGroups();
-    const { canonical: verifiedCanonicalVariants } = this.computeVariantDedupe(verifiedSource.variants);
-    const baselineVariants = verifiedCanonicalVariants.map(variant => ({ ...variant }));
-    const variants = verifiedCanonicalVariants.map(variant => ({ ...variant }));
-    let categories = await this.getProductCategories();
-
-    let filledVariantsCount = 0;
-    let affectedGroupsCount = 0;
-    let anyGroupChanged = false;
-    let upgradedSkusCount = 0;
-
-    for (const group of groups) {
-      const groupNormTitle = group.normalized_title || normalizeProductTitle(group.title);
-      const groupTitle = group.title;
-
-      const matchingItems = allInventory.filter(item => {
-        const itemNorm = item.normalized_product_title || normalizeProductTitle(item.product_title);
-        if (groupNormTitle && itemNorm) {
-            return groupNormTitle === itemNorm;
-        }
-        return item.product_title === groupTitle;
-      });
-
-      const existingVariants = variants.filter(v => v.product_group_id === group.id || 
-         (v.product_category_id && categories.some(c => c.id === v.product_category_id && c.product_group_id === group.id)));
-
-      let groupChanged = false;
-      const ambiguousItemCodes = new Set<string>();
-
-      // SKU Auto-Upgrade Phase for new catalog format
-      for (const item of matchingItems) {
-        const hasExactMatch = existingVariants.some(v => v.myacg_item_code === item.myacg_item_code);
-        if (hasExactMatch) continue;
-
-        const parentCode = item.myacg_parent_code || getBaseSku(item.myacg_item_code);
-        if (!parentCode) continue;
-
-        const cleanParent = parentCode.trim().toUpperCase();
-        const cleanRaw = item.raw_variant_name?.trim();
-
-        // 1. Find candidates matching strict raw_variant_name and parent code prefix, excluding manual source
-        const candidates = existingVariants.filter(v => {
-          if (v.source === 'manual') return false;
-          
-          const vCode = v.myacg_item_code.trim().toUpperCase();
-          const prefixMatch = vCode === cleanParent || vCode.startsWith(cleanParent + '_');
-          const nameMatch = v.raw_variant_name?.trim() === cleanRaw;
-          return prefixMatch && nameMatch;
-        });
-
-        if (candidates.length === 1) {
-          const matchVar = candidates[0];
-          const oldCode = matchVar.myacg_item_code;
-          matchVar.myacg_item_code = item.myacg_item_code;
-          groupChanged = true;
-          anyGroupChanged = true;
-          upgradedSkusCount++;
-          console.log(`[SKU Auto Upgrade] Variant ${matchVar.id} SKU upgraded: ${oldCode} -> ${item.myacg_item_code}`);
-        } else if (candidates.length > 1) {
-          ambiguousItemCodes.add(item.myacg_item_code);
-          console.warn(`[SKU Auto Upgrade WARNING] Ambiguous match: multiple candidates found for item ${item.myacg_item_code} and spec "${item.raw_variant_name}"`);
-        } else {
-          // candidates.length === 0: check if variant_name matches (but raw_variant_name does not)
-          const nameMatchCandidates = existingVariants.filter(v => {
-            if (v.source === 'manual') return false;
-            
-            const vCode = v.myacg_item_code.trim().toUpperCase();
-            const prefixMatch = vCode === cleanParent || vCode.startsWith(cleanParent + '_');
-            const nameMatch = v.variant_name?.trim() === cleanRaw;
-            return prefixMatch && nameMatch;
-          });
-
-          if (nameMatchCandidates.length > 0) {
-            ambiguousItemCodes.add(item.myacg_item_code);
-            console.warn(`[SKU Auto Upgrade WARNING] Ambiguous match: variant_name matched but raw_variant_name did not for item ${item.myacg_item_code} and spec "${item.raw_variant_name}"`);
-          }
-        }
-      }
-
-      const missingItems = matchingItems.filter(item => {
-        if (ambiguousItemCodes.has(item.myacg_item_code)) return false;
-        const matchingVar = findMatchingVariant(item, existingVariants, group.id);
-        return !matchingVar;
-      });
-
-      // 1. Process existing variants: check if they are missing from catalog and update sort_order
-      for (const v of existingVariants) {
-        if (v.source === 'manual') {
-          continue;
-        }
-        const invItem = findMatchingInventoryItem(v, matchingItems);
-        if (invItem) {
-          let updated = false;
-          if (v.catalog_missing !== false) {
-            v.catalog_missing = false;
-            updated = true;
-          }
-          if (v.sort_order !== (invItem.import_sort_index ?? 9999)) {
-            v.sort_order = invItem.import_sort_index ?? 9999;
-            updated = true;
-          }
-          if (v.product_title !== invItem.product_title) {
-            v.product_title = invItem.product_title;
-            updated = true;
-          }
-          if (v.raw_variant_name !== invItem.raw_variant_name) {
-            v.raw_variant_name = invItem.raw_variant_name;
-            updated = true;
-          }
-          if (updated) {
-            groupChanged = true;
-          }
-        } else {
-          if (v.catalog_missing !== true || v.sort_order !== 999999) {
-            v.catalog_missing = true;
-            v.sort_order = 999999;
-            groupChanged = true;
-          }
-        }
-      }
-
-      // 2. Add missing items from catalog
-      if (missingItems.length > 0) {
-        affectedGroupsCount++;
-        groupChanged = true;
-        
-        const rawNames = matchingItems.map(i => i.raw_variant_name || '');
-        const resolved = resolveMyacgSpecs(rawNames);
-
-        for (const item of missingItems) {
-            const spec = resolved[item.raw_variant_name || ''];
-            let catId = undefined;
-            
-            if (spec && spec.category_label) {
-                let cat = categories.find(c => c.product_group_id === group.id && c.title === spec.category_label);
-                if (!cat) {
-                    cat = {
-                        id: crypto.randomUUID(),
-                        product_group_id: group.id,
-                        title: spec.category_label,
-                        sort_order: categories.filter(c => c.product_group_id === group.id).length
-                    };
-                    categories.push(cat);
-                }
-                catId = cat.id;
-            }
-
-            const newVariant = {
-                id: crypto.randomUUID(),
-                product_group_id: group.id,
-                product_category_id: catId,
-                myacg_item_code: item.myacg_item_code,
-                product_title: item.product_title,
-                variant_name: spec ? spec.variant_label : (item.raw_variant_name || ''),
-                myacg_auto_quantity: 0,
-                effective_myacg_quantity: 0,
-                note: '',
-                sort_order: item.import_sort_index ?? 9999,
-                catalog_missing: false
-            };
-            variants.push(newVariant);
-            existingVariants.push(newVariant); // add to existing for category calculation later
-            filledVariantsCount++;
-        }
-
-        for (const item of matchingItems) {
-            if (missingItems.includes(item)) continue; 
-            
-            const existingVar = findMatchingVariant(item, variants, group.id);
-            if (existingVar) {
-                let updated = false;
-                if (existingVar.product_title !== item.product_title) {
-                    existingVar.product_title = item.product_title;
-                    updated = true;
-                }
-                if (existingVar.raw_variant_name !== item.raw_variant_name) {
-                    existingVar.raw_variant_name = item.raw_variant_name;
-                    updated = true;
-                }
-                
-                const spec = resolved[item.raw_variant_name || ''];
-                if (spec && spec.category_label) {
-                    let cat = categories.find(c => c.product_group_id === group.id && c.title === spec.category_label);
-                    if (!cat) {
-                        cat = {
-                            id: crypto.randomUUID(),
-                            product_group_id: group.id,
-                            title: spec.category_label,
-                            sort_order: categories.filter(c => c.product_group_id === group.id).length
-                        };
-                        categories.push(cat);
-                    }
-                    if (existingVar.product_category_id !== cat.id) {
-                        existingVar.product_category_id = cat.id;
-                        updated = true;
-                    }
-                    if (existingVar.variant_name !== spec.variant_label) {
-                        existingVar.variant_name = spec.variant_label;
-                        updated = true;
-                    }
-                } else if (spec) {
-                    if (existingVar.product_category_id !== undefined) {
-                        existingVar.product_category_id = undefined;
-                        updated = true;
-                    }
-                    if (existingVar.variant_name !== spec.variant_label) {
-                        existingVar.variant_name = spec.variant_label;
-                        updated = true;
-                    }
-                }
-                if (updated) {
-                    groupChanged = true;
-                }
-            }
-        }
-      }
-
-      // 3. Update category sort_order
-      for (const cat of categories.filter(c => c.product_group_id === group.id)) {
-        const variantsInCat = existingVariants.filter(v => v.product_category_id === cat.id);
-        let minSort = 999999;
-        for (const v of variantsInCat) {
-          if (v.sort_order < minSort) minSort = v.sort_order;
-        }
-        if (variantsInCat.length > 0 && variantsInCat.every(v => v.catalog_missing)) {
-          minSort = 999999; // If all are missing, put category at the end
-        }
-        if (cat.sort_order !== minSort) {
-          cat.sort_order = minSort;
-          groupChanged = true;
-        }
-      }
-
-      if (groupChanged) {
-        anyGroupChanged = true;
-      }
-    }
-
-    if (anyGroupChanged) {
-      this.assertVariantSyncCandidateSafe(
-        baselineVariants,
-        variants,
-        verifiedSource.verifiedEmpty,
-      );
-      await this.saveProductCategories(categories);
-        await this.saveProductVariants(variants);
-    }
-
-    // Recalculate auto quantities based on new inventory sold numbers
-    await this.getProductVariants({ recalc: true });
-
-    return { filledVariantsCount, affectedGroupsCount, upgradedSkusCount };
-  }
+  async createPurchaseRecordFromInventory(itemCodes:string[]):Promise<void> { return createCatalogRecords.call(this.catalogContext(),itemCodes); }
+  async reparseProductVariants():Promise<void> { return reparseCatalogVariants.call(this.catalogContext()); }
+  async syncProductGroupsWithInventory():Promise<{filledVariantsCount:number;affectedGroupsCount:number;upgradedSkusCount:number}> { return syncCatalogGroups.call(this.catalogContext()); }
 
   async reparseProductTitles(): Promise<void> {
     const inventory = await this.getInventory();
@@ -3356,7 +2885,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
   async getSalesOrders(): Promise<SalesOrder[]> {
     return this.get<SalesOrder[]>('erp_sales_orders', []);
   }
-  
+
   async saveSalesOrders(items: SalesOrder[]): Promise<void> {
     await this.set('erp_sales_orders', items);
   }
@@ -3782,6 +3311,47 @@ export class IndexedDbAdapter implements DatabaseAdapter {
 
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return this.get<PrivateOrder[]>('erp_private_orders', []);
+  }
+
+  async applyRelatedTransaction(command:RelatedTransactionCommand):Promise<void> {
+    const database=await this.dbPromise;
+    await new Promise<void>((resolve,reject)=>{
+      const tx=database.transaction('kv','readwrite');const store=tx.objectStore('kv');
+      const current:Record<string,Record<string,unknown>[]>={};
+      const entries=Object.entries(RELATED_STORAGE); let pending=entries.length;let failure:unknown;
+      for(const [entity,key] of entries){
+        const request=store.get(key);
+        request.onsuccess=()=>{
+          current[entity]=request.result??[];
+          if(--pending)return;
+          try{
+            const next=mergeRelatedCollections(current,command);
+            const writes=relatedWriteEntities(command);
+            for(const [name,storageKey] of entries)if(writes.has(name))store.put(next[name],storageKey);
+          }catch(error){failure=error;tx.abort();}
+        };
+      }
+      tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(failure??tx.error??new Error('關聯交易未完成。'));
+    });
+  }
+
+  async savePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<void> {
+    const database=await this.dbPromise;
+    await new Promise<void>((resolve,reject)=>{
+      const tx=database.transaction('kv','readwrite'); const store=tx.objectStore('kv');
+      const orders=store.get('erp_private_orders'); const items=store.get('erp_private_order_items');
+      const variants=store.get('erp_product_variants'); let pending=3; let failure:unknown;
+      const ready=()=>{
+        if(--pending) return;
+        try {
+          const next=mergePrivateOrderState(orders.result??[],items.result??[],command);
+          if(!command.remove && command.items.some(i=>!(variants.result??[]).some((v:ProductVariant)=>v.id===i.product_variant_id && v.product_group_id===command.order.product_group_id))) throw new Error('登記規格不存在或不屬於此商品。');
+          store.put(next.orders,'erp_private_orders'); store.put(next.items,'erp_private_order_items');
+        } catch(error){ failure=error; tx.abort(); }
+      };
+      orders.onsuccess=ready; items.onsuccess=ready; variants.onsuccess=ready;
+      tx.oncomplete=()=>resolve(); tx.onerror=tx.onabort=()=>reject(failure??tx.error??new Error('私下登記交易未完成。'));
+    });
   }
 
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {

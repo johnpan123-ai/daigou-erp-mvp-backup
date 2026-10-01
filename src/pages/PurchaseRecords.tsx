@@ -2433,8 +2433,8 @@ export default function PurchaseRecords() {
         return g;
       });
 
-      setGroups(nextGroups);
       await dataProvider.saveProductGroups(nextGroups);
+      setGroups(await dataProvider.getProductGroups());
       alert(`已成功將 ${selectedGroupIds.size} 筆商品${actionName}。`);
       setSelectedGroupIds(new Set());
     } catch (err) {

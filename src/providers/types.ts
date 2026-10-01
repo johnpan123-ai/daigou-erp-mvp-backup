@@ -18,6 +18,8 @@ import type {
   OutboundShipmentItem
 } from '../lib/db';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { PrivateOrderTransactionCommand } from './cloud/privateOrderTransaction';
+import type { RelatedTransactionCommand } from './cloud/relatedTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type {
@@ -55,6 +57,9 @@ export interface IDataProvider {
   savePurchaseBatchTransaction(command: PurchaseBatchTransactionCommand): Promise<void>;
 
   getPrivateOrders(): Promise<PrivateOrder[]>;
+  savePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<void>;
+  reconcilePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<boolean>;
+  applyRelatedTransaction(command: RelatedTransactionCommand): Promise<void>;
   savePrivateOrders(orders: PrivateOrder[]): Promise<void>;
   getPrivateOrderItems(): Promise<PrivateOrderItem[]>;
   savePrivateOrderItems(items: PrivateOrderItem[]): Promise<void>;

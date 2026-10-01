@@ -8,6 +8,8 @@ import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { isJapanPackageSubmitBoundaryError, japanPackageIntentCoordinator } from '../providers/cloud/japanPackageTransaction';
 import { buildJapanPackageQuantityById } from '../lib/growthSafeSelectors';
+import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 
 const CARRIERS_LIST = [
   { name: 'ヤマト運輸 (Yamato)', keyword: 'yamato' },
@@ -313,7 +315,7 @@ export default function JapanPackagesList() {
 
       try {
         await dataProvider.saveJapanPackages(updatedList);
-        setPackages(updatedList);
+        setPackages(await dataProvider.getJapanPackages());
         setEditingPackageId(null);
         closeAddModal();
         // Reset form
@@ -330,7 +332,7 @@ export default function JapanPackagesList() {
           note: ''
         });
       } catch (err) {
-        alert('儲存失敗，請重試！');
+        alert(cloudMutationFailureMessage(err));
       }
     } else {
       // Add mode
@@ -406,13 +408,16 @@ export default function JapanPackagesList() {
       const updatedPkgs = packages.filter(p => p.id !== id);
       const updatedItems = packageItems.filter(item => item.japan_package_id !== id);
       
-      await dataProvider.saveJapanPackages(updatedPkgs);
-      await dataProvider.saveJapanPackageItems(updatedItems);
+      const base=packages.find(p=>p.id===id); if(!base)return;
+      await submitRelatedIntent({family:'package-delete',rootId:id,collections:[
+        {entity:'japan_packages',base:[base],next:[]},
+        {entity:'japan_package_items',base:packageItems.filter(i=>i.japan_package_id===id),next:[]},
+      ]},command=>dataProvider.applyRelatedTransaction(command));
       
       setPackages(updatedPkgs);
       setPackageItems(updatedItems);
     } catch (err) {
-      alert('刪除失敗，請重試！');
+      alert(cloudMutationFailureMessage(err));
     }
   };
 

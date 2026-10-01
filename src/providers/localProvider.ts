@@ -1,5 +1,7 @@
 import type { IDataProvider } from './types';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { PrivateOrderTransactionCommand } from './cloud/privateOrderTransaction';
+import type { RelatedTransactionCommand } from './cloud/relatedTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type {
@@ -107,6 +109,13 @@ export class LocalProvider implements IDataProvider {
   async getPrivateOrders(): Promise<PrivateOrder[]> {
     return db.getPrivateOrders();
   }
+  async savePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<void> {
+    return db.savePrivateOrderTransaction(command);
+  }
+  async reconcilePrivateOrderTransaction(command: PrivateOrderTransactionCommand):Promise<boolean> {
+    void command; return false; // Local writes resolve only after their atomic transaction completes.
+  }
+  async applyRelatedTransaction(command:RelatedTransactionCommand):Promise<void> { return db.applyRelatedTransaction(command); }
   async savePrivateOrders(orders: PrivateOrder[]): Promise<void> {
     return db.savePrivateOrders(orders);
   }

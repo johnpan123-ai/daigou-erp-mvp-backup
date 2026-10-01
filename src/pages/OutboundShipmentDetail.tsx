@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, ExternalLink, Check } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import { calculateVariantDemandAndPurchased } from '../lib/db';
 import type {
   OutboundShipment,
@@ -1005,9 +1006,11 @@ export default function OutboundShipmentDetail() {
     };
     const latest = await dataProvider.getOutboundShipments();
     const all = latest.map(s => s.id === id ? updated : s);
-    await dataProvider.saveOutboundShipments(all);
-    setShipment(updated);
-    setShowHeaderEdit(false);
+    try {
+      await dataProvider.saveOutboundShipments(all);
+      setShipment((await dataProvider.getOutboundShipments()).find(s=>s.id===id)??updated);
+      setShowHeaderEdit(false);
+    }catch(error){alert(cloudMutationFailureMessage(error));}
   };
 
   const updateStatus = async (newStatus: string) => {
@@ -1021,8 +1024,10 @@ export default function OutboundShipmentDetail() {
     };
     const latest = await dataProvider.getOutboundShipments();
     const all = latest.map(s => s.id === id ? updated : s);
-    await dataProvider.saveOutboundShipments(all);
-    setShipment(updated);
+    try {
+      await dataProvider.saveOutboundShipments(all);
+      setShipment((await dataProvider.getOutboundShipments()).find(s=>s.id===id)??updated);
+    }catch(error){alert(cloudMutationFailureMessage(error));}
   };
 
   const manualEditModal = editingManualItemId ? (

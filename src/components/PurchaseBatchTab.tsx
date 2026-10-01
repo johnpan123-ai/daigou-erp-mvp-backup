@@ -6,6 +6,8 @@ import { useViewport } from '../contexts/ViewportContext';
 import { Package } from 'lucide-react';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 import { writeTextToClipboard } from '../lib/safeClipboard';
+import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 
 function getStatusPriority(status: string): number {
   switch (status) {
@@ -98,11 +100,10 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
     if (!window.confirm(`確定刪除此採購批次？底下明細也會一起刪除。`)) return;
     
     try {
-      const allBatches = await dataProvider.getPurchaseBatches();
-      const allItems = await dataProvider.getPurchaseBatchItems();
-      
-      await dataProvider.savePurchaseBatches(allBatches.filter(b => b.id !== batch.id));
-      await dataProvider.savePurchaseBatchItems(allItems.filter(i => i.purchase_batch_id !== batch.id));
+      await submitRelatedIntent({family:'purchase-delete',rootId:batch.id,collections:[
+        {entity:'purchase_batches',base:[batch],next:[]},
+        {entity:'purchase_batch_items',base:batchItems.filter(i=>i.purchase_batch_id===batch.id),next:[]},
+      ]},command=>dataProvider.applyRelatedTransaction(command));
       
       onRefresh();
     } catch (err) {
@@ -111,7 +112,7 @@ export default function PurchaseBatchTab({ batches, batchItems, variants, catego
         onRefresh();
         return;
       }
-      throw err;
+      alert(cloudMutationFailureMessage(err));
     }
   };
 

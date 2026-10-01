@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
 import {
@@ -56,6 +57,7 @@ export default function Settings() {
   const { user, signOut } = useAuth();
   const { role, displayName, isProfileLoading } = useRole();
   const currentMode = getProviderMode();
+  const cloudMode=currentMode==='cloud'||currentMode==='fallback';
   const isSandbox = isSandboxEnvironmentActive();
   const sandboxConfig = getActiveSandboxConfig();
   const sandboxLabel = sandboxConfig?.label ?? 'Sandbox';
@@ -585,7 +587,7 @@ export default function Settings() {
                     await loadCounts();
                   } catch (err) {
                     console.error('Reparse failed:', err);
-                    alert('重新解析失敗，請查看 Console');
+                    alert(cloudMutationFailureMessage(err));
                   }
                 }}
               >
@@ -596,9 +598,9 @@ export default function Settings() {
             <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>重新整理商品標題</div>
-                <div className="text-xs text-muted">清理商品名稱中多餘的促銷/代購文字，僅保留商品主體。不影響原始名稱。</div>
+                <div className="text-xs text-muted">{cloudMode?'雲端使用共用顯示名稱規則，不改寫原始商品名稱；此舊資料工具僅限本機。':'清理商品名稱中多餘的促銷/代購文字，僅保留商品主體。不影響原始名稱。'}</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={async () => {
+              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={cloudMode} onClick={async () => {
                 if (confirm('確定要重新整理所有商品標題嗎？')) {
                   await dataProvider.reparseProductTitles();
                   alert('清理完成');
@@ -612,9 +614,9 @@ export default function Settings() {
             <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-warning)', backgroundColor: 'rgba(245, 158, 11, 0.05)', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-warning" style={{ marginBottom: '4px' }}>清空訂購紀錄資料</div>
-                <div className="text-xs text-muted">只清除訂購紀錄 (Group/Category/Variant)，不影響商品主檔。</div>
+                <div className="text-xs text-muted">{cloudMode?'為保護雲端關聯資料，此本機清空工具不在雲端開放。':'只清除訂購紀錄 (Group/Category/Variant)，不影響商品主檔。'}</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={handleClearPurchaseRecords}>
+              <button className="btn" style={{ backgroundColor: 'var(--color-warning)', color: 'white' }} disabled={cloudMode} onClick={handleClearPurchaseRecords}>
                 <Trash2 size={16} /> 清空紀錄
               </button>
             </div>
@@ -626,9 +628,9 @@ export default function Settings() {
             <div className="flex items-center justify-between settings-action-row" style={{ padding: '16px', border: '1px solid var(--color-danger)', backgroundColor: '#FEF2F2', borderRadius: '8px' }}>
               <div>
                 <div className="font-medium text-danger" style={{ marginBottom: '4px' }}>危險操作：清空全部資料</div>
-                <div className="text-xs text-danger" style={{ opacity: 0.8 }}>將清空所有測試與正式資料，操作無法復原。</div>
+                <div className="text-xs text-danger" style={{ opacity: 0.8 }}>{cloudMode?'正式雲端禁止瀏覽器直接清空資料；此工具僅限目前本機資料。':'將清空目前本機資料，操作無法復原。'}</div>
               </div>
-              <button className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white' }} disabled={currentMode === 'cloud'} onClick={handleClear}>
+              <button className="btn" style={{ backgroundColor: 'var(--color-danger)', color: 'white' }} disabled={cloudMode} onClick={handleClear}>
                 <Trash2 size={16} /> 清空 Reset
               </button>
             </div>

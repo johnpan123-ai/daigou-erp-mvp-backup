@@ -78,7 +78,7 @@ export const toCloudFieldRow = (
       priority: text(row.priority, 'Medium'), purchase_date: optionalText(row.purchase_date),
       closing_date: optionalText(row.closing_date), release_month: optionalText(row.release_month),
       has_official_site: bool(row.has_official_site), product_url: optionalText(row.product_url),
-      proxy_agent: optionalText(row.proxy_agent), show_in_purchase_list: bool(row.show_in_purchase_list),
+      proxy_agent: optionalText(row.proxy_agent), show_in_purchase_list: bool(row.show_in_purchase_list, true),
     };
     case 'product_categories': return {
       ...common(entity, row), local_id: localId, product_group_id: optionalText(row.product_group_id),

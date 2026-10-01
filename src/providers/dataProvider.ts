@@ -28,6 +28,8 @@ import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
+import type { PrivateOrderTransactionCommand } from './cloud/privateOrderTransaction';
+import type { RelatedTransactionCommand } from './cloud/relatedTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type {
@@ -368,6 +370,15 @@ class DynamicDataProvider implements IDataProvider {
       await restoreDeadlineDurableBackup('next', before);
       throw error;
     }
+  }
+  async savePrivateOrderTransaction(command: PrivateOrderTransactionCommand): Promise<void> {
+    await this.guardedWrite(() => this.getActiveProvider().savePrivateOrderTransaction(command));
+  }
+  async reconcilePrivateOrderTransaction(command: PrivateOrderTransactionCommand):Promise<boolean> {
+    return this.getActiveProvider().reconcilePrivateOrderTransaction(command); // SELECT-only; no stale/write guard is relaxed.
+  }
+  async applyRelatedTransaction(command:RelatedTransactionCommand):Promise<void> {
+    await this.guardedWrite(()=>this.getActiveProvider().applyRelatedTransaction(command));
   }
   async clearData(): Promise<void> {
     return this.guardedWrite(() => this.getActiveProvider().clearData());
