@@ -42,6 +42,40 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '051': {
+    sourceFile:'051_related_saveability_atomic_transactions.sql',dependencies:['050'],
+    risk:'LOW_ADDITIVE',idempotency:'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',
+    preconditions:[fn('erp_apply_field_mutations(text,jsonb)'),table('erp_idempotency_keys')],
+    postconditions:[fn('erp_apply_related_transaction(uuid,jsonb)',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
+      definitionIncludes:['expectedRecords','erp_apply_field_mutations'],
+    })],
+  },
+  '050': {
+    sourceFile:'050_catalog_atomic_transaction.sql',dependencies:['049'],
+    risk:'LOW_ADDITIVE',idempotency:'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',
+    preconditions:[fn('erp_apply_field_mutations(text,jsonb)'),table('erp_idempotency_keys')],
+    postconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
+      definitionIncludes:['dependencies','SHARE ROW EXCLUSIVE','erp_apply_field_mutations'],
+    })],
+  },
+  '049': {
+    sourceFile:'049_private_order_atomic_transaction.sql',dependencies:['048'],
+    risk:'LOW_ADDITIVE',idempotency:'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',
+    preconditions:[fn('erp_apply_field_mutations(text,jsonb)'),table('private_orders'),table('private_order_items'),table('erp_idempotency_keys')],
+    postconditions:[fn('erp_apply_private_order_transaction(uuid,jsonb)',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
+      definitionIncludes:['expectedItems','expectedParentVersion','erp_apply_field_mutations'],
+    }),fn('erp_reconcile_private_order_transaction(uuid,jsonb)',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
+      definitionIncludes:['request_payload','private-order','committed'],
+    })],
+  },
   '018': {
     sourceFile: '018_cloud_import_batch_canonical.sql', dependencies: ['001', '002-core', '011'],
     risk: 'LOW_ADDITIVE', idempotency: 'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY', repairClosure: '018b',

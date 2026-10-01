@@ -47,6 +47,9 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql',
   '048_erp2_live_canonical_contract_reconciliation.sql',
+  '049_private_order_atomic_transaction.sql',
+  '050_catalog_atomic_transaction.sql',
+  '051_related_saveability_atomic_transactions.sql',
 ]);
 
 // Checksum-bearing source history. These artifacts remain reviewable and are
@@ -62,6 +65,9 @@ export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
   '046b_waca_myacg_parent_compatibility_repair.sql',
   '047_erp_schema_migration_ledger.sql',
   '048_erp2_live_canonical_contract_reconciliation.sql',
+  '049_private_order_atomic_transaction.sql',
+  '050_catalog_atomic_transaction.sql',
+  '051_related_saveability_atomic_transactions.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,
