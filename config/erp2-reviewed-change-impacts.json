@@ -366,6 +366,170 @@
           "schemaExpectation": "No schema change; tests use synthetic isolated data only."
         }
       ]
+    },
+    {
+      "id": "waca-spec-code-identity-v1",
+      "beforeHead": "bc09ca3ba518f9b5328d3679e1458535e74db304",
+      "reviewedHead": "3396f2e1dc930383ebd037f3875a90cb44ca46a9",
+      "requiredRegressions": [
+        "spec-code",
+        "domain",
+        "pending",
+        "legacy-modern",
+        "cloud-next",
+        "registry",
+        "provider",
+        "cloud-restore",
+        "postgrest",
+        "execute-envelope",
+        "sync",
+        "promotion",
+        "guard"
+      ],
+      "files": [
+        {
+          "file": "src/pages/WacaIntegration.tsx",
+          "beforeHash": "4f08a9c8f1be025c274b990a3c67dc76b84c0e5ab4b7e107de43285591d29889",
+          "afterHash": "21537a8f036a0320136df683b8580231e7159b9f07cd8852c91f8fb8774dd27f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "manualMap",
+            "choicesFor",
+            "explanations",
+            "preview"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Candidate/preview follows same spec-code identity and shows both corrected target and old-target quantity change.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "src/waca/orderCore.ts",
+          "beforeHash": "a0b430051a7210fc6a2841ad2c3e709b915f497ad0e27fb316d2d901ef3f41bb",
+          "afterHash": "4406ccce8150f8e26a3e98228da6818621ead2bdb728f43f0d9fd5db6eb03c89",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "wacaFeature",
+            "matchWacaItem",
+            "resolveWacaItem",
+            "setWacaMapping",
+            "importWacaRows"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Existing JSON feature gains specCode component; existing durable item keys remain unchanged to prevent SQL upsert duplicates. New mappings use existing fields; historical manual records remain.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/next-waca-order-integration.mjs",
+          "beforeHash": "ce748e6ccb07b1e2d2f92865911b2bc94b2e3fab8a7d8693e04a6b5c0668f3d0",
+          "afterHash": "2b6895ed2c680bb0bdc44ccede1e2dcfe8bfe30bfaf7ea58dd66f0f9be08c7dc",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/next-waca-ui.mjs",
+          "beforeHash": "1447f098f3c8edd33a737eed580359553cbfd3f7d89bba6b9b6ca917d4d8de93",
+          "afterHash": "fac649685c9dbf04e3c0329131ccb0161ca5716666d6d372a9601c6768bd1e0f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/waca-cloud-ui-parity.mjs",
+          "beforeHash": "b74b531d903ebc4da77463d0a9041a6c5c0d990d2c1f257aae4b827e417532e1",
+          "afterHash": "81cd604deb6173a39700b989e2ffda944a6fe604f866af86b579f5b2cb06326a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/waca-matching-closure-v2.mjs",
+          "beforeHash": "09cc63c384d07fc6c3d7ef02e5c98406b4801d30d6f46884615e296b4d69962f",
+          "afterHash": "34567ee3fd43a65bcfbb806ae1dff0d4bfa4a90e2ad4b126a97ec435bafc25a2",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/waca-pending-reimport.mjs",
+          "beforeHash": "ef0692b880fcc102d84b33ad15b9e97ef969d5a43039a8b93b6484f120e61302",
+          "afterHash": "01b5c292a0dd70a3b4cf74215edddb900ed4c59c5d5a43a18408e6a9750486ae",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/waca-postgrest-isolated-v3.mjs",
+          "beforeHash": "8e9a9b5c2eb5b0853220c7dfb2bed5886dc473b83c83255b2d08f35d1f0a6119",
+          "afterHash": "a7ac0582950ca49c47a0c1785e3c7aacfa4eca1aeec0a297805783619fdd8d9c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        },
+        {
+          "file": "tests/waca-spec-code-matching.mjs",
+          "beforeHash": null,
+          "afterHash": "ef6fde4a4597923d95c711f8276ee2a863a803c6a7c624a208f48dfe40d31529",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated specification-code regression"
+          ],
+          "dataFlow": "Separate parent productCode from variant specCode. Unique normalized specification code selects ERP SKU; blank/conflicting codes remain pending. Revalidate old AUTO and preserve MANUAL audit.",
+          "persistenceBehavior": "Synthetic isolated fixtures only; no live writes.",
+          "writePath": "Existing snapshot RPC/CAS/atomic transaction and full SUM recompute unchanged; no direct table write.",
+          "providerPath": "Same NEXT/Cloud domain and provider boundary, no provider implementation change.",
+          "externalContract": "No new serialized field, table, column, RPC signature, grant, registry or backup format. specCode already durable in item JSON.",
+          "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
+        }
+      ]
     }
   ]
 }

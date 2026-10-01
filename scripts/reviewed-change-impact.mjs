@@ -13,6 +13,7 @@ export const regressionScripts = Object.freeze({
   guard: 'tests/erp2-reviewed-change-impact.mjs',
   promotion: 'tests/erp2-promotion-guard.mjs',
   domain: 'tests/next-waca-order-integration.mjs',
+  'spec-code': 'tests/waca-spec-code-matching.mjs',
   pending: 'tests/waca-pending-reimport.mjs',
   'legacy-modern': 'tests/waca-backup-cutover-v3.mjs',
   'cloud-next': 'tests/cloud-backup-next-restore-e2e.mjs',

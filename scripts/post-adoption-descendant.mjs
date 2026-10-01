@@ -209,7 +209,14 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
     return sources.get(key);
   };
   const changed = git(['diff', '--name-only', '--no-renames', baseline, candidate.head, '--']).trim().split(/\r?\n/u).filter(Boolean);
-  const reviews = reviewForCandidate(git, candidate.head);
+  // Validate the full immutable review history, then classify only patches
+  // after this adopted baseline. Earlier accepted patches are already part of
+  // its tree, not a pre-patch gap in a later release. No path/hash exemption.
+  const reviews = reviewForCandidate(git, candidate.head).filter(review => {
+    try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, baseline]); }
+    catch { return true; }
+    return false;
+  });
   const usedReviews = new Set();
   const classified = changed.map(file => {
     const before = source(baseline, file, oldSet.has(file));

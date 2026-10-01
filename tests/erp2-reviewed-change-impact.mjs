@@ -21,7 +21,9 @@ const offlineGit = args => {
   return realGit(args);
 };
 const actualMutationHead = 'f79d7d6b4a23199e2c5a37a082bca134375bc69f';
-const candidate = { head: reviewedImpacts.reviews.at(-1).reviewedHead, checkpointTag: 'checkpoint-unit-fixture', branch: 'codex/next-waca-order-integration-v1' };
+// Keep the historical v4 fixture fixed: later schema baselines cannot be
+// treated as UI-only descendants of the old v4 canonical contract.
+const candidate = { head: 'de2ccc03f6557d05db8709ce4586f6c8d9a146f2', checkpointTag: 'checkpoint-unit-fixture', branch: 'codex/next-waca-order-integration-v1' };
 const inspection = inspectSafeDescendant({ git: offlineGit, candidate, baselineRecord });
 assert.equal(inspection.result, 'PASS'); assert.equal(inspection.unknownFiles, 0);
 assert.equal(inspection.schemaSensitiveFiles, 0); assert.equal(inspection.persistenceSchemaNeutralFiles, 8);
@@ -45,7 +47,7 @@ const evidence = sealImpactEvidence({ schemaVersion: 1, kind: 'ERP2_REVIEWED_CHA
     outputChecksum: impactHash('unit evidence only, not a claim of test execution'), result: 'PASS', exitCode: 0, elapsedMs: 1 })) });
 assert.equal(verifySafeDescendant({ git: offlineGit, candidate, baselineRecord, changeImpactEvidence: evidence }).regressionEvidence.result, 'PASS');
 assert.throws(() => verifySafeDescendant({ git: offlineGit, candidate, baselineRecord }), /FAILED_CLOSED/u);
-for (const review of reviewedImpacts.reviews) {
+for (const review of reviewForCandidate(offlineGit, candidate.head)) {
   for (const row of review.files.filter(row => row.file.startsWith('src/'))) {
     const mutatedGit = args => args[0] === 'show' && args[1] === `${candidate.head}:${row.file}`
       ? offlineGit(args) + '\nexport const unsafeFutureWrite = 1;' : offlineGit(args);
@@ -76,6 +78,31 @@ verifyBad({ ...unsigned, regressions: unsigned.regressions.map((r, i) => i ? r :
 verifyBad({ ...unsigned, regressions: unsigned.regressions.map((r, i) => i ? r : { ...r, scriptChecksum: '0'.repeat(64) }) });
 verifyBad({ ...unsigned, inspection: { ...inspection, candidateHead: baseline } });
 assert.throws(() => inspectSafeDescendant({ git: args => args[0] === '--no-replace-objects' ? (() => { throw new Error('unrelated'); })() : offlineGit(args), candidate, baselineRecord }), /FAILED_CLOSED/u);
+const specReview = reviewedImpacts.reviews.find(review => review.id === 'waca-spec-code-identity-v1');
+assert.ok(specReview);
+const v5Tag = 'checkpoint-20261001-erp2-v5-final-canonical-reconciliation-v1';
+const v5Baseline = { sourceHead: specReview.beforeHead, checkpoint: v5Tag };
+const specCandidate = { ...candidate, head: specReview.reviewedHead };
+const v5Git = args => args[0] === 'ls-remote'
+  ? `${v5Baseline.sourceHead}\trefs/tags/${v5Tag}^{}\n` : offlineGit(args);
+const specInspection = inspectSafeDescendant({ git: v5Git, candidate: specCandidate, baselineRecord: v5Baseline });
+assert.equal(specInspection.mode, 'SAFE_DESCENDANT');
+assert.equal(specInspection.schemaSensitiveFiles, 0);
+assert.equal(specInspection.migrationChecksumParity, 'PASS');
+assert.equal(specInspection.canonicalContractParity, 'PASS');
+assert.ok(specInspection.requiredRegressions.includes('spec-code'));
+assert.ok(!specInspection.requiredRegressions.includes('mutation-native'), 'already adopted patches do not expand this release review');
+assert.deepEqual([...new Set(specInspection.changedFiles.flatMap(row => row.reviewIds ?? []))], [specReview.id]);
+for (const file of ['src/waca/orderCore.ts', 'src/pages/WacaIntegration.tsx',
+  'supabase/sql/049_private_order_atomic_transaction.sql', 'tools/schema-reconciliation/schemaContract.mjs',
+  'src/lib/durableResourceRegistry.ts', 'src/providers/cloud/supabaseProvider.ts']) {
+  const badGit = args => args[0] === 'show' && args[1] === `${specCandidate.head}:${file}`
+    ? v5Git(args) + '\nexport const unreviewedFutureContract = 1;' : v5Git(args);
+  assert.throws(() => inspectSafeDescendant({ git: badGit, candidate: specCandidate, baselineRecord: v5Baseline }), /FAILED_CLOSED/u, file);
+}
+assert.throws(() => inspectSafeDescendant({ git: v5Git, candidate: specCandidate, baselineRecord: {
+  ...v5Baseline, sourceHead: candidate.head } }), /FAILED_CLOSED/u, 'cannot relabel an old baseline as v5');
+console.log('PASS v5 adopted review anchoring: only exact post-baseline spec patch; future hunks/SQL/provider/registry drift still blocked');
 console.log('PASS exact WACA and mutation patches A/B/C; unchanged SQL, canonical, provider RPC and Backup/Restore contract; baseline immutable');
 console.log('PASS future db/WACA/provider hunks, SQL/RLS/resource/RPC/allowlist drift, unknown files and missing/stale/failed/tampered evidence fail closed');
 console.log('Unit fixtures only; real release regression execution is required separately; live writes=0');
