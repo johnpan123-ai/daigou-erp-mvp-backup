@@ -2064,7 +2064,9 @@ export class SupabaseProvider implements IDataProvider {
       const activeOrders = changedOrNewRows(currentLocal, orders).filter(o => isValidUuid(o.id) && isValidUuid(o.product_group_id));
       if (activeOrders.length === 0) {
         console.log('[Private Order Sync] skip empty active cloud upsert for private_orders');
-        await this.refreshAcknowledgedCloudRows('private_orders', removedOrders.map(order => ({ databaseId: order.id, canonicalId: order.id })));
+        // An unchanged survivor does not mean there are no mutations: a
+        // delete-only diff must reach field CAS before acknowledging/cache refresh.
+        if (removedOrders.length > 0) await this.applyCloudCollection('private_orders', currentLocal, orders);
         return;
       }
 

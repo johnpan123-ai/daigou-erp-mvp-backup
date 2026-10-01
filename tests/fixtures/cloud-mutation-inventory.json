@@ -31,5 +31,6 @@
     "auto_quantities": "DERIVED; reject inline edit; existing dedicated import/recompute and collection contract unchanged"
   },
   "affectedUiBuilders": ["handleUpdateDefaultJpyCost", "handleUpdateDefaultTwdCost", "handleUpdatePlatformDemand", "handleApplyMasterCostToAll", "handleApplyMasterCostToCategory"],
+  "relatedWritePathFix": {"method": "savePrivateOrders", "reproduced": "Delete one order while another is unchanged: old provider returned success with no mutation RPC", "repair": "Route existing delete-only collection diff through unchanged field-CAS delete before acknowledgement", "safety": "Server rejection preserves cache; retry touches only deleted order; no schema/RPC/field/policy change"},
   "liveReadOnlyImpact": {"exactAffectedVariant": "NOT_UNIQUELY_IDENTIFIED", "reason": "Multiple live groups match 玩偶; no SKU supplied. Existing user editing tab was not disturbed.", "oldErrorDispatch": "Actual old handler -> strict builder rejects updated_at before RPC dispatch; isolated captured RPC dispatch count = 0", "live4500WrittenByAgent": false}
 }
