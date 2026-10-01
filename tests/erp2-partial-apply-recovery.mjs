@@ -5,7 +5,8 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import { planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
-import { fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/schemaContract.mjs';
+// This fixture verifies the frozen pre-v5 migration baseline, not promotion.
+import { fingerprintStructuralSnapshotV2 as fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/schemaContract.mjs';
 
 const EXPECTED_FINGERPRINT = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');

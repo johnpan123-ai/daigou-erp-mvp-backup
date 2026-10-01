@@ -6,7 +6,7 @@ import {isolatedDatabase} from './helpers/saveability-isolated.mjs';
 import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
 import {buildMigrationEffectRegistry} from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import {planSchemaDelta} from '../tools/schema-reconciliation/reconcile.mjs';
-import {fingerprintStructuralSnapshot} from '../tools/schema-reconciliation/schemaContract.mjs';
+import {fingerprintStructuralSnapshot,fingerprintStructuralSnapshotV2} from '../tools/schema-reconciliation/schemaContract.mjs';
 const files=CANONICAL_FRESH_INSTALL_V3.slice(-3);
 assert.deepEqual(files,['049_private_order_atomic_transaction.sql','050_catalog_atomic_transaction.sql','051_related_saveability_atomic_transactions.sql']);
 const base=CANONICAL_FRESH_INSTALL_V3.slice(0,-3);
@@ -22,7 +22,7 @@ const fresh=await isolatedDatabase();let upgrade;
 try{
   upgrade=await isolatedDatabase({migrations:base});
   const before=await capture(upgrade);const plan=planSchemaDelta(before,registry);
-  assert.equal(fingerprintStructuralSnapshot(before),'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317');
+  assert.equal(fingerprintStructuralSnapshotV2(before),'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317');
   assert.equal(plan.readyForApply,true);assert.deepEqual(plan.applyPlan.map(e=>e.migrationId),['049','050','051']);
   assert.equal(plan.blockers.length,0);
   const businessSnapshot=async db=>(await db.sql.query('select public.erp_cloud_restore_snapshot() result')).rows[0].result;
@@ -63,6 +63,6 @@ try{
     assert.equal(hash(current),hash(baseline),'Previously adopted SQL changed:'+file);
   }
   console.log(JSON.stringify({PASS:true,engine:'native PostgreSQL',isolated048Delta:plan.applyPlan.map(e=>e.migrationId),freshUpgradeParity:true,
-    v4Fingerprint:fingerprintStructuralSnapshot(before),semanticFingerprint:fingerprintStructuralSnapshot(after),partialPlans,
+    v4Fingerprint:fingerprintStructuralSnapshotV2(before),semanticFingerprint:fingerprintStructuralSnapshot(after),partialPlans,
     reapply:true,existingMigrationChecksumsUnchanged:true,ACL:true,newTables:0,newDurableResources:0,businessFixtureMutation:0,liveApply:0}));
 }finally{await upgrade?.close();await fresh.close();}
