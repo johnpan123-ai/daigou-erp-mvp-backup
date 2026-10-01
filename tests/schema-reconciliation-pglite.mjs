@@ -10,6 +10,10 @@ import { fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/sc
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
+const saveabilityFiles = CANONICAL_FRESH_INSTALL_V3.slice(-3);
+const v4Fingerprint = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
+const v5Fingerprint = '0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef';
+const partialPlans = [];
 
 async function createDatabase() {
   const db = await PGlite.create({ extensions: { pgcrypto } });
@@ -52,8 +56,13 @@ const upgraded = await createDatabase();
 const partialBridge = await createDatabase();
 const compatibility = await createDatabase();
 try {
-  await apply(fresh, CANONICAL_FRESH_INSTALL_V3, 'fresh');
+  assert.deepEqual(saveabilityFiles.map(file => file.slice(0, 3)), ['049', '050', '051']);
+  await apply(fresh, CANONICAL_FRESH_INSTALL_V3.slice(0, -3), 'fresh-v4');
+  const freshV4Snapshot = await capture(fresh);
+  assert.equal(fingerprintStructuralSnapshot(freshV4Snapshot), v4Fingerprint);
+  await apply(fresh, saveabilityFiles, 'fresh-v5');
   const freshSnapshot = await capture(fresh);
+  assert.equal(fingerprintStructuralSnapshot(freshSnapshot), v5Fingerprint);
   const bridgeIndex = CANONICAL_FRESH_INSTALL_V3.indexOf('026b_cloud_inventory_uuid_identity_bridge.sql');
   const wacaStart = CANONICAL_FRESH_INSTALL_V3.indexOf('044_waca_cloud_ledger.sql');
   await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(0, bridgeIndex), 'pre-bridge');
@@ -85,7 +94,7 @@ try {
 
   const registry = await buildMigrationEffectRegistry();
   const plan = planSchemaDelta(freshSnapshot, registry, { expectedSnapshot: upgradedSnapshot,
-    requiredBaselineId: 'erp2-canonical-schema-v4' });
+    requiredBaselineId: 'erp2-canonical-schema-v5-saveability' });
   const failed = plan.migrations.filter(item => item.state !== 'SATISFIED');
   assert.deepEqual(failed.map(item => ({ id: item.migrationId, state: item.state,
     failed: item.postconditions.filter(check => check.result !== 'MATCH').map(check => check.condition.object) })), []);
@@ -117,10 +126,45 @@ try {
     '048_erp2_live_canonical_contract_reconciliation.sql',
   ], 'live-like-ledger-and-contract');
   const repairedSnapshot = await capture(compatibility);
-  assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), fingerprintStructuralSnapshot(freshSnapshot));
+  assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), v4Fingerprint);
+  assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), fingerprintStructuralSnapshot(freshV4Snapshot));
   const repairedPlan = planSchemaDelta(repairedSnapshot, registry, { expectedSnapshot: freshSnapshot });
   assert.ok(['046','046b','047','048'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
-  console.log('PASS live-like 046 conflict repairs idempotently, unblocks 047, and converges to fresh target');
+  assert.equal(repairedPlan.readyForApply, true);
+  assert.deepEqual(repairedPlan.applyPlan.map(item => item.migrationId), ['049', '050', '051']);
+  console.log('PASS fresh and repaired live-like 048 preserve the independent v4 baseline fingerprint');
+
+  for (const [index, file] of saveabilityFiles.entries()) {
+    await apply(compatibility, [file], 'v4-to-v5');
+    const stage = await capture(compatibility);
+    const stagePlan = planSchemaDelta(stage, registry, { expectedSnapshot: freshSnapshot });
+    const remaining = saveabilityFiles.slice(index + 1).map(entry => entry.slice(0, 3));
+    assert.equal(stagePlan.readyForApply, true);
+    assert.equal(stagePlan.blockers.length, 0);
+    assert.deepEqual(stagePlan.applyPlan.map(item => item.migrationId), remaining);
+    partialPlans.push({ applied: file.slice(0, 3), remaining });
+  }
+  const finalSnapshot = await capture(compatibility);
+  assert.equal(fingerprintStructuralSnapshot(finalSnapshot), v5Fingerprint);
+  assert.deepEqual(Object.keys(finalSnapshot.tables).sort(), Object.keys(repairedSnapshot.tables).sort());
+  await apply(compatibility, saveabilityFiles, 'v5-replay');
+  assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), v5Fingerprint);
+
+  const partialV5 = structuredClone(finalSnapshot);
+  delete partialV5.functions['public.erp_reconcile_private_order_transaction(uuid, jsonb)'];
+  // Catalog capture uses PostgreSQL's canonical regprocedure signature spacing.
+  for (const key of Object.keys(partialV5.functions)) {
+    if (key.startsWith('public.erp_reconcile_private_order_transaction(')) delete partialV5.functions[key];
+  }
+  const partialV5Plan = planSchemaDelta(partialV5, registry, { expectedSnapshot: freshSnapshot });
+  assert.equal(partialV5Plan.migrations.find(item => item.migrationId === '049').state, 'PARTIAL');
+  assert.equal(partialV5Plan.readyForApply, false);
+  const unknownV5 = structuredClone(finalSnapshot);
+  unknownV5.completeness.functions = false;
+  const unknownV5Plan = planSchemaDelta(unknownV5, registry, { expectedSnapshot: freshSnapshot });
+  assert.equal(unknownV5Plan.readyForApply, false);
+  assert.ok(unknownV5Plan.migrations.some(item => item.state === 'UNKNOWN'));
+  console.log('PASS v4→049→050→051 partial planners, final v5, reapply, and UNKNOWN/PARTIAL fail-closed');
 
   const owner = '00000000-0000-4000-8000-000000000099';
   await fresh.exec(`insert into auth.users(id,email) values('${owner}','owner@example.com');
@@ -128,7 +172,7 @@ try {
     set role authenticated; set request.jwt.claim.sub='${owner}';`);
   const metadata = JSON.stringify({ historicalMigrationExecutionClaimed: false,
     classification: 'ENVIRONMENT_LOCAL_NON_PORTABLE_OPS_METADATA' });
-  const args = ['BASELINE_ADOPTED','erp2-canonical-schema-v4','a'.repeat(64),'c'.repeat(40),
+  const args = ['BASELINE_ADOPTED','erp2-canonical-schema-v5-saveability','a'.repeat(64),'c'.repeat(40),
     'checkpoint-fixture','b'.repeat(64),'b'.repeat(64),'PRODUCTION','rhfdjsklfrgpoqsaqpkn','PASS',metadata];
   const placeholders = args.map((_, index) => index === args.length - 1
     ? `$${index + 1}::jsonb` : `$${index + 1}`).join(',');
@@ -143,4 +187,6 @@ try {
   await fresh.close(); await upgraded.close(); await partialBridge.close(); await compatibility.close();
 }
 
-console.log(JSON.stringify({ result: 'PASS', engine: 'PGlite PostgreSQL 18', liveMutation: 0 }));
+console.log(JSON.stringify({ result: 'PASS', engine: 'PGlite PostgreSQL 18',
+  v4Fingerprint, v5Fingerprint, partialPlans, reapply: true, unknownPartialFailClosed: true,
+  liveMutation: 0 }));

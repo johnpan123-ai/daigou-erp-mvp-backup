@@ -84,7 +84,12 @@ const verifyPlannerContract = (evidence, migrationRegistry) => {
     || evidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(evidence)) {
     failClosed('schema planner evidence identity mismatch');
   }
-  if (!migrationRegistry || !exactJson(Object.keys(migrationRegistry), evidence.migrations.map(item => item.migrationId))) {
+  // Registry property insertion order is not a migration execution contract.
+  // Match the exact scope in source canonical order; the loop below still
+  // verifies each checksum, dependency, and strictly increasing plan order.
+  const registryIds = migrationRegistry && Object.keys(migrationRegistry)
+    .sort((left, right) => migrationRegistry[left].canonicalOrder - migrationRegistry[right].canonicalOrder);
+  if (!registryIds || !exactJson(registryIds, evidence.migrations.map(item => item.migrationId))) {
     failClosed('schema planner registry scope mismatch');
   }
   const ids = new Set();

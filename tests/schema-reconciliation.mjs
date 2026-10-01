@@ -18,7 +18,10 @@ import { readdir } from 'node:fs/promises';
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
-assert.deepEqual(Object.keys(registry), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048']);
+assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051'].sort());
+assert.deepEqual(registry['049'].dependencies, ['048']);
+assert.deepEqual(registry['050'].dependencies, ['049']);
+assert.deepEqual(registry['051'].dependencies, ['050']);
 for (const effect of Object.values(registry)) {
   assert.match(effect.sourceChecksum, /^[0-9a-f]{64}$/u);
   assert.ok(effect.sourceEffects.transactionWrapped);
@@ -295,6 +298,16 @@ const fixtureNow = Date.parse(evidence.snapshotIdentity.capturedAt);
 assert.equal(verifySchemaBaselineEvidence({ evidence, contract: fixtureContract, candidate: {
   head: evidence.sourceHead, checkpointTag: evidence.checkpoint,
 }, liveObservation, migrationRegistry: registry, now: fixtureNow }).result, 'PASS');
+const verifyRegistry = migrationRegistry => verifySchemaBaselineEvidence({ evidence,
+  contract: fixtureContract, candidate: { head: evidence.sourceHead, checkpointTag: evidence.checkpoint },
+  liveObservation, migrationRegistry, now: fixtureNow });
+assert.equal(verifyRegistry(Object.fromEntries(Object.entries(registry).reverse())).result, 'PASS');
+const missingRegistry = { ...registry }; delete missingRegistry['050'];
+assert.throws(() => verifyRegistry(missingRegistry), /registry scope mismatch/u);
+assert.throws(() => verifyRegistry({ ...registry, '999': { ...registry['051'], canonicalOrder: 999 } }), /registry scope mismatch/u);
+const changedOrderRegistry = { ...registry, '050': { ...registry['050'], canonicalOrder: 999 } };
+assert.throws(() => verifyRegistry(changedOrderRegistry), /FAILED_CLOSED/u);
+console.log('PASS v5 registry insertion order is irrelevant; missing/unknown/changed canonical order fails closed');
 const postAdoptionEvidence = sealSchemaEvidence({ ...evidence, mode: 'POST_ADOPTION', migrationHistoryProvenance: 'AVAILABLE',
   baselineRecord: {
     ...adoption, eventKey: contract.schemaBaseline.requiredBaselineId,

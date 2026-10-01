@@ -22,17 +22,29 @@ const fresh=await isolatedDatabase();let upgrade;
 try{
   upgrade=await isolatedDatabase({migrations:base});
   const before=await capture(upgrade);const plan=planSchemaDelta(before,registry);
+  assert.equal(fingerprintStructuralSnapshot(before),'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317');
   assert.equal(plan.readyForApply,true);assert.deepEqual(plan.applyPlan.map(e=>e.migrationId),['049','050','051']);
   assert.equal(plan.blockers.length,0);
-  const count=async db=>(await db.sql.query('select count(*)::int n from public.product_variants')).rows[0].n;
-  const oldCount=await count(upgrade);
-  for(const file of files)await upgrade.sql.query(read('supabase/sql/'+file));
+  const businessSnapshot=async db=>(await db.sql.query('select public.erp_cloud_restore_snapshot() result')).rows[0].result;
+  const oldBusiness=await businessSnapshot(upgrade);
+  assert.equal(Object.keys(oldBusiness).length,24);
+  const partialPlans=[];
+  for(const [index,file] of files.entries()){
+    await upgrade.sql.query(read('supabase/sql/'+file));
+    const stage=planSchemaDelta(await capture(upgrade),registry);
+    const remaining=files.slice(index+1).map(entry=>entry.slice(0,3));
+    assert.equal(stage.readyForApply,true);assert.equal(stage.blockers.length,0);
+    assert.deepEqual(stage.applyPlan.map(entry=>entry.migrationId),remaining);
+    assert.deepEqual(await businessSnapshot(upgrade),oldBusiness,'Migration changed durable business data:'+file);
+    partialPlans.push({applied:file.slice(0,3),remaining});
+  }
   const after=await capture(upgrade);const canonical=await capture(fresh);
   const contract=JSON.parse(read('config/erp-environment-identity.json'));
   assert.equal(contract.schemaBaseline.canonicalFingerprint,fingerprintStructuralSnapshot(canonical),'Candidate canonical source identity stale');
   assert.equal(contract.schemaBaseline.requiredBaselineId,'erp2-canonical-schema-v5-saveability');
   assert.equal(fingerprintStructuralSnapshot(after),fingerprintStructuralSnapshot(canonical),'Fresh/048-upgrade schema drift');
-  assert.equal((await count(upgrade)),oldCount,'Additive source changed business rows');
+  assert.deepEqual(Object.keys(after.tables).sort(),Object.keys(before.tables).sort(),'Migration added business tables');
+  assert.deepEqual(await businessSnapshot(upgrade),oldBusiness,'Additive source changed business rows');
   const finalPlan=planSchemaDelta(after,registry);assert.equal(finalPlan.blockers.length,0);assert.equal(finalPlan.applyPlan.length,0);
   for(const file of files)await upgrade.sql.query(read('supabase/sql/'+file));
   assert.equal(fingerprintStructuralSnapshot(await capture(upgrade)),fingerprintStructuralSnapshot(after),'Migration reapply drift');
@@ -51,5 +63,6 @@ try{
     assert.equal(hash(current),hash(baseline),'Previously adopted SQL changed:'+file);
   }
   console.log(JSON.stringify({PASS:true,engine:'native PostgreSQL',isolated048Delta:plan.applyPlan.map(e=>e.migrationId),freshUpgradeParity:true,
-    semanticFingerprint:fingerprintStructuralSnapshot(after),reapply:true,existingMigrationChecksumsUnchanged:true,ACL:true,newTables:0,liveApply:0}));
+    v4Fingerprint:fingerprintStructuralSnapshot(before),semanticFingerprint:fingerprintStructuralSnapshot(after),partialPlans,
+    reapply:true,existingMigrationChecksumsUnchanged:true,ACL:true,newTables:0,newDurableResources:0,businessFixtureMutation:0,liveApply:0}));
 }finally{await upgrade?.close();await fresh.close();}
