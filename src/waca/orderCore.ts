@@ -285,6 +285,18 @@ export function importWacaRows(
       }
     }
   }
+  // A catalogue product may be added after its orders were saved as pending.
+  // Reusing a confirmed feature mapping must also resolve those historical
+  // items, including orders omitted from the current file. This preserves their
+  // original quantities/statuses and avoids importing or incrementing them again.
+  for (const item of repo.items.values()) {
+    if (item.productVariantId) continue;
+    const mapping = repo.mappings.get(item.feature);
+    if (!mapping) continue;
+    item.productVariantId = mapping.productVariantId;
+    item.match = mapping.method === 'MANUAL' ? 'MANUAL_MATCH' : 'AUTO_MATCH';
+    item.diagnostic = null;
+  }
   recomputeWacaQuantities(repo);
   const quantityChanges = [...new Set([...before.keys(), ...repo.autoQuantities.keys()])].sort().map(variantId => ({
     variantId, before: before.get(variantId) ?? 0, after: repo.autoQuantities.get(variantId) ?? 0,

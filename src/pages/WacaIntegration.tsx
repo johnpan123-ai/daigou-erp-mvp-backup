@@ -261,12 +261,16 @@ export default function WacaIntegration() {
       setPendingImport(null);
       setChosenFileName('');
       await load();
-      const remaining = result.unmatched + result.multipleCandidates + result.statusConflicts.length;
-      if (finalCheck.status === 'PASS' && remaining === 0) {
-        setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。`);
-      } else {
+      const pendingFeatures = new Set(finalSnapshot.items.filter(isPending).map(item => item.feature)).size;
+      const integrityIssues = finalCheck.issues.filter(issue => issue.reason !== 'UNMATCHED_SOURCE');
+      if (integrityIssues.length || result.statusConflicts.length) {
         setTab('pending');
-        setError(`WACA 訂單已保存，但有 ${finalCheck.issues.length + remaining} 個項目需要確認。`);
+        setError(`WACA 訂單已保存，但有 ${integrityIssues.length + result.statusConflicts.length} 個對帳或訂單狀態問題需要確認。`);
+      } else if (pendingFeatures) {
+        setTab('pending');
+        setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。建立商品後重新匯入 WACA Excel，即可自動配對並更新數量。`);
+      } else {
+        setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。`);
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
@@ -435,6 +439,7 @@ export default function WacaIntegration() {
     {tab === 'import' && <section className="waca-panel">
       <h2><FileSpreadsheet size={19} /> 匯入 WACA 訂單 Excel</h2>
       <p>選擇檔案後先看預覽；按「確認更新」前不會改動訂單或商品數量。</p>
+      <p>尚未建立或尚未配對的商品會保存為待處理，不影響其他商品匯入。建立商品後重新匯入，即可配對並重算已保存訂單的 WACA 數量。</p>
       <FileUploadButton accept=".xlsx,.xls" inputLabel="選擇 WACA Excel" label="匯入 WACA Excel"
         selectedFileName={pendingImport?.fileName || chosenFileName} disabled={busy || !snapshot}
         onFile={file => void handleWacaFile(file)} />
@@ -452,6 +457,7 @@ export default function WacaIntegration() {
         </div>
         <p className="waca-equation">新增 {pendingImport.result.inserted}、更新 {pendingImport.result.updated}、未變更 {pendingImport.result.unchanged}；
           取消／失敗 {pendingImport.result.cancelledOrders + pendingImport.result.failedOrders} 張訂單不計入數量。</p>
+        {pendingImport.items.some(isPending) && <p className="waca-notice">未配對商品會先保存為待處理，暫不計入商品 WACA 數量；建立商品後重新匯入即可更新。</p>}
         {pendingImport.result.errors.length > 0 && <p className="waca-danger">資料列錯誤：{pendingImport.result.errors.join('、')}</p>}
         <h3>商品數量變化</h3>
         <p>只顯示這次會改變數量的商品。點開商品群組可看各規格。</p>
@@ -535,7 +541,7 @@ export default function WacaIntegration() {
       {reconciliation?.issues.map((issue, index) => <div className="waca-pending-card" key={`reconcile-${issue.variantId}-${issue.sku}-${index}`}>
         <strong>{displayNameForVariant(issue.variantId, issue.productTitle)}／{issue.variantTitle}</strong>
         <p>SKU：{issue.sku}</p>{issue.reason === 'UNMATCHED_SOURCE'
-          ? <p>此商品尚未對應訂購紀錄表；有效訂單 {issue.sourceQuantity} 件尚未計入 WACA 數量。請先確認商品對照。</p>
+          ? <p>此商品尚未對應訂購紀錄表；有效訂單 {issue.sourceQuantity} 件已保存為待處理，暫不計入 WACA 數量。建立商品／規格後重新匯入，即可自動配對並更新數量；也可在商品對照中人工確認。</p>
           : <><p>來源訂單數量 {issue.sourceQuantity}，系統 WACA 數量 {issue.storedQuantity}，差異 {issue.difference > 0 ? '+' : ''}{issue.difference}。</p>
             <p>訂購紀錄表顯示 {issue.displayedQuantity}。請重新讀取後確認；若仍不一致，先不要繼續匯入。</p></>}
         <details className="waca-tech"><summary>查看技術資訊</summary>{issue.reason}／{issue.variantId}</details>

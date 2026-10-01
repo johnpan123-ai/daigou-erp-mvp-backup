@@ -115,6 +115,45 @@ assert.deepEqual(restored.autoQuantities, repo.autoQuantities);
 assert.equal(restored.manualAdjustments.get('vr'), 4);
 const audit = buildWacaCutoverAudit(variants.map(item => item.id === 'vr' ? { ...item, waca_auto_quantity: 10 } : item),
   new Map([['vr', 10]]), new Map([['vr', 9]]), '2026-09-28T00:00:00Z');
+const historicalAudit = { ...audit[0], productVariantId: 'deleted-or-not-yet-imported-variant' };
+const orphanCutover = { ...recovered, cutoverAudit: [historicalAudit] };
+validateNextWacaSnapshot(orphanCutover, variants);
+assert.deepEqual(repositoryFromSnapshot(orphanCutover, variants).autoQuantities, repo.autoQuantities);
+assert.deepEqual(orphanCutover.cutoverAudit, [historicalAudit], 'historical audit is preserved');
+assert.throws(() => validateNextWacaSnapshot({ ...orphanCutover,
+  cutoverAudit: [{ ...historicalAudit, productVariantId: '' }] }, variants), /CUTOVER_AUDIT_INVALID/);
+assert.throws(() => validateNextWacaSnapshot({ ...orphanCutover,
+  cutoverAudit: [{ ...historicalAudit, newOrderDerivedQuantity: NaN }] }, variants), /CUTOVER_AUDIT_INVALID/);
+assert.throws(() => validateNextWacaSnapshot({ ...recovered,
+  items: [{ ...recovered.items[0], productVariantId: 'missing-active-variant' }] }, variants), /ORPHAN_VARIANT/);
+
+// Orders can arrive before the catalogue. A later partial re-import resolves
+// every saved order of the confirmed feature, without repeating the old file.
+const pendingRepo = createWacaRepository();
+const cap = row({ productCode: 'GP-CAP', productTitle: '胡桃誕生日記念', spec1: '棒球帽', orderNumber: 'CAP-1' });
+const capMaster = [{ mainCode: 'GP-CAP', childCode: 'G-CAP', variantId: 'cap', productGroupId: 'cap-group',
+  productTitle: cap.productTitle, variantTitle: '棒球帽', active: true }];
+const firstPending = importWacaRows([cap], pendingRepo, [], 'cap-before-catalogue');
+assert.equal(firstPending.unmatched, 1);
+assert.equal(pendingRepo.items.size, 1);
+assert.equal(pendingRepo.autoQuantities.get('cap') ?? 0, 0);
+importWacaRows([cap], pendingRepo, capMaster, 'cap-after-catalogue');
+assert.equal(pendingRepo.autoQuantities.get('cap'), 1, '胡桃棒球帽 becomes 1 after re-import');
+for (let repeat = 0; repeat < 5; repeat++) {
+  importWacaRows([cap], pendingRepo, capMaster, `cap-repeat-${repeat}`);
+  assert.equal(pendingRepo.autoQuantities.get('cap'), 1);
+}
+const historicalPending = createWacaRepository();
+importWacaRows([cap, { ...cap, orderNumber: 'CAP-2' }, { ...cap, orderNumber: 'CAP-CANCEL', orderStatus: '取消' },
+  { ...cap, orderNumber: 'CAP-FAIL', orderStatus: '失敗' }], historicalPending, [], 'cap-history-pending');
+importWacaRows([{ ...cap, orderNumber: 'CAP-2' }], historicalPending, capMaster, 'cap-partial-reimport');
+assert.equal(historicalPending.autoQuantities.get('cap'), 2, 'saved effective orders are resolved, cancelled/failed stay zero');
+assert.equal(historicalPending.orders.size, 4);
+assert.ok([...historicalPending.items.values()].every(item => item.productVariantId === 'cap'));
+assert.equal(historicalPending.importHistory.length, 2, 'backfill does not generate a synthetic import');
+const ambiguousPending = createWacaRepository();
+importWacaRows([cap], ambiguousPending, [capMaster[0], { ...capMaster[0], variantId: 'other-cap' }], 'ambiguous');
+assert.equal(ambiguousPending.autoQuantities.size, 0, 'ambiguous products are never auto counted');
 assert.equal(audit.find(item => item.productVariantId === 'vr').legacyWacaQuantity, 4,
   'stored order-derived auto is excluded from legacy, while unknown pre-cutover manual is audited');
 const readback = {

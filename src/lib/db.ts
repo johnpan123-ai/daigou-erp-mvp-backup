@@ -2136,7 +2136,7 @@ const validateAtomicImportPayload = (jsonString: string, source: 'backup' | 'clo
           || (row.productVariantId && !variantIds.has(row.productVariantId)))) {
       throw new Error('JSON 備份 WACA 商品對照關聯不完整。');
     }
-    if (cutoverAudit.some(row => !variantIds.has(row.productVariantId)
+    if (cutoverAudit.some(row => typeof row.productVariantId !== 'string' || !row.productVariantId.trim()
       || !Number.isFinite(Number(row.legacyWacaQuantity))
       || !Number.isFinite(Number(row.newOrderDerivedQuantity)))) {
       throw new Error('JSON 備份 WACA 切換稽核無效。');

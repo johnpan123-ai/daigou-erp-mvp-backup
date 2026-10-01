@@ -108,7 +108,14 @@ export function validateNextWacaSnapshot(snapshot: NextWacaSnapshot, variants: r
     }
   }
   for (const row of snapshot.cutoverAudit ?? []) {
-    if (!variantIds.has(row.productVariantId)) throw new Error(`NEXT_WACA_ORPHAN_CUTOVER:${row.productVariantId}`);
+    // Historical cutover evidence can outlive a deleted product. Preserve the
+    // audit without requiring it to belong to the current catalogue; only
+    // active ledger items and mappings above participate in quantities.
+    if (typeof row.productVariantId !== 'string' || !row.productVariantId.trim()
+      || !Number.isFinite(Number(row.legacyWacaQuantity))
+      || !Number.isFinite(Number(row.newOrderDerivedQuantity))) {
+      throw new Error('NEXT_WACA_CUTOVER_AUDIT_INVALID');
+    }
   }
 }
 
