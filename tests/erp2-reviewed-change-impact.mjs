@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { inspectSafeDescendant, verifySafeDescendant, classifyDescendantFile, assertReviewedProviderContract } from '../scripts/post-adoption-descendant.mjs';
-import { sourceHash, impactHash, reviewedImpacts, regressionScripts, sealImpactEvidence } from '../scripts/reviewed-change-impact.mjs';
+import { sourceHash, impactHash, reviewedImpacts, regressionScripts, sealImpactEvidence, classifyReviewedFile, reviewForCandidate } from '../scripts/reviewed-change-impact.mjs';
 const baseline = '5cbf5137cb7a2e6fd6244606692feca5ba42521a';
 const tag = 'checkpoint-20260930-erp2-post-migration-canonical-reconciliation-v1-guard-closure';
 const baselineRecord = { sourceHead: baseline, checkpoint: tag };
@@ -21,13 +21,24 @@ const offlineGit = args => {
   return realGit(args);
 };
 const actualMutationHead = 'f79d7d6b4a23199e2c5a37a082bca134375bc69f';
-const candidate = { head: actualMutationHead, checkpointTag: 'checkpoint-unit-fixture', branch: 'codex/next-waca-order-integration-v1' };
+const candidate = { head: reviewedImpacts.reviews.at(-1).reviewedHead, checkpointTag: 'checkpoint-unit-fixture', branch: 'codex/next-waca-order-integration-v1' };
 const inspection = inspectSafeDescendant({ git: offlineGit, candidate, baselineRecord });
 assert.equal(inspection.result, 'PASS'); assert.equal(inspection.unknownFiles, 0);
 assert.equal(inspection.schemaSensitiveFiles, 0); assert.equal(inspection.persistenceSchemaNeutralFiles, 8);
 assert.equal(inspection.migrationChecksumParity, 'PASS'); assert.equal(inspection.backupContractParity, 'PASS');
 assert.equal(inspection.providerContractParity, 'PASS'); assert.equal(inspection.schemaBaselineMutated, false);
 assert.ok(inspection.requiredRegressions.includes('postgrest')); assert.ok(inspection.requiredRegressions.includes('mutation-native'));
+assert.ok(inspection.requiredRegressions.includes('private-delete'));
+const providerChain = reviewedImpacts.reviews.filter(review => review.files.some(row => row.file === 'src/providers/cloud/supabaseProvider.ts'));
+const latestProvider = realGit(['show', `${candidate.head}:src/providers/cloud/supabaseProvider.ts`]);
+assert.equal(classifyReviewedFile({ file: 'src/providers/cloud/supabaseProvider.ts', after: latestProvider, reviews: providerChain }).chain.length, 2);
+const discontinuous = structuredClone(providerChain);
+discontinuous.at(-1).files.find(row => row.file === 'src/providers/cloud/supabaseProvider.ts').beforeHash = '0'.repeat(64);
+assert.throws(() => classifyReviewedFile({ file: 'src/providers/cloud/supabaseProvider.ts', after: latestProvider, reviews: discontinuous }), /FAILED_CLOSED/u);
+const nonChronologicalGit = args => args[0] === '--no-replace-objects' && args[2] === '--is-ancestor'
+  && args[3] === providerChain[0].reviewedHead && args[4] === providerChain.at(-1).beforeHead
+  ? (() => { throw new Error('nonchronological fixture'); })() : offlineGit(args);
+assert.throws(() => reviewForCandidate(nonChronologicalGit, candidate.head), /FAILED_CLOSED/u);
 const evidence = sealImpactEvidence({ schemaVersion: 1, kind: 'ERP2_REVIEWED_CHANGE_IMPACT', completedAt: new Date().toISOString(), inspection,
   regressions: inspection.requiredRegressions.map(id => ({ id, script: regressionScripts[id],
     scriptChecksum: sourceHash(offlineGit(['show', `${candidate.head}:${regressionScripts[id]}`])),

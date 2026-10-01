@@ -307,6 +307,65 @@
           "schemaExpectation": "Unchanged."
         }
       ]
+    },
+    {
+      "id": "private-order-delete-only-v1",
+      "beforeHead": "b041109331c0ce5e13b2b09215684ad43d269721",
+      "reviewedHead": "de2ccc03f6557d05db8709ce4586f6c8d9a146f2",
+      "requiredRegressions": [
+        "private-delete",
+        "cas",
+        "mutation-fields",
+        "mutation-ordering",
+        "cloud-next"
+      ],
+      "files": [
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "e4054f31828747c1c14bef0a7b8b71422a354109c52ec535786d65c61e168a16",
+          "afterHash": "d1620a5840b33c1d2ad82e3dbf5697eaa2b1143cfca2a120e4038e4561575412",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "savePrivateOrders"
+          ],
+          "dataFlow": "Existing private-order delete-only diff must reach field CAS before readback; unchanged survivor is not written.",
+          "persistenceBehavior": "Fix early return that silently skipped intended deletion; no new delete policy.",
+          "writePath": "Same applyCloudCollection -> field-CAS delete, expectedVersion and transaction boundary.",
+          "providerPath": "Same Cloud provider and ID-targeted acknowledgement refresh; rejection leaves cache intact.",
+          "externalContract": "Same delete RPC/args/columns/grants/ACL; dedicated child deletion unchanged.",
+          "schemaExpectation": "No schema change; tests use synthetic isolated data only."
+        },
+        {
+          "file": "tests/cloud-private-order-delete.mjs",
+          "beforeHash": null,
+          "afterHash": "cc64587009fd1be0e0769745e01ffc465060e3d3ba0a4c0d28ad0a03404c5bea",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated deletion regression/inventory"
+          ],
+          "dataFlow": "Existing private-order delete-only diff must reach field CAS before readback; unchanged survivor is not written.",
+          "persistenceBehavior": "Fix early return that silently skipped intended deletion; no new delete policy.",
+          "writePath": "Same applyCloudCollection -> field-CAS delete, expectedVersion and transaction boundary.",
+          "providerPath": "Same Cloud provider and ID-targeted acknowledgement refresh; rejection leaves cache intact.",
+          "externalContract": "Same delete RPC/args/columns/grants/ACL; dedicated child deletion unchanged.",
+          "schemaExpectation": "No schema change; tests use synthetic isolated data only."
+        },
+        {
+          "file": "tests/fixtures/cloud-mutation-inventory.json",
+          "beforeHash": "54882b1b67b01db706149b37870287dad8adf8653fc9955660ce04bce1b9237c",
+          "afterHash": "8b08dfe3836889cb407a6d9694e372e711cee6d2893830ec11d25d52c794eb6a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated deletion regression/inventory"
+          ],
+          "dataFlow": "Existing private-order delete-only diff must reach field CAS before readback; unchanged survivor is not written.",
+          "persistenceBehavior": "Fix early return that silently skipped intended deletion; no new delete policy.",
+          "writePath": "Same applyCloudCollection -> field-CAS delete, expectedVersion and transaction boundary.",
+          "providerPath": "Same Cloud provider and ID-targeted acknowledgement refresh; rejection leaves cache intact.",
+          "externalContract": "Same delete RPC/args/columns/grants/ACL; dedicated child deletion unchanged.",
+          "schemaExpectation": "No schema change; tests use synthetic isolated data only."
+        }
+      ]
     }
   ]
 }

@@ -29,12 +29,14 @@ export const regressionScripts = Object.freeze({
   cas: 'tests/cloud-field-cas.mjs',
   realtime: 'tests/cloud-realtime-draft-catchup.mjs',
   draft: 'tests/cloud-field-cas-react.mjs',
+  'private-delete': 'tests/cloud-private-order-delete.mjs',
 });
 
 // A review is an exact immutable patch, not a path exception. Both anchor
 // trees are read from Git; any subsequent hunk in these files fails closed.
 export function reviewForCandidate(git, candidateHead) {
   if (reviewedImpacts.schemaVersion !== 1) fail('unsupported change-impact registry');
+  const previousReviews = new Map();
   return reviewedImpacts.reviews.filter(review => {
     try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, candidateHead]); }
     catch { return false; }
@@ -43,12 +45,19 @@ export function reviewForCandidate(git, candidateHead) {
       .trim().split(/\r?\n/u).filter(Boolean).sort();
     if (impactHash(changed) !== impactHash(review.files.map(row => row.file).sort())) fail('review patch scope mismatch');
     for (const row of review.files) {
+      const previous = previousReviews.get(row.file);
+      if (previous) {
+        if (row.beforeHash !== previous.row.afterHash) fail(`unreviewed gap between exact patches: ${row.file}`);
+        try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', previous.review.reviewedHead, review.beforeHead]); }
+        catch { fail(`review chain is not chronological: ${row.file}`); }
+      }
       const oldSource = row.beforeHash === null ? null : git(['show', `${review.beforeHead}:${row.file}`]);
       const afterSource = git(['show', `${review.reviewedHead}:${row.file}`]);
       if (sourceHash(oldSource) !== row.beforeHash || sourceHash(afterSource) !== row.afterHash
         || !['PRESENTATION_ONLY', 'APPLICATION_DOMAIN_ONLY', 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL'].includes(row.classification)) {
         fail(`review anchor or classification mismatch: ${row.file}`);
       }
+      previousReviews.set(row.file, { row, review });
     }
     return true;
   });
@@ -57,10 +66,12 @@ export function reviewForCandidate(git, candidateHead) {
 export function classifyReviewedFile({ file, after, reviews }) {
   const matches = reviews.flatMap(review => review.files.filter(row => row.file === file).map(row => ({ review, row })));
   if (!matches.length) return null;
-  if (matches.length !== 1) fail(`ambiguous reviewed source: ${file}`);
-  const { review, row } = matches[0];
+  for (let i = 1; i < matches.length; i++) {
+    if (matches[i].row.beforeHash !== matches[i - 1].row.afterHash) fail(`ambiguous/discontinuous reviewed source: ${file}`);
+  }
+  const { review, row } = matches.at(-1);
   if (sourceHash(after) !== row.afterHash) fail(`unreviewed change in reviewed source: ${file}`);
-  return { review, row };
+  return { review, row, chain: matches };
 }
 
 export function sealImpactEvidence(evidence) {

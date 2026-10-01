@@ -168,7 +168,7 @@ export function assertReviewedProviderContract(file, before, after) {
     return;
   }
   const allowedMethods = {
-    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk'],
+    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk', 'savePrivateOrders'],
     'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
     'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
   }[file];
@@ -218,12 +218,14 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
     if (reviewed) {
       // Preserve the original UI-only guard for the earlier baseline ->
       // deployed interval. Only the exact separately-reviewed patch is new.
-      const previous = reviewed.row.beforeHash === null ? null : git(['show', `${reviewed.review.beforeHead}:${file}`]);
+      const first = reviewed.chain[0];
+      const previous = first.row.beforeHash === null ? null : git(['show', `${first.review.beforeHead}:${file}`]);
       if (sourceHash(before) !== sourceHash(previous)
         && classifyDescendantFile(file, before, previous) === 'SCHEMA_SENSITIVE_OR_UNREVIEWED') fail(`unreviewed pre-patch source: ${file}`);
-      usedReviews.add(reviewed.review.id);
+      reviewed.chain.forEach(entry => usedReviews.add(entry.review.id));
       return { ...reviewed.row, beforeHash: sourceHash(before), reviewedBeforeHash: reviewed.row.beforeHash,
-        reviewId: reviewed.review.id };
+        reviewId: reviewed.review.id, reviewIds: reviewed.chain.map(entry => entry.review.id),
+        functions: [...new Set(reviewed.chain.flatMap(entry => entry.row.functions))] };
     }
     return { file, classification: classifyDescendantFile(file, before, after), beforeHash: sourceHash(before), afterHash: sourceHash(after) };
   });
