@@ -134,15 +134,6 @@ export const LIVE_SCHEMA_RECONCILIATION_RULES = Object.freeze([
       securityImpact: 'NONE',
       resolution: 'Filter duplicate NOT NULL constraint records and compare constraints by semantic body, not name.',
     }),
-  rule('sql-rendering-normalization', LIVE_SCHEMA_CLASSIFICATIONS.B,
-    '^(functions\\.public\\.erp_commit_waca_snapshot\\(jsonb,bigint,boolean\\)\\.definition|tables\\.public\\.erp_cloud_restore_(attempts|failures)\\.policies\\.)', {
-      evidence: 'Definitions differ only by CRLF/comment parsing or extensions.digest qualification resolved to the same function.',
-      currentCallerWriter: 'WACA import RPC and Atomic Restore read policies.',
-      migrationOrigin: 'Catalog SQL rendering differences.',
-      portabilityClass: 'SQL_RENDERING_ONLY',
-      securityImpact: 'NONE',
-      resolution: 'Normalize line endings and the known pgcrypto schema qualification.',
-    }),
 ]);
 
 const matches = (pattern, path) => new RegExp(pattern, 'u').test(path);
@@ -170,10 +161,16 @@ export function classifyLiveSchemaDifference(difference) {
   });
 }
 
-export function classifyLiveSchemaDifferences(differences, { canonicalDifferencePaths = [] } = {}) {
+export function classifyLiveSchemaDifferences(differences, { canonicalDifferencePaths = [], normalizationProofPaths = [] } = {}) {
   const canonicalPaths = new Set(canonicalDifferencePaths);
+  const normalizationPaths = new Set(normalizationProofPaths);
   const items = differences.map(difference => {
     const classified = classifyLiveSchemaDifference(difference);
+    if (normalizationPaths.has(difference.path) && !canonicalPaths.has(difference.path)) return Object.freeze({
+      ...classified, classification: LIVE_SCHEMA_CLASSIFICATIONS.B, ruleId: 'canonical-engine-proven-rendering',
+      evidence: 'Both raw values produce identical canonical SQL tokens under the same algorithm.',
+      portabilityClass: 'SQL_RENDERING_ONLY', securityImpact: 'NONE', resolution: 'NO_SCHEMA_CHANGE',
+    });
     if (classified.classification !== LIVE_SCHEMA_CLASSIFICATIONS.B
       || !canonicalPaths.has(classified.object)) return classified;
     return Object.freeze({

@@ -28,6 +28,8 @@
     "test:staging-build-identity": "node tests/staging-build-identity.mjs",
     "test:promotion-sync-state": "node tests/promotion-sync-state.mjs",
     "test:schema-reconciliation": "node tests/schema-reconciliation.mjs",
+    "test:schema-canonical-v3": "node tests/schema-canonical-v3.mjs",
+    "test:schema-canonical-native-v3": "node tests/schema-canonical-native-v3.mjs",
     "test:schema-reconciliation-pg": "node tests/schema-reconciliation-pglite.mjs",
     "test:erp2-046-isolated": "node tests/erp2-046-compatibility-isolated.mjs",
     "test:erp2-partial-apply-recovery": "node tests/erp2-partial-apply-recovery.mjs",

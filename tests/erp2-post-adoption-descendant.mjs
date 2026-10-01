@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { classifyDescendantFile, verifySafeDescendant } from '../scripts/post-adoption-descendant.mjs';
 import { verifySchemaBaselineEvidence } from '../scripts/promotion-safety.mjs';
 import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
+import { SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT, SQL_CANONICAL_ALGORITHM } from '../tools/schema-reconciliation/schemaContract.mjs';
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url)));
 
 const baseline = '5cbf5137cb7a2e6fd6244606692feca5ba42521a';
@@ -89,6 +90,8 @@ const migration = { migrationId: '047', sourceFile: '047_fixture.sql', sourceChe
 const record = { ...baselineRecord, schemaFingerprintAfter: fingerprint };
 const makeEvidence = overrides => sealSchemaEvidence({
   contractVersion: 2, mode: 'POST_ADOPTION', requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
+  fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+  canonicalContract: SCHEMA_CANONICAL_CONTRACT, canonicalAlgorithm: SQL_CANONICAL_ALGORITHM,
   projectRef: 'rhfdjsklfrgpoqsaqpkn', sourceHead: candidate.head, checkpoint: candidate.checkpointTag,
   snapshotIdentity: { projectRef: 'rhfdjsklfrgpoqsaqpkn', environmentRole: 'PRODUCTION', capturedAt: observedAt,
     currentFingerprint: fingerprint, snapshotToolChecksum: contract.schemaBaseline.snapshotToolChecksum,

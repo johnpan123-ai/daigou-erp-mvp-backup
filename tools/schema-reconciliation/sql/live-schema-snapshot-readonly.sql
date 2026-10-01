@@ -89,6 +89,7 @@ tables_object as (
 functions_object as (
   select jsonb_object_agg('public.'||p.proname||'('||replace(oidvectortypes(p.proargtypes),', ', ',')||')',jsonb_build_object(
     'returnType',pg_get_function_result(p.oid),'language',l.lanname,'owner',pg_get_userbyid(p.proowner),
+    'arguments',pg_get_function_arguments(p.oid),'strict',p.proisstrict,'parallel',p.proparallel,'leakproof',p.proleakproof,
     'securityDefiner',p.prosecdef,'volatility',p.provolatile,'config',coalesce(to_jsonb(p.proconfig),'[]'::jsonb),
     'authenticatedExecute',case when to_regrole('authenticated') is null then false else has_function_privilege('authenticated',p.oid,'EXECUTE') end,
     'anonExecute',case when to_regrole('anon') is null then false else has_function_privilege('anon',p.oid,'EXECUTE') end,
@@ -120,5 +121,27 @@ select jsonb_build_object(
   'schemas',coalesce((select value from schema_names),'[]'::jsonb),
   'tables',coalesce((select value from tables_object),'{}'::jsonb),
   'functions',coalesce((select value from functions_object),'{}'::jsonb),
+  -- Catalog proof of extension-owned functions, not name-only substitutions.
+  -- Qualified and visible unqualified calls resolve to the same extension code.
+  'sqlResolution',jsonb_build_object('resolvedFunctionAliases',coalesce((
+    select jsonb_object_agg(alias,canonical_name) from (
+      select distinct alias,'extension:'||e.extname||':'||p.proname as canonical_name
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      join pg_depend d on d.classid='pg_proc'::regclass and d.objid=p.oid and d.deptype='e'
+      join pg_extension e on d.refclassid='pg_extension'::regclass and e.oid=d.refobjid
+      cross join lateral (select n.nspname||'.'||p.proname as alias
+        union all select p.proname where pg_function_is_visible(p.oid)) names
+      where e.extname='pgcrypto' and p.proname='digest'
+    ) resolved
+  ),'{}'::jsonb),'digestCandidates',coalesce((
+    select jsonb_object_agg(qualified_name,extensions) from (
+      select n.nspname||'.'||p.proname qualified_name,
+        jsonb_agg(distinct coalesce(e.extname,'APPLICATION_FUNCTION')) extensions
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      left join pg_depend d on d.classid='pg_proc'::regclass and d.objid=p.oid and d.deptype='e'
+      left join pg_extension e on d.refclassid='pg_extension'::regclass and e.oid=d.refobjid
+      where p.proname='digest' group by n.nspname,p.proname
+    ) candidates
+  ),'{}'::jsonb)),
   'integrity','{}'::jsonb
 ) as erp_schema_snapshot;

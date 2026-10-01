@@ -28,7 +28,7 @@ for (const [file, expected] of Object.entries(migrationChecksums)) {
   assert.equal(await normalizedSourceHash('supabase/sql/' + file), expected);
 }
 const tests = [
-  'schema-reconciliation', 'schema-reconciliation-pglite', 'saveability-migration-source',
+  'schema-canonical-v3', 'schema-canonical-native-v3', 'schema-reconciliation', 'schema-reconciliation-pglite', 'saveability-migration-source',
   'private-order-atomic-isolated', 'catalog-atomic-isolated', 'related-saveability-isolated',
   'full-postgrest-write-matrix', 'saveability-native-ui', 'saveability-next-local',
   'saveability-matrix', 'cloud-field-cas', 'cloud-field-cas-react',
@@ -44,7 +44,9 @@ const evidence = {
   sourceHead: git(['rev-parse', 'HEAD']), branch: git(['branch', '--show-current']),
   startedAt: new Date().toISOString(), migrationChecksums,
   v4Fingerprint: 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317',
-  v5Fingerprint: '0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef',
+  historicalV5FingerprintV2: '0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef',
+  canonicalAlgorithmVersion: 3,
+  v5Fingerprint: JSON.parse(await readFile('config/erp-environment-identity.json', 'utf8')).schemaBaseline.canonicalFingerprint,
   nativeTarget: 'disposable loopback PostgreSQL 18 / PostgREST',
   steps: [], result: 'RUNNING', liveMutation: 0,
 };

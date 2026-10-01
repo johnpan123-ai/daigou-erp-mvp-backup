@@ -1,4 +1,6 @@
-import { fingerprintStructuralSnapshot, fingerprintValue, normalizeDefinition } from './schemaContract.mjs';
+import { fingerprintStructuralSnapshot, fingerprintValue, normalizeDefinition,
+  diffStructuralSnapshots, SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT,
+  SQL_CANONICAL_ALGORITHM } from './schemaContract.mjs';
 import { SCHEMA_EVIDENCE_CONTRACT_VERSION, sealSchemaEvidence } from './evidenceContract.mjs';
 import { classifyRestoreFunctionState, RESTORE_FUNCTION_STATES,
   restoreFactsFromStructuralSnapshot } from './restoreFunctionState.mjs';
@@ -317,7 +319,6 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
   const blockers = migrations.filter(item => !item.coveredByRepair
     && ([EFFECT_STATES.PARTIAL, EFFECT_STATES.CONFLICT, EFFECT_STATES.UNKNOWN].includes(item.state)
       || (item.state === EFFECT_STATES.NEEDS_APPLY && !item.safeToApply)));
-  const readyForApply = blockers.length === 0;
   const currentFingerprint = snapshot.completeness?.structural === true
     ? fingerprintStructuralSnapshot(snapshot) : null;
   for (const item of migrations) {
@@ -331,10 +332,24 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
     migrationId: item.migrationId, sourceFile: item.sourceFile, sourceChecksum: item.sourceChecksum,
     canonicalOrder: item.canonicalOrder, applyMethod: item.applyMethod,
   }));
+  const canonicalComparison = options.expectedSnapshot
+    ? diffStructuralSnapshots(snapshot, options.expectedSnapshot) : null;
+  // Migration-effect probes are intentionally partial. A zero-delta plan must
+  // also prove full schema equality; matching fragments cannot hide drift.
+  const canonicalMismatch = applyPlan.length === 0 && canonicalComparison?.semanticEqual === false;
+  if (canonicalMismatch) blockers.push({ migrationId: 'CANONICAL_SCHEMA', state: 'CONFLICT' });
+  const readyForApply = blockers.length === 0;
   const baselineRecord = (snapshot.migrationHistory?.records ?? []).find(record => record.eventType === 'BASELINE_ADOPTED'
     && record.eventKey === options.requiredBaselineId && record.result === 'PASS') ?? null;
   return sealSchemaEvidence({
     contractVersion: SCHEMA_EVIDENCE_CONTRACT_VERSION,
+    fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+    canonicalContract: SCHEMA_CANONICAL_CONTRACT,
+    canonicalAlgorithm: SQL_CANONICAL_ALGORITHM,
+    canonicalComparison: canonicalComparison ? {
+      semanticEqual: canonicalComparison.semanticEqual,
+      differences: canonicalComparison.semanticDifferences,
+    } : null,
     mode: options.mode ?? 'PRE_ADOPTION',
     requiredBaselineId: options.requiredBaselineId ?? null,
     environment: options.environment ?? snapshot.identity?.environmentRole ?? 'UNKNOWN',

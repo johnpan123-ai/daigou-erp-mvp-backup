@@ -146,7 +146,7 @@ const firstFunction = Object.keys(presentationOnly.functions).sort()[0];
 presentationOnly.functions[firstFunction].definition = `  ${presentationOnly.functions[firstFunction].definition
   .toUpperCase().replaceAll(',', ' , ')}  `;
 const presentationDiff = diffStructuralSnapshots(canonical, presentationOnly);
-assert.equal(SCHEMA_FINGERPRINT_CONTRACT_VERSION, 2);
+assert.equal(SCHEMA_FINGERPRINT_CONTRACT_VERSION, 3);
 assert.equal(presentationDiff.classification, 'B_CANONICALIZATION_OR_ENVIRONMENT_ONLY');
 assert.equal(presentationDiff.semanticEqual, true);
 assert.equal(presentationDiff.semanticDifferences.length, 0);

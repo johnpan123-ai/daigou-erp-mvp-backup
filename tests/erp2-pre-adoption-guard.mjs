@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { verifySchemaBaselineEvidence } from '../scripts/promotion-safety.mjs';
 import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
+import { SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT, SQL_CANONICAL_ALGORITHM } from '../tools/schema-reconciliation/schemaContract.mjs';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 const projectRef = 'rhfdjsklfrgpoqsaqpkn';
@@ -44,6 +45,8 @@ const makeEvidence = ({ migrations, mode = 'PRE_ADOPTION', capturedAt = nowIso,
   snapshotProjectRef = projectRef, snapshotCurrentFingerprint = currentFingerprint,
   migrationHistoryProvenance = mode === 'POST_ADOPTION' ? 'AVAILABLE' : 'UNAVAILABLE' } = {}) => sealSchemaEvidence({
   contractVersion: 2,
+  fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+  canonicalContract: SCHEMA_CANONICAL_CONTRACT, canonicalAlgorithm: SQL_CANONICAL_ALGORITHM,
   mode,
   requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
   environment: 'PRODUCTION',

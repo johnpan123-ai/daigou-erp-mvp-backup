@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
+import { canonicalSql, SQL_CANONICAL_ALGORITHM } from './sqlCanonical.mjs';
 import {
   isEnvironmentLocalFunction,
   isEnvironmentLocalPolicy,
 } from './liveSchemaReconciliationRegistry.mjs';
 
 export const SCHEMA_SNAPSHOT_CONTRACT_VERSION = 1;
-export const SCHEMA_FINGERPRINT_CONTRACT_VERSION = 2;
+export const SCHEMA_FINGERPRINT_CONTRACT_VERSION = 3;
+export const SCHEMA_CANONICAL_CONTRACT = 'ERP2_SEMANTIC_SCHEMA_V3';
+export { SQL_CANONICAL_ALGORITHM };
 
 const TRANSIENT_KEYS = new Set([
   'capturedAt', 'rowEstimate', 'rowCounts', 'integrity', 'migrationHistory',
@@ -23,7 +26,7 @@ const sha256 = value => createHash('sha256').update(String(value)).digest('hex')
  * content. PostgreSQL may change whitespace and keyword case between versions;
  * those presentation differences are not schema drift.
  */
-const normalizeSql = value => {
+const normalizeSqlV2 = value => {
   const source = String(value ?? '').replace(/\r\n?/gu, '\n');
   let result = '';
   let quote = null;
@@ -143,20 +146,20 @@ const canonicalizeConstraintArray = value => value
     return semantic;
   });
 
-const canonicalizeSemanticValue = (value, key = '', path = []) => {
+const canonicalizeSemanticValue = (value, key = '', path = [], normalizer = canonicalSql) => {
   if (value === null || typeof value !== 'object') {
-    return typeof value === 'string' && SQL_VALUE_KEYS.test(key) ? normalizeSql(value) : value;
+    return typeof value === 'string' && SQL_VALUE_KEYS.test(key) ? normalizer(value, path) : value;
   }
   if (Array.isArray(value)) {
     const projected = key === 'constraints' ? canonicalizeConstraintArray(value) : value;
-    const normalized = projected.map(item => canonicalizeSemanticValue(item, key, path));
+    const normalized = projected.map(item => canonicalizeSemanticValue(item, key, path, normalizer));
     return shouldSortArray(path)
       ? normalized.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
       : normalized;
   }
   return Object.fromEntries(Object.keys(value).sort()
     .filter(name => !TRANSIENT_KEYS.has(name) && !ENVIRONMENT_LOCAL_KEYS.has(name))
-    .map(name => [name, canonicalizeSemanticValue(value[name], name, [...path, name])]));
+    .map(name => [name, canonicalizeSemanticValue(value[name], name, [...path, name], normalizer)]));
 };
 
 const canonicalizeObservedSemanticValueV2 = (value, key = '', path = []) => {
@@ -202,18 +205,52 @@ const reconciliationProjection = snapshot => {
 };
 
 /** The only canonical projection used for schema fingerprints. */
+export const sqlOptionsForPath = (snapshot, path) => {
+  const resolution = snapshot.sqlResolution ?? {};
+  const aliases = { ...(resolution.resolvedFunctionAliases ?? {}) };
+  if (path[0] === 'functions') {
+    // Function bodies resolve through their SET search_path, not the export
+    // session's search_path. Shadowing or missing catalog proof preserves raw
+    // qualification and therefore cannot accidentally hide drift.
+    delete aliases.digest;
+    const config = snapshot.functions?.[path[1]]?.config ?? [];
+    const searchPath = config.find(value => /^search_path=/iu.test(value));
+    for (const schema of searchPath?.slice(searchPath.indexOf('=') + 1).split(',').map(value => value.trim()) ?? []) {
+      const candidates = resolution.digestCandidates?.[`${schema}.digest`];
+      if (!candidates) continue;
+      if (candidates.length === 1 && candidates[0] === 'pgcrypto') aliases.digest = 'extension:pgcrypto:digest';
+      break;
+    }
+  }
+  return { resolvedFunctionAliases: aliases };
+};
+
 export const canonicalizeStructuralSnapshot = snapshot => {
   if (snapshot?.contractVersion !== SCHEMA_SNAPSHOT_CONTRACT_VERSION) {
     throw new Error('SCHEMA_SNAPSHOT_CONTRACT_UNSUPPORTED');
   }
   const projected = reconciliationProjection(snapshot);
+  const normalizer = (value, path) => canonicalSql(value, sqlOptionsForPath(snapshot, path));
   return canonicalizeSemanticValue({
     snapshotContractVersion: snapshot.contractVersion,
     fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
     schemas: projected.schemas ?? [],
     tables: projected.tables ?? {},
     functions: projected.functions ?? {},
-  });
+  }, '', [], normalizer);
+};
+
+/** Frozen v2 history: never a current promotion decision. */
+export const fingerprintStructuralSnapshotV2 = snapshot => {
+  const projected = reconciliationProjection(snapshot);
+  // New query metadata did not exist in the v2 snapshot contract.
+  for (const fn of Object.values(projected.functions ?? {})) {
+    for (const key of ['arguments', 'strict', 'parallel', 'leakproof']) delete fn[key];
+  }
+  return sha256(JSON.stringify(canonicalizeSemanticValue({
+    snapshotContractVersion: snapshot.contractVersion, fingerprintContractVersion: 2,
+    schemas: projected.schemas ?? [], tables: projected.tables ?? {}, functions: projected.functions ?? {},
+  }, '', [], normalizeSqlV2)));
 };
 
 // Frozen pre-reconciliation projection used only to classify the 2026-09-30
@@ -224,7 +261,7 @@ export const canonicalizeObservedStructuralSnapshotV2 = snapshot => {
   }
   return canonicalizeObservedSemanticValueV2({
     snapshotContractVersion: snapshot.contractVersion,
-    fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+    fingerprintContractVersion: 2,
     schemas: snapshot.schemas ?? [],
     tables: snapshot.tables ?? {},
     functions: snapshot.functions ?? {},
@@ -313,10 +350,11 @@ const evidenceProjection = snapshot => ({
   rowCounts: snapshot?.rowCounts ?? null,
 });
 
-const collectNormalizationDifferences = (before, after, path = [], result = []) => {
+const collectNormalizationDifferences = (before, after, path = [], result = [], beforeOptions = {}, afterOptions = {}) => {
   if (typeof before === 'string' && typeof after === 'string') {
     const key = path.at(-1) ?? '';
-    if (before !== after && SQL_VALUE_KEYS.test(key) && normalizeSql(before) === normalizeSql(after)) {
+    if (before !== after && SQL_VALUE_KEYS.test(key)
+      && canonicalSql(before, sqlOptionsForPath(beforeOptions, path)) === canonicalSql(after, sqlOptionsForPath(afterOptions, path))) {
       result.push({ path: path.join('.'), category: 'SQL_FORMATTING_ONLY' });
     }
     return result;
@@ -330,14 +368,14 @@ const collectNormalizationDifferences = (before, after, path = [], result = []) 
       return result;
     }
     for (let index = 0; index < Math.min(before.length, after.length); index += 1) {
-      collectNormalizationDifferences(before[index], after[index], [...path, String(index)], result);
+      collectNormalizationDifferences(before[index], after[index], [...path, String(index)], result, beforeOptions, afterOptions);
     }
     return result;
   }
   if (before && after && typeof before === 'object' && typeof after === 'object') {
     for (const key of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
       if (ENVIRONMENT_LOCAL_KEYS.has(key) || TRANSIENT_KEYS.has(key)) continue;
-      collectNormalizationDifferences(before[key], after[key], [...path, key], result);
+      collectNormalizationDifferences(before[key], after[key], [...path, key], result, beforeOptions, afterOptions);
     }
   }
   return result;
@@ -360,6 +398,7 @@ export function diffStructuralSnapshots(beforeSnapshot, afterSnapshot) {
   const normalizationDifferences = collectNormalizationDifferences(
     { schemas: beforeSnapshot.schemas ?? [], tables: beforeSnapshot.tables ?? {}, functions: beforeSnapshot.functions ?? {} },
     { schemas: afterSnapshot.schemas ?? [], tables: afterSnapshot.tables ?? {}, functions: afterSnapshot.functions ?? {} },
+    [], [], beforeSnapshot, afterSnapshot,
   );
   return {
     result: 'PASS',
@@ -399,14 +438,18 @@ export function reconcileFingerprintEvidence({ expectedSnapshot, currentSnapshot
   }
   const actualExpectedFingerprint = fingerprintStructuralSnapshot(expectedSnapshot);
   const actualExpectedLegacyFingerprintV1 = fingerprintLegacyStructuralSnapshotV1(expectedSnapshot);
+  const actualExpectedFingerprintV2 = fingerprintStructuralSnapshotV2(expectedSnapshot);
   if (expectedFingerprint && actualExpectedFingerprint !== expectedFingerprint
+    && actualExpectedFingerprintV2 !== expectedFingerprint
     && actualExpectedLegacyFingerprintV1 !== expectedFingerprint) {
     throw new Error('OLD_SCHEMA_SNAPSHOT_FINGERPRINT_MISMATCH');
   }
   return {
     status: 'COMPARED',
     expectedFingerprintContract: expectedFingerprint === actualExpectedLegacyFingerprintV1
-      ? 'V1_LEGACY_EVIDENCE' : 'V2_SEMANTIC',
+      ? 'V1_LEGACY_EVIDENCE' : expectedFingerprint === actualExpectedFingerprintV2
+        ? 'V2_FROZEN_HISTORICAL_EVIDENCE' : 'V3_SEMANTIC',
+    expectedHistoricalFingerprintV2: actualExpectedFingerprintV2,
     expectedLegacyFingerprintV1: actualExpectedLegacyFingerprintV1,
     currentLegacyFingerprintV1,
     ...diffStructuralSnapshots(expectedSnapshot, currentSnapshot),

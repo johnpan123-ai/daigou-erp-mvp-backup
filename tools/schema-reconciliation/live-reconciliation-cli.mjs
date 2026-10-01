@@ -20,6 +20,7 @@ const observedDifferences = diffObservedStructuralSnapshotsV2(source, live);
 const canonical = diffStructuralSnapshots(source, live);
 const classification = classifyLiveSchemaDifferences(observedDifferences, {
   canonicalDifferencePaths: canonical.semanticDifferences.map(item => item.path),
+  normalizationProofPaths: canonical.normalizationDifferences.map(item => item.path),
 });
 const report = {
   contract: 'ERP2_LIVE_SCHEMA_RECONCILIATION_V1',

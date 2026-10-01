@@ -9,6 +9,8 @@ import {
   buildSchemaEvidenceIdentity,
 } from '../tools/schema-reconciliation/evidenceContract.mjs';
 import { verifySafeDescendant } from './post-adoption-descendant.mjs';
+import { SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT,
+  SQL_CANONICAL_ALGORITHM } from '../tools/schema-reconciliation/schemaContract.mjs';
 
 export const CANONICAL_ERP2_TARGET = Object.freeze({
   role: 'ERP_2_CLOUD_CANDIDATE',
@@ -51,6 +53,9 @@ export function assertCanonicalContract(contract) {
   }
   if (!contract.schemaBaseline?.requiredBaselineId
     || contract.schemaBaseline.evidenceContractVersion !== 2
+    || contract.schemaBaseline.fingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
+    || contract.schemaBaseline.canonicalContract !== SCHEMA_CANONICAL_CONTRACT
+    || contract.schemaBaseline.canonicalAlgorithm !== SQL_CANONICAL_ALGORITHM
     || contract.schemaBaseline.preAdoptionMode !== 'READ_ONLY_RECONCILIATION'
     || contract.schemaBaseline.postAdoptionLedger !== 'public.erp_schema_migration_ledger'
     || !/^[0-9a-f]{64}$/u.test(contract.schemaBaseline.canonicalFingerprint ?? '')
@@ -212,6 +217,9 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
   if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
+    || evidence.fingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
+    || evidence.canonicalContract !== SCHEMA_CANONICAL_CONTRACT
+    || evidence.canonicalAlgorithm !== SQL_CANONICAL_ALGORITHM
     || !['PRE_ADOPTION', 'POST_ADOPTION'].includes(evidence.mode)
     || evidence.requiredBaselineId !== required
     || evidence.projectRef !== CANONICAL_ERP2_TARGET.supabaseProject
@@ -417,6 +425,12 @@ export async function verifyArtifactIdentity({ artifactRoot, proof, contract }) 
   catch { failClosed('build identity manifest missing or invalid'); }
   const { identity, ...evidence } = manifest;
   if (manifest.schemaVersion !== 2 || identity !== buildManifestIdentity(evidence)) failClosed('artifact manifest identity mismatch');
+  if (manifest.schemaContract?.name !== contract.schemaBaseline.canonicalContract
+    || manifest.schemaContract?.algorithm !== contract.schemaBaseline.canonicalAlgorithm
+    || manifest.schemaContract?.version !== contract.schemaBaseline.fingerprintContractVersion
+    || manifest.schemaContract?.fingerprint !== contract.schemaBaseline.canonicalFingerprint) {
+    failClosed('artifact canonical contract mismatch');
+  }
   const source = manifest.source ?? {};
   if (source.head !== proof.candidate.head || source.branch !== proof.candidate.branch
     || source.checkpointTag !== proof.candidate.checkpointTag

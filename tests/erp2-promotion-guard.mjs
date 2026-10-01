@@ -14,6 +14,7 @@ import {
   verifySchemaBaselineEvidence,
 } from '../scripts/promotion-safety.mjs';
 import { sealSchemaEvidence } from '../tools/schema-reconciliation/evidenceContract.mjs';
+import { SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT, SQL_CANONICAL_ALGORITHM } from '../tools/schema-reconciliation/schemaContract.mjs';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 const accepted = contract.githubPreDeployGate.acceptedHead;
@@ -125,6 +126,8 @@ const liveObservation = {
 };
 const schemaEvidence = sealSchemaEvidence({
   contractVersion: 2, mode: 'PRE_ADOPTION', requiredBaselineId: contract.schemaBaseline.requiredBaselineId,
+  fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+  canonicalContract: SCHEMA_CANONICAL_CONTRACT, canonicalAlgorithm: SQL_CANONICAL_ALGORITHM,
   projectRef: CANONICAL_ERP2_TARGET.supabaseProject, sourceHead: head, checkpoint,
   migrationHistoryProvenance: 'UNAVAILABLE', currentFingerprint: baselineFingerprint,
   expectedFingerprint: baselineFingerprint, targetAfterDeltaFingerprint: baselineFingerprint,
@@ -161,6 +164,10 @@ try {
   await writeFile(join(artifactRoot, 'index.html'), '<!doctype html>fixture', 'utf8');
   const evidence = {
     schemaVersion: 2,
+    schemaContract: { name: contract.schemaBaseline.canonicalContract,
+      algorithm: contract.schemaBaseline.canonicalAlgorithm,
+      version: contract.schemaBaseline.fingerprintContractVersion,
+      fingerprint: contract.schemaBaseline.canonicalFingerprint },
     source: {
       head, branch, checkpointTag: checkpoint,
       acceptedBaselineTag: candidate.acceptedBaselineTag,

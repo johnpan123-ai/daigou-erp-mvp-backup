@@ -5,14 +5,14 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import { detectInventoryBridgeState, planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
-import { fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/schemaContract.mjs';
+import { fingerprintStructuralSnapshot, fingerprintStructuralSnapshotV2 } from '../tools/schema-reconciliation/schemaContract.mjs';
 
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
 const saveabilityFiles = CANONICAL_FRESH_INSTALL_V3.slice(-3);
 const v4Fingerprint = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
-const v5Fingerprint = '0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef';
+const v5Fingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
 const partialPlans = [];
 
 async function createDatabase() {
@@ -59,10 +59,11 @@ try {
   assert.deepEqual(saveabilityFiles.map(file => file.slice(0, 3)), ['049', '050', '051']);
   await apply(fresh, CANONICAL_FRESH_INSTALL_V3.slice(0, -3), 'fresh-v4');
   const freshV4Snapshot = await capture(fresh);
-  assert.equal(fingerprintStructuralSnapshot(freshV4Snapshot), v4Fingerprint);
+  assert.equal(fingerprintStructuralSnapshotV2(freshV4Snapshot), v4Fingerprint);
   await apply(fresh, saveabilityFiles, 'fresh-v5');
   const freshSnapshot = await capture(fresh);
   assert.equal(fingerprintStructuralSnapshot(freshSnapshot), v5Fingerprint);
+  assert.equal(fingerprintStructuralSnapshotV2(freshSnapshot), '0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef');
   const bridgeIndex = CANONICAL_FRESH_INSTALL_V3.indexOf('026b_cloud_inventory_uuid_identity_bridge.sql');
   const wacaStart = CANONICAL_FRESH_INSTALL_V3.indexOf('044_waca_cloud_ledger.sql');
   await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(0, bridgeIndex), 'pre-bridge');
@@ -126,7 +127,7 @@ try {
     '048_erp2_live_canonical_contract_reconciliation.sql',
   ], 'live-like-ledger-and-contract');
   const repairedSnapshot = await capture(compatibility);
-  assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), v4Fingerprint);
+  assert.equal(fingerprintStructuralSnapshotV2(repairedSnapshot), v4Fingerprint);
   assert.equal(fingerprintStructuralSnapshot(repairedSnapshot), fingerprintStructuralSnapshot(freshV4Snapshot));
   const repairedPlan = planSchemaDelta(repairedSnapshot, registry, { expectedSnapshot: freshSnapshot });
   assert.ok(['046','046b','047','048'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));

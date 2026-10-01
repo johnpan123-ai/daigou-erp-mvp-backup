@@ -47,7 +47,7 @@ const mode = args.get('mode') ?? 'PRE_ADOPTION';
 if (!['PRE_ADOPTION', 'POST_ADOPTION'].includes(mode)) throw new Error('SCHEMA_RECONCILIATION_MODE_INVALID');
 const registry = await buildMigrationEffectRegistry();
 const snapshotToolSource = await readFile(new URL('./sql/live-schema-snapshot-readonly.sql', import.meta.url));
-const snapshotToolChecksum = createHash('sha256').update(snapshotToolSource).digest('hex');
+const snapshotToolChecksum = createHash('sha256').update(snapshotToolSource.toString('utf8').replaceAll('\r\n', '\n')).digest('hex');
 const plan = planSchemaDelta(snapshot, registry, {
   expectedSnapshot, sourceHead: args.get('source-head') ?? null, checkpoint: args.get('checkpoint') ?? null,
   requiredBaselineId: args.get('baseline-id') ?? null, mode, snapshotToolChecksum,

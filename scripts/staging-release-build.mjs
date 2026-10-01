@@ -54,6 +54,12 @@ run(process.execPath, [
 
 const evidence = {
   schemaVersion: 2,
+  schemaContract: {
+    name: contract.schemaBaseline.canonicalContract,
+    algorithm: contract.schemaBaseline.canonicalAlgorithm,
+    version: contract.schemaBaseline.fingerprintContractVersion,
+    fingerprint: contract.schemaBaseline.canonicalFingerprint,
+  },
   source: {
     head: source.head,
     branch: source.branch,

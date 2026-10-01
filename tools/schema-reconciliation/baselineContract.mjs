@@ -1,4 +1,5 @@
-import { fingerprintValue } from './schemaContract.mjs';
+import { fingerprintValue, SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT,
+  SQL_CANONICAL_ALGORITHM } from './schemaContract.mjs';
 
 export const BASELINE_EVENT_TYPES = Object.freeze(['BASELINE_ADOPTED', 'MIGRATION_APPLIED']);
 export const OPS_METADATA_CLASSIFICATION = 'ENVIRONMENT_LOCAL_NON_PORTABLE_OPS_METADATA';
@@ -8,6 +9,8 @@ const fingerprint = value => /^[0-9a-f]{64}$/iu.test(value ?? '');
 
 export function createBaselineAdoptionRecord({ plan, baselineId, sourceHead, checkpoint, environmentRole, projectRef }) {
   if (!plan?.readyForApply || plan.blockers?.length || !plan.currentFingerprint || !plan.expectedFingerprint
+    || plan.fingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
+    || plan.canonicalContract !== SCHEMA_CANONICAL_CONTRACT || plan.canonicalAlgorithm !== SQL_CANONICAL_ALGORITHM
     || plan.currentFingerprint !== plan.expectedFingerprint) throw new Error('BASELINE_ADOPTION_RECONCILIATION_REQUIRED');
   if (!baselineId || !fullSha(sourceHead) || !checkpoint?.startsWith('checkpoint-')
     || !environmentRole || !projectRef || !fingerprint(plan.currentFingerprint)) {
@@ -22,6 +25,11 @@ export function createBaselineAdoptionRecord({ plan, baselineId, sourceHead, che
     schemaFingerprintAfter: plan.currentFingerprint, environmentRole, supabaseProjectRef: projectRef,
     result: 'PASS', metadata: {
       historicalMigrationExecutionClaimed: false,
+      canonicalContract: SCHEMA_CANONICAL_CONTRACT,
+      canonicalAlgorithm: SQL_CANONICAL_ALGORITHM,
+      fingerprintContractVersion: SCHEMA_FINGERPRINT_CONTRACT_VERSION,
+      verifiedMigrationEffects: plan.migrations.map(item => ({ migrationId: item.migrationId,
+        sourceChecksum: item.sourceChecksum, state: item.state })),
       reconciliationEvidenceFingerprint: plan.evidenceFingerprint,
       classification: OPS_METADATA_CLASSIFICATION,
     },
