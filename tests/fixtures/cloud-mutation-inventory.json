@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Audited public Cloud write boundaries; test-only inventory, not a new persistence/schema contract",
+  "groups": [
+    {"boundary": "erp_apply_field_mutations / field CAS", "modules": ["Purchase Records", "Recent Purchases", "Purchasing", "Pending Delist", "Duplicates", "Orders"], "methods": ["saveProductGroups", "saveProductCategories", "saveProductVariants", "updateProductVariantPatch", "updateProductVariantPatchBulk", "upsertInventory", "saveSalesOrders", "saveSalesOrderItems", "savePurchaseBatches", "savePurchaseBatchItems", "savePrivateOrders", "savePrivateOrderItems", "deletePrivateOrderItems", "saveBundleComponents", "saveBundleComponentsForVariant", "saveJapanPackages", "saveJapanPackageItems", "saveOutboundShipments", "saveOutboundShipmentItems", "deleteProductVariant"], "payload": "Explicit entity projection -> allowed changed fields only. CAS expected/observedVersion are separate. Creates preserve creation identities; partial edits reject identity/version changes."},
+    {"boundary": "erp_delete_product_group_trees", "modules": ["Purchase Records", "Pending Delist"], "methods": ["deleteProductGroup", "deleteProductGroups"], "payload": "Canonical group IDs plus expected versions; server atomic delete tree."},
+    {"boundary": "Purchase batch transaction", "modules": ["Purchasing", "Recent Purchases"], "methods": ["savePurchaseBatchTransaction"], "payload": "Existing transaction request/idempotency key; not whole-row PATCH."},
+    {"boundary": "Japan package transaction", "modules": ["Japan Package receiving/assignment"], "methods": ["applyJapanPackageTransaction"], "payload": "Existing atomic request, expected checked/version, delta-only items, idempotency."},
+    {"boundary": "Outbound delete transaction", "modules": ["Outbound"], "methods": ["deleteOutboundShipmentTransaction"], "payload": "Existing shipment/items CAS + idempotency; no raw table write."},
+    {"boundary": "erp_commit_waca_snapshot", "modules": ["WACA import", "Permanent/manual mapping", "Cutover state"], "methods": ["commitWacaSnapshot"], "payload": "Existing durable snapshot + expected revision + recompute flag; server transaction. No contract change."},
+    {"boundary": "Atomic Restore lifecycle", "modules": ["Settings"], "methods": ["proveCloudRestoreCandidate", "prepareCloudRestoreAttempt", "restoreCloudSnapshot"], "payload": "Dedicated proof/prepare/small execute contract. Not business partial PATCH. No changes."},
+    {"boundary": "Fail-closed disabled Cloud local-first helpers", "modules": ["Legacy import/maintenance/reset"], "methods": ["saveImportBatches", "clearData", "clearPurchaseRecords", "createPurchaseRecordFromInventory", "reparseProductVariants", "reparseProductTitles", "syncProductGroupsWithInventory", "restoreBackup"], "payload": "Reject before write; do not silently write only cache. Existing product limitation, not introduced here."},
+    {"boundary": "Browser recovery metadata", "modules": ["Import backup"], "methods": ["saveLastImportBackup"], "payload": "Local recovery cache only, guarded. Not Cloud business data."},
+    {"boundary": "LEGACY_UNUSED_RESOURCE", "modules": ["Historical dashboard image provider"], "methods": ["saveDashboardCategoryImage"], "payload": "Historical direct upsert includes client timestamp, but no current UI call site. Excluded from active mutation parity and not redesigned."}
+  ],
+  "separateContracts": [
+    "Auth password/reset/session uses Supabase Auth; no application field-CAS helper or business table write.",
+    "Deadline durable mappings/audit use their existing sidecar transaction, not Cloud field mutation.",
+    "Profile lookup is read-only in current client; membership does not share business field mutation.",
+    "import_batches are owned by server transaction; independent Cloud save is intentionally rejected."
+  ],
+  "systemFieldPolicy": {
+    "created_at": "SERVER_GENERATED; strip read context on partial edits",
+    "updated_at": "SYSTEM_MANAGED; strip read context; server clock maintains value",
+    "updated_by": "SYSTEM_MANAGED; strip context; authenticated server actor maintains value",
+    "sync_status": "SYSTEM_MANAGED local read context; strip",
+    "version": "CAS_ONLY; reject business patch, preserve independent observed/expected version",
+    "id/database_id/local_id": "IDENTITY_IMMUTABLE on partial edit; new identity belongs to create contract",
+    "deleted_at": "SYSTEM_MANAGED; reject partial edit; delete operation owns it",
+    "created_by": "UNKNOWN in current field RPC; reject, not guessed into allowlist",
+    "auto_quantities": "DERIVED; reject inline edit; existing dedicated import/recompute and collection contract unchanged"
+  },
+  "affectedUiBuilders": ["handleUpdateDefaultJpyCost", "handleUpdateDefaultTwdCost", "handleUpdatePlatformDemand", "handleApplyMasterCostToAll", "handleApplyMasterCostToCategory"],
+  "liveReadOnlyImpact": {"exactAffectedVariant": "NOT_UNIQUELY_IDENTIFIED", "reason": "Multiple live groups match 玩偶; no SKU supplied. Existing user editing tab was not disturbed.", "oldErrorDispatch": "Actual old handler -> strict builder rejects updated_at before RPC dispatch; isolated captured RPC dispatch count = 0", "live4500WrittenByAgent": false}
+}

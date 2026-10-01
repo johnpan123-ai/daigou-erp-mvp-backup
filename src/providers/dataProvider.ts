@@ -23,6 +23,7 @@ import type {
   OutboundShipmentItem
 } from '../lib/db';
 import { notifyLocalVariantCollectionChanged } from '../lib/db';
+import { sanitizeCloudBusinessPatch } from './cloud/cloudFieldCas';
 import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
@@ -254,10 +255,12 @@ class DynamicDataProvider implements IDataProvider {
     await this.guardedWrite(() => this.getActiveProvider().deleteProductVariant(id));
   }
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().updateProductVariantPatch(id, patch));
+    const businessPatch = sanitizeCloudBusinessPatch('product_variants', patch);
+    await this.guardedWrite(() => this.getActiveProvider().updateProductVariantPatch(id, businessPatch));
   }
   async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
-    await this.guardedWrite(() => this.getActiveProvider().updateProductVariantPatchBulk(patches));
+    const businessPatches = patches.map(({ id, patch }) => ({ id, patch: sanitizeCloudBusinessPatch('product_variants', patch) }));
+    await this.guardedWrite(() => this.getActiveProvider().updateProductVariantPatchBulk(businessPatches));
   }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return this.getActiveProvider().getPurchaseBatches();

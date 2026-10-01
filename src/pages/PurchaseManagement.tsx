@@ -18,6 +18,7 @@ import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import { formatPurchaseBatchLedger } from '../lib/purchaseBatchLedger';
 import { writeTextToClipboard } from '../lib/safeClipboard';
 import { getProviderMode } from '../providers/providerMode';
+import { CloudMutationBoundaryError, cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 
 
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
@@ -504,6 +505,7 @@ export default function PurchaseManagement() {
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [platformDemandDrafts, setPlatformDemandDrafts] = useState<Record<string, string>>({});
   const platformDemandCommitInFlightRef = useRef<Set<string>>(new Set());
+  const costCommitInFlightRef = useRef<Set<string>>(new Set());
   const originalValuesRef = useRef<Record<string, string>>({});
 
   const [tempJpyCosts, setTempJpyCosts] = useState<Record<string, string>>({});
@@ -577,8 +579,13 @@ export default function PurchaseManagement() {
       });
       return;
     }
-    await handleUpdateDefaultJpyCost(variantId, valStr);
+    const key = `${variantId}:jpy`;
+    if (costCommitInFlightRef.current.has(key) || isStale || dataProvider.checkIsStaleLive()) return;
+    costCommitInFlightRef.current.add(key);
+    try { await handleUpdateDefaultJpyCost(variantId, valStr); }
+    finally { costCommitInFlightRef.current.delete(key); }
     setTempJpyCosts(prev => {
+      if (prev[variantId] !== valStr) return prev;
       const copy = { ...prev };
       delete copy[variantId];
       return copy;
@@ -596,8 +603,13 @@ export default function PurchaseManagement() {
       });
       return;
     }
-    await handleUpdateDefaultTwdCost(variantId, valStr);
+    const key = `${variantId}:twd`;
+    if (costCommitInFlightRef.current.has(key) || isStale || dataProvider.checkIsStaleLive()) return;
+    costCommitInFlightRef.current.add(key);
+    try { await handleUpdateDefaultTwdCost(variantId, valStr); }
+    finally { costCommitInFlightRef.current.delete(key); }
     setTempTwdCosts(prev => {
+      if (prev[variantId] !== valStr) return prev;
       const copy = { ...prev };
       delete copy[variantId];
       return copy;
@@ -810,6 +822,25 @@ export default function PurchaseManagement() {
   const handleUpdateDefaultJpyCost = async (variantId: string, valStr: string) => {
     if (!canEditData) return;
     const val = valStr === '' ? null : parseInt(valStr);
+    if (val !== null && (!Number.isFinite(val) || val < 0)) return;
+    try {
+      await dataProvider.updateProductVariantPatch(variantId, { default_jpy_cost: val });
+    } catch (error) {
+      console.error('JPY price save failed:', error);
+      setToastMessage(cloudMutationFailureMessage(error));
+      return;
+    }
+    let authoritative: ProductVariant | undefined;
+    try { authoritative = (await dataProvider.getProductVariants()).find(v => v.id === variantId); }
+    catch (error) {
+      console.error('JPY price readback failed:', error);
+      setToastMessage(cloudMutationFailureMessage(new CloudMutationBoundaryError('committed-readback-pending', error)));
+      return;
+    }
+    if (!authoritative) {
+      setToastMessage('已儲存，但讀回找不到此規格。請同步後確認。');
+      return;
+    }
     
     const updated = { ...variantDefaultJpyCosts };
     if (val === null || isNaN(val) || val <= 0) {
@@ -820,12 +851,7 @@ export default function PurchaseManagement() {
     setVariantDefaultJpyCosts(updated);
     localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
 
-    await dataProvider.updateProductVariantPatch(variantId, {
-      default_jpy_cost: val,
-      updated_at: new Date().toISOString()
-    });
-    
-    setVariants(variants.map(v => v.id === variantId ? { ...v, default_jpy_cost: val } : v));
+    setVariants(prev => prev.map(v => v.id === variantId ? authoritative : v));
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
@@ -840,6 +866,25 @@ export default function PurchaseManagement() {
   const handleUpdateDefaultTwdCost = async (variantId: string, valStr: string) => {
     if (!canEditData) return;
     const val = valStr === '' ? null : parseInt(valStr);
+    if (val !== null && (!Number.isFinite(val) || val < 0)) return;
+    try {
+      await dataProvider.updateProductVariantPatch(variantId, { default_twd_cost: val });
+    } catch (error) {
+      console.error('TWD price save failed:', error);
+      setToastMessage(cloudMutationFailureMessage(error));
+      return;
+    }
+    let authoritative: ProductVariant | undefined;
+    try { authoritative = (await dataProvider.getProductVariants()).find(v => v.id === variantId); }
+    catch (error) {
+      console.error('TWD price readback failed:', error);
+      setToastMessage(cloudMutationFailureMessage(new CloudMutationBoundaryError('committed-readback-pending', error)));
+      return;
+    }
+    if (!authoritative) {
+      setToastMessage('已儲存，但讀回找不到此規格。請同步後確認。');
+      return;
+    }
 
     const updated = { ...variantDefaultTwdCosts };
     if (val === null || isNaN(val) || val <= 0) {
@@ -850,12 +895,7 @@ export default function PurchaseManagement() {
     setVariantDefaultTwdCosts(updated);
     localStorage.setItem('variant_default_twd_costs', JSON.stringify(updated));
 
-    await dataProvider.updateProductVariantPatch(variantId, {
-      default_twd_cost: val,
-      updated_at: new Date().toISOString()
-    });
-    
-    setVariants(variants.map(v => v.id === variantId ? { ...v, default_twd_cost: val } : v));
+    setVariants(prev => prev.map(v => v.id === variantId ? authoritative : v));
   };
 
   const cleanDailiTitle = (title: string): string => {
@@ -1216,7 +1256,6 @@ export default function PurchaseManagement() {
         patch = { waca_manual_adjustment: manualAdj };
       }
       if (currentTotal === totalValue) return;
-      patch.updated_at = new Date().toISOString();
       await dataProvider.updateProductVariantPatch(vId, patch);
       setVariants(prev => prev.map(v => v.id === vId ? { ...v, ...patch } : v));
     }
@@ -1251,6 +1290,11 @@ export default function PurchaseManagement() {
         delete next[key];
         return next;
       });
+    } catch (error) {
+      console.error('Platform demand save failed:', error);
+      setToastMessage(error instanceof CloudMutationBoundaryError
+        ? cloudMutationFailureMessage(error)
+        : '儲存失敗，資料未變更；未儲存的數量仍保留為草稿。');
     } finally {
       platformDemandCommitInFlightRef.current.delete(key);
     }
@@ -1495,8 +1539,7 @@ export default function PurchaseManagement() {
       const patches = variants.map(v => ({
         id: v.id,
         patch: {
-          [costField]: val,
-          updated_at: new Date().toISOString()
+          [costField]: val
         }
       }));
 
@@ -1561,8 +1604,7 @@ export default function PurchaseManagement() {
       const patches = targetVariants.map(v => ({
         id: v.id,
         patch: {
-          [costField]: val,
-          updated_at: new Date().toISOString()
+          [costField]: val
         }
       }));
 

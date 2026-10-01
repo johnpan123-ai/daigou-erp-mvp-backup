@@ -99,6 +99,10 @@ import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
 import { clearLocalCloudWrites, markLocalCloudWrite } from './cloudRealtimeEchoRegistry';
 import {
   assertCloudFieldMutationSucceeded,
+  assertCloudMutationOperations,
+  sanitizeCloudBusinessPatch,
+  CloudMutationBoundaryError,
+  cloudMutationFailureMessage,
   buildCloudCollectionMutationPlan,
   buildCloudPatchOperation,
   isCloudFieldMutationError,
@@ -725,6 +729,7 @@ export class SupabaseProvider implements IDataProvider {
     operations: CloudFieldMutationOperation[],
   ): Promise<void> {
     if (operations.length === 0) return;
+    assertCloudMutationOperations(entity, operations);
     const ids = operations.map(operation => operation.id);
     assertCloudWriteAllowed();
     markLocalCloudWrite(entity, ids);
@@ -738,7 +743,7 @@ export class SupabaseProvider implements IDataProvider {
     } catch (caughtError) {
       clearLocalCloudWrites(entity, ids);
       markCloudRequestFailed(caughtError);
-      throw caughtError;
+      throw new CloudMutationBoundaryError('result-unknown', caughtError);
     }
     if (error) {
       clearLocalCloudWrites(entity, ids);
@@ -753,7 +758,12 @@ export class SupabaseProvider implements IDataProvider {
       if (isCloudFieldMutationError(mutationError)) notifyCloudFieldMutationConflict(mutationError);
       throw mutationError;
     }
-    await this.refreshAcknowledgedCloudRows(entity, ids.map(databaseId => ({ databaseId })));
+    try {
+      await this.refreshAcknowledgedCloudRows(entity, ids.map(databaseId => ({ databaseId })));
+    } catch (readbackError) {
+      clearLocalCloudWrites(entity, ids);
+      throw new CloudMutationBoundaryError('committed-readback-pending', readbackError);
+    }
   }
 
   private async applyCloudCollection(
@@ -1614,13 +1624,13 @@ export class SupabaseProvider implements IDataProvider {
     try {
       console.log(`[Cloud Patch] product_variants target id: ${id}, patch keys: ${Object.keys(patch).join(', ')}`);
       const base = toCloudFieldRow('product_variants', localVariant);
-      const operation = buildCloudPatchOperation('product_variants', base, patch as Record<string, unknown>);
+      const operation = buildCloudPatchOperation('product_variants', base, sanitizeCloudBusinessPatch('product_variants', patch));
       if (operation) await this.applyCloudFieldMutations('product_variants', [operation]);
 
       console.log(`[Sync Patch] product_variants update success for id: ${id}`);
     } catch (err: any) {
       console.error(`[Cloud Patch ERROR] Supabase error message: ${err.message || err}`);
-      if (!isCloudFieldMutationError(err)) alert(`雲端局部更新商品規格發生異常：${err.message || err}。雲端快取未變更。`);
+      if (!isCloudFieldMutationError(err)) alert(cloudMutationFailureMessage(err));
       throw err;
     }
   }
@@ -1639,7 +1649,7 @@ export class SupabaseProvider implements IDataProvider {
         return buildCloudPatchOperation(
           'product_variants',
           toCloudFieldRow('product_variants', variant),
-          item.patch as Record<string, unknown>,
+          sanitizeCloudBusinessPatch('product_variants', item.patch),
         );
       }).filter((operation): operation is CloudPatchOperation => Boolean(operation));
       await this.applyCloudFieldMutations('product_variants', operations);
@@ -1647,7 +1657,7 @@ export class SupabaseProvider implements IDataProvider {
       console.log(`[Sync Patch Bulk] product_variants bulk update success for count: ${patches.length}`);
     } catch (err: any) {
       console.error(`[Cloud Patch Bulk ERROR] Supabase error message: ${err.message || err}`);
-      if (!isCloudFieldMutationError(err)) alert(`雲端批量局部更新商品規格發生異常：${err.message || err}。雲端快取未變更。`);
+      if (!isCloudFieldMutationError(err)) alert(cloudMutationFailureMessage(err));
       throw err;
     }
   }

@@ -180,6 +180,82 @@ const SYSTEM_FIELDS = new Set([
   'id', 'created_at', 'updated_at', 'updated_by', 'version', 'deleted_at', 'sync_status',
 ]);
 
+export type MutationFieldClass = 'USER_MUTABLE' | 'SYSTEM_MANAGED' | 'CAS_ONLY'
+  | 'IDENTITY_IMMUTABLE' | 'DERIVED' | 'SERVER_GENERATED' | 'UNKNOWN';
+export class CloudMutationBoundaryError extends Error {
+  readonly state: 'result-unknown' | 'committed-readback-pending';
+  readonly detail: unknown;
+  constructor(state: 'result-unknown' | 'committed-readback-pending', detail: unknown) {
+    super(`CLOUD_MUTATION_${state.toUpperCase().replaceAll('-', '_')}`);
+    this.name = 'CloudMutationBoundaryError';
+    this.state = state;
+    this.detail = detail;
+  }
+}
+export function cloudMutationFailureMessage(error: unknown): string {
+  if (error instanceof CloudMutationBoundaryError) {
+    return error.state === 'committed-readback-pending'
+      ? '已儲存至雲端，但資料讀回尚未完成。請同步後確認，勿重複提交。'
+      : '儲存結果尚未確認。請同步後核對雲端資料，勿重複提交。';
+  }
+  return '儲存失敗，雲端資料未變更。';
+}
+const AUDIT_CONTEXT_FIELDS = new Set(['created_at', 'updated_at', 'updated_by', 'sync_status']);
+const IDENTITY_FIELDS = new Set(['id', 'database_id', 'local_id']);
+const DERIVED_VARIANT_FIELDS = new Set(['myacg_auto_quantity', 'effective_myacg_quantity', 'waca_auto_quantity']);
+
+/** Same authoritative field registry as the CAS builders, not another allowlist. */
+export function classifyMutationField(entity: CloudMutableEntity, field: string): MutationFieldClass {
+  if (IDENTITY_FIELDS.has(field)) return 'IDENTITY_IMMUTABLE';
+  if (field === 'version') return 'CAS_ONLY';
+  if (field === 'created_at') return 'SERVER_GENERATED';
+  if (SYSTEM_FIELDS.has(field)) return 'SYSTEM_MANAGED';
+  if (entity === 'product_variants' && DERIVED_VARIANT_FIELDS.has(field)) return 'DERIVED';
+  return CLOUD_FIELD_ENTITY_CONTRACTS[entity]?.patch.includes(field) ? 'USER_MUTABLE' : 'UNKNOWN';
+}
+
+/**
+ * Partial-edit boundary. Read-model audit context is discarded, never forwarded
+ * as a new value. Identity/version/unknown fields still fail closed. Derived
+ * quantities remain in their existing collection/import transaction paths.
+ */
+export function sanitizeCloudBusinessPatch(entity: CloudMutableEntity, patch: Record<string, unknown>): Record<string, unknown> {
+  if (!isPlainObject(patch)) throw new Error('CLOUD_MUTATION_INVALID_PATCH');
+  const result: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(patch)) {
+    if (AUDIT_CONTEXT_FIELDS.has(field)) continue;
+    if (classifyMutationField(entity, field) !== 'USER_MUTABLE') throw new Error(`CLOUD_MUTATION_FIELD_NOT_ALLOWED:${field}`);
+    result[field] = value;
+  }
+  return result;
+}
+
+/** Final transport boundary also covers collection/create/delete/reorder paths. */
+export function assertCloudMutationOperations(entity: CloudMutableEntity, operations: CloudFieldMutationOperation[]): void {
+  const definition = CLOUD_FIELD_ENTITY_CONTRACTS[entity];
+  if (!definition || !Array.isArray(operations)) throw new Error('CLOUD_MUTATION_INVALID_OPERATIONS');
+  const ids = new Set<string>();
+  for (const operation of operations) {
+    assertCanonicalUuid(operation.id);
+    if (ids.has(operation.id)) throw new Error('CLOUD_MUTATION_DUPLICATE_OPERATION_ID');
+    ids.add(operation.id);
+    if (operation.kind === 'create') {
+      selectAllowed(operation.values, definition.create);
+    } else if (operation.kind === 'patch' || operation.kind === 'reorder') {
+      const allowed = operation.kind === 'patch' ? definition.patch : definition.reorder;
+      selectAllowed(operation.changes, allowed);
+      selectAllowed(operation.expected, allowed);
+      if (Object.keys(operation.changes).sort().join('\0') !== Object.keys(operation.expected).sort().join('\0')) {
+        throw new Error('CLOUD_MUTATION_CAS_FIELD_MISMATCH');
+      }
+      const version = operation.kind === 'patch' ? operation.observedVersion : operation.expectedVersion;
+      assertVersion({ version });
+    } else if (operation.kind === 'delete' && definition.delete) {
+      assertVersion({ version: operation.expectedVersion });
+    } else throw new Error('CLOUD_MUTATION_INVALID_OPERATION');
+  }
+}
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );

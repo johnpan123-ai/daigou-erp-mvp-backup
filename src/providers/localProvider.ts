@@ -8,6 +8,7 @@ import type {
 } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
+import { sanitizeCloudBusinessPatch } from './cloud/cloudFieldCas';
 import type { 
   InventoryItem, 
   SalesOrder, 
@@ -80,10 +81,10 @@ export class LocalProvider implements IDataProvider {
     return db.deleteProductVariant(id);
   }
   async updateProductVariantPatch(id: string, patch: Partial<ProductVariant>): Promise<void> {
-    return db.updateProductVariantPatch(id, patch);
+    return db.updateProductVariantPatch(id, sanitizeCloudBusinessPatch('product_variants', patch));
   }
   async updateProductVariantPatchBulk(patches: { id: string, patch: Partial<ProductVariant> }[]): Promise<void> {
-    return db.updateProductVariantPatchBulk(patches);
+    return db.updateProductVariantPatchBulk(patches.map(({ id, patch }) => ({ id, patch: sanitizeCloudBusinessPatch('product_variants', patch) })));
   }
   async getPurchaseBatches(): Promise<PurchaseBatch[]> {
     return db.getPurchaseBatches();
