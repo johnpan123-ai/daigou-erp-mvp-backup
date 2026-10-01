@@ -14,7 +14,9 @@
   "purePresentationFiles": ["src/waca/providerSupport.ts"],
   "releaseControlFiles": [
     "scripts/promotion-safety.mjs", "scripts/verify-erp2-promotion.mjs",
-    "scripts/post-adoption-descendant.mjs", "config/erp2-non-schema-release-policy.json"
+    "scripts/post-adoption-descendant.mjs", "config/erp2-non-schema-release-policy.json",
+    "scripts/reviewed-change-impact.mjs", "scripts/verify-erp2-change-impact.mjs",
+    "config/erp2-reviewed-change-impacts.json"
   ],
   "nonRuntimePrefixes": ["tests/", "docs/"],
   "stylePrefixes": ["src/styles/", "src/pages/", "src/components/"]

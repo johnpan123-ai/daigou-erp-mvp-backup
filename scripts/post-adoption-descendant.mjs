@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+import { classifyReviewedFile, reviewForCandidate, sourceHash, verifyImpactEvidence } from './reviewed-change-impact.mjs';
 
 const policy = JSON.parse(readFileSync(new URL('../config/erp2-non-schema-release-policy.json', import.meta.url), 'utf8'));
 const fail = message => { throw new Error(`DEPLOYMENT_GUARD_FAILED_CLOSED: ${message}`); };
@@ -156,7 +157,35 @@ export function classifyDescendantFile(file, before, after) {
   return policy.defaultClassification;
 }
 
-export function verifySafeDescendant({ git, candidate, baselineRecord }) {
+// Exact patch hashes remain mandatory. These structural checks additionally
+// prove the reviewed provider patch did not change its external schema/RPC
+// contract. This is not a provider-directory allowlist.
+export function assertReviewedProviderContract(file, before, after) {
+  const oldTree = parse(file, before); const newTree = parse(file, after);
+  if (file === 'src/providers/cloud/cloudFieldCas.ts') {
+    const statements = new Set(newTree.statements.map(node => canonical(newTree, node)));
+    if (oldTree.statements.some(node => !statements.has(canonical(oldTree, node)))) fail('existing field/CAS contract changed');
+    return;
+  }
+  const allowedMethods = {
+    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk'],
+    'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
+    'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
+  }[file];
+  if (!allowedMethods) fail('unreviewed provider contract exception');
+  const findClass = tree => tree.statements.find(node => ts.isClassDeclaration(node)
+    && node.members.some(member => member.name?.getText(tree) === 'updateProductVariantPatch'));
+  const oldClass = findClass(oldTree); const newClass = findClass(newTree);
+  if (!oldClass || !newClass) fail('provider class missing');
+  const members = (tree, node) => node.members.filter(member => !allowedMethods.includes(member.name?.getText(tree)))
+    .map(member => canonical(tree, member));
+  if (JSON.stringify(members(oldTree, oldClass)) !== JSON.stringify(members(newTree, newClass))) fail('unreviewed provider member changed');
+  const rpc = tree => nodes(tree).filter(ts.isCallExpression).filter(node => node.expression.getText(tree) === 'supabase.rpc')
+    .map(node => canonical(tree, node));
+  if (JSON.stringify(rpc(oldTree)) !== JSON.stringify(rpc(newTree))) fail('provider RPC signature/payload changed');
+}
+
+export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   const baseline = baselineRecord?.sourceHead;
   if (!sha(baseline) || !sha(candidate?.head) || !baselineRecord.checkpoint?.startsWith('checkpoint-')) fail('invalid schema baseline Git identity');
   if (git(['rev-parse', `${baselineRecord.checkpoint}^{}`]).trim() !== baseline) fail('local schema baseline checkpoint mismatch');
@@ -172,11 +201,32 @@ export function verifySafeDescendant({ git, candidate, baselineRecord }) {
   const oldFiles = git(['ls-tree', '-r', '--name-only', baseline]).trim().split(/\r?\n/u).filter(Boolean);
   const newFiles = git(['ls-tree', '-r', '--name-only', candidate.head]).trim().split(/\r?\n/u).filter(Boolean);
   const oldSet = new Set(oldFiles); const newSet = new Set(newFiles);
-  const source = (head, file, exists) => exists ? git(['show', `${head}:${file}`]) : null;
+  const sources = new Map();
+  const source = (head, file, exists) => {
+    if (!exists) return null;
+    const key = `${head}:${file}`;
+    if (!sources.has(key)) sources.set(key, git(['show', key]));
+    return sources.get(key);
+  };
   const changed = git(['diff', '--name-only', '--no-renames', baseline, candidate.head, '--']).trim().split(/\r?\n/u).filter(Boolean);
-  const classified = changed.map(file => ({ file,
-    classification: classifyDescendantFile(file, source(baseline, file, oldSet.has(file)), source(candidate.head, file, newSet.has(file))),
-  }));
+  const reviews = reviewForCandidate(git, candidate.head);
+  const usedReviews = new Set();
+  const classified = changed.map(file => {
+    const before = source(baseline, file, oldSet.has(file));
+    const after = source(candidate.head, file, newSet.has(file));
+    const reviewed = classifyReviewedFile({ file, after, reviews });
+    if (reviewed) {
+      // Preserve the original UI-only guard for the earlier baseline ->
+      // deployed interval. Only the exact separately-reviewed patch is new.
+      const previous = reviewed.row.beforeHash === null ? null : git(['show', `${reviewed.review.beforeHead}:${file}`]);
+      if (sourceHash(before) !== sourceHash(previous)
+        && classifyDescendantFile(file, before, previous) === 'SCHEMA_SENSITIVE_OR_UNREVIEWED') fail(`unreviewed pre-patch source: ${file}`);
+      usedReviews.add(reviewed.review.id);
+      return { ...reviewed.row, beforeHash: sourceHash(before), reviewedBeforeHash: reviewed.row.beforeHash,
+        reviewId: reviewed.review.id };
+    }
+    return { file, classification: classifyDescendantFile(file, before, after), beforeHash: sourceHash(before), afterHash: sourceHash(after) };
+  });
   const sensitive = classified.filter(row => row.classification === 'SCHEMA_SENSITIVE_OR_UNREVIEWED');
   const migrations = [...new Set([...oldFiles, ...newFiles].filter(file => file.endsWith('.sql')))];
   const checksumParity = migrations.every(file => oldSet.has(file) && newSet.has(file)
@@ -188,13 +238,37 @@ export function verifySafeDescendant({ git, candidate, baselineRecord }) {
   if (!checksumParity) fail('migration/source SQL checksum changed since adopted baseline');
   if (!canonicalParity) fail('canonical schema/fingerprint contract changed since adopted baseline');
   if (sensitive.length) fail(`schema-sensitive or unreviewed descendant diff: ${sensitive.map(row => row.file).join(', ')}`);
+  const contractParity = predicate => [...new Set([...oldFiles, ...newFiles].filter(predicate))].every(file =>
+    oldSet.has(file) && newSet.has(file) && sourceHash(source(baseline, file, true)) === sourceHash(source(candidate.head, file, true)));
+  const backupParity = contractParity(file => /(?:durableResourceRegistry|workbenchJsonBackup|closingDateSidecarBackup|backupFormat|CloudAtomicRestore|cloudAtomicRestore)/u.test(file));
+  const providerFiles = [...new Set([...oldFiles, ...newFiles].filter(file => file.startsWith('src/providers/')))];
+  const providerParity = providerFiles.every(file => {
+    if (!oldSet.has(file) || !newSet.has(file)) return false;
+    const before = source(baseline, file, true); const after = source(candidate.head, file, true);
+    if (sourceHash(before) === sourceHash(after)) return true;
+    const reviewed = classifyReviewedFile({ file, after, reviews });
+    if (!reviewed || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;
+    assertReviewedProviderContract(file, before, after);
+    return true;
+  });
+  if (!backupParity) fail('backup/restore resource contract changed');
+  if (!providerParity) fail('provider persistence/schema contract changed');
+  const requiredRegressions = [...new Set(reviews.filter(review => usedReviews.has(review.id)).flatMap(review => review.requiredRegressions))];
   return {
     result: 'PASS', mode: baseline === candidate.head ? 'EXACT_BASELINE' : 'SAFE_DESCENDANT',
     baselineHead: baseline, baselineCheckpoint: baselineRecord.checkpoint,
-    candidateHead: candidate.head, candidateCheckpoint: candidate.checkpointTag,
+    candidateHead: candidate.head, candidateCheckpoint: candidate.checkpointTag, candidateBranch: candidate.branch ?? null,
     ancestry: 'PASS', schemaSensitiveFiles: 0, nonSchemaFiles: classified.length,
     migrationChecksumParity: 'PASS', migrationFiles: migrations.length,
-    canonicalContractParity: 'PASS', changedFiles: classified,
+    canonicalContractParity: 'PASS', backupContractParity: 'PASS', providerContractParity: 'PASS', changedFiles: classified,
+    persistenceSchemaNeutralFiles: classified.filter(row => row.classification === 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL').length,
+    unknownFiles: 0, requiredRegressions,
     schemaBaselineMutated: false,
   };
+}
+
+export function verifySafeDescendant({ git, candidate, baselineRecord, changeImpactEvidence, now }) {
+  const inspection = inspectSafeDescendant({ git, candidate, baselineRecord });
+  const regressionEvidence = verifyImpactEvidence({ evidence: changeImpactEvidence, inspection, git, now });
+  return { ...inspection, regressionEvidence };
 }

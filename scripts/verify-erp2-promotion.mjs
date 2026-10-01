@@ -13,7 +13,7 @@ import {
 import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 
 const fail = message => { throw new DeploymentGuardError(message); };
-const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir', 'schema-evidence']);
+const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir', 'schema-evidence', 'change-impact-evidence']);
 
 export function parseArguments(argv) {
   const args = new Map();
@@ -73,11 +73,17 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
   let schemaEvidence;
   try { schemaEvidence = JSON.parse(await readFile(resolve(candidateRoot, schemaEvidencePath), 'utf8')); }
   catch { fail('schema reconciliation evidence missing or invalid'); }
+  let changeImpactEvidence;
+  if (args.has('change-impact-evidence')) {
+    try { changeImpactEvidence = JSON.parse(await readFile(resolve(candidateRoot, args.get('change-impact-evidence')), 'utf8')); }
+    catch { fail('change-impact evidence missing or invalid'); }
+  }
   const schemaBaseline = verifySchemaBaselineEvidence({
     evidence: schemaEvidence,
     contract,
     candidate: proof.candidate,
     candidateGit,
+    changeImpactEvidence,
     migrationRegistry: await buildMigrationEffectRegistry(),
     liveObservation: {
       projectRef: environment.ERP2_LIVE_SCHEMA_PROJECT_REF,

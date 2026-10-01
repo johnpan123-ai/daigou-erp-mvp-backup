@@ -179,7 +179,7 @@ const verifyPreAdoption = ({ evidence, migrationsById }) => {
   }
 };
 
-const verifyPostAdoption = ({ evidence, required, candidate, candidateGit }) => {
+const verifyPostAdoption = ({ evidence, required, candidate, candidateGit, changeImpactEvidence, now }) => {
   if (evidence.currentFingerprint !== evidence.expectedFingerprint
     || evidence.migrationHistoryProvenance !== 'AVAILABLE'
     || evidence.applyPlan.length !== 0
@@ -199,10 +199,10 @@ const verifyPostAdoption = ({ evidence, required, candidate, candidateGit }) => 
       baselineCheckpoint: record.checkpoint, schemaBaselineMutated: false };
   }
   if (typeof candidateGit !== 'function') failClosed('descendant deployment requires actual Git evidence');
-  return verifySafeDescendant({ git: candidateGit, candidate, baselineRecord: record });
+  return verifySafeDescendant({ git: candidateGit, candidate, baselineRecord: record, changeImpactEvidence, now });
 };
 
-export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, migrationRegistry, candidateGit,
+export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, migrationRegistry, candidateGit, changeImpactEvidence,
   now = Date.now() }) {
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
@@ -229,7 +229,7 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
   verifyLiveObservation({ liveObservation, evidence, contract, now });
   const migrationsById = verifyPlannerContract(evidence, migrationRegistry);
   const deploymentLineage = evidence.mode === 'POST_ADOPTION'
-    ? verifyPostAdoption({ evidence, required, candidate, candidateGit }) : null;
+    ? verifyPostAdoption({ evidence, required, candidate, candidateGit, changeImpactEvidence, now }) : null;
   if (evidence.mode !== 'POST_ADOPTION') verifyPreAdoption({ evidence, migrationsById });
   return {
     result: 'PASS', mode: evidence.mode, baselineId: required,

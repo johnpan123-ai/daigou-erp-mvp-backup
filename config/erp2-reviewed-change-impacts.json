@@ -1,0 +1,312 @@
+{
+  "schemaVersion": 1,
+  "reviews": [
+    {
+      "id": "waca-pending-history-rematch-v1",
+      "beforeHead": "c76a46808b89d6f89a4e69dd276126824dfff120",
+      "reviewedHead": "a2d092c5eae9c2c4d45fc42fb237ef8a882b77fc",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "domain",
+        "pending",
+        "legacy-modern",
+        "cloud-next",
+        "registry",
+        "provider",
+        "cloud-restore",
+        "postgrest",
+        "execute-envelope",
+        "sync"
+      ],
+      "files": [
+        {
+          "file": "src/lib/db.ts",
+          "beforeHash": "f47ba51ce26bed5f15f06c348856786d882780f4eaed2ab9316242f9352074d3",
+          "afterHash": "c71bc26dff75515448e87441bec0845571240b29f02bf8fe52e285c285dacca1",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "validateAtomicImportPayload"
+          ],
+          "dataFlow": "Historical cutover reference may outlive an active catalog variant; nonempty ID and finite quantities remain required.",
+          "persistenceBehavior": "Backup import acceptance changes; audit rows are preserved, not rewritten or dropped.",
+          "writePath": "Existing atomic import and rollback remain unchanged.",
+          "providerPath": "Existing NEXT IndexedDB path unchanged.",
+          "externalContract": "Same collections, serialized fields, keys and backup format.",
+          "schemaExpectation": "No schema change; active item/mapping integrity stays strict. Cloud physical audit FK is not relaxed."
+        },
+        {
+          "file": "src/waca/nextStorage.ts",
+          "beforeHash": "539a43e5736543da1c085f2c81622786594c261e047b5efc5152dd4d50e8d2c8",
+          "afterHash": "d810ce156422720bcf90aea1b06bfd69db634a1292818b5369acf96f68b6ae1d",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "validateNextWacaSnapshot"
+          ],
+          "dataFlow": "Historical audit is readable after catalog removal; malformed audit and active orphans still fail.",
+          "persistenceBehavior": "Snapshot validation only; no audit deletion or new durable fields.",
+          "writePath": "Existing transaction, revision/CAS and commit unchanged.",
+          "providerPath": "Existing NEXT database, object stores and WACA keys unchanged.",
+          "externalContract": "Snapshot interfaces and serialization unchanged.",
+          "schemaExpectation": "Historical soft-deleted references differ from active relationship validation; no Cloud FK change."
+        },
+        {
+          "file": "src/waca/orderCore.ts",
+          "beforeHash": "ce07ae4bbc389eb6a47f4f37a4222ac961511a36e594bcb9d9f435c72d6f9b92",
+          "afterHash": "a0b430051a7210fc6a2841ad2c3e709b915f497ad0e27fb316d2d901ef3f41bb",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "importWacaRows"
+          ],
+          "dataFlow": "Confirmed mappings resolve previously pending ledger items before full order-derived recompute, including orders absent from the current file.",
+          "persistenceBehavior": "Updates existing productVariantId, match and diagnostic fields; keeps original order status and quantity.",
+          "writePath": "Existing snapshot commit; recompute SUM, never increment.",
+          "providerPath": "Same domain used by NEXT and Cloud; provider selection unchanged.",
+          "externalContract": "No new field/resource/RPC/transaction payload shape.",
+          "schemaExpectation": "Existing durable ledger only."
+        },
+        {
+          "file": "src/pages/WacaIntegration.tsx",
+          "beforeHash": "1a22b1320b429d701b16166977fb3352c5fcd9b86d500ee338f80f5ef994e100",
+          "afterHash": "4f08a9c8f1be025c274b990a3c67dc76b84c0e5ab4b7e107de43285591d29889",
+          "classification": "PRESENTATION_ONLY",
+          "functions": [
+            "confirmImport (post-commit message selection)",
+            "preview/pending rendering"
+          ],
+          "dataFlow": "After commit/read-back, distinguish saved pending items from real integrity errors.",
+          "persistenceBehavior": "None.",
+          "writePath": "Commit arguments and reconciliation unchanged.",
+          "providerPath": "Unchanged.",
+          "externalContract": "Human-readable UI only.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/next-waca-order-integration.mjs",
+          "beforeHash": "bfb675f6f049b54708ee1d331fc8fbbe18a905d263037277b6dc5eb7453ba941",
+          "afterHash": "ce748e6ccb07b1e2d2f92865911b2bc94b2e3fab8a7d8693e04a6b5c0668f3d0",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "domain regression assertions"
+          ],
+          "dataFlow": "Tests historical rematch, valid/cancelled/failed quantities and audit validation.",
+          "persistenceBehavior": "Disposable fixtures only.",
+          "writePath": "No product runtime change.",
+          "providerPath": "No product runtime change.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-pending-reimport.mjs",
+          "beforeHash": null,
+          "afterHash": "ef0692b880fcc102d84b33ad15b9e97ef969d5a43039a8b93b6484f120e61302",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated pending/reimport/restore browser scenario"
+          ],
+          "dataFlow": "Known product processes beside pending product; later catalog creation and reimport recover demand.",
+          "persistenceBehavior": "Disposable browser-context data only.",
+          "writePath": "No live writes; intercepts/rejects Supabase requests.",
+          "providerPath": "Proves NEXT boundary.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        }
+      ]
+    },
+    {
+      "id": "cloud-mutation-field-contract-v1",
+      "beforeHead": "a2d092c5eae9c2c4d45fc42fb237ef8a882b77fc",
+      "reviewedHead": "f79d7d6b4a23199e2c5a37a082bca134375bc69f",
+      "requiredRegressions": [
+        "mutation-fields",
+        "mutation-native",
+        "mutation-ui",
+        "mutation-ordering",
+        "cas",
+        "realtime",
+        "draft"
+      ],
+      "files": [
+        {
+          "file": "src/pages/PurchaseManagement.tsx",
+          "beforeHash": "4e04588464c170539453ae520a418731e710662f94f62006f0801ce79c582825",
+          "afterHash": "ebb4f8d9d94ea89d2fe4ee82558cf426fbf69f8522db69ef0dac04e42e634fde",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "handleCommitJpyCost",
+            "handleCommitTwdCost",
+            "handleUpdateDefaultJpyCost",
+            "handleUpdateDefaultTwdCost",
+            "handleUpdatePlatformDemand",
+            "handleApplyMasterCostToAll",
+            "handleApplyMasterCostToCategory"
+          ],
+          "dataFlow": "UI -> minimal cost/manual patch -> acknowledged targeted readback -> display.",
+          "persistenceBehavior": "Remove timestamps from five builders; preferences persist only after success; failure rollback preserves newer drafts.",
+          "writePath": "Existing partial/bulk provider methods.",
+          "providerPath": "Same provider selection.",
+          "externalContract": "Existing fields and independent CAS.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/providers/cloud/cloudFieldCas.ts",
+          "beforeHash": "b388d7bf33055b9ea1c22fe0c8e81785913fb79187f817620d25b31b3b2a0ccb",
+          "afterHash": "415a12ae42968d66e45828056391bb51e8457cc3499667f3073f219bc4f88b14",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "classifyMutationField",
+            "sanitizeCloudBusinessPatch",
+            "assertCloudMutationOperations",
+            "CloudMutationBoundaryError",
+            "cloudMutationFailureMessage"
+          ],
+          "dataFlow": "Existing registry -> field classification -> partial sanitizer -> final validation.",
+          "persistenceBehavior": "Strip audit context; reject identity/version/unknown/derived inline fields; derived import path stays intact.",
+          "writePath": "Existing strict builders unchanged.",
+          "providerPath": "Pure shared validation; no network.",
+          "externalContract": "Existing field registry AST unchanged.",
+          "schemaExpectation": "No new field."
+        },
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "ca6ee0ef4ac7b67cf8fb01168263fcea7198f623a3c22d736f67512a69417f15",
+          "afterHash": "e4054f31828747c1c14bef0a7b8b71422a354109c52ec535786d65c61e168a16",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "applyCloudFieldMutations",
+            "updateProductVariantPatch",
+            "updateProductVariantPatchBulk"
+          ],
+          "dataFlow": "Validation -> same RPC -> same ID-targeted refresh.",
+          "persistenceBehavior": "Distinguish failed/unknown/committed-readback; no false unchanged claim.",
+          "writePath": "All supabase.rpc call expressions and arguments unchanged.",
+          "providerPath": "Same authenticated Cloud path and generation.",
+          "externalContract": "WACA/Restore transaction methods and projection unchanged.",
+          "schemaExpectation": "No SQL/RLS/ACL/RPC change."
+        },
+        {
+          "file": "src/providers/dataProvider.ts",
+          "beforeHash": "878e4bf9abf4745385cb59504203b6b8aac9fdae37d1a30d3a349dba418b109f",
+          "afterHash": "05f95c230c4cc05624ec2faf5db1383aaec91ddb5b96e4788d670a0088452019",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "updateProductVariantPatch",
+            "updateProductVariantPatchBulk"
+          ],
+          "dataFlow": "Sanitize -> existing guardedWrite -> provider.",
+          "persistenceBehavior": "Strip read context; reject ID/version.",
+          "writePath": "Existing guardedWrite and stale checks unchanged.",
+          "providerPath": "Same local/cloud/fallback dispatch.",
+          "externalContract": "Same public interface.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/providers/localProvider.ts",
+          "beforeHash": "ef205c966ec437afee971c5c9bbfc55433df8099ebd305e90826660eaffd888e",
+          "afterHash": "1ff2973375bf4c91e17eaca33d2fe0c1509301187283bbfbb305c912ccb71e51",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "updateProductVariantPatch",
+            "updateProductVariantPatchBulk"
+          ],
+          "dataFlow": "Same shared validation -> existing db update.",
+          "persistenceBehavior": "Local canonical layer maintains timestamps.",
+          "writePath": "Same IndexedDB update implementation.",
+          "providerPath": "No Supabase request.",
+          "externalContract": "Same public business fields.",
+          "schemaExpectation": "No store/schema change."
+        },
+        {
+          "file": "tests/cloud-mutation-field-contract-isolated.mjs",
+          "beforeHash": null,
+          "afterHash": "78f79048326a518c15eb4398472ed29c3108c7bb2c3679db3348dafcf9e02bab",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated regression/inventory"
+          ],
+          "dataFlow": "Synthetic/disposable fixtures.",
+          "persistenceBehavior": "No product runtime change.",
+          "writePath": "No live write; loopback only.",
+          "providerPath": "Existing provider regression.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/cloud-mutation-field-contract.mjs",
+          "beforeHash": null,
+          "afterHash": "6922c9439ce8e49270d460597feac611c52b0805b071573118086a36acd2852a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated regression/inventory"
+          ],
+          "dataFlow": "Synthetic/disposable fixtures.",
+          "persistenceBehavior": "No product runtime change.",
+          "writePath": "No live write; loopback only.",
+          "providerPath": "Existing provider regression.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/cloud-mutation-inline-ui.mjs",
+          "beforeHash": null,
+          "afterHash": "9cdf3c65de9caada7cb08f0295c8d11b2f11adfdf55c5d06eed1aefe7f0c7750",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated regression/inventory"
+          ],
+          "dataFlow": "Synthetic/disposable fixtures.",
+          "persistenceBehavior": "No product runtime change.",
+          "writePath": "No live write; loopback only.",
+          "providerPath": "Existing provider regression.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/fixtures/cloud-mutation-field-contract.html",
+          "beforeHash": null,
+          "afterHash": "c3d0727bd593b77196e7eb2aa198ce2f38c7ca0553d1ade0430e718545b4a87d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated regression/inventory"
+          ],
+          "dataFlow": "Synthetic/disposable fixtures.",
+          "persistenceBehavior": "No product runtime change.",
+          "writePath": "No live write; loopback only.",
+          "providerPath": "Existing provider regression.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/fixtures/cloud-mutation-field-contract.mjs",
+          "beforeHash": null,
+          "afterHash": "0d30af45c4d4f8e2f9a92a54ccb3c6e0309c0eeac7d07d1afb45eae51ef6cb19",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated regression/inventory"
+          ],
+          "dataFlow": "Synthetic/disposable fixtures.",
+          "persistenceBehavior": "No product runtime change.",
+          "writePath": "No live write; loopback only.",
+          "providerPath": "Existing provider regression.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/fixtures/cloud-mutation-inventory.json",
+          "beforeHash": null,
+          "afterHash": "54882b1b67b01db706149b37870287dad8adf8653fc9955660ce04bce1b9237c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated regression/inventory"
+          ],
+          "dataFlow": "Synthetic/disposable fixtures.",
+          "persistenceBehavior": "No product runtime change.",
+          "writePath": "No live write; loopback only.",
+          "providerPath": "Existing provider regression.",
+          "externalContract": "None.",
+          "schemaExpectation": "Unchanged."
+        }
+      ]
+    }
+  ]
+}
