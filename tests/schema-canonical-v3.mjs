@@ -16,6 +16,7 @@ same(fn("-- caller's transaction\n RETURN '{\"Upper\":1}'::jsonb;"),
   fn("/* caller's /* nested */ transaction */\r\n RETURN '{\"Upper\":1}' :: jsonb ;").replaceAll('$outer$', '$other$'));
 same('SELECT CAST(1 AS bigint)', 'select (1::bigint)');
 same('SELECT ((1))', 'select 1');
+same("SELECT 1+/* caller's comment */2", 'select 1 + 2');
 same("SELECT 'a''b'", "select $value$a'b$value$");
 same(fn('command := format(\'SELECT %s FROM %I WHERE id = $1\',p_version,\'items\'); EXECUTE command;'),
   fn('command := format(\'select  %s\n from %I where id=$1\',p_version,\'items\'); EXECUTE command;'));

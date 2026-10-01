@@ -99,6 +99,8 @@ const safeDelta = [migration('018', 18, 'NEEDS_APPLY', {
 }),
   migration('026b', 26, 'SATISFIED')];
 assert.deepEqual(pass(makeEvidence({ migrations: safeDelta })).applyDelta, ['018']);
+blocked(sealSchemaEvidence({ ...makeEvidence({migrations:safeDelta}), fingerprintContractVersion: 2 }));
+blocked(sealSchemaEvidence({ ...makeEvidence({migrations:safeDelta}), canonicalAlgorithm: 'UNKNOWN' }));
 console.log('PASS A: PRE_ADOPTION permits current != canonical with an exact safe delta');
 assert.deepEqual(pass(makeEvidence({ migrations: safeDelta, migrationHistoryProvenance: 'AVAILABLE' })).applyDelta, ['018']);
 blocked(makeEvidence({ migrations: safeDelta, migrationHistoryProvenance: 'AVAILABLE',

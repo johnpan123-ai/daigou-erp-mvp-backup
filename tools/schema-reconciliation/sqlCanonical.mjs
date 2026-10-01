@@ -70,7 +70,11 @@ export function tokenizeSql(value, { formatTemplate = false } = {}) {
     if (word) { output.push(token('word', word.replace(/[A-Z]/gu, value => value.toLowerCase()))); index += word.length; continue; }
     const number = source.slice(index).match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/u)?.[0];
     if (number) { output.push(token('number', number)); index += number.length; continue; }
-    const operator = source.slice(index).match(/^(?:::|:=|=>|[+\-*/<>=~!@#%^&|`?]+)/u)?.[0];
+    let operator = source.slice(index).match(/^(?:::|:=|=>|[+\-*/<>=~!@#%^&|`?]+)/u)?.[0];
+    if (operator) {
+      const comment = operator.search(/--|\/\*/u);
+      if (comment > 0) operator = operator.slice(0, comment);
+    }
     if (operator) { output.push(token('operator', operator)); index += operator.length; continue; }
     output.push(token('punctuation', character)); index += 1;
   }

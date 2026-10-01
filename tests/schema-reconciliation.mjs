@@ -192,6 +192,14 @@ assert.ok(fullPlan.migrations.every(item => item.state === EFFECT_STATES.SATISFI
 assert.ok(fullPlan.migrations.every(item => item.historicalExecution === 'UNPROVEN'));
 console.log('PASS full canonical schema is SATISFIED without fake APPLIED history');
 
+const unknownFunctionDrift = structuredClone(canonical);
+unknownFunctionDrift.functions['public.unreviewed_rpc()'] = { definition: 'select 1', authenticatedExecute: true };
+const zeroDeltaDrift = planSchemaDelta(unknownFunctionDrift, registry, { expectedSnapshot: canonical });
+assert.equal(zeroDeltaDrift.applyPlan.length, 0);
+assert.equal(zeroDeltaDrift.readyForApply, false);
+assert.ok(zeroDeltaDrift.blockers.some(item => item.migrationId === 'CANONICAL_SCHEMA'));
+console.log('PASS unknown full-schema drift blocks even when all migration fragments are SATISFIED');
+
 const emptyPlan = planSchemaDelta(blank(), registry, { expectedSnapshot: canonical });
 assert.equal(emptyPlan.readyForApply, false);
 assert.equal(emptyPlan.migrations.find(item => item.migrationId === '018').state, EFFECT_STATES.NEEDS_APPLY);

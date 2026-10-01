@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
-import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
+import { CANONICAL_FRESH_INSTALL_V3 as CURRENT_FRESH_INSTALL } from '../supabase/canonicalFreshInstallV3.mjs';
+// The recovery state in this historical fixture ends at 048. Later additive
+// v5 migrations are covered independently by schema-reconciliation-pglite.
+const CANONICAL_FRESH_INSTALL_V3 = CURRENT_FRESH_INSTALL.slice(0,
+  CURRENT_FRESH_INSTALL.indexOf('048_erp2_live_canonical_contract_reconciliation.sql') + 1);
 // This fixture verifies the frozen pre-v5 migration baseline, not promotion.
 import { fingerprintStructuralSnapshotV2 as fingerprintStructuralSnapshot } from '../tools/schema-reconciliation/schemaContract.mjs';
 import { CANONICAL_RESTORE_RESOURCES, classifyRestoreFunctionState, CORE_RESTORE_RESOURCES,
