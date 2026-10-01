@@ -86,7 +86,7 @@ try {
   const sheet = XLSX.utils.aoa_to_sheet([headers.map(() => '訂單資訊'), headers, ...[10, 2].map(n =>
     ['完成付款', `ORDER-${n}`, '2026-09-30', 'GP-A',
       '【小河馬日本代購】 預購 27年02月 代理版 GSC 換裝玩偶 BanG Dream! Morfonica',
-      `規格${n}`, '', '', 2, 200])]);
+      `規格${n}`, '', `G${n}`, 2, 200])]);
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, sheet, 'orders');
   await page.getByLabel('選擇 WACA Excel').setInputFiles({ name: 'synthetic-waca.xlsx',

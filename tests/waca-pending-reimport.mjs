@@ -64,8 +64,8 @@ try {
     '多規格名稱二', '規格編號', '訂單商品數量', '小計'];
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers.map(() => '訂單資訊'), headers,
-    ['完成付款', 'ORDER-EXISTING', '2026-10-01', 'GP-EXISTING', group.title, variant.variant_name, '', '', 2, 200],
-    ['處理中', 'ORDER-CAP', '2026-10-01', 'GP-CAP', '胡桃誕生日記念', '棒球帽', '', '', 1, 100],
+    ['完成付款', 'ORDER-EXISTING', '2026-10-01', 'GP-EXISTING', group.title, variant.variant_name, '', 'G-EXISTING', 2, 200],
+    ['處理中', 'ORDER-CAP', '2026-10-01', 'GP-CAP', '胡桃誕生日記念', '棒球帽', '', 'G-CAP', 1, 100],
   ]), 'orders');
   const buffer = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
   const upload = async () => {

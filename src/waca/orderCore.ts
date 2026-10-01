@@ -58,7 +58,8 @@ export interface WacaItem {
   productVariantId: string | null;
   match: 'AUTO_MATCH' | 'MANUAL_MATCH' | 'UNMATCHED' | 'MANUAL_REVIEW';
   diagnostic: 'MASTER_EVIDENCE_MISSING' | 'MASTER_GROUP_LINK_MISSING' | 'VARIANT_NOT_MATCHED'
-    | 'MULTIPLE_VARIANT_CANDIDATES' | 'VARIANT_NOT_IN_ERP' | 'PRODUCT_NOT_IN_MASTER' | 'NAME_CONFLICT' | null;
+    | 'MULTIPLE_VARIANT_CANDIDATES' | 'VARIANT_NOT_IN_ERP' | 'PRODUCT_NOT_IN_MASTER' | 'NAME_CONFLICT'
+    | 'SPEC_CODE_MISSING' | 'SPEC_CODE_CONFLICT' | null;
 }
 
 export interface WacaRepository {
@@ -93,8 +94,12 @@ export const normalizeWacaText = (value: string): string =>
     .replace(/[\uFF01-\uFF5E]/gu, character => String.fromCharCode(character.charCodeAt(0) - 0xFEE0))
     .replace(/\s+/gu, ' ').trim().replace(/[a-z]/gu, character => character.toUpperCase());
 
-export const wacaFeature = (row: Pick<WacaRow, 'productCode' | 'productTitle' | 'spec1' | 'spec2'>): string =>
+const legacyWacaFeature = (row: Pick<WacaRow, 'productCode' | 'productTitle' | 'spec1' | 'spec2'>): string =>
   JSON.stringify([row.productCode, row.productTitle, row.spec1, row.spec2].map(normalizeWacaText));
+
+// Keep both source codes: identical parent/name labels must not collapse two SKUs.
+export const wacaFeature = (row: Pick<WacaRow, 'productCode' | 'productTitle' | 'spec1' | 'spec2' | 'specCode'>): string =>
+  JSON.stringify([row.productCode, row.productTitle, row.spec1, row.spec2, row.specCode].map(normalizeWacaText));
 
 export const isWacaDiscount = (row: WacaRow): boolean =>
   normalizeWacaText(row.productCode) === 'COUPON'
@@ -121,13 +126,7 @@ export interface WacaMatch {
 const specification = (value: string): string => normalizeWacaText(value)
   .replace(/[\s\u3000/／・·.．,，:：()（）【】_-]+/gu, '').replaceAll('[', '').replaceAll(']', '');
 
-const matchingSpec = (row: WacaRow, candidates: readonly MasterVariant[]): MasterVariant[] => {
-  const wanted = [row.spec1, row.spec2].map(specification).filter(Boolean).join('');
-  if (!wanted) return [...candidates];
-  return candidates.filter(candidate => specification(candidate.variantTitle) === wanted);
-};
-
-const verifiesTitle = (row: WacaRow, candidate: MasterVariant): boolean => {
+const verifiesTitle = (row: Pick<WacaRow, 'productTitle'>, candidate: MasterVariant): boolean => {
   // Seller punctuation and spacing may differ across platforms; words, digits and signs do not.
   const title = (value: string) => normalizeWacaText(value).replace(/[\s\u3000、,，。・·]+/gu, '');
   const wanted = title(row.productTitle);
@@ -135,28 +134,53 @@ const verifiesTitle = (row: WacaRow, candidate: MasterVariant): boolean => {
   return !wanted || !actual || wanted === actual || wanted.includes(actual) || actual.includes(wanted);
 };
 
-export function matchWacaItem(row: WacaRow, master: readonly MasterVariant[], completeMaster = false): WacaMatch {
-  const code = normalizeWacaText(row.productCode);
+export function matchWacaItem(
+  row: Pick<WacaRow, 'specCode' | 'productTitle' | 'spec1' | 'spec2'>, master: readonly MasterVariant[],
+): WacaMatch {
+  // 商品編號 is parent evidence only. A missing 規格編號 is never guessed.
+  const code = normalizeWacaText(row.specCode);
+  if (!code) return { kind: 'UNMATCHED', candidate: null, candidates: [], diagnostic: 'SPEC_CODE_MISSING' };
   const direct = master.filter(item => normalizeWacaText(item.childCode) === code && item.active);
-  if (code.startsWith('G') && !code.startsWith('GP')) {
-    if (!direct.length) return { kind: 'UNMATCHED', candidate: null, candidates: [], diagnostic: 'VARIANT_NOT_IN_ERP' };
-    const resolved = direct.filter(item => item.variantId);
-    if (!resolved.length) return { kind: 'UNMATCHED', candidate: null, candidates: direct, diagnostic: 'VARIANT_NOT_IN_ERP' };
-    if (resolved.length !== 1) return { kind: 'MANUAL_REVIEW', candidate: null, candidates: resolved, diagnostic: 'MULTIPLE_VARIANT_CANDIDATES' };
-    return { kind: 'AUTO_MATCH', candidate: resolved[0], candidates: resolved,
-      diagnostic: resolved[0].mainCode && !resolved[0].productGroupId ? 'MASTER_GROUP_LINK_MISSING' : null };
+  const resolved = direct.filter(item => item.variantId);
+  if (!resolved.length) return { kind: 'UNMATCHED', candidate: null, candidates: direct, diagnostic: 'VARIANT_NOT_IN_ERP' };
+  if (resolved.length !== 1) return { kind: 'MANUAL_REVIEW', candidate: null, candidates: resolved, diagnostic: 'MULTIPLE_VARIANT_CANDIDATES' };
+  const candidate = resolved[0];
+  const wantedSpec = [row.spec1, row.spec2].map(specification).filter(Boolean).join('');
+  const nameConflict = !verifiesTitle(row, candidate)
+    || Boolean(wantedSpec && specification(candidate.variantTitle) && wantedSpec !== specification(candidate.variantTitle));
+  return { kind: 'AUTO_MATCH', candidate, candidates: resolved,
+    diagnostic: nameConflict ? 'NAME_CONFLICT'
+      : candidate.mainCode && !candidate.productGroupId ? 'MASTER_GROUP_LINK_MISSING' : null };
+}
+
+function resolveWacaItem(item: WacaItem, repo: WacaRepository, master: readonly MasterVariant[], importId: string): void {
+  const code = normalizeWacaText(item.specCode);
+  const mapping = repo.mappings.get(item.feature);
+  const match = matchWacaItem(item, master);
+  if (mapping?.method === 'MANUAL') {
+    const target = master.find(candidate => candidate.variantId === mapping.productVariantId
+      && normalizeWacaText(candidate.childCode) === code);
+    const conflict = code && (normalizeWacaText(mapping.myacgVariantId) !== code
+      || master.some(candidate => candidate.variantId === mapping.productVariantId
+        && normalizeWacaText(candidate.childCode) !== code));
+    item.productVariantId = code && !conflict && target ? mapping.productVariantId : null;
+    item.match = item.productVariantId ? 'MANUAL_MATCH' : conflict ? 'MANUAL_REVIEW' : 'UNMATCHED';
+    item.diagnostic = !code ? 'SPEC_CODE_MISSING' : conflict ? 'SPEC_CODE_CONFLICT'
+      : !target ? 'VARIANT_NOT_IN_ERP' : match.diagnostic === 'NAME_CONFLICT' ? 'NAME_CONFLICT' : null;
+    return;
   }
-  const scoped = master.filter(item => normalizeWacaText(item.mainCode) === code && item.active);
-  if (!scoped.length) return { kind: 'UNMATCHED', candidate: null, candidates: [],
-    diagnostic: completeMaster ? 'PRODUCT_NOT_IN_MASTER' : 'MASTER_EVIDENCE_MISSING' };
-  const specMatches = matchingSpec(row, scoped);
-  if (!specMatches.length) return { kind: 'UNMATCHED', candidate: null, candidates: scoped, diagnostic: 'VARIANT_NOT_MATCHED' };
-  const verified = specMatches.filter(item => verifiesTitle(row, item));
-  if (!verified.length) return { kind: 'UNMATCHED', candidate: null, candidates: specMatches, diagnostic: 'NAME_CONFLICT' };
-  if (verified.length !== 1) return { kind: 'MANUAL_REVIEW', candidate: null, candidates: verified, diagnostic: 'MULTIPLE_VARIANT_CANDIDATES' };
-  if (!verified[0].variantId) return { kind: 'UNMATCHED', candidate: null, candidates: verified, diagnostic: 'VARIANT_NOT_IN_ERP' };
-  return { kind: 'AUTO_MATCH', candidate: verified[0], candidates: verified,
-    diagnostic: !verified[0].productGroupId ? 'MASTER_GROUP_LINK_MISSING' : null };
+  item.productVariantId = match.candidate?.variantId ?? null;
+  item.match = match.kind;
+  item.diagnostic = match.diagnostic;
+  if (match.candidate && (mapping?.productVariantId !== match.candidate.variantId
+    || normalizeWacaText(mapping.myacgVariantId) !== code)) {
+    repo.mappings.set(item.feature, {
+      feature: item.feature, myacgMainId: match.candidate.mainCode, myacgVariantId: match.candidate.childCode,
+      productVariantId: match.candidate.variantId, method: 'AUTO', confirmedAt: importId,
+      historicalProductTitle: item.productTitle, historicalVariantTitle: match.candidate.variantTitle,
+      masterStatus: 'ACTIVE',
+    });
+  }
 }
 
 export const wacaOrderKey = (orderNumber: string): string => `WACA::${normalizeWacaText(orderNumber)}`;
@@ -180,6 +204,13 @@ export function setWacaMapping(repo: WacaRepository, mapping: WacaMapping): void
   repo.mappings.set(mapping.feature, mapping);
   for (const item of repo.items.values()) {
     if (item.feature !== mapping.feature) continue;
+    if (!normalizeWacaText(item.specCode)
+      || normalizeWacaText(item.specCode) !== normalizeWacaText(mapping.myacgVariantId)) {
+      item.productVariantId = null;
+      item.match = 'MANUAL_REVIEW';
+      item.diagnostic = normalizeWacaText(item.specCode) ? 'SPEC_CODE_CONFLICT' : 'SPEC_CODE_MISSING';
+      continue;
+    }
     item.productVariantId = mapping.productVariantId;
     item.match = mapping.method === 'MANUAL' ? 'MANUAL_MATCH' : 'AUTO_MATCH';
     item.diagnostic = null;
@@ -226,7 +257,7 @@ export function importWacaRows(
   for (const row of rows) {
     const discount = isWacaDiscount(row);
     if (discount) discountIgnored += 1;
-    if (!row.orderNumber.trim() || (!discount && (!row.productCode.trim() || !Number.isSafeInteger(row.quantity) || row.quantity < 0))) {
+    if (!row.orderNumber.trim() || (!discount && (!Number.isSafeInteger(row.quantity) || row.quantity < 0))) {
       errors.push('WACA_ROW_INVALID'); continue;
     }
     try { parseWacaStatus(row.orderStatus); } catch { errors.push('WACA_STATUS_UNSUPPORTED'); continue; }
@@ -235,6 +266,22 @@ export function importWacaRows(
   }
 
   const before = new Map(repo.autoQuantities);
+  // Upgrade only the in-memory candidate, committed through the existing atomic
+  // import boundary. Preserve manual mapping/audit records at their old feature.
+  const keyedItems = new Map<string, WacaItem>();
+  const keyByIdentity = new Map<string, string>();
+  for (const prior of repo.items.values()) {
+    const feature = wacaFeature(prior);
+    const identity = itemKey(prior.orderKey, feature);
+    if (keyByIdentity.has(identity)) throw new Error('WACA_ITEM_IDENTITY_CONFLICT');
+    const mapping = repo.mappings.get(prior.feature);
+    if (mapping?.method === 'MANUAL' && !repo.mappings.has(feature)) repo.mappings.set(feature, { ...mapping, feature });
+    // Cloud RPC upserts by the durable key; never replace an existing key,
+    // otherwise the old SQL row would survive and be counted a second time.
+    keyedItems.set(prior.key, { ...prior, feature });
+    keyByIdentity.set(identity, prior.key);
+  }
+  repo.items = keyedItems;
   let inserted = 0, updated = 0, unchanged = 0, matched = 0, unmatched = 0, multipleCandidates = 0, mappingMissing = 0;
   const statusConflicts: string[] = [];
   const importedItemKeys = new Set<string>();
@@ -255,17 +302,20 @@ export function importWacaRows(
         : { ...row });
     }
     for (const [feature, row] of itemsByFeature) {
-      const keyForItem = itemKey(key, feature);
+      const identity = itemKey(key, feature);
+      const keyForItem = keyByIdentity.get(identity) ?? identity;
+      keyByIdentity.set(identity, keyForItem);
       importedItemKeys.add(keyForItem);
-      const mapping = repo.mappings.get(feature);
-      const match = mapping ? null : matchWacaItem(row, master);
-      const productVariantId = mapping?.productVariantId ?? match?.candidate?.variantId ?? null;
-      const matchKind = mapping ? (mapping.method === 'MANUAL' ? 'MANUAL_MATCH' : 'AUTO_MATCH') : match!.kind;
       const item: WacaItem = {
         key: keyForItem, orderKey: key, feature, productCode: row.productCode, productTitle: row.productTitle,
         spec1: row.spec1, spec2: row.spec2, specCode: row.specCode, quantity: row.quantity, subtotal: row.subtotal,
-        productVariantId, match: matchKind, diagnostic: match?.diagnostic ?? null,
+        productVariantId: null, match: 'UNMATCHED', diagnostic: null,
       };
+      // Legacy manual decisions are evidence, not permission to override SKU.
+      const legacy = repo.mappings.get(legacyWacaFeature(row));
+      if (legacy?.method === 'MANUAL' && !repo.mappings.has(feature)) repo.mappings.set(feature, { ...legacy, feature });
+      resolveWacaItem(item, repo, master, importId);
+      const matchKind = item.match;
       const prior = repo.items.get(keyForItem);
       if (!prior) inserted += 1;
       else if (JSON.stringify(prior) !== JSON.stringify(item) || oldOrder?.status !== status) updated += 1;
@@ -275,27 +325,12 @@ export function importWacaRows(
       else if (matchKind === 'MANUAL_REVIEW') multipleCandidates += 1;
       else matched += 1;
       if (item.diagnostic === 'MASTER_EVIDENCE_MISSING') mappingMissing += 1;
-      if (matchKind === 'AUTO_MATCH' && !mapping && match?.candidate) {
-        repo.mappings.set(feature, {
-          feature, myacgMainId: match.candidate.mainCode, myacgVariantId: match.candidate.childCode,
-          productVariantId: match.candidate.variantId, method: 'AUTO', confirmedAt: importId,
-          historicalProductTitle: row.productTitle, historicalVariantTitle: match.candidate.variantTitle,
-          masterStatus: 'ACTIVE',
-        });
-      }
     }
   }
-  // A catalogue product may be added after its orders were saved as pending.
-  // Reusing a confirmed feature mapping must also resolve those historical
-  // items, including orders omitted from the current file. This preserves their
-  // original quantities/statuses and avoids importing or incrementing them again.
+  // Revalidate every saved line, including previously wrong AUTO matches and
+  // orders omitted from this file. Quantities/statuses are never incremented.
   for (const item of repo.items.values()) {
-    if (item.productVariantId) continue;
-    const mapping = repo.mappings.get(item.feature);
-    if (!mapping) continue;
-    item.productVariantId = mapping.productVariantId;
-    item.match = mapping.method === 'MANUAL' ? 'MANUAL_MATCH' : 'AUTO_MATCH';
-    item.diagnostic = null;
+    resolveWacaItem(item, repo, master, importId);
   }
   recomputeWacaQuantities(repo);
   const quantityChanges = [...new Set([...before.keys(), ...repo.autoQuantities.keys()])].sort().map(variantId => ({

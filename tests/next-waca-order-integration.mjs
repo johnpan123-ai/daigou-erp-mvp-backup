@@ -19,7 +19,7 @@ try {
 
 const row = (value = {}) => ({
   orderStatus: '處理中', orderNumber: 'A', purchasedAt: '2026-08-01', productCode: 'GP-A',
-  productTitle: 'Product', spec1: 'Red', spec2: '', specCode: '', quantity: 1, subtotal: 100,
+  productTitle: 'Product', spec1: 'Red', spec2: '', specCode: 'G-RED', quantity: 1, subtotal: 100,
   ...value,
 });
 const master = [
@@ -30,13 +30,13 @@ const master = [
 assert.equal(normalizeWacaText(' Ａ  b '), 'A B');
 assert.notEqual(normalizeWacaText('2026 Limited'), normalizeWacaText('2027 Limited'));
 assert.equal(matchWacaItem(row(), master).candidate?.variantId, 'vr');
-assert.equal(matchWacaItem(row({ productCode: 'G-BLUE', spec1: 'Blue' }), master).candidate?.variantId, 'vb');
-assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master).diagnostic, 'MASTER_EVIDENCE_MISSING');
-assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master, true).diagnostic, 'PRODUCT_NOT_IN_MASTER');
-assert.equal(matchWacaItem(row({ spec1: 'Green' }), master).diagnostic, 'VARIANT_NOT_MATCHED');
-assert.equal(matchWacaItem(row({ spec1: '' }), master).diagnostic, 'MULTIPLE_VARIANT_CANDIDATES');
+assert.equal(matchWacaItem(row({ productCode: 'G-RED', specCode: 'G-BLUE', spec1: 'Blue' }), master).candidate?.variantId, 'vb');
+assert.equal(matchWacaItem(row({ productCode: 'GP-MISSING' }), master).candidate?.variantId, 'vr');
+assert.equal(matchWacaItem(row({ specCode: 'G-MISSING' }), master).diagnostic, 'VARIANT_NOT_IN_ERP');
+assert.equal(matchWacaItem(row({ spec1: 'Green' }), master).diagnostic, 'NAME_CONFLICT');
+assert.equal(matchWacaItem(row({ specCode: '' }), master).diagnostic, 'SPEC_CODE_MISSING');
 assert.equal(matchWacaItem(row({ productTitle: 'Unrelated Figure' }), master).diagnostic, 'NAME_CONFLICT');
-assert.equal(matchWacaItem(row({ productCode: 'GP-B' }), master).candidate?.variantId, 'vo');
+assert.equal(matchWacaItem(row({ productCode: 'GP-B', specCode: 'G-OTHER' }), master).candidate?.variantId, 'vo');
 assert.equal(isWacaDiscount(row({ productCode: 'CoUpOn' })), true);
 assert.equal(isWacaDiscount(row({ productTitle: 'HIPPOSEP60' })), true);
 assert.equal(isWacaDiscount(row({ spec1: '小河馬09月份60元折扣券' })), true);
@@ -65,7 +65,7 @@ importWacaRows([row({ orderNumber: 'C', orderStatus: '失敗' })], repo, master,
 assert.equal(repo.autoQuantities.get('vr'), 4);
 result = importWacaRows([
   row({ orderNumber: 'D', quantity: 2 }), row({ orderNumber: 'D', quantity: 3 }),
-  row({ orderNumber: 'D', spec1: 'Blue', quantity: 1 }),
+  row({ orderNumber: 'D', spec1: 'Blue', specCode: 'G-BLUE', quantity: 1 }),
   row({ orderNumber: 'D', productCode: 'coupon', productTitle: 'discount' }),
 ], repo, master, 'duplicate-and-multi-product');
 assert.equal(repo.autoQuantities.get('vr'), 9);
@@ -75,8 +75,8 @@ assert.equal(result.discountIgnored, 1);
 result = importWacaRows([row({ orderNumber: 'D', orderStatus: '取消', quantity: 99 }), row({ orderNumber: 'D', quantity: 99 })], repo, master, 'status-conflict');
 assert.deepEqual(result.statusConflicts, ['WACA::D']);
 assert.equal(repo.autoQuantities.get('vr'), 9);
-result = importWacaRows([row({ orderNumber: 'E', productCode: 'GP-MISSING', quantity: 4 })], repo, master, 'mapping-missing');
-assert.equal(result.mappingMissing, 1);
+result = importWacaRows([row({ orderNumber: 'E', productCode: 'GP-MISSING', specCode: 'G-MISSING', quantity: 4 })], repo, master, 'mapping-missing');
+assert.equal(result.unmatched, 1);
 assert.equal(result.effectiveQuantity, result.matchedEffectiveQuantity + result.unmatchedPendingQuantity);
 const feature = wacaFeature(row());
 setWacaMapping(repo, {
@@ -85,16 +85,18 @@ setWacaMapping(repo, {
   historicalVariantTitle: 'Blue', masterStatus: 'ACTIVE',
 });
 assert.equal(repo.autoQuantities.get('vr') ?? 0, 0);
-assert.equal(repo.autoQuantities.get('vb'), 10);
+assert.equal(repo.autoQuantities.get('vb'), 1);
+assert.ok([...repo.items.values()].filter(item => item.feature === feature)
+  .every(item => item.diagnostic === 'SPEC_CODE_CONFLICT'));
 refreshWacaMasterStatus(repo, []);
 assert.equal(repo.mappings.get(feature)?.masterStatus, 'MISSING_FROM_LATEST_MASTER');
-assert.equal(repo.autoQuantities.get('vb'), 10);
+assert.equal(repo.autoQuantities.get('vb'), 1);
 importWacaRows([row({ orderNumber: 'A', quantity: 2 })], repo, [], 'later-without-B');
 assert.equal(repo.orders.has('WACA::B'), true);
-assert.equal(repo.autoQuantities.get('vb'), 10);
+assert.equal(repo.autoQuantities.get('vb') ?? 0, 0);
 
 const partialOrderRepo = createWacaRepository();
-importWacaRows([row(), row({ spec1: 'Blue' })], partialOrderRepo, master, 'both-items');
+importWacaRows([row(), row({ spec1: 'Blue', specCode: 'G-BLUE' })], partialOrderRepo, master, 'both-items');
 const partialResult = importWacaRows([row()], partialOrderRepo, master, 'one-item-only');
 assert.equal(partialOrderRepo.items.size, 2, 'an omitted historical line is not silently deleted');
 assert.equal(partialResult.effectiveQuantity, 1, 'the current import equation covers only rows in that file');
@@ -130,7 +132,7 @@ assert.throws(() => validateNextWacaSnapshot({ ...recovered,
 // Orders can arrive before the catalogue. A later partial re-import resolves
 // every saved order of the confirmed feature, without repeating the old file.
 const pendingRepo = createWacaRepository();
-const cap = row({ productCode: 'GP-CAP', productTitle: '胡桃誕生日記念', spec1: '棒球帽', orderNumber: 'CAP-1' });
+const cap = row({ productCode: 'GP-CAP', specCode: 'G-CAP', productTitle: '胡桃誕生日記念', spec1: '棒球帽', orderNumber: 'CAP-1' });
 const capMaster = [{ mainCode: 'GP-CAP', childCode: 'G-CAP', variantId: 'cap', productGroupId: 'cap-group',
   productTitle: cap.productTitle, variantTitle: '棒球帽', active: true }];
 const firstPending = importWacaRows([cap], pendingRepo, [], 'cap-before-catalogue');
@@ -219,7 +221,8 @@ if (!existsSync(sample) || !existsSync(source) || !existsSync(snapshotFile)) {
   const known = productRows.find(item => item.productCode === 'GP00379558' && item.spec1 === '我們團長的壓克力立牌');
   assert.ok(known);
   const knownMatch = matchWacaItem(known, reference);
-  assert.equal(knownMatch.candidate?.childCode, 'G07419745');
+  if (!normalizeWacaText(known.specCode)) assert.equal(knownMatch.diagnostic, 'SPEC_CODE_MISSING');
+  else if (knownMatch.candidate) assert.equal(normalizeWacaText(knownMatch.candidate.childCode), normalizeWacaText(known.specCode));
   const actualRepo = createWacaRepository();
   const imported = importWacaRows(waca.rows, actualRepo, reference, 'real-sample');
   assert.equal(imported.errors.length, 0);
@@ -230,7 +233,7 @@ if (!existsSync(sample) || !existsSync(source) || !existsSync(snapshotFile)) {
   console.log(JSON.stringify({
     realSample: true, rows: waca.rows.length, orders: imported.ordersTotal,
     discounts: imported.discountIgnored, features: features.size, counts, knownExample: knownMatch.candidate?.childCode,
-    pending, matchedEffectiveQuantity: imported.matchedEffectiveQuantity,
+    pendingCount: pending.length, matchedEffectiveQuantity: imported.matchedEffectiveQuantity,
     unmatchedPendingQuantity: imported.unmatchedPendingQuantity,
   }, null, 2));
 }

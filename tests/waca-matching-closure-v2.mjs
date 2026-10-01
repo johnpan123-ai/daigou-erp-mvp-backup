@@ -58,49 +58,40 @@ try {
   assert.equal(waca.rows.length, 127);
   assert.equal(productRows.length, 115);
   assert.equal(features.length, 60);
-  assert.equal(autoFeatures.length, 60);
-  assert.equal(autoRows.length, 115);
-  const matchedG = (code, spec) => matchWacaItem(features.find(row => row.productCode === code && row.spec1 === spec), master).candidate?.childCode;
-  assert.equal(matchedG('GP00379558', '我們團長的壓克力立牌'), 'G07419745');
-  assert.equal(matchedG('GP00392293', '親簽套組'), 'G07487794');
-  for (const code of ['G07553129', 'G07507981', 'G07510616', 'G07525624', 'G07525628']) {
-    const direct = features.find(row => row.productCode === code);
-    if (direct) assert.equal(matchWacaItem(direct, master).candidate?.childCode, code);
-  }
+  // This pre-fix workbook contains historical rows without a specification
+  // code. Preserve them as pending instead of reviving the old parent fallback.
+  assert.equal(autoRows.length + productRows.filter(r => matchWacaItem(r, master).kind !== 'AUTO_MATCH').length, 115);
   const kaela = features.find(row => row.productCode === 'GP00392293' && row.spec1 === '親簽套組');
-  assert.equal(matchWacaItem({ ...kaela, spec1: '複製簽套組' }, master).candidate?.childCode, 'G07487795');
+  assert.equal(matchWacaItem({ ...kaela, specCode: 'G07487795', spec1: '複製簽套組' }, master).candidate?.childCode, 'G07487795');
   const withoutHistoricKaela = master.filter(item => item.childCode !== 'G07487794');
-  assert.equal(matchWacaItem(kaela, withoutHistoricKaela).diagnostic, 'VARIANT_NOT_MATCHED');
+  assert.equal(matchWacaItem({ ...kaela, specCode: 'G07487794' }, withoutHistoricKaela).diagnostic, 'VARIANT_NOT_IN_ERP');
   const unknownGp = { ...kaela, productCode: 'GP-NOT-OBSERVED' };
-  assert.equal(matchWacaItem(unknownGp, master).diagnostic, 'MASTER_EVIDENCE_MISSING');
-  assert.equal(matchWacaItem(unknownGp, master, true).diagnostic, 'PRODUCT_NOT_IN_MASTER');
+  assert.equal(matchWacaItem({ ...unknownGp, specCode: 'G07487794' }, master).candidate?.childCode, 'G07487794');
+  assert.equal(matchWacaItem({ ...unknownGp, specCode: '' }, master).diagnostic, 'SPEC_CODE_MISSING');
   const absentErp = links.find(link => !link.productVariantId && link.variantTitle && link.productTitle);
   assert.ok(absentErp, 'source GP → G evidence must survive when ERP lacks the G');
   assert.equal(matchWacaItem({ ...kaela, productCode: absentErp.mainCode, productTitle: absentErp.productTitle,
-    spec1: absentErp.variantTitle }, master).diagnostic, 'VARIANT_NOT_IN_ERP');
-  assert.equal(matchWacaItem({ ...kaela, productTitle: 'Entirely different product' }, master).diagnostic, 'NAME_CONFLICT');
+    specCode: absentErp.childCode, spec1: absentErp.variantTitle }, master).diagnostic, 'VARIANT_NOT_IN_ERP');
+  assert.equal(matchWacaItem({ ...kaela, specCode: 'G07487794', productTitle: 'Entirely different product' }, master).diagnostic, 'NAME_CONFLICT');
   const duplicateCandidates = [
     { mainCode: 'GP-X', childCode: 'G-X1', variantId: 'x1', productGroupId: '',
       productTitle: 'Product X', variantTitle: 'Red', active: true },
-    { mainCode: 'GP-X', childCode: 'G-X2', variantId: 'x2', productGroupId: '',
+    { mainCode: 'GP-X', childCode: 'G-X1', variantId: 'x2', productGroupId: '',
       productTitle: 'Product X', variantTitle: 'Red', active: true },
   ];
-  assert.equal(matchWacaItem({ ...kaela, productCode: 'GP-X', productTitle: 'Product X', spec1: 'Red' },
+  assert.equal(matchWacaItem({ ...kaela, productCode: 'GP-X', specCode: 'G-X1', productTitle: 'Product X', spec1: 'Red' },
     duplicateCandidates).diagnostic, 'MULTIPLE_VARIANT_CANDIDATES');
-  const groupMissing = matchWacaItem({ ...kaela, productCode: 'G-X1' }, duplicateCandidates);
+  const groupMissing = matchWacaItem({ ...kaela, productCode: 'GP-X', specCode: 'G-X1', productTitle: 'Product X', spec1: 'Red' }, duplicateCandidates.slice(0, 1));
   assert.equal(groupMissing.kind, 'AUTO_MATCH', 'an exact G can match even without an ERP group link');
   assert.equal(groupMissing.diagnostic, 'MASTER_GROUP_LINK_MISSING');
-  const specKey = value => normalizeWacaText(value).replace(/[\s\u3000\/／・·.．,，:：()（）\[\]【】_-]+/gu, '');
   let falsePositiveCount = 0;
   for (const row of productRows) {
     const candidate = matchWacaItem(row, master).candidate;
-    const evidence = catalogByG.get(candidate?.childCode);
-    const exactG = row.productCode === candidate?.childCode;
-    const exactGpSpec = evidence && row.productCode === evidence['主編號(多規格編號)']
-      && specKey([row.spec1, row.spec2].filter(Boolean).join('')) === specKey(evidence['規格/項目']);
-    if (!candidate?.variantId || !(exactG || exactGpSpec)) falsePositiveCount += 1;
+    if (!row.specCode.trim()) assert.equal(matchWacaItem(row, master).diagnostic, 'SPEC_CODE_MISSING');
+    if (candidate && (!candidate.variantId
+      || normalizeWacaText(row.specCode) !== normalizeWacaText(candidate.childCode))) falsePositiveCount += 1;
   }
-  assert.equal(falsePositiveCount, 0, 'all auto matches require exact G or GP + exact normalized source specification');
+  assert.equal(falsePositiveCount, 0, 'every auto match must use the explicit specification code');
   const pending = featureMatch.filter(item => item.match.kind !== 'AUTO_MATCH').map(({ row, match }) => ({
     code: row.productCode, title: row.productTitle, spec: [row.spec1, row.spec2].filter(Boolean).join(' / '),
     reason: match.diagnostic, candidates: match.candidates.map(candidate => ({
@@ -122,7 +113,7 @@ try {
   assert.deepEqual(restored.autoQuantities, repo.autoQuantities);
   console.log(JSON.stringify({ rows: waca.rows.length, orders: result.ordersTotal,
     discounts: result.discountIgnored, productRows: productRows.length, features: features.length,
-    autoFeatures: autoFeatures.length, autoRows: autoRows.length, falsePositiveCount, pending,
+    autoFeatures: autoFeatures.length, autoRows: autoRows.length, falsePositiveCount, pendingCount: pending.length,
     imported: { matched: result.matched, unmatched: result.unmatched, multiple: result.multipleCandidates,
       effectiveQuantity: result.effectiveQuantity, matchedEffectiveQuantity: result.matchedEffectiveQuantity,
       unmatchedPendingQuantity: result.unmatchedPendingQuantity },

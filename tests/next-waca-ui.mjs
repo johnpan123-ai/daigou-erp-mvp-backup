@@ -71,7 +71,7 @@ try {
   const wacaBook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wacaBook, XLSX.utils.aoa_to_sheet([
     headers.map(() => '訂單資訊'), headers,
-    ['處理中', 'A-001', '2026-09-28', 'GP-A', 'Product', 'Red', '', '', 2, 200],
+    ['處理中', 'A-001', '2026-09-28', 'GP-A', 'Product', 'Red', '', 'G-RED', 2, 200],
   ]), 'WACA');
   const wacaBytes = XLSX.write(wacaBook, { type: 'buffer', bookType: 'xlsx' });
   const upload = async () => {
@@ -156,7 +156,7 @@ try {
   const changedBook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(changedBook, XLSX.utils.aoa_to_sheet([
     headers.map(() => '訂單資訊'), headers,
-    ['處理中', 'A-001', '2026-09-28', 'GP-A', 'Product', 'Red', '', '', 3, 300],
+    ['處理中', 'A-001', '2026-09-28', 'GP-A', 'Product', 'Red', '', 'G-RED', 3, 300],
   ]), 'WACA');
   await page.getByLabel('選擇 WACA Excel').setInputFiles({
     name: 'changed.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

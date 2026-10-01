@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { createServer } from 'vite';
 
 // Disposable loopback PostgreSQL and PostgREST only. Never accept a remote URL.
 const rawUrl = process.env.WACA_ISOLATED_PG_URL;
@@ -20,6 +21,7 @@ const secret = 'isolated-waca-postgrest-v3-secret-32-bytes';
 const origin = 'http://127.0.0.1:4397';
 const ownerId = '00000000-0000-4000-8000-000000000099';
 let server;
+let vite;
 let serverOutput = '';
 
 const jwt = sub => {
@@ -105,8 +107,68 @@ try {
   const { rows } = await sql.query('select waca_auto_quantity from public.product_variants where local_id=$1', ['v-11']);
   assert.equal(rows[0].waca_auto_quantity, 11);
   assert.equal((await sql.query('select count(*)::integer n from public.waca_orders')).rows[0].n, 1);
+
+  // Exercise the actual domain -> existing snapshot RPC -> SQL recompute path.
+  // Old durable item keys must survive feature normalization: the RPC upserts
+  // keys rather than deleting omitted rows, so rekeying would double count.
+  vite = await createServer({ configFile: false, server: { middlewareMode: true }, appType: 'custom' });
+  const { importWacaRows, normalizeWacaText } = await vite.ssrLoadModule('/src/waca/orderCore.ts');
+  const { repositoryFromSnapshot, snapshotFromRepository } = await vite.ssrLoadModule('/src/waca/nextStorage.ts');
+  const signedId = '00000000-0000-4000-8000-000000000011';
+  const capId = '00000000-0000-4000-8000-000000000012';
+  await sql.query(`insert into public.product_variants(id,local_id,myacg_item_code,product_title,variant_name)
+    values ($1,'v-12','G002','Test group','Cap')`, [capId]);
+  const variants = (await sql.query('select * from public.product_variants')).rows;
+  const master = variants.map(v => ({ mainCode: 'GP-TEST', childCode: v.myacg_item_code,
+    variantId: v.id, productGroupId: 'test-group', productTitle: v.product_title,
+    variantTitle: v.variant_name, active: true }));
+  const row = (specCode, spec1, quantity, overrides = {}) => ({ orderStatus: '完成付款',
+    orderNumber: 'HTTP-A', purchasedAt: '2026-10-02', productCode: 'G001', productTitle: 'Test group',
+    specCode, spec1, spec2: '', quantity, subtotal: quantity * 100, ...overrides });
+  const capRow = row('G002', 'Cap', 1);
+  const oldFeature = JSON.stringify([capRow.productCode, capRow.productTitle, capRow.spec1, capRow.spec2].map(normalizeWacaText));
+  const oldKey = snapshot.items[0].key;
+  const seeded = { ...saved.data,
+    items: [{ ...capRow, key: oldKey, orderKey: 'WACA::HTTP-A', feature: oldFeature,
+      productVariantId: signedId, match: 'AUTO_MATCH', diagnostic: null }],
+    mappings: [{ feature: oldFeature, productVariantId: signedId, myacgMainId: 'GP-TEST',
+      myacgVariantId: 'G001', method: 'AUTO', confirmedAt: '2026-10-01' }],
+  };
+  const seed = await call('/rpc/erp_commit_waca_snapshot', {
+    p_snapshot: seeded, p_expected_revision: saved.data.revision, p_update_auto_quantity: true,
+  }, owner);
+  assert.equal(seed.status, 200, 'isolated old wrong mapping seed');
+  const inputs = [row('G001', 'Test variant', 3), capRow, row('', 'Cap', 9, { orderNumber: 'BLANK-SPEC' }),
+    row('G002', 'Cap', 7, { orderNumber: 'CANCEL', orderStatus: '取消' }),
+    row('G002', 'Cap', 8, { orderNumber: 'FAIL', orderStatus: '失敗' })];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const current = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
+    const repo = repositoryFromSnapshot(current, variants);
+    const result = importWacaRows(inputs, repo, master, `SPEC-${attempt}`);
+    assert.equal(result.errors.length, 0);
+    assert.equal(repo.autoQuantities.get(signedId), 3);
+    assert.equal(repo.autoQuantities.get(capId), 1);
+    assert.equal(repo.items.get(oldKey).productVariantId, capId);
+    const committed = await call('/rpc/erp_commit_waca_snapshot', {
+      p_snapshot: snapshotFromRepository(current, repo, current.batches),
+      p_expected_revision: current.revision, p_update_auto_quantity: true,
+    }, owner);
+    assert.equal(committed.status, 200, JSON.stringify(committed.data));
+    assert.equal(committed.data.effectiveQuantity, 13, 'source sum includes the pending 9, not assigned ERP quantity');
+    const actual = (await sql.query('select id,waca_auto_quantity from public.product_variants')).rows;
+    assert.equal(actual.find(v => v.id === signedId).waca_auto_quantity, 3);
+    assert.equal(actual.find(v => v.id === capId).waca_auto_quantity, 1);
+    assert.equal((await sql.query('select count(*)::integer n from public.waca_order_items')).rows[0].n, 5);
+    const back = (await call('/rpc/erp_read_waca_snapshot', {}, owner)).data;
+    assert.equal(back.items.find(item => item.key === oldKey).productVariantId, capId);
+    assert.equal(back.items.find(item => item.specCode === '').productVariantId, '');
+    assert.equal(back.items.find(item => item.specCode === '').diagnostic, 'SPEC_CODE_MISSING');
+    assert.deepEqual(back.cutoverAudit, saved.data.cutoverAudit, 'historical audit remains unchanged');
+  }
+  console.log('PASS isolated PostgREST spec-code rematch, stable legacy SQL keys, signed=3/cap=1, blank pending, status rules and 5x idempotency');
   console.log('PASS isolated PostgREST 16.4: owner/anon/non-owner ACL, RPC 5x idempotency, 8→11, CAS, direct-write deny');
 } finally {
+  await vite?.close();
   server?.kill();
   await sql.end();
   await admin.query(`drop database ${databaseName} with (force)`);

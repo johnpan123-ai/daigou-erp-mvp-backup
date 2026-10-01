@@ -48,6 +48,8 @@ const statusText: Record<string, string> = {
   VARIANT_NOT_IN_ERP: '找不到對應商品',
   PRODUCT_NOT_IN_MASTER: '找不到對應商品',
   NAME_CONFLICT: '商品名稱需要確認',
+  SPEC_CODE_MISSING: '缺少規格編號，請確認來源訂單',
+  SPEC_CODE_CONFLICT: '人工對照與規格編號不一致，請確認',
 };
 
 const quantity = (value: number) => value.toLocaleString('zh-TW');
@@ -152,11 +154,10 @@ export default function WacaIntegration() {
   }, [masterState.master]);
   const evidenceByChildCode = useMemo(() => new Map(masterState.links.map(link => [link.childCode, link])), [masterState.links]);
   const explanationByFeature = useMemo(() => new Map(mappingItems.map(item => {
-    const code = normalizeWacaText(item.productCode);
+    const code = normalizeWacaText(item.specCode);
     const match = matchWacaItem({
-      orderStatus: '', orderNumber: '', purchasedAt: '', productCode: item.productCode,
       productTitle: item.productTitle, spec1: item.spec1, spec2: item.spec2,
-      specCode: item.specCode, quantity: item.quantity, subtotal: item.subtotal,
+      specCode: item.specCode,
     }, masterByCode.get(code) ?? []);
     return [item.feature, match.diagnostic ? statusText[match.diagnostic] : '已找到安全候選'] as const;
   })), [mappingItems, masterByCode]);
@@ -168,7 +169,8 @@ export default function WacaIntegration() {
     ? [...new Map(pendingImport.items.map(item => [item.feature, item])).values()] : [], [pendingImport]);
   const previewGroups = useMemo(() => {
     if (!pendingImport) return [];
-    const touched = new Set(pendingImport.items.map(item => item.productVariantId).filter((id): id is string => Boolean(id)));
+    const touched = new Set([...pendingImport.items.map(item => item.productVariantId),
+      ...pendingImport.result.quantityChanges.map(change => change.variantId)].filter((id): id is string => Boolean(id)));
     const touchedGroups = new Set(variants.filter(row => touched.has(row.id)).map(row => row.product_group_id || row.id));
     const skuSort = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
     return [...touchedGroups].map(id => {
@@ -218,7 +220,7 @@ export default function WacaIntegration() {
       const keys = new Set(parsed.rows.map(row => `${wacaOrderKey(row.orderNumber)}::${wacaFeature(row)}`));
       setPendingImport({
         fileName: file.name, rows: parsed.rows, revision: snapshot.revision, importId, result,
-        items: [...candidate.items.values()].filter(item => keys.has(item.key)),
+        items: [...candidate.items.values()].filter(item => keys.has(`${item.orderKey}::${item.feature}`)),
         links: masterState.links,
         afterQuantities: new Map(candidate.autoQuantities),
       });
@@ -304,7 +306,9 @@ export default function WacaIntegration() {
   };
 
   const choicesFor = useCallback((item: WacaItem) => {
-    return masterByCode.get(normalizeWacaText(item.productCode)) ?? [];
+    const code = normalizeWacaText(item.specCode);
+    return code ? (masterByCode.get(code) ?? [])
+      .filter(candidate => normalizeWacaText(candidate.childCode) === code) : [];
   }, [masterByCode]);
 
   const explanationFor = useCallback((item: WacaItem) => {
@@ -314,7 +318,7 @@ export default function WacaIntegration() {
   const manualMap = useCallback(async (item: WacaItem) => {
     if (!snapshot) return;
     const chosen = choicesFor(item).find(row => row.variantId === selectedVariant[item.feature]);
-    if (!chosen || !chosen.variantId) { setError('請先選擇同一買動漫 GP 底下且 ERP 存在的子規格。'); return; }
+    if (!chosen || !chosen.variantId) { setError('請先選擇與 WACA 規格編號一致、且 ERP 存在的規格。'); return; }
     setBusy(true); setError('');
     try {
       const current = await dataProvider.getNextWacaSnapshot();
