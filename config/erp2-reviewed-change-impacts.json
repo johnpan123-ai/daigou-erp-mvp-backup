@@ -1257,5 +1257,118 @@
         }
       ]
     }
+    ,
+    {
+      "id": "buyanime-adopted-review-lineage-v1",
+      "beforeHead": "f06664a6c6b939b6c6fb0127babef654f085ff53",
+      "reviewedHead": "ddd243270c05559d77c77a10db9c2c112776b303",
+      "patchSha256": "91d8dbbe38f26b0b8e4ed39d0a1487670784450ea53b117f46693b4e0a15870b",
+      "schemaSensitiveCount": 0,
+      "unknownCount": 0,
+      "migrationChecksumParity": "PASS",
+      "canonicalContractParity": "PASS",
+      "backupContractParity": "PASS",
+      "providerContractParity": "PASS",
+      "newDurableResources": 0,
+      "newRequiredDurableFields": 0,
+      "requiredRegressions": [
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "config/erp2-reviewed-change-impacts.json",
+          "beforeHash": "a0793da86af8a439999c1eb41324cc498eba8cde5c5e1e87e53f8da8a909b90a",
+          "afterHash": "5cb6a780566a6b56c913e6c85f5342750cdb91a578c9ad7060e5e84a5690bcae",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact review adoption-boundary validation"
+          ],
+          "changedInputs": "Verified adopted baseline Git ancestry and immutable exact review anchors.",
+          "changedOutputs": "Only proven pre-adoption gaps may cross the baseline boundary; all post-baseline gaps, source drift, RPC/migration/provider/backup/unknown changes fail closed.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "Release evidence only; baseline and runtime UUID unchanged.",
+          "dataFlow": "Git source and exact hashes -> release classification or fail closed.",
+          "persistenceBehavior": "Release metadata only; no ERP persistence.",
+          "writePath": "No live/cloud mutation.",
+          "providerPath": "None.",
+          "externalContract": "No schema/RPC/backup change.",
+          "schemaExpectation": "Existing adopted canonical baseline untouched."
+        },
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "e68274da67c0b683da8a7bcc0036517ccd49ee797dacee922e0908a2f298be3d",
+          "afterHash": "3f4e9f5ddfa107c7ee375c02a44e381ae64d6bf7ba18edf0e2cdcfa12d913d45",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact review adoption-boundary validation"
+          ],
+          "changedInputs": "Verified adopted baseline Git ancestry and immutable exact review anchors.",
+          "changedOutputs": "Only proven pre-adoption gaps may cross the baseline boundary; all post-baseline gaps, source drift, RPC/migration/provider/backup/unknown changes fail closed.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "Release evidence only; baseline and runtime UUID unchanged.",
+          "dataFlow": "Git source and exact hashes -> release classification or fail closed.",
+          "persistenceBehavior": "Release metadata only; no ERP persistence.",
+          "writePath": "No live/cloud mutation.",
+          "providerPath": "None.",
+          "externalContract": "No schema/RPC/backup change.",
+          "schemaExpectation": "Existing adopted canonical baseline untouched."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "6a4c95c99b7a559eb5c63ba69d7862b75d8d4dbb5c0d4686fac01f1814568591",
+          "afterHash": "bcb5cfbab78f174902f4630cec7e6c6ab9ad4370354c193039cd095835254efa",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact review adoption-boundary validation"
+          ],
+          "changedInputs": "Verified adopted baseline Git ancestry and immutable exact review anchors.",
+          "changedOutputs": "Only proven pre-adoption gaps may cross the baseline boundary; all post-baseline gaps, source drift, RPC/migration/provider/backup/unknown changes fail closed.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "Release evidence only; baseline and runtime UUID unchanged.",
+          "dataFlow": "Git source and exact hashes -> release classification or fail closed.",
+          "persistenceBehavior": "Release metadata only; no ERP persistence.",
+          "writePath": "No live/cloud mutation.",
+          "providerPath": "None.",
+          "externalContract": "No schema/RPC/backup change.",
+          "schemaExpectation": "Existing adopted canonical baseline untouched."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "fc54f48590ff21561cb945220fc04498c239308387a45e052c51a86bb5c3d0b8",
+          "afterHash": "89e4ee27cc04a2cf69fe729b454cfdcade46f5e1d5e3b67d62667149383cd035",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact BuyAnime future-hunk negative tests"
+          ],
+          "changedInputs": "Verified adopted baseline Git ancestry and immutable exact review anchors.",
+          "changedOutputs": "Only proven pre-adoption gaps may cross the baseline boundary; all post-baseline gaps, source drift, RPC/migration/provider/backup/unknown changes fail closed.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "Release evidence only; baseline and runtime UUID unchanged.",
+          "dataFlow": "Git source and exact hashes -> release classification or fail closed.",
+          "persistenceBehavior": "Release metadata only; no ERP persistence.",
+          "writePath": "No live/cloud mutation.",
+          "providerPath": "None.",
+          "externalContract": "No schema/RPC/backup change.",
+          "schemaExpectation": "Existing adopted canonical baseline untouched."
+        }
+      ]
+    }
   ]
 }
