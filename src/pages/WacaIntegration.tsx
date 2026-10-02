@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { FileSpreadsheet, Link2, RefreshCw } from 'lucide-react';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { FileUploadButton } from '../components/FileUploadButton';
@@ -10,7 +10,7 @@ import { normalizeProductTitle, type InventoryItem, type ProductGroup, type Prod
 import { productGroupDisplayName } from '../lib/productGroupDisplayName';
 import {
   cloneWacaRepository, importWacaRows, indexWacaMaster,
-  matchWacaItem, refreshWacaMasterStatus, setWacaMapping, wacaFeature, wacaOrderKey,
+  isWacaDiscount, matchWacaItem, refreshWacaMasterStatus, setWacaMapping, wacaFeature, wacaOrderKey,
   type MasterVariant, type WacaImportResult, type WacaItem, type WacaRow, type WacaStatus,
 } from '../waca/orderCore';
 import {
@@ -23,6 +23,10 @@ import {
 } from '../waca/nextStorage';
 import { parseWacaWorkbook } from '../waca/workbookParser';
 import { reconcileWacaReadback } from '../waca/reconciliation';
+import {
+  buildWacaPreviewComparisons, isWacaPreviewVariantVisible,
+  type WacaVariantPreviewComparison,
+} from '../waca/previewReconciliation';
 import { supportsWacaProvider } from '../waca/providerSupport';
 import './WacaIntegration.css';
 
@@ -34,10 +38,14 @@ type PendingImport = {
   importId: string;
   result: WacaImportResult;
   items: WacaItem[];
+  candidateOrders: Array<{ key: string; orderNumber: string; status: WacaStatus }>;
   links: MyAcgMasterLink[];
-  afterQuantities: Map<string, number>;
+  comparisonByVariant: Map<string, WacaVariantPreviewComparison>;
 };
 type PendingLinks = { fileName: string; revision: number; result: LinkImportResult; links: MyAcgMasterLink[] };
+type UnresolvedPreviewTrace = {
+  key: string; orderNumber: string; status: string; quantity: number; reason: string;
+};
 
 const statusText: Record<string, string> = {
   MASTER_EVIDENCE_MISSING: '找不到對應商品',
@@ -69,6 +77,7 @@ const resolutionText = (item: WacaItem): string => {
 };
 
 const quantity = (value: number) => value.toLocaleString('zh-TW');
+const signedQuantity = (value: number) => value > 0 ? `+${quantity(value)}` : quantity(value);
 const isPending = (item: WacaItem) => !item.productVariantId;
 const readErrorText = (cause: unknown): string => cause && typeof cause === 'object' && 'message' in cause
   ? String(cause.message) : String(cause);
@@ -83,6 +92,8 @@ export default function WacaIntegration() {
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [chosenFileName, setChosenFileName] = useState('');
   const [showUnchanged, setShowUnchanged] = useState(false);
+  const [showOnlyBaselineDifferences, setShowOnlyBaselineDifferences] = useState(false);
+  const [expandedTraces, setExpandedTraces] = useState<ReadonlySet<string>>(new Set());
   const [pendingLinks, setPendingLinks] = useState<PendingLinks | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<Record<string, string>>({});
   const [selectedParent, setSelectedParent] = useState<Record<string, string>>({});
@@ -163,6 +174,8 @@ export default function WacaIntegration() {
   const matchedFeatures = mappingItems.filter(item => item.productVariantId).length;
   const manualFeatures = mappingItems.filter(item => item.match === 'MANUAL_MATCH').length;
   const multipleFeatures = mappingItems.filter(item => item.diagnostic === 'MULTIPLE_VARIANT_CANDIDATES').length;
+  const rebaselinePreview = snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED'
+    || snapshot?.cutoverState?.mode === 'LEGACY_QUANTITY_ACTIVE';
   const previewFeatures = useMemo(() => pendingImport
     ? [...new Map(pendingImport.items.map(item => [item.feature, item])).values()] : [], [pendingImport]);
   const previewReasons = useMemo(() => {
@@ -174,18 +187,52 @@ export default function WacaIntegration() {
     }
     return reasons;
   }, [pendingImport]);
+  const previewUnresolvedByGroup = useMemo(() => {
+    const result = new Map<string, UnresolvedPreviewTrace[]>();
+    if (!pendingImport) return result;
+    const orderByKey = new Map(pendingImport.candidateOrders.map(row => [row.key, row]));
+    const add = (groupId: string, row: UnresolvedPreviewTrace) => {
+      const values = result.get(groupId) ?? [];
+      if (!values.some(value => value.key === row.key)) values.push(row);
+      result.set(groupId, values);
+    };
+    for (const item of pendingImport.items.filter(row => !row.productVariantId)) {
+      const match = matchWacaItem(item, masterIndex);
+      const groups = new Set(match.candidates.map(row => row.productGroupId).filter(Boolean));
+      if (groups.size !== 1) continue;
+      const order = orderByKey.get(item.orderKey);
+      add([...groups][0], { key: item.key, orderNumber: order?.orderNumber ?? item.orderKey.replace('WACA::', ''),
+        status: '待處理', quantity: item.quantity, reason: resolutionText(item) });
+    }
+    const conflicts = new Set(pendingImport.result.statusConflicts);
+    for (const row of pendingImport.rows) {
+      const orderKey = wacaOrderKey(row.orderNumber);
+      if (!conflicts.has(orderKey) || isWacaDiscount(row)) continue;
+      const match = matchWacaItem(row, masterIndex);
+      const groups = new Set(match.candidates.map(candidate => candidate.productGroupId).filter(Boolean));
+      if (match.candidate?.productGroupId) groups.add(match.candidate.productGroupId);
+      if (groups.size !== 1) continue;
+      add([...groups][0], { key: `${orderKey}::${wacaFeature(row)}`, orderNumber: row.orderNumber,
+        status: '狀態衝突', quantity: row.quantity, reason: '同一訂單出現多種狀態，確認前不計入 WACA 數量' });
+    }
+    return result;
+  }, [pendingImport, masterIndex]);
   const previewGroups = useMemo(() => {
     if (!pendingImport) return [];
     const touched = new Set([...pendingImport.items.map(item => item.productVariantId),
       ...pendingImport.result.quantityChanges.map(change => change.variantId)].filter((id): id is string => Boolean(id)));
     const touchedGroups = new Set(variants.filter(row => touched.has(row.id)).map(row => row.product_group_id || row.id));
+    for (const groupId of previewUnresolvedByGroup.keys()) touchedGroups.add(groupId);
+    const variantsByGroup = new Map<string, ProductVariant[]>();
+    for (const variant of variants) {
+      const groupId = variant.product_group_id || variant.id;
+      variantsByGroup.set(groupId, [...(variantsByGroup.get(groupId) ?? []), variant]);
+    }
     const skuSort = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
     return [...touchedGroups].map(id => {
-      const children = variants.filter(row => (row.product_group_id || row.id) === id).map(variant => {
-        const before = snapshot?.cutoverAudit?.length ? (repo?.autoQuantities.get(variant.id) ?? 0) : 0;
-        const after = pendingImport.afterQuantities.get(variant.id) ?? 0;
-        return { variant, before, after, delta: after - before };
-      }).sort((a, b) => {
+      const children = (variantsByGroup.get(id) ?? []).map(variant => ({
+        variant, comparison: pendingImport.comparisonByVariant.get(variant.id)!,
+      })).sort((a, b) => {
         const left = a.variant.myacg_item_code?.trim();
         const right = b.variant.myacg_item_code?.trim();
         if (!left || !right) return Number(!left) - Number(!right)
@@ -195,16 +242,18 @@ export default function WacaIntegration() {
       const group = groupById.get(id);
       return { id, title: group ? productGroupDisplayName(group)
         : normalizeProductTitle(children[0]?.variant.product_title || '未命名商品群組'),
-        children, increases: children.filter(row => row.delta > 0).length,
-        decreases: children.filter(row => row.delta < 0).length,
-        unchanged: children.filter(row => row.delta === 0).length };
+        children, unresolved: previewUnresolvedByGroup.get(id) ?? [],
+        increases: children.filter(row => row.comparison.difference > 0).length,
+        decreases: children.filter(row => row.comparison.difference < 0).length,
+        unchanged: children.filter(row => row.comparison.difference === 0).length };
     }).sort((a, b) => Number(b.increases + b.decreases > 0) - Number(a.increases + a.decreases > 0)
       || (b.increases + b.decreases) - (a.increases + a.decreases) || a.title.localeCompare(b.title));
-  }, [pendingImport, variants, repo, groupById, snapshot]);
-  const visiblePreviewGroups = showUnchanged ? previewGroups : previewGroups
-    .filter(group => group.increases + group.decreases > 0)
-    .map(group => ({ ...group, children: group.children.filter(row => row.delta !== 0) }));
-  const changedPreviewVariants = previewGroups.reduce((sum, group) => sum + group.increases + group.decreases, 0);
+  }, [pendingImport, variants, groupById, previewUnresolvedByGroup]);
+  const visiblePreviewGroups = previewGroups.map(group => ({ ...group, children: group.children.filter(row =>
+    isWacaPreviewVariantVisible(row.comparison, showUnchanged, showOnlyBaselineDifferences)) }))
+    .filter(group => group.children.length > 0 || group.unresolved.length > 0);
+  const changedPreviewVariants = previewGroups.reduce((sum, group) => sum
+    + group.children.filter(row => row.comparison.ledgerBeforeQuantity !== row.comparison.ledgerAfterQuantity).length, 0);
 
   const run = (rows: WacaRow[], current: NextWacaSnapshot, importId: string, links = masterState.links) => {
     const currentRepo = repositoryFromSnapshot(current, variants);
@@ -212,24 +261,29 @@ export default function WacaIntegration() {
     const master = buildWacaMasterReference(variants, links);
     const result = importWacaRows(rows, candidate, master, importId);
     refreshWacaMasterStatus(candidate, master);
-    return { candidate, result };
+    return { currentRepo, candidate, result };
   };
 
   const handleWacaFile = async (file?: File) => {
     if (!file || !snapshot) return;
     setChosenFileName(file.name);
     setBusy(true); setError(''); setMessage(''); setPendingImport(null); setShowUnchanged(false);
+    setShowOnlyBaselineDifferences(false); setExpandedTraces(new Set());
     try {
       if (masterState.error) throw new Error(masterState.error);
       const parsed = parseWacaWorkbook(await file.arrayBuffer());
       const importId = crypto.randomUUID();
-      const { candidate, result } = run(parsed.rows, snapshot, importId);
+      const { currentRepo, candidate, result } = run(parsed.rows, snapshot, importId);
       const keys = new Set(parsed.rows.map(row => `${wacaOrderKey(row.orderNumber)}::${wacaFeature(row)}`));
+      const comparisonByVariant = buildWacaPreviewComparisons(
+        variants, currentRepo, candidate, snapshot.cutoverState?.mode,
+      );
       setPendingImport({
         fileName: file.name, rows: parsed.rows, revision: snapshot.revision, importId, result,
         items: [...candidate.items.values()].filter(item => keys.has(`${item.orderKey}::${item.feature}`)),
+        candidateOrders: [...candidate.orders.values()],
         links: masterState.links,
-        afterQuantities: new Map(candidate.autoQuantities),
+        comparisonByVariant,
       });
     } catch (cause) { setChosenFileName(''); setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
@@ -484,22 +538,62 @@ export default function WacaIntegration() {
         {pendingImport.items.some(isPending) && <p className="waca-notice">未配對商品會先保存為待處理，暫不計入商品 WACA 數量；建立商品後重新匯入即可更新。</p>}
         {pendingImport.result.errors.length > 0 && <p className="waca-danger">資料列錯誤：{pendingImport.result.errors.join('、')}</p>}
         <h3>商品數量變化</h3>
-        <p>只顯示這次會改變數量的商品。點開商品群組可看各規格。</p>
-        <label className="waca-show-unchanged"><input type="checkbox" checked={showUnchanged}
-          onChange={event => setShowUnchanged(event.target.checked)} /> 顯示未變更商品</label>
+        <p>{rebaselinePreview
+          ? '以訂購紀錄表目前保留的 ERP1 WACA 數量，對照本次訂單完整重算結果。點開商品群組可看各規格。'
+          : '以目前 WACA 數量對照本次匯入後的重算結果。點開商品群組可看各規格。'}</p>
+        <div className="waca-preview-filters">
+          <label className="waca-show-unchanged"><input type="checkbox" checked={showUnchanged}
+            onChange={event => setShowUnchanged(event.target.checked)} /> 顯示未變更商品</label>
+          <label className="waca-show-unchanged"><input type="checkbox" checked={showOnlyBaselineDifferences}
+            onChange={event => setShowOnlyBaselineDifferences(event.target.checked)} /> {rebaselinePreview ? '只顯示與 ERP1 有差異' : '只顯示數量差異'}</label>
+        </div>
         {!visiblePreviewGroups.length && <p className="waca-no-changes">這份檔案沒有商品數量變動。</p>}
         <div className="waca-group-list">{visiblePreviewGroups.map(group => <details className={`waca-group ${group.increases + group.decreases ? 'changed' : 'unchanged'}`} key={group.id}>
-          <summary><strong>{group.title}</strong><span>新增 {group.increases}、減少 {group.decreases}、變動 {group.increases + group.decreases}
-            {showUnchanged ? `、未變更 ${group.unchanged}` : ''}</span></summary>
-          <div className="waca-scroll"><table><thead><tr><th>規格／SKU</th><th>原 WACA → 新 WACA</th><th>變化</th></tr></thead><tbody>
-            {group.children.map(({ variant, before, after, delta }) => <tr key={variant.id}>
-              <td><strong>{variant.variant_name || '標準規格'}</strong><small>SKU {variant.myacg_item_code}</small>
-                {[...(previewReasons.get(variant.id) ?? [])]
-                  .map(reason => <small key={reason}>{reason}</small>)}</td>
-              <td className="waca-quantity-pair">{before} <span aria-hidden="true">→</span> {after}</td>
-              <td className={delta > 0 ? 'waca-increase' : delta < 0 ? 'waca-decrease' : 'waca-unchanged'}>{delta > 0 ? `+${delta}` : delta}</td>
-            </tr>)}
-          </tbody></table></div>
+          <summary><strong>{group.title}</strong><span>增加 {group.increases}、減少 {group.decreases}、差異 {group.increases + group.decreases}
+            {showUnchanged ? `、一致 ${group.unchanged}` : ''}{group.unresolved.length ? `、待處理 ${group.unresolved.length}` : ''}</span></summary>
+          {!!group.children.length && <div className="waca-scroll"><table><thead><tr><th>規格／SKU</th>
+            <th>{rebaselinePreview ? 'ERP1 原 WACA' : '目前 WACA'}</th>
+            <th>匯入後 WACA</th><th>差異</th><th>明細</th></tr></thead><tbody>
+            {group.children.map(({ variant, comparison }) => {
+              const expanded = expandedTraces.has(variant.id);
+              return <Fragment key={variant.id}><tr>
+                <td><strong>{variant.variant_name || '標準規格'}</strong><small>SKU {variant.myacg_item_code}</small>
+                  {[...(previewReasons.get(variant.id) ?? [])]
+                    .map(reason => <small key={reason}>{reason}</small>)}</td>
+                <td className="waca-quantity-value">{quantity(comparison.baselineQuantity)}</td>
+                <td className="waca-quantity-value">{quantity(comparison.recomputedQuantity)}</td>
+                <td className={comparison.difference > 0 ? 'waca-increase' : comparison.difference < 0 ? 'waca-decrease' : 'waca-unchanged'}>
+                  {signedQuantity(comparison.difference)}</td>
+                <td><button type="button" className="waca-detail-toggle"
+                  aria-expanded={expanded} aria-label={`${expanded ? '收合' : '查看'} ${variant.myacg_item_code} 明細`}
+                  onClick={() => setExpandedTraces(previous => {
+                    const next = new Set(previous); if (next.has(variant.id)) next.delete(variant.id); else next.add(variant.id); return next;
+                  })}>{expanded ? '▼ 收合明細' : '▶ 查看明細'}</button></td>
+              </tr>{expanded && <tr className="waca-trace-row"><td colSpan={5}>
+                <div className="waca-trace-summary">{comparison.baselineLabel} {quantity(comparison.baselineQuantity)}｜ERP2 重算 {quantity(comparison.recomputedQuantity)}｜
+                  差異 {signedQuantity(comparison.difference)}｜計入 {quantity(comparison.includedOrderCount)} 筆訂單，共 {quantity(comparison.includedQuantity)} 件</div>
+                <h4>計入的 WACA 訂單</h4>
+                {!comparison.included.length && <p className="waca-trace-empty">目前沒有計入此規格的訂單。</p>}
+                {!!comparison.included.length && <div className="waca-scroll waca-trace-table"><table><thead><tr><th>訂單編號</th><th>訂單狀態</th><th>規格／SKU</th><th>數量</th><th>配對方式</th><th>是否計入</th></tr></thead><tbody>
+                  {comparison.included.map(trace => <tr key={trace.key}><td>{trace.orderNumber}</td><td>{trace.status}</td>
+                    <td>{variant.variant_name || '標準規格'}<small>SKU {variant.myacg_item_code}</small></td><td>{quantity(trace.quantity)}</td>
+                    <td>{trace.matchReason}<details className="waca-tech-inline"><summary>技術資訊</summary><small>{trace.resolutionCode ?? trace.matchReason}</small></details></td><td>計入</td></tr>)}
+                </tbody><tfoot><tr><td colSpan={3}>合計</td><td>{quantity(comparison.includedQuantity)} 件</td><td colSpan={2}>{quantity(comparison.includedOrderCount)} 筆訂單</td></tr></tfoot></table></div>}
+                {!!comparison.excluded.length && <details className="waca-excluded-details"><summary>未計入／待處理（{comparison.excluded.length}）</summary>
+                  <div className="waca-scroll waca-trace-table"><table><thead><tr><th>訂單編號</th><th>狀態</th><th>數量</th><th>原因</th></tr></thead><tbody>
+                    {comparison.excluded.map(trace => <tr key={trace.key}><td>{trace.orderNumber}</td><td>{trace.status}</td><td>{quantity(trace.quantity)}</td><td>{trace.excludedReason}</td></tr>)}
+                  </tbody></table></div></details>}
+                <details className="waca-tech waca-ledger-tech"><summary>查看技術資訊</summary>
+                  <p>Ledger 匯入前：{quantity(comparison.ledgerBeforeQuantity)}</p><p>本次 Preview 後：{quantity(comparison.ledgerAfterQuantity)}</p>
+                  <p>{comparison.baselineLabel}：{quantity(comparison.baselineQuantity)}</p><p>Rebaseline 差異：{signedQuantity(comparison.difference)}</p>
+                </details>
+              </td></tr>}</Fragment>;
+            })}
+          </tbody></table></div>}
+          {!!group.unresolved.length && <details className="waca-excluded-details waca-group-pending"><summary>未計入／待處理（{group.unresolved.length}）</summary>
+            <div className="waca-scroll waca-trace-table"><table><thead><tr><th>訂單編號</th><th>狀態</th><th>數量</th><th>原因</th></tr></thead><tbody>
+              {group.unresolved.map(trace => <tr key={trace.key}><td>{trace.orderNumber}</td><td>{trace.status}</td><td>{quantity(trace.quantity)}</td><td>{trace.reason}</td></tr>)}
+            </tbody></table></div></details>}
         </details>)}</div>
         <details className="waca-resolution-details"><summary>查看每筆商品的配對理由（含待處理）</summary>
           <p>有效數量 {pendingImport.result.effectiveQuantity} = 已配對 {pendingImport.result.matchedEffectiveQuantity} + 待處理 {pendingImport.result.unmatchedPendingQuantity}</p>

@@ -84,7 +84,17 @@ try {
   await upload();
   assert.match(await page.locator('[aria-label="WACA 匯入預覽摘要"]').innerText(), /2\s+有效數量/);
   await page.locator('.waca-group > summary').click();
-  assert.match(await page.locator('.waca-group').innerText(), /G-RED/);
+  const previewGroup = page.locator('.waca-group').first();
+  assert.match(await previewGroup.innerText(), /G-RED/);
+  assert.match(await previewGroup.locator('thead').first().innerText(), /ERP1 原 WACA\s+匯入後 WACA\s+差異\s+明細/);
+  assert.match(await previewGroup.locator('tbody > tr').first().innerText(), /G-RED[\s\S]*4\s+2\s+-2\s+▶ 查看明細/);
+  assert.equal(await previewGroup.locator('.waca-trace-row').count(), 0, 'order trace must not render while collapsed');
+  await previewGroup.getByRole('button', { name: '查看 G-RED 明細' }).click();
+  assert.equal(await previewGroup.locator('.waca-trace-row').count(), 1);
+  assert.match(await previewGroup.locator('.waca-trace-summary').innerText(), /ERP1 原 WACA 4.*ERP2 重算 2.*差異 -2.*計入 1 筆訂單，共 2 件/);
+  assert.match(await previewGroup.locator('.waca-trace-table').first().innerText(), /A-001\s+處理中[\s\S]*G-RED\s+2[\s\S]*規格編號精確配對[\s\S]*計入/);
+  await previewGroup.locator('.waca-ledger-tech > summary').click();
+  assert.match(await previewGroup.locator('.waca-ledger-tech').innerText(), /Ledger 匯入前：0.*本次 Preview 後：2.*ERP1 原 WACA：4.*Rebaseline 差異：-2/s);
   const [preImportBackup] = await Promise.all([
     page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click(),
   ]);
@@ -105,6 +115,9 @@ try {
   assert.equal(await page.locator('.waca-group').count(), 0, 'unchanged groups are hidden by default');
   await page.getByLabel('顯示未變更商品').check();
   assert.equal(await page.locator('.waca-group').count(), 1);
+  await page.getByLabel('只顯示數量差異').check();
+  assert.equal(await page.locator('.waca-group').count(), 0, 'baseline-difference filter hides equal current/recomputed rows');
+  await page.getByLabel('只顯示數量差異').uncheck();
   const [repeatBackup] = await Promise.all([
     page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click(),
   ]);

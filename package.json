@@ -17,6 +17,7 @@
     "test:waca-postgrest-isolated-v3": "node tests/waca-postgrest-isolated-v3.mjs",
     "test:next-waca-ui": "node tests/next-waca-ui.mjs",
     "test:waca-cloud-ui-parity": "node tests/waca-cloud-ui-parity.mjs",
+    "test:waca-rebaseline-preview": "node tests/waca-rebaseline-preview.mjs",
     "test:cloud-backup-next-restore": "node tests/cloud-backup-next-restore-e2e.mjs",
     "build:experimental": "tsc -b && vite build --mode experimental",
     "build:staging": "node scripts/staging-release-build.mjs",

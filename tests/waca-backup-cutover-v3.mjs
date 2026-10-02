@@ -85,6 +85,57 @@ try {
   assert.equal(legacy.modern.deadlineApplyBatches.length, 1);
   assert.equal(legacy.modern.deadlineApplyItems.length, 1);
 
+  const replacementContext = await browser.newContext();
+  const replacementPage = await replacementContext.newPage();
+  await replacementPage.route('**/*.supabase.co/**', route => route.abort());
+  await replacementPage.goto(origin + '/waca', { waitUntil: 'networkidle' });
+  await replacementPage.waitForFunction(() => Boolean(window.dataProvider));
+  const replacement = await replacementPage.evaluate(async ({ backup, id }) => {
+    const provider = window.dataProvider;
+    await provider.importData(JSON.stringify(backup));
+    // Model the restored aggregate as the Purchase Records-visible legacy 4,
+    // with an existing historical audit row. The first ledger cutover must
+    // replace all four pieces, never carry them forward as a manual +4.
+    const { NEXT_SANDBOX_INDEXED_DB_NAME } = await import('/src/lib/testSandboxEnvironment.ts');
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(NEXT_SANDBOX_INDEXED_DB_NAME, 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction('kv', 'readwrite');
+      const store = transaction.objectStore('kv');
+      const request = store.get('erp_product_variants');
+      request.onsuccess = () => store.put(request.result.map(row => row.id === id
+        ? { ...row, waca_auto_quantity: 0, waca_manual_adjustment: 4 } : row), 'erp_product_variants');
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+    const first = await provider.getNextWacaSnapshot();
+    const feature = JSON.stringify(['GP-TARGET', 'TEST', 'SPEC', '', 'G-TARGET']);
+    const orderKey = 'WACA::REBASELINE-4';
+    const next = { ...first,
+      orders: [{ key: orderKey, orderNumber: 'REBASELINE-4', status: '完成付款', purchasedAt: '2026-10-02' }],
+      items: [{ key: `${orderKey}::${feature}`, orderKey, feature, productCode: 'GP-TARGET',
+        productTitle: 'TEST', spec1: 'SPEC', spec2: '', specCode: 'G-TARGET', quantity: 4, subtotal: 400,
+        productVariantId: id, match: 'AUTO_MATCH', diagnostic: null, resolution: 'SPEC_CODE_EXACT' }],
+      mappings: [{ feature, myacgMainId: 'GP-TARGET', myacgVariantId: 'G-TARGET', productVariantId: id,
+        method: 'AUTO', confirmedAt: '2026-10-02', historicalProductTitle: 'TEST',
+        historicalVariantTitle: 'SPEC', masterStatus: 'ACTIVE', resolution: 'SPEC_CODE_EXACT' }],
+      cutoverAudit: [{ productVariantId: id, sku: 'G-TARGET', productTitle: 'TEST', variantTitle: 'SPEC',
+        legacyWacaQuantity: 4, legacyAutoQuantity: 0, unverifiedPreCutoverManualQuantity: 4,
+        newOrderDerivedQuantity: 4, difference: 0, cutoverAt: '2026-10-02T00:00:00.000Z' }],
+    };
+    await provider.commitNextWacaSnapshot(next, first.revision, true);
+    const saved = (await provider.getProductVariants({ raw: true })).find(row => row.id === id);
+    const { purchaseRecordsWacaQuantity } = await import('/src/waca/reconciliation.ts');
+    return { auto: saved.waca_auto_quantity, manual: saved.waca_manual_adjustment,
+      displayed: purchaseRecordsWacaQuantity(saved, true) };
+  }, { backup: fixture, id: targetId });
+  assert.deepEqual(replacement, { auto: 4, manual: 0, displayed: 4 }, 'legacy 4 must be replaced by ledger 4, not become 8');
+  await replacementContext.close();
+
   const restoredContext = await browser.newContext();
   const restoredPage = await restoredContext.newPage();
   await restoredPage.route('**/*.supabase.co/**', route => route.abort());
@@ -129,7 +180,7 @@ try {
       cleared: await readCloudDeadlineRestoreStage(id) };
   }, stageId);
   assert.deepEqual(staged, { mappings: 1, cleared: null });
-  console.log('PASS legacy 8→11 cutover, repeat idempotency, modern WACA/Deadline/dashboard restore without Excel');
+  console.log('PASS legacy 8→11 and 4→4 replacement cutover (never 8), repeat idempotency, modern WACA/Deadline/dashboard restore without Excel');
   console.log('PASS Cloud Deadline restore hand-off survives F5 and is cleared after verification');
 } finally {
   await browser?.close();

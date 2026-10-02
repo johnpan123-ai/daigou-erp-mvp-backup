@@ -92,12 +92,21 @@ try {
   assert.match(preview, /12\s+折扣忽略/);
   assert.match(preview, /111\s+有效數量/);
   assert.equal(await page.locator('.waca-group-list details[open]').count(), 0);
-  assert.ok(await page.locator('.waca-group').count() > 0, 'first rebaseline must show 0→N changes');
+  assert.equal(await page.locator('.waca-trace-row').count(), 0, 'large preview order traces stay unrendered while collapsed');
+  assert.ok(await page.locator('.waca-group').count() > 0, 'first rebaseline must show ledger changes for ERP1 comparison');
   assert.equal(await page.getByLabel('顯示未變更商品').isChecked(), false);
-  assert.equal(await page.locator('.waca-group tbody tr td:last-child').evaluateAll(
-    cells => cells.some(cell => cell.textContent.trim() === '0')), false, '0→0 and unchanged rows are hidden');
+  assert.equal(await page.locator('.waca-group > .waca-scroll > table > tbody > tr > td:nth-child(4)').evaluateAll(
+    cells => cells.some(cell => cell.textContent.trim() === '0')), true,
+  'ERP1-equal rows stay visible when the underlying ledger is changing from 0 to the imported quantity');
   const multiSkuGroup = page.locator('.waca-group').filter({ hasText: 'RAISE A SUILEN' }).first();
   await multiSkuGroup.locator('summary').click();
+  await page.evaluate(() => { window.__wacaPerf.transactions = 0; window.__wacaPerf.writes = 0; });
+  await multiSkuGroup.locator('.waca-detail-toggle').first().click();
+  assert.equal(await multiSkuGroup.locator('.waca-trace-row').count(), 1, 'only the selected Variant trace renders');
+  assert.deepEqual(await page.evaluate(() => ({ transactions: window.__wacaPerf.transactions, writes: window.__wacaPerf.writes })),
+    { transactions: 0, writes: 0 }, 'expanding order trace must reuse preview memory without provider reads or writes');
+  await multiSkuGroup.locator('.waca-detail-toggle').first().click();
+  assert.equal(await multiSkuGroup.locator('.waca-trace-row').count(), 0);
   const skus = (await multiSkuGroup.locator('tbody td small:first-of-type').allTextContents()).map(value => value.replace('SKU ', ''));
   assert.deepEqual(skus, [...skus].sort(new Intl.Collator('en', { numeric: true, sensitivity: 'base' }).compare));
   const previewTitles = await page.locator('.waca-group summary strong').allTextContents();

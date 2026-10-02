@@ -229,7 +229,11 @@ export async function commitNextWacaSnapshot(
           nextVariants = variants.map(variant => ({
             ...variant,
             waca_auto_quantity: repo.autoQuantities.get(variant.id) ?? 0,
-            waca_manual_adjustment: previousState?.mode === 'ORDER_DRIVEN_ACTIVE' || (snapshot.cutoverAudit ?? []).length
+            // Match the Cloud transaction contract: the first order-driven
+            // cutover replaces the complete legacy aggregate. Historical audit
+            // rows are evidence only and must never keep legacy manual quantity
+            // alive during ORDER_REBASELINE_REQUIRED.
+            waca_manual_adjustment: previousState?.mode === 'ORDER_DRIVEN_ACTIVE'
               ? (variant.waca_manual_adjustment ?? 0) : 0,
           }));
         }

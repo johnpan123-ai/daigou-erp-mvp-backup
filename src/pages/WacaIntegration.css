@@ -25,13 +25,31 @@
 .waca-group .waca-scroll { margin: 0 12px 12px; }
 .waca-show-unchanged { display: inline-flex; align-items: center; gap: 7px; margin: 0 0 14px; color: #475569; font-size: 14px; cursor: pointer; }
 .waca-show-unchanged input { accent-color: #0369a1; }
+.waca-preview-filters { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 .waca-no-changes { margin: 3px 0 16px; padding: 15px; border-radius: 9px; background: #f8fafc; color: #64748b; }
 .waca-group td strong { font-weight: 600; }
 .waca-quantity-pair { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .waca-quantity-pair span { margin: 0 7px; color: #94a3b8; }
+.waca-quantity-value { min-width: 92px; font-variant-numeric: tabular-nums; font-weight: 600; }
 .waca-increase { color: #047857; font-weight: 700; }
 .waca-decrease { color: #be123c; font-weight: 700; }
 .waca-unchanged { color: #64748b; }
+.waca-detail-toggle { border: 0; padding: 3px 0; background: transparent; color: #0369a1; font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.waca-detail-toggle:hover { color: #075985; text-decoration: underline; }
+.waca-trace-row > td { padding: 14px 16px 16px; background: #f8fafc; }
+.waca-trace-summary { padding: 10px 12px; border-radius: 7px; background: #eff6ff; color: #1e40af; font-weight: 600; }
+.waca-trace-row h4 { margin: 14px 0 6px; font-size: 14px; }
+.waca-trace-empty { margin: 8px 0; color: #64748b; }
+.waca-trace-table { margin: 6px 0 10px; }
+.waca-trace-table table { background: #fff; }
+.waca-trace-table tfoot td { background: #f1f5f9; font-weight: 700; }
+.waca-excluded-details { margin-top: 10px; color: #475569; }
+.waca-excluded-details > summary { cursor: pointer; font-weight: 600; }
+.waca-group-pending { margin: 0 16px 15px; }
+.waca-ledger-tech { margin: 12px 0 0; }
+.waca-ledger-tech p { display: inline-block; margin: 8px 20px 0 0; }
+.waca-tech-inline { margin-top: 4px; color: #64748b; }
+.waca-tech-inline > summary { cursor: pointer; }
 .waca-master-import .waca-notice button { margin-left: 15px; }
 .waca-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 9px; }
 .waca-metrics > div { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; background: #f8fafc; }
