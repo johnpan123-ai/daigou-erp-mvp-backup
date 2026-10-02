@@ -530,6 +530,182 @@
           "schemaExpectation": "Schema-neutral application behavior. SQL and canonical fingerprint source unchanged; local/PostgREST 5x stable-key regression required."
         }
       ]
+    },
+    {
+      "id": "waca-evidence-resolver-v2",
+      "beforeHead": "d0574a9525567febb6f7b21ceda992f80497033c",
+      "reviewedHead": "0a2ae478a29d7fa24f5ccca9da82484bfb8a4093",
+      "patchSha256": "5309aabce3126b5fc4e3d4301f66be982da370b5e98a33f8720d4d6aaea97dce",
+      "schemaSensitiveCount": 0,
+      "unknownCount": 0,
+      "migrationChecksumParity": "PASS",
+      "canonicalContractParity": "PASS",
+      "backupContractParity": "PASS",
+      "providerContractParity": "PASS",
+      "newDurableResources": 0,
+      "newRequiredDurableFields": 0,
+      "requiredRegressions": [
+        "evidence-review", "evidence-resolver", "evidence-real", "evidence-manual",
+        "spec-code", "domain", "pending", "legacy-modern", "cloud-next", "registry",
+        "provider", "cloud-restore", "postgrest", "execute-envelope", "sync", "cas", "realtime",
+        "promotion", "guard"
+      ],
+      "files": [
+        {
+          "file": "src/pages/WacaIntegration.tsx",
+          "beforeHash": "21537a8f036a0320136df683b8580231e7159b9f07cd8852c91f8fb8774dd27f",
+          "afterHash": "649474d2eebddc00d8645020589c9c04158803ad94216d8743b40a428d5943dd",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["resolutionText", "masterIndex/matchByFeature/previewReasons memo", "choicesFor", "manualMap", "parentConfirmation", "preview/pending rendering"],
+          "changedInputs": "Existing catalogue, source codes/names and explicit human parent/Variant selection; no new automatic cross-parent search.",
+          "changedOutputs": "Scoped choices, human-readable reason/candidate count, canonical matched target rather than stale AUTO mapping.",
+          "changedDurableFields": "Existing mapping.myacgMainId may use explicitly confirmed parent source code; no required field added. Domain writes optional provenance in existing item/mapping JSON.",
+          "changedRpcContract": "NONE: same p_snapshot/p_expected_revision/p_update_auto_quantity and existing snapshot RPC.",
+          "changedProviderContract": "NONE: NEXT/Cloud routing, snapshot CAS, acknowledgement and transaction boundary unchanged.",
+          "changedBackupContract": "NONE: existing full JSON item/mapping pass-through preserves optional provenance.",
+          "changedSchemaExpectations": "NONE: no SQL, table, column, RLS, ACL, index, resource or required schema version change.",
+          "changedIdentitySemantics": "Explicit spec SKU wins; blank rows require parent-scoped proof or human confirmation, never parent-to-SKU fallback.",
+          "dataFlow": "Memoized domain resolver feeds preview and explicit manual confirmation; tabs do not rerun import/match/recompute.",
+          "persistenceBehavior": "Human confirmation delegates to reviewed domain validation, preserving existing snapshot durable keys.",
+          "writePath": "Existing export-before-write, expected revision and commitNextWacaSnapshot; no direct table writes.",
+          "providerPath": "Provider implementations and runtime environment boundary unchanged.",
+          "externalContract": "Existing JSONB snapshot envelope; no new RPC or mandatory serialized field. Optional resolution/candidateCount survive existing Backup/Restore.",
+          "schemaExpectation": "Schema-neutral domain/UI wiring, not presentation-only. Exact source hashes and native read-back regression required."
+        },
+        {
+          "file": "src/waca/masterReference.ts",
+          "beforeHash": "6d9bd94a1d61dd1bbddc8113989fe4c1af43f780fa5ff458073f96b54c6b3053",
+          "afterHash": "8dc337ae3f9aca446f28dfa6492df226a9bc32edd7ec53d80d35e645090bf423",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["buildWacaMasterReference"],
+          "changedInputs": "Existing ERP canonical product/spec name plus actual historical BuyAnime names.",
+          "changedOutputs": "Ephemeral MasterVariant.variantTitles aliases and current canonical productTitle preference.",
+          "changedDurableFields": "NONE: MyAcgMasterLink durable interface/writer unchanged; aliases are rebuilt runtime catalogue data.",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "Actual source aliases provide literal spec evidence; no inferred SKU or new canonical ID.",
+          "dataFlow": "Existing catalogue/master links build an in-memory lookup for parent-scoped strict matching.",
+          "persistenceBehavior": "None: does not save MasterVariant or alter master link persistence.",
+          "writePath": "No writes.",
+          "providerPath": "Existing provider read data only.",
+          "externalContract": "No change to durable links, SQL or provider payload.",
+          "schemaExpectation": "Ephemeral derived catalogue projection only."
+        },
+        {
+          "file": "src/waca/orderCore.ts",
+          "beforeHash": "4406ccce8150f8e26a3e98228da6818621ead2bdb728f43f0d9fd5db6eb03c89",
+          "afterHash": "2f4ea3b771b911c548928783b37b963fdfa26c511fe2f323ba267ce692dae5f1",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["indexWacaMaster", "wacaSpecNamesMatch", "matchWacaItem", "sourceSpecConflicts", "resolveWacaItem", "setWacaMapping", "importWacaRows"],
+          "changedInputs": "Existing productCode/specCode/spec1/spec2, canonical group/Variant, historical master evidence and manual decision.",
+          "changedOutputs": "Exact/unique/manual/pending resolution, candidate count and freshly validated canonical Variant targets.",
+          "changedDurableFields": "Existing item productVariantId/match/diagnostic/feature/specCode and mapping targets may update. Add OPTIONAL item.resolution/item.candidateCount and mapping.resolution within existing JSON payload; no new mandatory key, column, resource or format version.",
+          "changedRpcContract": "NONE: domain does not call RPC; existing snapshot arguments/envelope unchanged.",
+          "changedProviderContract": "NONE: unchanged serializers preserve complete JSON payload, stable SQL item key and revision/CAS transaction.",
+          "changedBackupContract": "NONE: existing ledger JSON includes optional provenance; old backups may omit it and resolver safely rebuilds it.",
+          "changedSchemaExpectations": "NONE: existing JSONB object payload, FK targets and SUM projection suffice.",
+          "changedIdentitySemantics": "Nonempty specCode including equal parent/spec always explicit SKU. Blank code anchors unique parent; strict unique name or sole variant proof; AUTO revalidated, manual conflict pending. Uniquely strengthened source keeps original durable SQL key.",
+          "dataFlow": "Same resolver processes incoming and historical order lines before unchanged SUM(valid matched items); pending target is null.",
+          "persistenceBehavior": "Existing mapping/ledger projections change after human-confirmed import; old manual audit retained; overlapping old blank/new explicit source is pending, never counted twice.",
+          "writePath": "Existing atomic snapshot transaction/RPC; no direct provider writes, no increment, no migration.",
+          "providerPath": "Shared NEXT/Cloud domain; no provider source change.",
+          "externalContract": "Optional JSON provenance actually persists via current JSONB payload transport and Backup/Restore. No required serialized field or RPC signature/ACL changes.",
+          "schemaExpectation": "Schema-neutral application persistence behavior; quantity recompute implementation/status rules unchanged. Exact key, manual conflict, native read-back and restore tests required."
+        },
+        {
+          "file": "tests/cloud-backup-next-restore-e2e.mjs",
+          "beforeHash": "2cfae0685171ed6e7725b5937fb04d5e0f879713d596d7324d56ac03c545c581",
+          "afterHash": "cb8fe968053d8b719bb7fc2bd113768916d8b6506cedbfbbd9b308bf6705d5b1",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["synthetic Cloud payload fixture", "restored provenance assertions"],
+          "changedInputs": "Synthetic manual mapping payload with optional provenance.",
+          "changedOutputs": "Asserts item/mapping resolution and candidateCount survive Cloud-to-NEXT Restore.",
+          "changedDurableFields": "Synthetic fixture only; no product data writer change.",
+          "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "NONE",
+          "dataFlow": "Isolated 24-resource Backup -> NEXT parser/atomic Restore.", "persistenceBehavior": "Disposable fixture only.", "writePath": "No Live writes.", "providerPath": "Production routing unchanged.", "externalContract": "None.", "schemaExpectation": "Existing format/optional-field compatibility asserted."
+        },
+        {
+          "file": "tests/next-waca-order-integration.mjs",
+          "beforeHash": "2b6895ed2c680bb0bdc44ccede1e2dcfe8bfe30bfaf7ea58dd66f0f9be08c7dc",
+          "afterHash": "f0231c1dd652ddca7fcbb64d9920ac4187b9adbcc2bd4407676d3a6cdc5238bb",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["blank-spec exact-name domain assertions"],
+          "changedInputs": "Existing synthetic and local real rows.", "changedOutputs": "Requires strict parent-scoped exact-name resolution for blank spec.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Test expected blank-spec evidence only.",
+          "dataFlow": "Pure domain/in-memory repository.", "persistenceBehavior": "Disposable fixture only.", "writePath": "No Live writes.", "providerPath": "Unchanged.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-cloud-ui-parity.mjs",
+          "beforeHash": "81cd604deb6173a39700b989e2ffda944a6fe604f866af86b579f5b2cb06326a",
+          "afterHash": "45bf62d4e1ac193d9128dee3bad7044f2f9af57738614a08eacad277d1741357",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["SKU locator", "explicit-spec human reason assertion"],
+          "changedInputs": "Existing isolated Cloud/fallback UI fixture.", "changedOutputs": "Checks exact reason while retaining changed-only/natural-sort/readonly-tab assertions.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "NONE",
+          "dataFlow": "Real frontend routing with isolated synthetic transport.", "persistenceBehavior": "No product runtime change.", "writePath": "No Live writes.", "providerPath": "Boundary regression only.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-evidence-real-fixture-v2.mjs",
+          "beforeHash": null, "afterHash": "a65476b3b1229f4a15e4498bef07eda3b2495f045bf5986233ab6580d3e25df5",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["readonly fixture loading", "A/equal/distinct classification", "resolution proof", "5x import/JSON restore assertions"],
+          "changedInputs": "User-provided local Excel/catalogue evidence, read-only.", "changedOutputs": "Aggregate counts/product pending reasons only; customer/order rows not logged.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Proof assertions for explicit SKU and parent-scoped unique evidence.",
+          "dataFlow": "Offline file -> in-memory repository -> isolated JSON restore.", "persistenceBehavior": "No normal NEXT/Cloud DB writes.", "writePath": "No Live writes.", "providerPath": "None.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-evidence-resolver-v2.mjs",
+          "beforeHash": null, "afterHash": "1f75942c439939ddc9ed5bb1236cd401eb9750908345799b606653f4f98e58c8",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["resolver matrix", "manual/canonical conflict", "historical/idempotency/overlap/restore assertions"],
+          "changedInputs": "Synthetic catalogue/order/manual scenarios.", "changedOutputs": "Checks price/cross-parent/year/size guesses rejected, equal spec exact, missing children pending, stable keys, optional provenance restore.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Explicit source/unique parent/human confirmation only.",
+          "dataFlow": "Isolated in-memory domain and JSON snapshot.", "persistenceBehavior": "Disposable fixture only.", "writePath": "No Live writes.", "providerPath": "None.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-matching-closure-v2-manual-ui.mjs",
+          "beforeHash": "c07f1b7cf8b2d664631d544b253ce247753da4766c52de932eff5428ae741aac",
+          "afterHash": "01ca1f14e7a05a85a8ef2883eaefa2629c69f61eec635ebab16795877777fc2e",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["pending locator", "human parent confirmation", "F5 quantity/provenance assertions"],
+          "changedInputs": "Synthetic ambiguous/unproven-parent UI fixture.", "changedOutputs": "Scoped manual choices and persistent human-confirmed mapping survive reload.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Tests explicit human parent/Variant selection, not automatic global matching.",
+          "dataFlow": "Disposable browser context -> isolated NEXT transaction.", "persistenceBehavior": "Synthetic fixture only.", "writePath": "No Live writes.", "providerPath": "NEXT boundary test only.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-matching-closure-v2-ui.mjs",
+          "beforeHash": "4c6514ffeb3a8184b4bf4c9fa636623a2f21df1dfa52f30cbf97db8acf186389",
+          "afterHash": "b8df75e128a2dde9d93a87e7d8cf8ef9cd6ccb213819ad20b47311e9250829c1",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["SKU locator", "expanded resolution detail locator"],
+          "changedInputs": "Existing real fixture isolated UI scenario.", "changedOutputs": "Preserves full matching, natural sort, quantity parity and tab read/write/recompute counters.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "NONE",
+          "dataFlow": "Local fixture -> isolated browser import/restore.", "persistenceBehavior": "Isolated only.", "writePath": "No Live writes.", "providerPath": "Unchanged.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-matching-closure-v2.mjs",
+          "beforeHash": "34567ee3fd43a65bcfbb806ae1dff0d4bfa4a90e2ad4b126a97ec435bafc25a2",
+          "afterHash": "0f32d58a58c0af92305744a21b504167c4b7135a045dc95ea77bebb4b771f3ec",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["real 60/60 feature / 115/115 row checks", "unique-evidence false-positive assertions"],
+          "changedInputs": "Existing user-provided local workbooks and ERP backup.", "changedOutputs": "Blank-spec matches must have strict parent-scoped evidence; unknown parent still rejected.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Independent SKU or unique name/sole parent candidate proof.",
+          "dataFlow": "Offline in-memory import/repeat/restore.", "persistenceBehavior": "No user DB change.", "writePath": "No Live writes.", "providerPath": "None.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        },
+        {
+          "file": "tests/waca-postgrest-isolated-v3.mjs",
+          "beforeHash": "a7ac0582950ca49c47a0c1785e3c7aacfa4eca1aeec0a297805783619fdd8d9c",
+          "afterHash": "fded470feaf7a79043b4b6b35350685c223b82280a9ce8fc27379c4a01dc3091",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["blank ambiguity fixture", "manual provenance read-back", "explicit-code conflict / immutable SQL key checks"],
+          "changedInputs": "Disposable loopback PostgreSQL/PostgREST, synthetic rows and existing migration chain.", "changedOutputs": "5x blank manual quantity=10, new explicit conflict removes 9 pending quantity; SQL rows stay 5 rather than 6; old audit survives.",
+          "changedDurableFields": "Synthetic fixture only; existing SQL JSONB envelope unchanged.", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Stronger field replaces only unique prior identity while preserving durable SQL key.",
+          "dataFlow": "Domain -> existing RPC -> native SQL -> authenticated read-back.", "persistenceBehavior": "Disposable isolated database only.", "writePath": "No Live writes; owner/anon/non-owner ACL regression retained.", "providerPath": "Existing Cloud contract exercised.", "externalContract": "None.", "schemaExpectation": "Unchanged chain; no migration source edits."
+        },
+        {
+          "file": "tests/waca-spec-code-matching.mjs",
+          "beforeHash": "ef6fde4a4597923d95c711f8276ee2a863a803c6a7c624a208f48dfe40d31529",
+          "afterHash": "d1e5e74dca20d87248c80b9fd239a222f49fd071c7ee71901662181151ad75ef",
+          "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["blank multi-variant fixture", "pending assertion", "memoized-index source assertion"],
+          "changedInputs": "Synthetic signed/cap explicit codes and no-label blank row.", "changedOutputs": "Hard spec behavior preserved; only blank without evidence pending; UI index memoized.",
+          "changedDurableFields": "NONE", "changedRpcContract": "NONE", "changedProviderContract": "NONE", "changedBackupContract": "NONE", "changedSchemaExpectations": "NONE", "changedIdentitySemantics": "Same/different nonempty source spec codes remain exact.",
+          "dataFlow": "Parser/domain/JSON restore regression.", "persistenceBehavior": "Synthetic memory only.", "writePath": "No Live writes.", "providerPath": "None.", "externalContract": "None.", "schemaExpectation": "Unchanged."
+        }
+      ]
     }
   ]
 }
