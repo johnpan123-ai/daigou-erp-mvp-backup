@@ -10,6 +10,7 @@ import {
 } from '../lib/db';
 import type { InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
+import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../utils/myacgImportErrors';
 import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
@@ -95,6 +96,7 @@ export default function Inventory() {
   const [isRollbackPending, setIsRollbackPending] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [backupNotice, setBackupNotice] = useState<string>('');
+  const [importDiagnostic, setImportDiagnostic] = useState<ReturnType<typeof myAcgImportDiagnostic> | null>(null);
   const [variantGuardProbeNotice, setVariantGuardProbeNotice] = useState<string>('');
   const showVariantGuardAcceptanceUi = isVariantSyncGuardAcceptanceUiEnabled();
   const injectVariantReadFailure = isVariantSyncReadFailureInjectionEnabled();
@@ -188,6 +190,9 @@ export default function Inventory() {
 
     setIsImporting(true);
     setBackupNotice('');
+    setImportDiagnostic(null);
+    const importRequestId = `catalog_import_${crypto.randomUUID()}`;
+    let importPhase: 'parse' | 'commit' = 'parse';
     try {
       console.log('[Import Backup] Creating pre-import snapshot...');
       try {
@@ -200,13 +205,14 @@ export default function Inventory() {
       }
 
       const parsedItems = await parseMyAcgFile(file);
-      const currentImportId = `catalog_import_${Date.now()}`;
+      const currentImportId = importRequestId;
       const currentTimestamp = new Date().toISOString();
       const itemsWithBatchMeta = parsedItems.map(item => ({
         ...item,
         latest_catalog_import_id: currentImportId,
         catalog_last_seen_at: currentTimestamp
       }));
+      importPhase = 'commit';
       const stats = await dataProvider.upsertInventory(itemsWithBatchMeta);
 
       const cloudMode = currentMode === 'cloud' || currentMode === 'fallback';
@@ -287,11 +293,14 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
 
       alert(report);
     } catch (err) {
-      console.error(err);
+      const failure = classifyMyAcgImportError(err, importPhase);
+      const diagnostic = myAcgImportDiagnostic(failure, importRequestId);
+      setImportDiagnostic(diagnostic);
+      console.error('[BuyAnime Import]', diagnostic);
       alert(
         isVariantDestructiveSyncGuardError(err)
           ? VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE
-          : '匯入失敗，請確認檔案格式是否正確。',
+          : failure.message,
       );
     } finally {
       setIsImporting(false);
@@ -1381,6 +1390,14 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
             <div style={{ marginTop: '8px', fontSize: '12px', color: '#047857', fontWeight: 600 }}>
               {backupNotice}
             </div>
+          )}
+          {importDiagnostic && (
+            <details style={{ marginTop: '8px', fontSize: '12px', color: '#b91c1c' }}>
+              <summary>匯入技術資訊</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                {JSON.stringify(importDiagnostic, null, 2)}
+              </pre>
+            </details>
           )}
           {variantGuardProbeNotice && (
             <div

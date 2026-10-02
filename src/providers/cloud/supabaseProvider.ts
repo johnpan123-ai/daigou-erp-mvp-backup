@@ -93,7 +93,7 @@ import {
   assertCloudRestoreCandidateProofResult,
   type CloudRestoreCandidateProofResult,
 } from './cloudRestoreCandidateProof';
-import { cloudCacheDb as db, normalizeProductTitle, prepareInventoryUpsert } from '../../lib/db';
+import { cloudCacheDb as db, normalizeProductTitle } from '../../lib/db';
 import { checkDataSizeWarnings } from '../../lib/dataSizeAdvisory';
 import { CloudRestoreDisabledError } from '../cloudRestorePolicy';
 import { clearLocalCloudWrites, markLocalCloudWrite } from './cloudRealtimeEchoRegistry';
@@ -113,6 +113,8 @@ import {
   type CloudPatchOperation,
 } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
+import { planCloudInventoryImport } from './inventoryImportPlan';
+import { classifyMyAcgImportError } from '../../utils/myacgImportErrors';
 import {
   assertCloudWriteAllowed,
   isLikelyCloudConnectivityError,
@@ -1442,11 +1444,23 @@ export class SupabaseProvider implements IDataProvider {
 
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     await this.requireCloudWritePermission();
-    const currentInventory = await db.getInventory();
-    const { inventory: preparedInventory, stats } = prepareInventoryUpsert(currentInventory, items);
-
-    await this.applyCloudCollection('inventory_items', currentInventory, preparedInventory);
-    return stats;
+    let plan: ReturnType<typeof planCloudInventoryImport>;
+    try {
+      // Identity authority is the server, including tombstones that still hold
+      // inventory_key. Cached active rows cannot prove a key is genuinely new.
+      const rows = await fetchAll<InventoryItem & { deleted_at?: string | null }>(async (from, to) =>
+        supabase.from('inventory_items').select('*').order('id').range(from, to));
+      markCloudReachable();
+      plan = planCloudInventoryImport(rows, items);
+    } catch (cause) {
+      throw classifyMyAcgImportError(cause, 'staging');
+    }
+    try {
+      await this.applyCloudFieldMutations('inventory_items', plan.operations);
+    } catch (cause) {
+      throw classifyMyAcgImportError(cause, 'commit');
+    }
+    return plan.stats;
   }
 
   async getSalesOrders(): Promise<SalesOrder[]> {

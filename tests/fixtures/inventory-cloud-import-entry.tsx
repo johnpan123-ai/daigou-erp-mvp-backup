@@ -47,6 +47,7 @@ const groups: ProductGroup[] = [
 ];
 let syncCalls = 0;
 let upsertCalls = 0;
+let nextImportError: { code?: string; message: string } | null = null;
 const callOrder: string[] = [];
 let delayedOldRead = false;
 let returnOldInventoryOnce = false;
@@ -89,6 +90,11 @@ dataProvider.waitForCloudBootstrapConvergence = async () => (
   bootstrapPending ? bootstrapConvergence : false
 );
 dataProvider.upsertInventory = async rows => {
+  if (nextImportError) {
+    const error = nextImportError;
+    nextImportError = null;
+    throw error;
+  }
   upsertCalls += 1;
   for (const row of rows) {
     const inventoryKey = row.inventory_key || row.myacg_item_code;
@@ -148,6 +154,7 @@ localStorage.setItem('erp_provider_mode', 'cloud');
 declare global {
   interface Window {
     __INVENTORY_CLOUD_IMPORT_TEST__: {
+      failNextImport: (error: { code?: string; message: string }) => void;
       failNextPostCommitGroupRead: () => void;
       completeBootstrap: () => void;
       prepareLateStaleRead: () => void;
@@ -160,6 +167,7 @@ declare global {
 }
 
 window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
+  failNextImport: error => { nextImportError = error; },
   failNextPostCommitGroupRead: () => { armPostCommitGroupReadFailure = true; },
   completeBootstrap: () => {
     if (!bootstrapPending) return;

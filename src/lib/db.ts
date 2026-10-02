@@ -2305,7 +2305,7 @@ export const prepareInventoryUpsert = (
 
   const aggregated = new Map<string, InventoryItem>();
   for (const item of items) {
-    const key = `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`;
+    const key = item.inventory_key || `${normalizeProductTitle(item.product_title)}::${item.myacg_item_code}::${item.raw_variant_name || ''}`;
     item.inventory_key = key;
     const existing = aggregated.get(key);
     if (!existing) aggregated.set(key, { ...item });

@@ -1,10 +1,11 @@
 import * as XLSX from 'xlsx';
 import type { InventoryItem } from '../lib/db';
+import { classifyMyAcgImportError, MyAcgImportError } from './myacgImportErrors';
 
-const getSoldQty = (rowData: any) => {
+const getSoldQty = (rowData: Record<string, unknown>) => {
   const normKeys = Object.keys(rowData).map(k => ({
     original: k,
-    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+    normalized: k.replace(/[\s\u00a0\u200b/]+/g, '')
   }));
   const keys = [
     '已售', '已售數量', '售出數量', '售出', '銷售', '銷售數量', 
@@ -22,10 +23,10 @@ const getSoldQty = (rowData: any) => {
   return 0;
 };
 
-const getAvailableQty = (rowData: any) => {
+const getAvailableQty = (rowData: Record<string, unknown>) => {
   const normKeys = Object.keys(rowData).map(k => ({
     original: k,
-    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+    normalized: k.replace(/[\s\u00a0\u200b/]+/g, '')
   }));
   const keys = ['庫存', '庫存數量', '可用數量', '剩餘數量', '庫存可用數量', '可用'];
   for (const k of keys) {
@@ -40,10 +41,10 @@ const getAvailableQty = (rowData: any) => {
   return 0;
 };
 
-const getDemandQty = (rowData: any) => {
+const getDemandQty = (rowData: Record<string, unknown>) => {
   const normKeys = Object.keys(rowData).map(k => ({
     original: k,
-    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+    normalized: k.replace(/[\s\u00a0\u200b/]+/g, '')
   }));
   const keys = ['需求', '需求數量', '買動漫需求', '平台需求'];
   for (const k of keys) {
@@ -58,12 +59,12 @@ const getDemandQty = (rowData: any) => {
   return 0;
 };
 
-const getValueByKeys = (rowData: any, keys: string[]): string => {
+const getValueByKeys = (rowData: Record<string, unknown>, keys: string[]): string => {
   const normKeys = Object.keys(rowData).map(k => ({
     original: k,
-    normalized: k.replace(/[\s\u00a0\u200b\/]+/g, '')
+    normalized: k.replace(/[\s\u00a0\u200b/]+/g, '')
   }));
-  const cleanKeys = keys.map(k => k.replace(/[\s\u00a0\u200b\/]+/g, ''));
+  const cleanKeys = keys.map(k => k.replace(/[\s\u00a0\u200b/]+/g, ''));
   for (const cleanKey of cleanKeys) {
     const match = normKeys.find(nk => nk.normalized === cleanKey);
     if (match) {
@@ -97,16 +98,25 @@ const priceKeys = ['價格', '單價', '售價', '價格單價'];
 const listedKeys = ['刊登時間', '上架時間', '刊登日期'];
 
 export async function parseMyAcgFile(file: File): Promise<InventoryItem[]> {
-  const text = await file.text();
-  
-  // Check if it's an HTML "fake excel" file
-  if (text.includes('<table') || text.includes('<html')) {
-    return parseHtmlTable(text);
+  let text: string;
+  try { text = await file.text(); }
+  catch (cause) { throw classifyMyAcgImportError(cause, 'file-read'); }
+  try {
+    const items = /<(?:table|html)\b/iu.test(text) ? parseHtmlTable(text) : await parseXlsxFile(file);
+    if (!items.length) throw new MyAcgImportError('VALIDATION_ERROR', 'validation');
+    return items;
+  } catch (cause) {
+    throw classifyMyAcgImportError(cause, 'parse');
   }
-
-  // Otherwise, fallback to proper XLSX parser
-  return parseXlsxFile(file);
 }
+
+const assertRequiredHeaders = (headers: string[]): void => {
+  const normalize = (key: string) => key.replace(/[\s\u00a0\u200b/]+/g, '');
+  const available = new Set(headers.map(normalize));
+  if (![codeKeys, titleKeys].every(keys => keys.some(key => available.has(normalize(key))))) {
+    throw new MyAcgImportError('REQUIRED_FIELD_MISSING', 'parse');
+  }
+};
 
 const normalizeRowKey = (key: string): string => {
   return String(key).replace(/[\s\u00a0\u200b]+/g, ' ').trim();
@@ -125,6 +135,7 @@ function parseHtmlTable(html: string): InventoryItem[] {
     
     if (index === 0) {
       headers = cells;
+      assertRequiredHeaders(headers);
       return;
     }
 
@@ -167,11 +178,14 @@ async function parseXlsxFile(file: File): Promise<InventoryItem[]> {
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
+        if (!worksheet) throw new MyAcgImportError('PARSER_ERROR', 'parse');
+        const headerRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as unknown[][];
+        assertRequiredHeaders((headerRows[0] || []).map(String));
         
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as any[];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as Record<string, unknown>[];
         
         const items: InventoryItem[] = jsonData.map((rawRow, index) => {
-          const rowData: any = {};
+          const rowData: Record<string, unknown> = {};
           for (const key of Object.keys(rawRow)) {
             const normKey = normalizeRowKey(key);
             rowData[normKey] = rawRow[key];
@@ -201,7 +215,7 @@ async function parseXlsxFile(file: File): Promise<InventoryItem[]> {
         reject(err);
       }
     };
-    reader.onerror = (err) => reject(err);
+    reader.onerror = (err) => reject(new MyAcgImportError('FILE_READ_ERROR', 'file-read', err));
     reader.readAsArrayBuffer(file);
   });
 }

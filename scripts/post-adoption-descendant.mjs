@@ -161,6 +161,22 @@ export function classifyDescendantFile(file, before, after) {
 // prove the reviewed provider patch did not change its external schema/RPC
 // contract. This is not a provider-directory allowlist.
 export function assertReviewedProviderContract(file, before, after) {
+  if (file === 'src/providers/cloud/inventoryImportPlan.ts') {
+    // Only the exact immutable review can select this helper. It has no new
+    // provider API, serializer, SQL fields or network/persistence calls.
+    if (before !== null) fail('inventory import planner must be reviewed as a new pure helper');
+    const tree = parse(file, after);
+    const declarations = tree.statements.filter(ts.isFunctionDeclaration);
+    if (declarations.length !== 1 || declarations[0].name?.text !== 'planCloudInventoryImport') {
+      fail('unreviewed inventory planner API');
+    }
+    for (const call of nodes(tree).filter(ts.isCallExpression)) {
+      if (/supabase|fetch|indexedDB|localStorage|\bdb\b|\.rpc|\.from/u.test(canonical(tree, call.expression))) {
+        fail('inventory identity planner contains I/O');
+      }
+    }
+    return;
+  }
   const oldTree = parse(file, before); const newTree = parse(file, after);
   if (file === 'src/providers/cloud/cloudFieldCas.ts') {
     const statements = new Set(newTree.statements.map(node => canonical(newTree, node)));
@@ -168,7 +184,7 @@ export function assertReviewedProviderContract(file, before, after) {
     return;
   }
   const allowedMethods = {
-    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk', 'savePrivateOrders'],
+    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk', 'savePrivateOrders', 'upsertInventory'],
     'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
     'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
   }[file];
@@ -252,8 +268,8 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   const backupParity = contractParity(file => /(?:durableResourceRegistry|workbenchJsonBackup|closingDateSidecarBackup|backupFormat|CloudAtomicRestore|cloudAtomicRestore)/u.test(file));
   const providerFiles = [...new Set([...oldFiles, ...newFiles].filter(file => file.startsWith('src/providers/')))];
   const providerParity = providerFiles.every(file => {
-    if (!oldSet.has(file) || !newSet.has(file)) return false;
-    const before = source(baseline, file, true); const after = source(candidate.head, file, true);
+    if (!newSet.has(file)) return false;
+    const before = source(baseline, file, oldSet.has(file)); const after = source(candidate.head, file, true);
     if (sourceHash(before) === sourceHash(after)) return true;
     const reviewed = classifyReviewedFile({ file, after, reviews });
     if (!reviewed || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;
