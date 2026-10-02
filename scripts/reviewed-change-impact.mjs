@@ -44,7 +44,7 @@ export const regressionScripts = Object.freeze({
 
 // A review is an exact immutable patch, not a path exception. Both anchor
 // trees are read from Git; any subsequent hunk in these files fails closed.
-export function reviewForCandidate(git, candidateHead) {
+export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = null) {
   if (reviewedImpacts.schemaVersion !== 1) fail('unsupported change-impact registry');
   const previousReviews = new Map();
   return reviewedImpacts.reviews.filter(review => {
@@ -57,7 +57,16 @@ export function reviewForCandidate(git, candidateHead) {
     for (const row of review.files) {
       const previous = previousReviews.get(row.file);
       if (previous) {
-        if (row.beforeHash !== previous.row.afterHash) fail(`unreviewed gap between exact patches: ${row.file}`);
+        if (row.beforeHash !== previous.row.afterHash) {
+          // An adopted schema baseline may legitimately contain changes from
+          // a schema release between two frontend reviews. Only that verified
+          // Git boundary can reset the chain; gaps after adoption stay blocked.
+          if (!adoptedBaselineHead) fail(`unreviewed gap between exact patches: ${row.file}`);
+          try {
+            git(['--no-replace-objects', 'merge-base', '--is-ancestor', previous.review.reviewedHead, adoptedBaselineHead]);
+            git(['--no-replace-objects', 'merge-base', '--is-ancestor', adoptedBaselineHead, review.beforeHead]);
+          } catch { fail(`unreviewed post-baseline gap: ${row.file}`); }
+        }
         try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', previous.review.reviewedHead, review.beforeHead]); }
         catch { fail(`review chain is not chronological: ${row.file}`); }
       }

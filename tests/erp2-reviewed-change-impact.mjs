@@ -31,7 +31,7 @@ assert.equal(inspection.migrationChecksumParity, 'PASS'); assert.equal(inspectio
 assert.equal(inspection.providerContractParity, 'PASS'); assert.equal(inspection.schemaBaselineMutated, false);
 assert.ok(inspection.requiredRegressions.includes('postgrest')); assert.ok(inspection.requiredRegressions.includes('mutation-native'));
 assert.ok(inspection.requiredRegressions.includes('private-delete'));
-const providerChain = reviewedImpacts.reviews.filter(review => review.files.some(row => row.file === 'src/providers/cloud/supabaseProvider.ts'));
+const providerChain = reviewForCandidate(offlineGit, candidate.head).filter(review => review.files.some(row => row.file === 'src/providers/cloud/supabaseProvider.ts'));
 const latestProvider = realGit(['show', `${candidate.head}:src/providers/cloud/supabaseProvider.ts`]);
 assert.equal(classifyReviewedFile({ file: 'src/providers/cloud/supabaseProvider.ts', after: latestProvider, reviews: providerChain }).chain.length, 2);
 const discontinuous = structuredClone(providerChain);
@@ -106,3 +106,47 @@ console.log('PASS v5 adopted review anchoring: only exact post-baseline spec pat
 console.log('PASS exact WACA and mutation patches A/B/C; unchanged SQL, canonical, provider RPC and Backup/Restore contract; baseline immutable');
 console.log('PASS future db/WACA/provider hunks, SQL/RLS/resource/RPC/allowlist drift, unknown files and missing/stale/failed/tampered evidence fail closed');
 console.log('Unit fixtures only; real release regression execution is required separately; live writes=0');
+
+const buyAnimeReview = reviewedImpacts.reviews.find(review => review.id === 'buyanime-canonical-identity-v1');
+assert.ok(buyAnimeReview, 'BuyAnime review must bind an immutable exact patch');
+const buyAnimeCandidate = { ...candidate, head: buyAnimeReview.reviewedHead };
+assert.throws(() => reviewForCandidate(v5Git, buyAnimeCandidate.head), /FAILED_CLOSED/u,
+  'an arbitrary missing review cannot reset the chain without a verified adoption boundary');
+assert.ok(reviewForCandidate(v5Git, buyAnimeCandidate.head, v5Baseline.sourceHead)
+  .some(review => review.id === buyAnimeReview.id));
+const falseBoundaryGit = args => args[0] === '--no-replace-objects' && args[2] === '--is-ancestor'
+  && args[3] === v5Baseline.sourceHead && args[4] === buyAnimeReview.beforeHead
+  ? (() => { throw new Error('false adoption boundary'); })() : v5Git(args);
+assert.throws(() => reviewForCandidate(falseBoundaryGit, buyAnimeCandidate.head, v5Baseline.sourceHead), /FAILED_CLOSED/u);
+const buyAnimeInspection = inspectSafeDescendant({ git: v5Git, candidate: buyAnimeCandidate, baselineRecord: v5Baseline });
+assert.equal(buyAnimeInspection.result, 'PASS');
+assert.equal(buyAnimeInspection.schemaSensitiveFiles, 0);
+assert.equal(buyAnimeInspection.unknownFiles, 0);
+assert.equal(buyAnimeInspection.providerContractParity, 'PASS');
+assert.equal(buyAnimeInspection.migrationChecksumParity, 'PASS');
+assert.equal(buyAnimeInspection.backupContractParity, 'PASS');
+assert.equal(buyAnimeInspection.canonicalContractParity, 'PASS');
+assert.ok(buyAnimeInspection.requiredRegressions.includes('buyanime-real'));
+const exactPatch = execFileSync('git', ['diff', '--binary', '--full-index', '--no-ext-diff', '--no-color',
+  buyAnimeReview.beforeHead, buyAnimeReview.reviewedHead, '--']);
+assert.equal((await import('node:crypto')).createHash('sha256').update(exactPatch).digest('hex'), buyAnimeReview.patchSha256);
+for (const file of ['src/providers/cloud/inventoryImportPlan.ts', 'src/providers/cloud/supabaseProvider.ts',
+  'src/lib/db.ts', 'src/utils/myacgParser.ts', 'src/utils/myacgImportErrors.ts', 'src/pages/Inventory.tsx',
+  'supabase/sql/050_catalog_atomic_transaction.sql', 'src/lib/durableResourceRegistry.ts',
+  'tools/schema-reconciliation/schemaContract.mjs']) {
+  const badGit = args => args[0] === 'show' && args[1] === `${buyAnimeCandidate.head}:${file}`
+    ? v5Git(args) + '\nexport const futureRequiredDurableField = 1;' : v5Git(args);
+  assert.throws(() => inspectSafeDescendant({ git: badGit, candidate: buyAnimeCandidate, baselineRecord: v5Baseline }), /FAILED_CLOSED/u, file);
+}
+const plannerFile = 'src/providers/cloud/inventoryImportPlan.ts';
+const plannerSource = realGit(['show', `${buyAnimeCandidate.head}:${plannerFile}`]);
+assertReviewedProviderContract(plannerFile, null, plannerSource);
+assert.throws(() => assertReviewedProviderContract(plannerFile, null,
+  plannerSource.replace('const byKey =', "fetch('/unsafe'); const byKey =")), /FAILED_CLOSED/u);
+const beforeProvider = realGit(['show', `${buyAnimeReview.beforeHead}:${provider}`]);
+const afterProvider = realGit(['show', `${buyAnimeReview.reviewedHead}:${provider}`]);
+assertReviewedProviderContract(provider, beforeProvider, afterProvider);
+assert.throws(() => assertReviewedProviderContract(provider, beforeProvider,
+  afterProvider.replace("supabase.rpc('erp_apply_field_mutations'", "supabase.rpc('erp_unsafe_write'")), /FAILED_CLOSED/u);
+assert.equal(classifyDescendantFile('src/providers/cloud/futurePlanner.ts', null, 'unknown'), 'SCHEMA_SENSITIVE_OR_UNREVIEWED');
+console.log('PASS exact BuyAnime canonical identity diff and SHA; future planner/provider/DB/parser/RPC/migration/backup/canonical hunks fail closed');

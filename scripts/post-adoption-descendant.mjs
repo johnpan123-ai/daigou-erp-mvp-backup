@@ -228,7 +228,7 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   // Validate the full immutable review history, then classify only patches
   // after this adopted baseline. Earlier accepted patches are already part of
   // its tree, not a pre-patch gap in a later release. No path/hash exemption.
-  const reviews = reviewForCandidate(git, candidate.head).filter(review => {
+  const reviews = reviewForCandidate(git, candidate.head, baseline).filter(review => {
     try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, baseline]); }
     catch { return true; }
     return false;
