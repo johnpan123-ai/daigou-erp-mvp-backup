@@ -237,7 +237,11 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   const classified = changed.map(file => {
     const before = source(baseline, file, oldSet.has(file));
     const after = source(candidate.head, file, newSet.has(file));
-    const reviewed = classifyReviewedFile({ file, after, reviews });
+    // The review registry is release-control metadata, not runtime source. Its
+    // immutable anchors are verified by reviewForCandidate above, but appending
+    // a later exact review cannot require that append's own future commit hash.
+    const reviewed = file === 'config/erp2-reviewed-change-impacts.json'
+      ? null : classifyReviewedFile({ file, after, reviews });
     if (reviewed) {
       // Preserve the original UI-only guard for the earlier baseline ->
       // deployed interval. Only the exact separately-reviewed patch is new.
