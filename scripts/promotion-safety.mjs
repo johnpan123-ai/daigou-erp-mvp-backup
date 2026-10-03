@@ -390,7 +390,10 @@ export function verifyPromotionIdentity({ contract, checkpointTag, candidateGit,
 
 export const runGitAt = cwd => args => {
   try {
-    return execFileSync('git', args, {
+    // Per-command only: deeply nested isolated tooling worktrees on Windows
+    // must read every immutable blob, including archived migration sources.
+    // Do not mutate the user's shared Git configuration.
+    return execFileSync('git', ['-c', 'core.longpaths=true', ...args], {
       cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
       env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
     });

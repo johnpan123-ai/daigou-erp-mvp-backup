@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "releases": [
+    {
+      "id": "buyanime-pre-resume-535d9",
+      "head": "535d9a67f044ac2bb237165313edc29ae477bb6e",
+      "branch": "codex/next-waca-order-integration-v1",
+      "checkpoint": "checkpoint-20261003-buyanime-canonical-identity-fix-v1",
+      "recoveryTag": "backup-20261003-before-buyanime-readback-resume-fix-v1",
+      "artifactIdentity": "839D1E2FD54EF95595C340C46A93373173C935D4195120A111D9B6867F5D6125",
+      "artifactFiles": 40,
+      "deploymentId": "8b5db849-6e1a-44e0-840c-bca48ea65842",
+      "deploymentUrl": "https://8b5db849.hippo-erp-realtime-preview.pages.dev",
+      "canonicalContract": "ERP2_SEMANTIC_SCHEMA_V3",
+      "canonicalFingerprint": "ec63a2eb2c69cd7984ca9c61584e9f092ee22bcabb70c051e8ca7aad5f66bf4c",
+      "knownRemainingIssue": "BULK_READBACK_URL_TOO_LONG",
+      "knownGoodReleaseEvidence": "Authenticated original deployment postflight; canonical inventory UUID regression PASS. Runtime-only rollback explicitly authorized; bulk readback issue accepted."
+    }
+  ]
+}

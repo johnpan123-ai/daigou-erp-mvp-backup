@@ -13,7 +13,7 @@ import {
 import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 
 const fail = message => { throw new DeploymentGuardError(message); };
-const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir', 'schema-evidence', 'change-impact-evidence']);
+const allowedArguments = new Set(['checkpoint-tag', 'candidate-worktree', 'guard-checkpoint-tag', 'artifact-dir', 'schema-evidence', 'change-impact-evidence', 'mode', 'release-id', 'recovery-tag']);
 
 export function parseArguments(argv) {
   const args = new Map();
@@ -53,6 +53,15 @@ export const runReadonlyWrangler = (root, argv, accountId) => {
 export async function runPromotionGuard(argv = process.argv.slice(2), environment = process.env) {
   const args = parseArguments(argv);
   const guardRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
+  if (args.has('mode')) {
+    if (args.get('mode') !== 'HISTORICAL_RUNTIME_ROLLBACK' || args.has('candidate-worktree') || args.has('guard-checkpoint-tag')) {
+      fail('invalid historical rollback guard mode/arguments');
+    }
+    const { runHistoricalRollbackGuard } = await import('./historical-runtime-rollback.mjs');
+    return runHistoricalRollbackGuard({ root: guardRoot, args, environment,
+      wrangler: (wranglerArgs, accountId) => runReadonlyWrangler(guardRoot, wranglerArgs, accountId) });
+  }
+  if (args.has('release-id') || args.has('recovery-tag')) fail('historical arguments require explicit rollback mode');
   const candidateRoot = resolve(args.get('candidate-worktree') || guardRoot);
   const artifactRoot = resolve(candidateRoot, args.get('artifact-dir') || 'staging-release-artifacts/dist');
   const checkpointTag = args.get('checkpoint-tag') || fail('missing --checkpoint-tag');
