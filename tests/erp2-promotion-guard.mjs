@@ -66,6 +66,18 @@ const positiveGit = gitFixture();
 const candidate = verifyRemoteCandidate({ contract, git: positiveGit.git, checkpointTag: checkpoint });
 assert.equal(candidate.lineageMode, 'RECONCILED_CHECKPOINT_DESCENDANT');
 assert.equal(candidate.remoteCheckpointPeeledHead, head);
+const buyAnimeCandidate = verifyRemoteCandidate({
+  contract,
+  git: gitFixture({ branch: 'codex/buyanime-final-fast-path-v1' }).git,
+  checkpointTag: checkpoint,
+});
+assert.equal(buyAnimeCandidate.branch, 'codex/buyanime-final-fast-path-v1');
+assert.throws(() => verifyRemoteCandidate({
+  contract,
+  git: gitFixture({ branch: 'codex/feature-unreviewed' }).git,
+  checkpointTag: checkpoint,
+}), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
+console.log('PASS exact BuyAnime release branch family; unrelated branch family remains fail-closed');
 const lightweightCandidate = verifyRemoteCandidate({
   contract,
   git: gitFixture({ lightweightCheckpoint: true, lightweightAccepted: true, lightweightReconciled: true }).git,
