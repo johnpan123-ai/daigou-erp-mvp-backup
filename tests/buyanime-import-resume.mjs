@@ -43,8 +43,8 @@ try {
   };
   await assert.rejects(() => new BuyAnimeImportPipeline(port).start(incoming,'399375_2026-10-03.xls'), /COMMITTED_READBACK_PENDING/);
   assert.equal(inventoryCommits,1);
-  assert.equal(journal.stage,'INVENTORY_READBACK_PENDING');
-  assert.match(buyAnimeRecoveryMessage(journal),/主檔已儲存/u);
+  assert.equal(journal.stage,'INVENTORY_COMMITTING','Durable intent remains sufficient for F5 reconciliation without an extra large journal write');
+  assert.match(buyAnimeRecoveryMessage(journal),/雲端核對/u);
   // New instance simulates F5/closed tab/new login. Nothing relies on React/session storage.
   readFailure=false;
   await new BuyAnimeImportPipeline(port).verify(structuredClone(journal));

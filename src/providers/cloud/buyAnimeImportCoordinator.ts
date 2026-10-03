@@ -1,6 +1,11 @@
 import { BuyAnimeResumeError, type BuyAnimeImportRecord, type BuyAnimeStage } from './buyAnimeImportResume';
 import type { CloudChange } from './cloudSyncDomain';
 
+export interface BuyAnimeAuthoritativeEvidence {
+  changes: CloudChange[];
+  rowsByTable: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>>;
+}
+
 export interface BuyAnimeFlowOptions {
   beforeStart?: () => Promise<unknown>;
   onStage?: (stage: BuyAnimeStage) => void;
@@ -16,13 +21,13 @@ export function subscribeBuyAnimeFlow(listener: () => void): () => void {
 export function publishBuyAnimeFlow(label: string, error = ''): void {
   presentation = { label, error }; listeners.forEach(listener => listener());
 }
-let targetedRefresh: ((changes: CloudChange[]) => Promise<void>) | undefined;
+let targetedRefresh: ((evidence: BuyAnimeAuthoritativeEvidence) => Promise<void>) | undefined;
 export function registerBuyAnimeTargetedRefresh(refresh: NonNullable<typeof targetedRefresh>): () => void {
   targetedRefresh = refresh;
   return () => { if (targetedRefresh === refresh) targetedRefresh = undefined; };
 }
-export function refreshBuyAnimeReadback(changes: CloudChange[], fallback: () => Promise<void>): Promise<void> {
-  return targetedRefresh ? targetedRefresh(changes) : fallback();
+export function refreshBuyAnimeReadback(evidence: BuyAnimeAuthoritativeEvidence, fallback: () => Promise<void>): Promise<void> {
+  return targetedRefresh ? targetedRefresh(evidence) : fallback();
 }
 /** One queue per client, plus an origin-wide lock across tabs. Journal CAS is
  * still the authority across devices; this lock never replaces it. */

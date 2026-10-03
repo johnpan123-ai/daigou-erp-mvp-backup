@@ -40,49 +40,94 @@ try {
   await page.goto('http://127.0.0.1:4292/tests/fixtures/buyanime-resume-provider.html');
   await page.waitForFunction(()=>Boolean(window.__BUYANIME_RESUME_PROVIDER__));
   await page.evaluate(actor=>window.__BUYANIME_RESUME_PROVIDER__.setup(actor),owner);
-  const result=await page.evaluate(async ({base64,automatic,legacy,fault})=>{
+  const result=await page.evaluate(async ({base64,automatic,legacy,fault,uiBenchmark,changeOne})=>{
     const bridge=window.__BUYANIME_RESUME_PROVIDER__, provider=bridge.provider();
-    const stages={}, longTasks=[];
+    // T0 starts after the normal app bootstrap has a fresh authoritative
+    // cache. Initial route loading is not part of selecting the XLS file.
+    await provider.waitForCloudBootstrapConvergence();
+    bridge.resetMetrics();
+    const stages={}, longTasks=[], timeline=[];let inventoryPlanSummary=null,catalogPlanSummary=null;
     const observer=new PerformanceObserver(list=>longTasks.push(...list.getEntries().map(e=>Math.round(e.duration))));
     observer.observe({type:'longtask',buffered:false});
-    const measure=async(name,fn)=>{const t=performance.now();try{return await fn();}finally{stages[name]=(stages[name]||0)+performance.now()-t;}};
+    const measure=async(name,fn)=>{const t=performance.now();try{return await fn();}finally{const end=performance.now();stages[name]=(stages[name]||0)+end-t;timeline.push({name,start:t,end,duration:end-t});}};
     // Instrument only this disposable provider; never change production diagnostics or dump rows.
     const port=provider.buyAnimePipeline.port;
-    for(const [name,label]of Object.entries({prepareInventory:'InventoryMatchingPlanning',commitInventory:'InventoryCommit',readInventory:'Readback',planCatalog:'CatalogPlanning',commitCatalog:'CatalogCommit',verifyCatalog:'CatalogReadback',ensureWacaEvidence:'WacaEvidence'})){
-      const original=port[name];port[name]=(...args)=>measure(label,()=>original(...args));
+    for(const [name,label]of Object.entries({load:'JournalLoad',save:'JournalSave',prepareInventory:'InventoryMatchingPlanning',commitInventory:'InventoryCommit',readInventory:'Readback',planCatalog:'CatalogPlanning',commitCatalog:'CatalogCommit',verifyCatalog:'CatalogReadback',ensureWacaEvidence:'WacaEvidence'})){
+      const original=port[name];port[name]=(...args)=>measure(label,async()=>{
+        const value=await original(...args);
+        if(name==='prepareInventory') inventoryPlanSummary={operations:value.operations.length,stats:value.stats};
+        if(name==='planCatalog') catalogPlanSummary=value?Object.fromEntries(Object.entries(value.request.operations).map(([table,ops])=>[table,ops.length])):{};
+        return value;
+      });
+    }
+    for(const name of ['getBuyAnimeImportRecovery','prepareBuyAnimeRecovery']) {
+      const original=provider[name].bind(provider);provider[name]=(...args)=>measure(name,()=>original(...args));
     }
     const total=performance.now();
-    const {createAndDownloadWorkbenchBackup}=await import('/src/lib/workbenchJsonBackup.ts');
-    await measure('Backup',()=>createAndDownloadWorkbenchBackup(provider,'isolated-before-import',new Date(),()=>{}));
-    const parsed=await measure('FileReadParse',()=>bridge.parse(base64));
-    const rows=await measure('Normalize',async()=>parsed.map(row=>({...row,latest_catalog_import_id:'catalog_import_411c6e55-cb73-41af-9ff1-61cf39cb532c',catalog_last_seen_at:'2026-10-03T04:52:25.877Z'})));
     let record;
+    let ui;
+    let postSuccessCriticalRequests=0;
     try {
       const cacheRefresh=provider.mutationCache.refresh.bind(provider.mutationCache);
       provider.mutationCache.refresh=(...args)=>measure('FinalTargetedRefresh',()=>cacheRefresh(...args));
       if(fault)bridge.failReadbackRequests(3);
-      if(legacy) record=await provider.recoverPendingBuyAnimeImport();
-      else if(automatic) record=await provider.completeBuyAnimeImport(rows,'399375_2026-10-03.xls');
-      else {record=await provider.importBuyAnimeInventory(rows,'399375_2026-10-03.xls');record=await provider.resumeBuyAnimeImport(record);}
+      if(uiBenchmark) {
+        const complete=provider.completeBuyAnimeImport.bind(provider);
+        provider.completeBuyAnimeImport=async(items,...args)=>{
+          const candidate=changeOne
+            ? items.map((row,index)=>index===0?{...row,myacg_sold_quantity:Number(row.myacg_sold_quantity||0)+1}:row)
+            : items;
+          record=await complete(candidate,...args);return record;
+        };
+        const {renderImportBenchmarkUi}=await import('/tests/fixtures/buyanime-performance-ui.tsx');
+        ui=await renderImportBenchmarkUi(provider,base64);
+      } else {
+        const {createAndDownloadWorkbenchBackup}=await import('/src/lib/workbenchJsonBackup.ts');
+        await measure('Backup',()=>createAndDownloadWorkbenchBackup(provider,'isolated-before-import',new Date(),()=>{}));
+        const parsed=await measure('FileReadParse',()=>bridge.parse(base64));
+        const rows=await measure('Normalize',async()=>parsed.map((row,index)=>({...row,
+          ...(fault&&index===0?{myacg_sold_quantity:Number(row.myacg_sold_quantity||0)+1}:{}),
+          latest_catalog_import_id:'catalog_import_411c6e55-cb73-41af-9ff1-61cf39cb532c',catalog_last_seen_at:'2026-10-03T04:52:25.877Z'})));
+        if(legacy) record=await provider.recoverPendingBuyAnimeImport();
+        else if(automatic) record=await provider.completeBuyAnimeImport(rows,'399375_2026-10-03.xls');
+        else {record=await provider.importBuyAnimeInventory(rows,'399375_2026-10-03.xls');record=await provider.resumeBuyAnimeImport(record);}
+      }
     } catch(error) {
-      const chain=[];for(let e=error,n=0;e&&n<6;e=e.cause,n++) chain.push({code:e.code,name:e.name,status:e.status,reason:String(e.message||'').match(/[A-Z][A-Z0-9_]{4,}/gu)});
-      return {failure:true,chain,stages,metrics:bridge.metrics()};
+      const chain=[];for(let e=error,n=0;e&&n<6;e=e.cause,n++) chain.push({code:e.code,name:e.name,status:e.status,message:String(e.message||'')});
+      return {failure:true,chain,inventoryPlanSummary,catalogPlanSummary,stages,metrics:bridge.metrics()};
     }
-    await measure('UiSnapshot',()=>provider.getInventoryCatalogSnapshot());
-    // Mount the real read-only Inventory presentation against this disposable
-    // provider. No synthetic row progress updates or production app is mounted.
-    const {renderReadOnlyUi}=await import('/tests/fixtures/buyanime-performance-ui.tsx');
-    const ui=await measure('UiRender',()=>renderReadOnlyUi(provider));
+    if (!uiBenchmark) {
+      await measure('UiSnapshot',()=>provider.getInventoryCatalogSnapshot());
+      // Mount the real read-only Inventory presentation against this disposable
+      // provider. No synthetic row progress updates or production app is mounted.
+      const {renderReadOnlyUi}=await import('/tests/fixtures/buyanime-performance-ui.tsx');
+      ui=await measure('UiRender',()=>renderReadOnlyUi(provider));
+    } else {
+      const atSuccess=bridge.metrics();
+      await new Promise(resolve=>setTimeout(resolve,250));
+      const afterSuccess=bridge.metrics();
+      postSuccessCriticalRequests=afterSuccess.totalRequests-atSuccess.totalRequests;
+    }
     await new Promise(r=>setTimeout(r,100));observer.disconnect();
-    stages.Total=performance.now()-total;
-    return {rows:parsed.length,stage:record.stage,stages:Object.fromEntries(Object.entries(stages).map(([k,v])=>[k,Math.round(v)])),longTasks,reactCommits:ui.commits,maxReactDurationMs:ui.maxDurationMs,metrics:bridge.metrics()};
-  },{base64:bytes.toString('base64'),automatic:process.env.BUYANIME_AUTO==='1',legacy:process.env.BUYANIME_LEGACY==='1',fault:process.env.BUYANIME_FAULT==='1'});
+    stages.Total=uiBenchmark?ui.totalMs:performance.now()-total;
+    const spans=[...timeline].sort((a,b)=>a.start-b.start);let cursor=total,uncovered=[];
+    for(const span of spans){if(span.start>cursor)uncovered.push({start:cursor-total,end:span.start-total,duration:span.start-cursor});cursor=Math.max(cursor,span.end);}
+    if(performance.now()>cursor)uncovered.push({start:cursor-total,end:performance.now()-total,duration:performance.now()-cursor});
+    return {rows:record?.stats?.total??1505,stage:record.stage,inventoryPlanSummary,catalogPlanSummary,stages:Object.fromEntries(Object.entries(stages).map(([k,v])=>[k,Math.round(v)])),timeline:timeline.map(s=>({...s,start:Math.round(s.start-total),end:Math.round(s.end-total),duration:Math.round(s.duration)})),uncovered,longTasks,reactCommits:ui.commits,maxReactDurationMs:ui.maxDurationMs,modalText:ui.modalText,syncText:ui.syncText,postSuccessCriticalRequests,metrics:bridge.metrics()};
+  },{base64:bytes.toString('base64'),automatic:process.env.BUYANIME_AUTO==='1',legacy:process.env.BUYANIME_LEGACY==='1',fault:process.env.BUYANIME_FAULT==='1',uiBenchmark:process.env.BUYANIME_UI_BENCHMARK==='1',changeOne:process.env.BUYANIME_CHANGE_ONE==='1'});
   if(result.failure) console.log(JSON.stringify(result));
-  assert.equal(result.rows,1505);assert.equal(result.stage,'COMPLETE');assert.equal(result.metrics.inventoryCommits,process.env.BUYANIME_LEGACY==='1'?0:1);assert.equal(externalRequests,0);
+  assert.equal(result.rows,1505);assert.equal(result.stage,'COMPLETE');
+  if(process.env.BUYANIME_UI_BENCHMARK==='1')assert.equal(result.postSuccessCriticalRequests,0,'No Catalog/WACA/readback/sync request may continue after success');
+  assert.equal(result.metrics.inventoryCommits,process.env.BUYANIME_LEGACY==='1'||result.inventoryPlanSummary?.operations===0?0:1);
+  assert.equal(externalRequests,0);
   const report={label:process.env.BUYANIME_PERF_LABEL||'baseline',...result,externalRequests,liveWrites:0};
   mkdirSync('scratch/buyanime-flow-performance',{recursive:true});
   writeFileSync(join('scratch/buyanime-flow-performance',report.label+'.json'),JSON.stringify(report,null,2));
-  console.log(JSON.stringify(report));
+  console.log(JSON.stringify(process.env.BUYANIME_PERF_COMPACT==='1'?{
+    label:report.label,totalMs:report.stages.Total,stage:report.stage,inventory:report.inventoryPlanSummary,
+    postSuccessCriticalRequests:report.postSuccessCriticalRequests,longTaskMax:Math.max(0,...report.longTasks),
+    reactMax:report.maxReactDurationMs,syncText:report.syncText,externalRequests,liveWrites:0,
+  }:report));
 } catch(error) {
   const safe=String(error.message).match(/(?:BUYANIME_|CLOUD_|ISOLATED_)[A-Z_]+/gu);
   console.log(JSON.stringify({result:'FAIL',code:error.code||error.name,reasons:safe||[],stack:String(error.stack).split('\n').filter(line=>/^\s+at /u.test(line)).slice(0,6)}));

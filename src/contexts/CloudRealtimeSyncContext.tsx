@@ -204,13 +204,20 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       onCommitted: async resources => { await Promise.all([...listeners.current].map(listener => listener(resources))); },
     });
     coordinatorRef.current = coordinator;
-    const unregisterBuyAnimeRefresh = registerBuyAnimeTargetedRefresh(async changes => {
+    const unregisterBuyAnimeRefresh = registerBuyAnimeTargetedRefresh(async evidence => {
+      const { changes, rowsByTable } = evidence;
       const resources = [...new Set(changes.map(change => change.resource))];
-      const result = await cache.refreshWithResult({ reason: 'realtime', resources, changes });
-      if (result.conflicts.length) notifyConflict([...new Set(result.conflicts.map(change => change.resource))]);
-      // Only actually refreshed non-conflicting resources may clear stale flags.
-      notifyRefreshed(resources.filter(resource => !result.conflicts.some(change => change.resource === resource)));
+      await cache.absorbVerifiedRows(changes, rowsByTable);
+      notifyRefreshed(resources);
       await Promise.all([...listeners.current].map(listener => listener(resources)));
+      // A concurrently requested global refresh is part of the visible sync
+      // state. Success must not race ahead of its final presentation.
+      if (globalRefreshInFlight.current) await globalRefreshInFlight.current;
+      const status = getCloudConnectivitySnapshot();
+      if (status.status !== 'online' || status.authoritativeReadPending
+        || !['fresh-online', 'fresh-empty'].includes(status.readStatus)) {
+        throw new Error('BUYANIME_GLOBAL_SYNC_NOT_CONVERGED');
+      }
     });
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
     let channelState: RealtimeChannelState = 'unavailable';

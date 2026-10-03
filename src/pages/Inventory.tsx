@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import {
@@ -6,13 +6,13 @@ import {
   isVariantSyncGuardAcceptanceUiEnabled,
   isVariantSyncReadFailureInjectionEnabled,
   VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE,
-  normalizeProductTitle,
 } from '../lib/db';
-import type { InventoryItem, ProductGroup } from '../lib/db';
+import type { ImportStats, InventoryItem, ProductGroup } from '../lib/db';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../utils/myacgImportErrors';
 import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
+import { BuyAnimeImportSuccessDialog } from '../components/BuyAnimeImportSuccessDialog';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
@@ -23,8 +23,8 @@ import {
   isCloudRestoreDisabledMode,
 } from '../providers/cloudRestorePolicy';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
-import { BuyAnimeResumeError, buyAnimeRecoveryDiagnostic, type BuyAnimeImportRecord } from '../providers/cloud/buyAnimeImportResume';
-import { buyAnimeFlowLabel, getBuyAnimeFlowPresentation, subscribeBuyAnimeFlow } from '../providers/cloud/buyAnimeImportCoordinator';
+import { BuyAnimeResumeError, buyAnimeRecoveryDiagnostic } from '../providers/cloud/buyAnimeImportResume';
+import { buyAnimeFlowLabel } from '../providers/cloud/buyAnimeImportCoordinator';
 
 interface InventoryGroup {
   title: string;
@@ -60,16 +60,6 @@ const DEFAULT_COL_WIDTHS = {
   sales: 100
 };
 
-const shouldSyncImportedInventoryWithExistingGroups = (
-  importedItems: InventoryItem[],
-  groups: ProductGroup[],
-): boolean => {
-  const importedTitles = new Set(importedItems.map(item => (
-    item.normalized_product_title || normalizeProductTitle(item.product_title)
-  )).filter(Boolean));
-  return groups.some(group => importedTitles.has(group.normalized_title || normalizeProductTitle(group.title)));
-};
-
 export default function Inventory() {
   const currentMode = getProviderMode();
   const isCloudRestoreDisabled = isCloudRestoreDisabledMode(currentMode);
@@ -99,11 +89,8 @@ export default function Inventory() {
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [backupNotice, setBackupNotice] = useState<string>('');
   const [importDiagnostic, setImportDiagnostic] = useState<ReturnType<typeof myAcgImportDiagnostic> | null>(null);
-  const [importRecovery, setImportRecovery] = useState<BuyAnimeImportRecord | null>(null);
-  const [recoveryBusy, setRecoveryBusy] = useState(false);
-  const [recoveryError, setRecoveryError] = useState('');
   const [importStatus, setImportStatus] = useState('');
-  const flow = useSyncExternalStore(subscribeBuyAnimeFlow, getBuyAnimeFlowPresentation, getBuyAnimeFlowPresentation);
+  const [successStats, setSuccessStats] = useState<ImportStats | null>(null);
   const [variantGuardProbeNotice, setVariantGuardProbeNotice] = useState<string>('');
   const showVariantGuardAcceptanceUi = isVariantSyncGuardAcceptanceUiEnabled();
   const injectVariantReadFailure = isVariantSyncReadFailureInjectionEnabled();
@@ -150,7 +137,7 @@ export default function Inventory() {
   useCloudResourceSync(
     'inventory-catalog',
     ['inventory', 'products'],
-    isImporting || isRollbackPending || recoveryBusy,
+    isImporting || isRollbackPending,
     loadItems,
   );
 
@@ -162,22 +149,6 @@ export default function Inventory() {
     if (isImporting) return;
     fileInputRef.current?.click();
   };
-
-  const recoverImport = useCallback(async () => {
-    setRecoveryBusy(true);
-    setRecoveryError('');
-    try {
-      await dataProvider.waitForCloudBootstrapConvergence();
-      const completed = await dataProvider.recoverPendingBuyAnimeImport({ onStage: stage => setImportStatus(buyAnimeFlowLabel(stage)) });
-      setImportRecovery(null);
-      if (completed) { setImportStatus('匯入完成'); await loadItems(); }
-    } catch (cause) {
-      setImportDiagnostic(buyAnimeRecoveryDiagnostic(cause, cause instanceof BuyAnimeResumeError ? cause.record : undefined));
-      if (cause instanceof BuyAnimeResumeError && cause.record) setImportRecovery(cause.record);
-      setRecoveryError('同步暫時未完成，請稍後重試。已儲存的主檔不會重送。');
-      setImportStatus('');
-    } finally { setRecoveryBusy(false); }
-  }, [loadItems]);
 
   const createPreImportBackup = async () => {
     const timestamp = new Date();
@@ -219,8 +190,8 @@ export default function Inventory() {
     setIsImporting(true);
     setBackupNotice('');
     setImportDiagnostic(null);
-    setRecoveryError('');
-    setImportStatus('匯入中…');
+    setSuccessStats(null);
+    setImportStatus('正在匯入並同步資料…');
     const importRequestId = `catalog_import_${crypto.randomUUID()}`;
     let importPhase: 'parse' | 'commit' = 'parse';
     try {
@@ -238,33 +209,26 @@ export default function Inventory() {
           beforeStart: createPreImportBackup,
           onStage: stage => setImportStatus(buyAnimeFlowLabel(stage)),
         });
-        setImportRecovery(null);
-        await loadItems();
-        setImportStatus(`匯入完成（新增 ${completed.stats.newCount}、更新 ${completed.stats.updatedCount}）`);
+        // completeBuyAnimeImport resolves only after Catalog, WACA evidence,
+        // authoritative read-back, targeted cache refresh and Global Sync all
+        // converge. Do not perform a second full fetch after this point.
+        setImportStatus('');
+        setSuccessStats(completed.stats);
         return;
       }
       // NEXT remains local and keeps the same backup-before-dispatch gate.
       await createPreImportBackup();
       const stats = await dataProvider.upsertInventory(itemsWithBatchMeta);
 
-      const cloudMode = false; // Cloud uses the durable staged pipeline above; NEXT remains local.
-      let shouldSync = !cloudMode;
-      let syncStats: Awaited<ReturnType<typeof dataProvider.syncProductGroupsWithInventory>> = {
-        filledVariantsCount: 0,
-        affectedGroupsCount: 0,
-        upgradedSkusCount: 0,
-      };
       let postCommitIssue: 'catalog-readback' | 'group-sync' | 'ui-readback' | null = null;
       try {
-        const authoritativeGroups = await dataProvider.getProductGroups();
-        shouldSync = !cloudMode
-          || shouldSyncImportedInventoryWithExistingGroups(itemsWithBatchMeta, authoritativeGroups);
+        await dataProvider.getProductGroups();
       } catch {
         postCommitIssue = 'catalog-readback';
       }
-      if (!postCommitIssue && shouldSync) {
+      if (!postCommitIssue) {
         try {
-          syncStats = await dataProvider.syncProductGroupsWithInventory();
+          await dataProvider.syncProductGroupsWithInventory();
         } catch {
           postCommitIssue = 'group-sync';
         }
@@ -272,7 +236,7 @@ export default function Inventory() {
       // The catalog is the authoritative GP → G evidence source in both
       // environments. Persist it while the uploaded parent code is still
       // available; a later WACA import must not require this file again.
-      if (!postCommitIssue && (currentMode === 'next' || cloudMode)) {
+      if (!postCommitIssue && currentMode === 'next') {
         try {
           const variants = await dataProvider.getAuthoritativeWacaVariants();
           const evidence = linksFromMyAcgInventory(itemsWithBatchMeta, variants, file.name, currentTimestamp);
@@ -302,28 +266,8 @@ export default function Inventory() {
         return;
       }
       
-      const report = `📊【買動漫 Catalog 匯入結果】
-
-一、Catalog 暫存主檔
-
-* 檔案原始列數：${stats.total} 筆
-* 本次新增到暫存主檔：${stats.newCount} 筆
-* 本次更新暫存主檔：${stats.updatedCount} 筆
-  註：這裡只是買動漫商品主檔快取，不代表訂購紀錄表新增規格。
-
-二、訂購紀錄表同步
-
-* 受影響商品群組：${syncStats.affectedGroupsCount} 組
-* 實際新增規格：${syncStats.filledVariantsCount} 筆
-* 舊 SKU 自動升級為新子編號：${syncStats.upgradedSkusCount || 0} 筆
-${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組；維持「未加入」，未執行跨表規格同步。' : ''}
-
-三、檢查提醒
-
-* 若「實際新增規格」不是預期數字，請先不要繼續匯入其他資料
-* 若「舊 SKU 自動升級」有數字，代表 UUID 與採購關聯維持不變`;
-
-      alert(report);
+      setImportStatus('');
+      setSuccessStats(stats);
     } catch (err) {
       if (err instanceof Error && err.name === 'BuyAnimeBackupError') {
         setImportStatus('匯入前 JSON 備份失敗，已中止 XLS 匯入。');
@@ -333,18 +277,14 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       if (currentMode === 'cloud' || currentMode === 'fallback') {
         if (err instanceof BuyAnimeResumeError && err.record) {
           setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, err.record));
-          setImportRecovery(err.record);
-          setRecoveryError('匯入暫時未完成，請稍後重試。已儲存的主檔不會重送。');
-          setImportStatus('');
-          try { await loadItems(); } catch { /* Keep the committed intent, never infer rollback from a cache display read. */ }
+          setImportStatus('匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。');
           return;
         }
         try {
           const pending = await dataProvider.getBuyAnimeImportRecovery();
           if (pending) {
-            setImportRecovery(pending);
-            setRecoveryError('同步暫時未完成，請稍後重試。已儲存的主檔不會重送。');
-            setImportStatus('');
+            setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, pending));
+            setImportStatus('匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。');
             return;
           }
         } catch { /* Do not claim rollback without commit evidence. */ }
@@ -1456,14 +1396,9 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
               </pre>
             </details>
           )}
-          {(importStatus || recoveryError || flow.label || flow.error) && (
-            <section role="status" data-testid="buyanime-import-recovery" style={{ marginTop: '12px', fontSize: '13px' }}>
-              <div>{recoveryError || flow.error || importStatus || flow.label}</div>
-              {(recoveryError || flow.error) && <button type="button" className="btn btn-secondary" onClick={() => void recoverImport()} disabled={recoveryBusy || isImporting}>重試同步</button>}
-              {importRecovery && <details style={{ marginTop: '8px', fontSize: '12px' }}>
-                <summary>匯入進度技術資訊</summary>
-                <div style={{ overflowWrap: 'anywhere' }}>批次：{importRecovery.batchId}<br />階段：{importRecovery.stage}<br />預期／批次筆數：{importRecovery.expected.length}<br />商品／規格：{['CATALOG_VERIFIED','WACA_EVIDENCE_PENDING','COMPLETE'].includes(importRecovery.stage) ? '已核對' : '待完成／核對'}<br />WACA 來源：{importRecovery.stage === 'COMPLETE' ? '已完成' : '待完成'}</div>
-              </details>}
+          {importStatus && (
+            <section role="status" data-testid="buyanime-import-status" style={{ marginTop: '12px', fontSize: '13px' }}>
+              <div>{importStatus}</div>
             </section>
           )}
           {variantGuardProbeNotice && (
@@ -1490,6 +1425,11 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
       </PageHeader>
 
       {/* KPI Cards Row */}
+      <BuyAnimeImportSuccessDialog
+        stats={successStats}
+        cloudSynced={currentMode === 'cloud' || currentMode === 'fallback'}
+        onClose={() => setSuccessStats(null)}
+      />
       <div className="kpi-row workspace-stats workspace-stats-six" data-workspace-stats>
         {/* 商品總數 */}
         <div className="kpi-card">

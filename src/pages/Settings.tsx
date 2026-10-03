@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import { dataProvider } from '../providers/dataProvider';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
@@ -27,6 +27,11 @@ import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { SystemInformation } from '../components/layout/SystemInformation';
+import {
+  DATA_SIZE_TABLE_LABELS,
+  getDataSizeObservations,
+  subscribeDataSizeObservations,
+} from '../lib/dataSizeAdvisory';
 import {
   isCloudAtomicBackupDocument,
   prepareCloudBackupForNextRestore,
@@ -62,6 +67,11 @@ export default function Settings() {
   const sandboxConfig = getActiveSandboxConfig();
   const sandboxLabel = sandboxConfig?.label ?? 'Sandbox';
   const environmentModeLabel = getEnvironmentModeLabel(currentMode, supabaseEnvironment.role);
+  const dataSizeObservations = useSyncExternalStore(
+    subscribeDataSizeObservations,
+    getDataSizeObservations,
+    getDataSizeObservations,
+  );
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -842,6 +852,24 @@ export default function Settings() {
         </div>
 
         <SystemInformation />
+
+        <section className="card flex-col" aria-label="系統健康" style={{ gridColumn: 'span 3', marginTop: '16px' }}>
+          <h3 style={{ margin: '0 0 8px' }}>系統健康</h3>
+          {dataSizeObservations.length === 0 ? (
+            <p className="text-muted text-sm" style={{ margin: 0 }}>目前沒有資料量效能觀察項目。</p>
+          ) : (
+            <>
+              <p className="text-muted text-sm" style={{ marginTop: 0 }}>
+                以下為非阻擋效能觀察值；不會在日常工作畫面跳出通知。
+              </p>
+              <ul style={{ marginBottom: 0 }}>
+                {dataSizeObservations.map(({ table, count, threshold }) => (
+                  <li key={table}>{DATA_SIZE_TABLE_LABELS[table] || table}：{count} / {threshold}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
 
         {/* Supabase 連線測試 */}
         {(() => {

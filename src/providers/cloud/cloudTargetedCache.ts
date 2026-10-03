@@ -13,7 +13,7 @@ import { cloudCacheDb as db } from '../../lib/db';
 import { supabase } from './supabaseClient';
 import type { CloudChange, CloudRefreshRequest, CloudRefreshResult, CloudResource } from './cloudSyncDomain';
 import { cloudBusinessRowsEqual } from './cloudRealtimeComparison';
-import { readCloudRowsByIds } from './cloudBulkRead';
+import { assertExpectedCloudFields, readCloudRowsByIds } from './cloudBulkRead';
 import { CLOUD_TABLE_RESOURCE, resolveCloudRowIdentity } from './cloudSyncDomain';
 import {
   getCloudConnectivitySnapshot,
@@ -206,6 +206,43 @@ export class CloudTargetedCache {
 
   async refresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<void> {
     await this.refreshWithResult(request, signal);
+  }
+
+  /** Commit rows that were already read from Cloud and contract-verified by a
+   * mutation pipeline. This is not an optimistic cache write: every non-delete
+   * change must carry its exact authoritative server row. */
+  async absorbVerifiedRows(
+    changes: CloudChange[],
+    rowsByTable: Readonly<Record<string, ReadonlyArray<Row>>>,
+  ): Promise<void> {
+    if (this.prepareDraftProtection) this.protectsDraft = await this.prepareDraftProtection();
+    const grouped = new Map<string, CloudChange[]>();
+    for (const change of changes) grouped.set(change.table, [...(grouped.get(change.table) || []), change]);
+    for (const table of Object.keys(rowsByTable)) {
+      if (!grouped.has(table)) throw new Error('CLOUD_VERIFIED_ROWS_UNEXPECTED_TABLE');
+    }
+    for (const [table, tableChanges] of grouped) {
+      const adapter = TABLES[table];
+      if (!adapter) throw new Error('CLOUD_VERIFIED_ROWS_UNSUPPORTED_TABLE');
+      const wanted = new Set(tableChanges.map(change => change.databaseId));
+      const rows = [...(rowsByTable[table] || [])];
+      const byId = new Map<string, Row>();
+      for (const row of rows) {
+        const id = String(row.id || '');
+        if (!wanted.has(id)) throw new Error('CLOUD_VERIFIED_ROWS_UNEXPECTED_ID');
+        if (byId.has(id)) throw new Error('CLOUD_VERIFIED_ROWS_DUPLICATE_ID');
+        byId.set(id, row);
+      }
+      for (const change of tableChanges) {
+        const row = byId.get(change.databaseId);
+        if (change.kind !== 'DELETE' && !row) throw new Error(`CLOUD_VERIFIED_ROWS_MISSING_ID:${table}:${change.kind}`);
+        if (row && change.expectedFields) assertExpectedCloudFields(row, change.expectedFields);
+      }
+      await this.merge(table, adapter, tableChanges.map(change => change.canonicalId), rows, []);
+      const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
+      if (newest) this.cursors.set(table, newest);
+    }
+    markCloudReadFresh();
   }
 
   refreshWithResult(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {

@@ -30,8 +30,10 @@ try {
   const dialogs = [];
   page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept(); });
   await page.locator('input[type=file]').setInputFiles(file);
-  await page.waitForFunction(() => !document.body.innerText.includes('匯入中...'), null, { timeout: 120000 });
-  assert.ok(dialogs.some(message => message.includes('1,505') || message.includes('1505')));
+  const success = page.getByTestId('buyanime-import-success-modal');
+  await success.waitFor({ timeout: 120000 });
+  assert.match(await success.innerText(), /1,?505/u);
+  await page.getByRole('button', { name: '確定' }).click();
   assert.equal(supabaseRequests, 0);
   const missing = await page.evaluate(async () => {
     const { parseMyAcgFile } = await import('/src/utils/myacgParser.ts');

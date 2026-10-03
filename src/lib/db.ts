@@ -2280,18 +2280,17 @@ export const prepareInventoryUpsert = (
     }
   }
 
-  const parentCodeList = [...parentCodes];
-  const normalizedTitleList = [...normalizedTitles];
   const filteredCurrent = current.filter(item => {
-    if (parentCodeList.length > 0) {
+    if (parentCodes.size > 0) {
       const code = (item.myacg_item_code || '').trim().toUpperCase();
       const parent = (item.myacg_parent_code || '').trim().toUpperCase();
-      if (parentCodeList.some(candidate => parent === candidate || code === candidate || code.startsWith(`${candidate}_`))) {
-        return false;
+      if (parentCodes.has(parent) || parentCodes.has(code)) return false;
+      for (let boundary = code.indexOf('_'); boundary >= 0; boundary = code.indexOf('_', boundary + 1)) {
+        if (parentCodes.has(code.slice(0, boundary))) return false;
       }
     } else {
       const normalizedTitle = item.normalized_product_title || normalizeProductTitle(item.product_title);
-      if (normalizedTitle && normalizedTitleList.includes(normalizedTitle)) return false;
+      if (normalizedTitle && normalizedTitles.has(normalizedTitle)) return false;
     }
     return true;
   });

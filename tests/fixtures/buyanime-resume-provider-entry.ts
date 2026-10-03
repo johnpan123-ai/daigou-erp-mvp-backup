@@ -17,6 +17,7 @@ declare global {
       loseCatalog: (enabled: boolean) => void;
       loseWaca: (enabled: boolean) => void;
       metrics: () => { inventoryCommits:number;catalogRequests:number;wacaRequests:number;readQueries:number;maxUrlBytes:number;largestChunkLatencyMs:number; totalRequests:number; fullReads:number; fullSnapshotReads:number; readMs:number };
+      resetMetrics: () => void;
       failReadbackRequests: (count: number) => void;
       lastRecord?: BuyAnimeImportRecord;
     };
@@ -81,4 +82,5 @@ window.__BUYANIME_RESUME_PROVIDER__ = {
   loseCatalog: enabled => {catalogLost=enabled;},
   loseWaca: enabled => {wacaLost=enabled;},
   metrics: () => ({...metrics}),
+  resetMetrics: () => { for (const key of Object.keys(metrics) as Array<keyof typeof metrics>) metrics[key] = 0; },
 };

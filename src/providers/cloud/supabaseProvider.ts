@@ -194,7 +194,7 @@ import { buildPrivateOrderRequest, PRIVATE_ORDER_RPC, type PrivateOrderTransacti
 import { readFormIntent,stableFormIntent,clearFormIntent } from './privateOrderTransaction';
 import { readCloudRowsByIds } from './cloudBulkRead';
 import {
-  BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord,
+  BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord, importCatalogKey,
   type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
 import { readBuyAnimeJournal, readPendingBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
@@ -1487,35 +1487,49 @@ export class SupabaseProvider implements IDataProvider {
       return saveBuyAnimeJournal(record, version);
     },
     prepareInventory: async items => {
-      const rows = await fetchAll<InventoryItem & { deleted_at?: string | null }>(async (from, to) =>
-        supabase.from('inventory_items').select('*').order('id').range(from, to));
-      return planCloudInventoryImport(rows, items);
+      // The fresh bootstrap cache is authoritative for active business rows.
+      // Tombstone keys are not cached, so retain the unique-key safety check
+      // with one small identity-only read rather than refetching every column.
+      const [active, tombstones] = await Promise.all([
+        db.getInventory(),
+        fetchAll<InventoryItem & { deleted_at?: string | null }>(async (from, to) => supabase
+          .from('inventory_items').select('*')
+          .not('deleted_at', 'is', null).order('id').range(from, to)),
+      ]);
+      return planCloudInventoryImport([...active, ...tombstones], items);
     },
     commitInventory: plan => {
-      const batch = plan.imported[0]?.latest_catalog_import_id;
-      if (batch) this.buyAnimeTouchedInventory.set(batch, plan.operations.map(operation => operation.id));
+      const batch = plan.batchId;
+      if (batch) this.buyAnimeTouchedInventory.set(batch, plan.operations);
       return this.applyCloudFieldMutations('inventory_items', plan.operations, { readback: false });
     },
     readInventory: record => this.readBuyAnimeCommittedRows(record),
     planCatalog: async (imported, verifiedInventory) => {
-      const allGroups = await this.readActiveCatalogTable<ProductGroup>('product_groups');
+      const [allGroups, allCategories, allVariants] = await Promise.all([
+        db.getProductGroups(), db.getProductCategories(), db.getProductVariants({ raw: true }),
+      ]);
       const titles = new Set(imported.map(row => row.normalized_product_title || normalizeProductTitle(row.product_title)));
       const groups = allGroups.filter(group => titles.has(group.normalized_title || normalizeProductTitle(group.title)));
       if (!groups.length) return null;
-      const ids = groups.map(group => group.id);
-      const [inventory, categories, directVariants, categoryVersions, variantVersions] = await Promise.all([
-        verifiedInventory || this.readActiveCatalogTable<InventoryItem>('inventory_items'),
-        this.readBuyAnimeRelatedRows<ProductCategory>('product_categories', 'product_group_id', ids),
-        this.readBuyAnimeRelatedRows<ProductVariant>('product_variants', 'product_group_id', ids),
-        this.readBuyAnimeVersions('product_categories'),
-        this.readBuyAnimeVersions('product_variants'),
-      ]);
+      const ids = new Set(groups.map(group => group.id));
+      // After F5/close/relogin the route cache can predate the Inventory
+      // commit. `imported` has just been read back and hash-verified from
+      // Cloud, so overlay those exact rows before planning Catalog CAS.
+      const cachedInventory = verifiedInventory ? [] : await db.getInventory();
+      const verifiedIds = new Set(imported.map(row => row.id));
+      const inventory = verifiedInventory || [
+        ...cachedInventory.filter(row => !verifiedIds.has(row.id)),
+        ...imported,
+      ];
+      const categories = allCategories.filter(category => Boolean(category.product_group_id)
+        && ids.has(category.product_group_id!));
+      const categoryIds = new Set(categories.map(category => category.id));
       // Keep category-only historical variants as well as direct group members.
-      const indirect = await this.readBuyAnimeRelatedRows<ProductVariant>('product_variants', 'product_category_id', categories.map(category => category.id));
-      const variants = [...new Map([...directVariants, ...indirect].map(variant => [variant.id, variant])).values()];
+      const variants = allVariants.filter(variant => (variant.product_group_id ? ids.has(variant.product_group_id) : false)
+        || (variant.product_category_id ? categoryIds.has(variant.product_category_id) : false));
       // Same Catalog algorithm and RPC contract; only imported parent groups
       // participate. Other groups are neither recomputed nor marked missing.
-      const plan = await planCatalogTransaction({ inventory, groups, categories, variants }, 'sync', [], { baselineVariantCount: variantVersions.length });
+      const plan = await planCatalogTransaction({ inventory, groups, categories, variants }, 'sync', [], { baselineVariantCount: allVariants.length });
       // 050 intentionally checks the COMPLETE active identity/version sets.
       // Preserve that contract using small metadata reads, never weaken it to
       // scoped dependencies. Scoped rows retain their observed CAS versions.
@@ -1524,12 +1538,15 @@ export class SupabaseProvider implements IDataProvider {
         return all.map(row => ({ id: row.id, version: observed.get(row.id) ?? row.version })).sort((a,b) => a.id.localeCompare(b.id));
       };
       plan.request.dependencies.product_groups = complete(allGroups, groups);
-      plan.request.dependencies.product_categories = complete(categoryVersions, categories);
-      plan.request.dependencies.product_variants = complete(variantVersions, variants);
+      plan.request.dependencies.product_categories = complete(allCategories, categories);
+      plan.request.dependencies.product_variants = complete(allVariants, variants);
+      const batchId = imported[0]?.latest_catalog_import_id;
+      if (batchId) this.buyAnimeCatalogPlans.set(importCatalogKey(batchId), plan);
       return plan;
     },
     commitCatalog: async catalog => {
       if (!catalog.plan) return;
+      this.buyAnimeCatalogPlans.set(catalog.key, catalog.plan);
       await this.requireCloudWritePermission();
       assertCloudWriteAllowed();
       let response;
@@ -1554,15 +1571,25 @@ export class SupabaseProvider implements IDataProvider {
     },
     verifyCatalog: async catalog => {
       if (!catalog.plan) return;
+      const verified: Record<string, Record<string, unknown>[]> = {};
       for (const [table, ops] of Object.entries(catalog.plan.request.operations)) {
         if (!ops.length) continue;
         const expected = new Map(ops.map(op => [op.id, op.kind === 'create' ? op.values : op.kind === 'delete'
           ? {} : op.changes]));
-        await this.readCloudIds(table, ops.map(op => op.id), expected);
+        verified[table] = await this.readCloudIds(table, ops.map(op => op.id), expected,
+          new Set(ops.filter(op => op.kind === 'delete').map(op => op.id)));
       }
+      this.buyAnimeCatalogRows.set(catalog.key, verified);
     },
     ensureWacaEvidence: async (record, imported) => {
-      const variants = await this.getAuthoritativeWacaVariants();
+      const localVariants = await db.getProductVariants({ raw: true });
+      const catalogRows = this.buyAnimeCatalogRows.get(importCatalogKey(record.batchId))?.product_variants || [];
+      const variantsById = new Map(localVariants.map(variant => [variant.id, variant]));
+      for (const row of catalogRows) {
+        if (row.deleted_at) variantsById.delete(String(row.id));
+        else variantsById.set(String(row.id), { ...row, id: String(row.id) } as unknown as ProductVariant);
+      }
+      const variants = [...variantsById.values()];
       const evidence = linksFromMyAcgInventory(imported, variants, record.fileName, record.observedAt);
       if (!evidence.links.length) return;
       const snapshot = await this.getWacaSnapshot();
@@ -1573,27 +1600,13 @@ export class SupabaseProvider implements IDataProvider {
         await this.commitWacaSnapshot({ ...snapshot, masterLinks }, snapshot.revision, false);
     },
   });
-  private async readActiveCatalogTable<T>(table: string): Promise<T[]> {
-    return fetchAll<T>(async (from, to) => supabase.from(table).select('*').is('deleted_at', null).order('id').range(from, to));
-  }
-  private async readBuyAnimeRelatedRows<T extends { id: string }>(table: string, field: string, ids: string[]): Promise<T[]> {
-    const rows: T[] = [];
-    for (let offset = 0; offset < ids.length; offset += 150) {
-      const chunk = ids.slice(offset, offset + 150);
-      rows.push(...await fetchAll<T>(async (from, to) => supabase.from(table).select('*').is('deleted_at', null)
-        .in(field, chunk).order('id').range(from, to)));
-    }
-    return [...new Map(rows.map(row => [row.id, row])).values()];
-  }
-  private async readBuyAnimeVersions(table: string): Promise<Array<{id:string;version:number}>> {
-    return fetchAll(async (from,to) => supabase.from(table).select('id,version').is('deleted_at',null).order('id').range(from,to));
-  }
   private async readCloudIds(
     table: string, ids: string[], expected?: ReadonlyMap<string, Record<string, unknown>>,
+    allowMissing?: ReadonlySet<string>,
   ): Promise<Record<string, unknown>[]> {
     try {
       const rows = await readCloudRowsByIds({
-        table, ids, expected,
+        table, ids, expected, allowMissing,
         load: async (chunk, signal) => {
           const result = await supabase.from(table).select('*').in('id', chunk).abortSignal(signal!);
           if (result.error) throw { ...result.error, status: result.status };
@@ -1614,6 +1627,9 @@ export class SupabaseProvider implements IDataProvider {
         return response.data || [];
       } });
     if (rows.some(row => row.deleted_at)) throw new BuyAnimeResumeError('BUYANIME_COMMITTED_ROW_DELETED', record);
+    const existing = this.buyAnimeInventoryRows.get(record.batchId) || [];
+    this.buyAnimeInventoryRows.set(record.batchId,
+      [...new Map([...existing, ...rows].map(row => [String(row.id), row as Record<string, unknown>])).values()]);
     return rows as unknown as InventoryItem[];
   }
   async getBuyAnimeImportRecovery(): Promise<BuyAnimeImportRecord | null> {
@@ -1673,25 +1689,52 @@ export class SupabaseProvider implements IDataProvider {
     assertCloudWriteAllowed();
   }
   private buyAnimeRefreshPending?: BuyAnimeImportRecord;
-  private readonly buyAnimeTouchedInventory = new Map<string,string[]>();
+  private readonly buyAnimeTouchedInventory = new Map<string,CloudFieldMutationOperation[]>();
+  private readonly buyAnimeInventoryRows = new Map<string,Record<string, unknown>[]>();
+  private readonly buyAnimeCatalogPlans = new Map<string,NonNullable<BuyAnimeImportRecord['catalog']>['plan']>();
+  private readonly buyAnimeCatalogRows = new Map<string,Record<string, Record<string, unknown>[]>>();
   private async finishBuyAnime(record: BuyAnimeImportRecord, options: BuyAnimeFlowOptions): Promise<BuyAnimeImportRecord> {
     this.buyAnimePipeline.onStage = stage => { publishBuyAnimeFlow(buyAnimeFlowLabel(stage)); options.onStage?.(stage); };
     const completed = await finishBuyAnimeImport(record,
       value => this.buyAnimePipeline.resume(value), () => this.prepareBuyAnimeRecovery());
     // Targeted row acknowledgement, not a full products/inventory refresh.
     // No full background pull is needed on the normal successful path.
-    const tables = new Map<string, string[]>([['inventory_items', [...new Set([...completed.expected.map(proof => proof.id), ...(this.buyAnimeTouchedInventory.get(completed.batchId) || [])])]]]);
-    for (const [table, operations] of Object.entries(completed.catalog?.plan?.request.operations || {}))
-      if (operations.length) tables.set(table, operations.map(operation => operation.id));
-    const changes = [...tables].flatMap(([table,ids]) => ids.map(databaseId => ({ table, databaseId, canonicalId: databaseId,
-      localId: null, resource: CLOUD_TABLE_RESOURCE[table], kind: 'UPDATE' as const, origin: 'local' as const })));
+    const catalogKey = importCatalogKey(completed.batchId);
+    const catalogPlan = this.buyAnimeCatalogPlans.get(catalogKey) || completed.catalog?.plan;
+    const operationsByTable: Record<string, CloudFieldMutationOperation[]> = {
+      inventory_items: this.buyAnimeTouchedInventory.get(completed.batchId)
+        || completed.expected.map(proof => ({ kind: 'patch', id: proof.id, expected: {}, changes: {}, observedVersion: 1 })),
+      ...(catalogPlan?.request.operations || {}),
+    };
+    const changes = Object.entries(operationsByTable).flatMap(([table, operations]) => {
+      const resource = CLOUD_TABLE_RESOURCE[table];
+      if (!resource && operations.length) throw new Error('BUYANIME_TARGETED_RESOURCE_UNKNOWN');
+      return operations.map(operation => ({ table, databaseId: operation.id, canonicalId: operation.id,
+        localId: null, resource, kind: operation.kind === 'create' ? 'INSERT' as const
+          : operation.kind === 'delete' ? 'DELETE' as const : 'UPDATE' as const, origin: 'local' as const,
+        expectedFields: operation.kind === 'create' ? operation.values
+          : operation.kind === 'delete' ? undefined : operation.changes }));
+    });
+    const verifiedRows = {
+      inventory_items: this.buyAnimeInventoryRows.get(completed.batchId) || [],
+      ...(this.buyAnimeCatalogRows.get(catalogKey) || {}),
+    };
+    const rowsByTable = Object.fromEntries(Object.entries(verifiedRows)
+      .filter(([table]) => (operationsByTable[table] || []).length > 0)
+      .map(([table, rows]) => {
+        const wanted = new Set((operationsByTable[table] || []).map(operation => operation.id));
+        return [table, rows.filter(row => wanted.has(String(row.id)))];
+      }));
     try {
       await finishBuyAnimeImport(completed, async value => {
-        await refreshBuyAnimeReadback(changes, () => this.mutationCache.refresh({ reason:'realtime', resources:[...new Set(changes.map(change=>change.resource))], changes }));
+        await refreshBuyAnimeReadback({ changes, rowsByTable }, () => this.mutationCache.absorbVerifiedRows(changes, rowsByTable));
         return value;
       }, async () => {}); // Read-only targeted retry; never repeat a completed mutation.
       this.buyAnimeRefreshPending = undefined;
       this.buyAnimeTouchedInventory.delete(completed.batchId);
+      this.buyAnimeInventoryRows.delete(completed.batchId);
+      this.buyAnimeCatalogPlans.delete(catalogKey);
+      this.buyAnimeCatalogRows.delete(catalogKey);
     } catch (cause) {
       this.buyAnimeRefreshPending = completed;
       throw new BuyAnimeResumeError('BUYANIME_UI_READBACK_PENDING', completed, cause);

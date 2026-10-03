@@ -55,7 +55,6 @@ export async function proveInventoryRows(record: BuyAnimeImportRecord, rows: Inv
     await Promise.all(record.expected.slice(offset, offset + 150).map(async expected => {
     const row = byId.get(expected.id);
     if (!row || row.id !== expected.id || (row.database_id && row.database_id !== expected.id)
-      || row.latest_catalog_import_id !== record.batchId
       || stable(await inventoryProof(row)) !== stable(expected))
       throw new BuyAnimeResumeError('BUYANIME_READBACK_IDENTITY_OR_FIELDS_MISMATCH', record);
     }));
@@ -116,13 +115,12 @@ export class BuyAnimeImportPipeline {
     const imported = plan.imported;
     let record: BuyAnimeImportRecord = {
       format: 'BUYANIME_IMPORT_RESUME_V1', batchId: items[0].latest_catalog_import_id!, fileName,
-      observedAt: items[0].catalog_last_seen_at!, stage: 'PLANNED', version: 0,
+      observedAt: items[0].catalog_last_seen_at!, stage: 'INVENTORY_COMMITTING', version: 0,
       expected: await Promise.all(imported.map(inventoryProof)), stats: plan.stats,
     };
     assertImportRecord(record);
     // Must persist intent BEFORE sending the single Inventory transaction.
     record = await this.port.save(record, 0);
-    record = await this.store(record, { stage: 'INVENTORY_COMMITTING' });
     try {
       await this.port.commitInventory(plan);
     } catch (cause) {
@@ -135,14 +133,20 @@ export class BuyAnimeImportPipeline {
       throw new BuyAnimeResumeError(unknown ? 'BUYANIME_COMMIT_OUTCOME_UNKNOWN'
         : committed ? 'BUYANIME_COMMITTED_READBACK_PENDING' : 'BUYANIME_COMMIT_FAILED', record, cause);
     }
+    // Durable COMMITTING intent already carries exact row proofs. F5 reconciles
+    // those proofs before any downstream write, never redispatches Inventory.
+    // Intermediate acknowledgement labels need not rewrite the large journal.
+    record = { ...record, stage: 'INVENTORY_READBACK_PENDING' };
     try {
-      // Persist recoverable progress before reading, while the commit is known
-      // successful. A later transport outage must not require a journal write.
-      record = await this.store(record, { stage: 'INVENTORY_READBACK_PENDING' });
-    } catch (cause) { throw new BuyAnimeResumeError('BUYANIME_COMMITTED_READBACK_PENDING', record, cause); }
-    try {
-      const rows = await this.verify(record);
-      const saved = await this.store(record, { stage: 'INVENTORY_VERIFIED' });
+      const mutatedIds = new Set(plan.operations.map(operation => operation.id));
+      const unchangedRows = plan.imported.filter(row => !mutatedIds.has(row.id));
+      const changedExpected = record.expected.filter(proof => mutatedIds.has(proof.id));
+      const changedRows = changedExpected.length
+        ? await this.port.readInventory({ ...record, expected: changedExpected })
+        : [];
+      const rows = [...unchangedRows, ...changedRows];
+      await proveInventoryRows(record, rows);
+      const saved = { ...record, stage: 'INVENTORY_VERIFIED' as const };
       // Reuse only the same attempt's proven rows, never an F5 cache. Versions
       // remain dependencies of the subsequent atomic Catalog transaction.
       const importedIds = new Set(rows.map(row => row.id));
@@ -168,12 +172,13 @@ export class BuyAnimeImportPipeline {
     if (['PLANNED', 'FAILED_PRE_COMMIT'].includes(record.stage)) throw new BuyAnimeResumeError('BUYANIME_NOT_COMMITTED', record);
     const proven = this.verified.get(input);
     this.verified.delete(input);
-    const reusable = proven && record.version === input.version && record.stage === input.stage
+    const reusable = proven && record.version === input.version
+      && (record.stage === input.stage || (record.stage === 'INVENTORY_COMMITTING' && input.stage === 'INVENTORY_VERIFIED'))
       && stable(record.expected) === stable(input.expected);
     const rows = reusable ? proven.rows : await this.verify(record);
     if (record.version === 0) record = await this.port.save(record, 0); // Adopt proven legacy operational evidence without Inventory replay.
     if (['INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED'].includes(record.stage)) {
-      record = await this.store(record, { stage: 'CATALOG_PENDING' });
+      record = { ...record, stage: 'CATALOG_PENDING' };
     }
     if (record.stage === 'CATALOG_PENDING') {
       const plan = await this.port.planCatalog(rows, reusable ? proven.inventory : undefined);
@@ -188,14 +193,21 @@ export class BuyAnimeImportPipeline {
           record = await this.store(record, { stage: 'CATALOG_PENDING', catalog: undefined });
         throw new BuyAnimeResumeError('BUYANIME_CATALOG_PENDING', record, cause);
       }
-      record = await this.store(record, { stage: 'CATALOG_COMMITTED' });
+      record = { ...record, stage: 'CATALOG_COMMITTED' };
     }
     if (record.stage === 'CATALOG_COMMITTED') {
       await this.port.verifyCatalog(record.catalog!);
-      record = await this.store(record, { stage: 'CATALOG_VERIFIED' });
+      record = { ...record, stage: 'CATALOG_VERIFIED' };
     }
-    if (record.stage === 'CATALOG_VERIFIED') record = await this.store(record, { stage: 'WACA_EVIDENCE_PENDING' });
+    if (record.stage === 'CATALOG_VERIFIED') {
+      // The exact Catalog request is only needed until its authoritative
+      // read-back succeeds. Drop it from later journal writes so a normal
+      // import does not resend a large, already-verified plan twice.
+      record = await this.store(record, { stage: 'WACA_EVIDENCE_PENDING', catalog: undefined });
+    }
     if (record.stage === 'WACA_EVIDENCE_PENDING') {
+      // WACA evidence is part of the user-visible success contract. Keep the
+      // durable intent, but never display success before this finishes.
       await this.port.ensureWacaEvidence(record, rows);
       record = await this.store(record, { stage: 'COMPLETE' });
     }

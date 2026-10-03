@@ -7,10 +7,43 @@ import {
 /** Optional operational subtype in the EXISTING import_batches/details contract.
  * Legacy business import rows and Backup/Restore serialization remain untouched.
  */
-const fromRow = (row: Record<string, unknown>): BuyAnimeImportRecord => {
-  const details = row.details as { buyAnimeImport?: unknown } | null;
-  assertImportRecord(details?.buyAnimeImport);
-  const record = details.buyAnimeImport;
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+};
+const base64ToBytes = (value: string): Uint8Array => Uint8Array.from(atob(value), character => character.charCodeAt(0));
+
+async function compressRecord(record: BuyAnimeImportRecord): Promise<string | null> {
+  if (typeof CompressionStream === 'undefined') return null;
+  const source = new Blob([JSON.stringify(record)]).stream();
+  const buffer = await new Response(source.pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  return bytesToBase64(new Uint8Array(buffer));
+}
+
+async function decompressRecord(value: string): Promise<unknown> {
+  if (typeof DecompressionStream === 'undefined') throw new BuyAnimeResumeError('BUYANIME_JOURNAL_DECOMPRESSION_UNAVAILABLE');
+  const bytes = base64ToBytes(value);
+  const source = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer]).stream();
+  const text = await new Response(source.pipeThrough(new DecompressionStream('gzip'))).text();
+  return JSON.parse(text);
+}
+
+const fromRow = async (row: Record<string, unknown>): Promise<BuyAnimeImportRecord> => {
+  const details = row.details as { buyAnimeImport?: unknown; buyAnimeImportGzip?: unknown } | null;
+  const recordValue = typeof details?.buyAnimeImportGzip === 'string'
+    ? await decompressRecord(details.buyAnimeImportGzip)
+    : details?.buyAnimeImport;
+  assertImportRecord(recordValue);
+  const record = recordValue;
+  const header = details?.buyAnimeImport as Partial<BuyAnimeImportRecord> | undefined;
+  if (typeof details?.buyAnimeImportGzip === 'string'
+    && (header?.format !== record.format || header.batchId !== record.batchId
+      || header.stage !== record.stage || header.version !== record.version)) {
+    throw new BuyAnimeResumeError('BUYANIME_JOURNAL_HEADER_MISMATCH');
+  }
   if (row.id !== importJournalId(record.batchId) || row.platform !== BUYANIME_JOURNAL_PLATFORM
     || Number(row.version) !== record.version || row.deleted_at
     || row.file_name !== record.fileName || Number(row.total_rows) !== record.expected.length)
@@ -34,8 +67,16 @@ export async function saveBuyAnimeJournal(record: BuyAnimeImportRecord, expected
   if (record.version !== expectedVersion) throw new BuyAnimeResumeError('BUYANIME_JOURNAL_VERSION_MISMATCH');
   const next = { ...record, version: expectedVersion + 1 };
   // Keep the established ImportBatch detail arrays valid for existing consumers.
+  // Large exact Catalog requests are compressed inside the same JSONB field;
+  // the small header preserves the existing pending-stage query and diagnostics.
+  const compressed = await compressRecord(next);
   const details = { newOrderItems: [], skippedDuplicateItems: [], createdGroups: [],
-    completedGroupSkus: [], catalogMissingSkus: [], buyAnimeImport: next };
+    completedGroupSkus: [], catalogMissingSkus: [],
+    buyAnimeImport: compressed
+      ? { format: next.format, batchId: next.batchId, stage: next.stage, version: next.version }
+      : next,
+    ...(compressed ? { buyAnimeImportGzip: compressed } : {}),
+  };
   const values = { version: next.version, details, updated_at: new Date().toISOString() };
   const result = expectedVersion === 0
     ? await supabase.from('import_batches').insert({

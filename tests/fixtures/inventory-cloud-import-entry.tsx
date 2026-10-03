@@ -220,7 +220,7 @@ declare global {
       prepareLateStaleRead: () => void;
       remount: () => void;
       resetToServer500: () => void;
-      snapshot: () => { callOrder: string[]; inventoryCount: number; syncCalls: number; upsertCalls: number };
+      snapshot: () => { callOrder: string[]; inventoryCount: number; syncCalls: number; upsertCalls: number; recoveryStage: string | null };
       evidenceSnapshot: () => { commits: number; links: unknown[] };
     };
   }
@@ -251,7 +251,8 @@ window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
   resetToServer500: () => {
     inventory = authoritative.slice(0, 500).map(row => ({ ...row }));
   },
-  snapshot: () => ({ callOrder: [...callOrder], inventoryCount: inventory.length, syncCalls, upsertCalls }),
+  snapshot: () => ({ callOrder: [...callOrder], inventoryCount: inventory.length, syncCalls, upsertCalls,
+    recoveryStage: mockRecovery?.stage || null }),
   evidenceSnapshot: () => ({ commits: wacaEvidenceCommits, links: [...wacaMasterLinks] }),
 };
 

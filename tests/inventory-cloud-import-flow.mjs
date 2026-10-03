@@ -81,12 +81,14 @@ try {
     };
 
     await importFile('new-unjoined.xls', 'NEW-UNJOINED-SKU', 'New Unjoined Product');
-    await page.waitForFunction(() => document.body.innerText.includes('501'));
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 0);
-    await page.getByText(/匯入完成（新增/u).waitFor();
+    const successDialog = page.getByTestId('buyanime-import-success-modal');
+    await successDialog.waitFor();
+    await page.getByText('雲端資料已同步完成。', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name:'匯入主檔 XLS' }).isEnabled(), true);
     assert.equal(await page.getByRole('button', { name:'重新核對雲端資料' }).count(), 0);
     assert.equal(await page.getByRole('button', { name:'繼續商品／規格同步' }).count(), 0);
+    await page.getByRole('button', { name:'確定' }).click();
 
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.remount());
     await page.waitForFunction(() => document.body.innerText.includes('501'));
@@ -103,30 +105,32 @@ try {
 
     await importFile('existing-group.xls', 'EXISTING-SKU', 'Existing Product');
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 601);
-    await page.waitForFunction(() => document.body.innerText.includes('601'));
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 1);
-    await page.getByRole('button', { name:'重試同步' }).waitFor();
+    await page.getByText(/匯入尚未完成/u).waitFor();
+    assert.equal(await page.getByRole('button', { name:'重試同步' }).count(),0);
     assert.equal(await page.getByRole('button', { name:'匯入主檔 XLS' }).isEnabled(),true,'A failed historical batch cannot permanently disable file selection');
 
-    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.remount());
-    await page.getByRole('button', { name:'重試同步' }).waitFor();
+    await page.evaluate(() => {
+      window.__INVENTORY_CLOUD_IMPORT_TEST__.allowCatalogResume();
+      window.__INVENTORY_CLOUD_IMPORT_TEST__.remount();
+    });
     assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls, 2, 'F5 discovery cannot resubmit Inventory');
-    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.allowCatalogResume());
-    await page.getByRole('button', { name: '重試同步' }).click();
-    await page.waitForFunction(() => document.body.innerText.includes('匯入完成') && !document.body.innerText.includes('重試同步'));
+    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().recoveryStage === 'COMPLETE');
     assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls, 2, 'User downstream resume cannot resubmit Inventory');
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.failNextPostCommitGroupRead());
     await importFile('readback-failure.xls', 'READBACK-FAILURE-SKU', 'Readback Failure Product');
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 602);
-    await page.getByRole('button', { name:'重試同步' }).waitFor();
+    await page.getByText(/匯入尚未完成/u).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot()), {
       callOrder: (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).callOrder,
       inventoryCount: 602,
       syncCalls: (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).syncCalls,
       upsertCalls: 3,
+      recoveryStage: 'CATALOG_PENDING',
     });
-    await page.getByRole('button', { name: '重試同步' }).click();
-    await page.waitForFunction(() => document.body.innerText.includes('匯入完成') && !document.body.innerText.includes('重試同步'));
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.remount());
+    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().recoveryStage === 'COMPLETE');
+    assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls,3);
     await importFile('gp-evidence.xls', 'GP-EVIDENCE-G', 'GP Evidence Product', 'GP-EVIDENCE-001');
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot().commits === 1);
     const evidence = await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot());

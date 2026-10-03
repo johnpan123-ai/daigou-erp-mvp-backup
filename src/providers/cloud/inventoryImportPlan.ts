@@ -30,6 +30,14 @@ export function planCloudInventoryImport(
     if (existing?.deleted_at) throw new Error('CLOUD_INVENTORY_KEY_SOFT_DELETED');
     if (existing) {
       const id = canonicalCloudId('inventory_items', existing as unknown as Record<string, unknown>);
+      const before = toCloudFieldRow('inventory_items', existing);
+      const after = toCloudFieldRow('inventory_items', row);
+      // A new attempt/timestamp alone is not a business change. Preserve the
+      // prior receipt on true no-ops instead of rewriting every uploaded row.
+      const ignored = new Set(['id', 'version', 'latest_catalog_import_id', 'catalog_last_seen_at']);
+      if (Object.keys(after).every(key => ignored.has(key) || JSON.stringify(after[key]) === JSON.stringify(before[key]))) {
+        return { ...existing, id, database_id: id };
+      }
       return { ...row, id, database_id: id, version: existing.version, updated_at: existing.updated_at };
     }
     // Only a genuinely new business key is allowed a deterministic UUID.
@@ -66,6 +74,6 @@ export function planCloudInventoryImport(
   const newCount = importedOperations.filter(op => op.kind === 'create').length;
   const updatedCount = importedOperations.filter(op => op.kind === 'patch').length;
   const imported = inventory.filter(row => importedKeys.has(row.inventory_key));
-  return { inventory, imported, operations, stats: { ...projection.stats, newCount, updatedCount,
+  return { inventory, imported, operations, batchId: incoming[0]?.latest_catalog_import_id, stats: { ...projection.stats, newCount, updatedCount,
     unchangedCount: importedKeys.size - newCount - updatedCount } };
 }

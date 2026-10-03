@@ -208,15 +208,24 @@ export function assertReviewedProviderContract(file, before, after) {
     const restored=after.replace("if (isAuthoritativeResourceRead || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty'))",
       "if ((!this.protectsDraft && !this.prepareDraftProtection) || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty'))");
     const oldTree=parse(file,before),newTree=parse(file,restored);
+    const absorbed=nodes(newTree).filter(ts.isMethodDeclaration)
+      .find(member=>member.name?.getText(newTree)==='absorbVerifiedRows');
+    if (!absorbed) fail('verified-row cache absorption contract missing');
+    const absorbedSource=canonical(newTree,absorbed);
+    for (const required of ['assertExpectedCloudFields','this.merge','markCloudReadFresh']) {
+      if (!absorbedSource.includes(required)) fail('verified-row cache evidence validation changed');
+    }
+    if (/supabase|fetch|readCloudRowsByIds|\.refresh(?:WithResult)?\(/u.test(absorbedSource)) {
+      fail('verified-row cache absorption performs an unreviewed read');
+    }
     const members=tree=>nodes(tree).filter(ts.isClassDeclaration).flatMap(node=>node.members)
-      .filter(member=>member.name?.getText(tree)!=='refreshChanges').map(member=>canonical(tree,member));
+      .filter(member=>!['refreshChanges','absorbVerifiedRows'].includes(member.name?.getText(tree))).map(member=>canonical(tree,member));
     if(JSON.stringify(members(oldTree))!==JSON.stringify(members(newTree)))fail('draft/generation/cache contract changed');
     return;
   }
   if (file === 'src/providers/cloud/inventoryImportPlan.ts') {
     // Only the exact immutable review can select this helper. It has no new
     // provider API, serializer, SQL fields or network/persistence calls.
-    if (before !== null) fail('inventory import planner must be reviewed as a new pure helper');
     const tree = parse(file, after);
     const declarations = tree.statements.filter(ts.isFunctionDeclaration);
     if (declarations.length !== 1 || declarations[0].name?.text !== 'planCloudInventoryImport') {
@@ -240,7 +249,8 @@ export function assertReviewedProviderContract(file, before, after) {
       'refreshAcknowledgedCloudRows','savePrivateOrderItems','buyAnimePipeline','readActiveCatalogTable','readCloudIds','readBuyAnimeCommittedRows',
       'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport',
       'readBuyAnimeRelatedRows','readBuyAnimeVersions','prepareBuyAnimeRecovery','finishBuyAnime',
-      'buyAnimeRefreshPending','buyAnimeTouchedInventory','recoverPendingBuyAnimeImport','completeBuyAnimeImport'],
+      'buyAnimeRefreshPending','buyAnimeTouchedInventory','buyAnimeInventoryRows','buyAnimeCatalogPlans','buyAnimeCatalogRows',
+      'recoverPendingBuyAnimeImport','completeBuyAnimeImport'],
     'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk',
       'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport',
       'recoverPendingBuyAnimeImport','completeBuyAnimeImport'],

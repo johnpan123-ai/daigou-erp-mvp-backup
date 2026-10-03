@@ -382,6 +382,40 @@ try {
   assert.equal(reconnect.outboundMutations, 0);
   assert.equal(reconnect.metrics.fullPulls, 0);
 
+  const verifiedFixture = await openFixturePage();
+  const verified = await verifiedFixture.page.evaluate(async () => {
+    const { cloudCacheDb } = await import('/src/lib/db.ts');
+    const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');
+    const { getCloudConnectivitySnapshot } = await import('/src/providers/cloud/cloudConnectivity.ts');
+    const id = '91000000-0000-4000-8000-000000000001';
+    await cloudCacheDb.saveProductGroups([{ id, title: 'Before verified result', priority: 'Medium', version: 1 }]);
+    let queries = 0;
+    const cache = new CloudTargetedCache({ query: async () => { queries += 1; return []; } });
+    const change = { table: 'product_groups', databaseId: id, canonicalId: id, localId: null,
+      resource: 'products', kind: 'UPDATE', origin: 'local', expectedFields: { title: 'Verified authoritative result' } };
+    const row = { id, title: 'Verified authoritative result', priority: 'High', version: 2,
+      updated_at: '2026-10-04T00:00:00.000Z' };
+    await cache.absorbVerifiedRows([change], { product_groups: [row] });
+    const after = await cloudCacheDb.getProductGroups();
+    const failures = [];
+    for (const [name, changes, rows] of [
+      ['missing', [change], { product_groups: [] }],
+      ['unexpected-table', [change], { product_groups: [row], inventory_items: [] }],
+      ['unexpected-id', [change], { product_groups: [{ ...row, id: '91000000-0000-4000-8000-000000000002' }] }],
+      ['duplicate', [change], { product_groups: [row, row] }],
+      ['tampered-field', [change], { product_groups: [{ ...row, title: 'Tampered' }] }],
+    ]) {
+      try { await cache.absorbVerifiedRows(changes, rows); failures.push(name + ':accepted'); }
+      catch (error) { failures.push(name + ':' + String(error.message)); }
+    }
+    return { after, failures, queries, state: getCloudConnectivitySnapshot() };
+  });
+  await verifiedFixture.context.close();
+  assert.equal(verified.after[0].title, 'Verified authoritative result');
+  assert.equal(verified.queries, 0, 'Already verified server rows must not be fetched again');
+  assert.equal(verified.state.readStatus, 'fresh-online');
+  assert.ok(verified.failures.every(result => !result.endsWith(':accepted')), verified.failures.join(' | '));
+
   const presentationSource = await readFile(new URL('../src/contexts/globalSyncPresentation.ts', import.meta.url), 'utf8');
   assert.match(presentationSource, /雲端讀取失敗｜目前顯示舊快取/);
   assert.match(presentationSource, /雲端已確認｜目前沒有資料/);
@@ -393,6 +427,7 @@ try {
   console.log('PASS partial server read failure leaves the complete Cloud cache transaction unchanged');
   console.log('PASS soft-timeout with cache shows cached pending; without cache remains loading pending');
   console.log('PASS reconnect zero/new rows converge cache without outbound mutation; fullPulls = 0');
+  console.log('PASS verified authoritative evidence converges cache without refetch and rejects missing/unexpected/duplicate/tampered rows');
   console.log('PASS Cloud cache authority fixtures create 0 Production/Staging requests');
 } finally {
   await browser.close();
