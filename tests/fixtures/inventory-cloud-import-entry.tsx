@@ -8,6 +8,7 @@ import { ViewportProvider } from '../../src/contexts/ViewportContext';
 import { BuyAnimeResumeError, inventoryProof, proveInventoryRows, type BuyAnimeImportRecord } from '../../src/providers/cloud/buyAnimeImportResume';
 import { deterministicCloudUuid } from '../../src/providers/cloud/cloudEntityPayload';
 import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../../src/waca/masterReference';
+import { coordinateBuyAnimeImport, finishBuyAnimeImport, publishBuyAnimeFlow, buyAnimeFlowLabel } from '../../src/providers/cloud/buyAnimeImportCoordinator';
 
 const inventoryRow = (index: number, title = `Authoritative ${index}`): InventoryItem => ({
   id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
@@ -64,6 +65,7 @@ const bootstrapConvergence = new Promise<boolean>(resolve => { resolveBootstrap 
 let root: Root | null = null;
 let mockRecovery: BuyAnimeImportRecord | null = null;
 let allowCatalog = false;
+let failBackup = false;
 
 dataProvider.getProductGroups = async () => {
   callOrder.push('groups');
@@ -180,11 +182,25 @@ dataProvider.resumeBuyAnimeImport = async record => {
     throw new BuyAnimeResumeError('BUYANIME_CATALOG_PENDING', mockRecovery, cause);
   }
 };
+dataProvider.recoverPendingBuyAnimeImport = async (options = {}) => coordinateBuyAnimeImport(async () => {
+  const pending = await dataProvider.getBuyAnimeImportRecovery();
+  if (!pending) return null;
+  const result = await finishBuyAnimeImport(pending, dataProvider.resumeBuyAnimeImport, async () => {});
+  options.onStage?.(result.stage); return result;
+});
+dataProvider.completeBuyAnimeImport = async (rows, fileName, options = {}) => coordinateBuyAnimeImport(async () => {
+  const pending = await dataProvider.getBuyAnimeImportRecovery();
+  if (pending) await finishBuyAnimeImport(pending, dataProvider.resumeBuyAnimeImport, async () => {});
+  await options.beforeStart?.();
+  const record = await dataProvider.importBuyAnimeInventory(rows, fileName);
+  const result = await finishBuyAnimeImport(record, dataProvider.resumeBuyAnimeImport, async () => {});
+  options.onStage?.(result.stage); publishBuyAnimeFlow(buyAnimeFlowLabel(result.stage)); return result;
+});
 dataProvider.getPurchaseBatches = empty as never;
 dataProvider.getPurchaseBatchItems = empty as never;
 dataProvider.getPrivateOrders = empty as never;
 dataProvider.getPrivateOrderItems = empty as never;
-dataProvider.getImportBatches = empty as never;
+dataProvider.getImportBatches = async () => { if (failBackup) { failBackup=false; throw new Error('ISOLATED_BACKUP_FAILED'); } return []; };
 dataProvider.getBundleComponents = empty as never;
 dataProvider.getJapanPackages = empty as never;
 dataProvider.getJapanPackageItems = empty as never;
@@ -197,6 +213,7 @@ declare global {
   interface Window {
     __INVENTORY_CLOUD_IMPORT_TEST__: {
       failNextImport: (error: { code?: string; message: string }) => void;
+      failNextBackup: () => void;
       failNextPostCommitGroupRead: () => void;
       allowCatalogResume: () => void;
       completeBootstrap: () => void;
@@ -211,6 +228,7 @@ declare global {
 
 window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
   failNextImport: error => { nextImportError = error; },
+  failNextBackup: () => { failBackup=true; },
   failNextPostCommitGroupRead: () => { armPostCommitGroupReadFailure = true; },
   allowCatalogResume: () => { allowCatalog = true; },
   completeBootstrap: () => {
@@ -227,6 +245,8 @@ window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
     root?.unmount();
     root = createRoot(document.getElementById('root')!);
     root.render(<ViewportProvider><Inventory /></ViewportProvider>);
+    // Simulate the authenticated application boundary's F5 durable recovery.
+    void dataProvider.recoverPendingBuyAnimeImport().catch(() => {});
   },
   resetToServer500: () => {
     inventory = authoritative.slice(0, 500).map(row => ({ ...row }));

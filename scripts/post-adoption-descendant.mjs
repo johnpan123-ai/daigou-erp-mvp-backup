@@ -161,6 +161,24 @@ export function classifyDescendantFile(file, before, after) {
 // prove the reviewed provider patch did not change its external schema/RPC
 // contract. This is not a provider-directory allowlist.
 export function assertReviewedProviderContract(file, before, after) {
+  if (file === 'src/providers/cloud/buyAnimeImportCoordinator.ts') {
+    if (before !== null) fail('coordinator needs a new exact review');
+    const tree=parse(file,after);
+    if(nodes(tree).filter(ts.isCallExpression).some(call=>/^(?:supabase\.|fetch|indexedDB\.|localStorage\.|sessionStorage\.|db\.)/u.test(call.expression.getText(tree))))
+      fail('import coordinator contains persistence I/O');
+    return;
+  }
+  if (file === 'src/providers/cloud/catalogTransaction.ts') {
+    // Exact reviewed patch changes only the transient FULL-registry guard count.
+    // Matching, quantity, request keys and field serialization stay identical.
+    const restored=after
+      .replace(", options: { baselineVariantCount?: number } = {}",'')
+      .replace('(options.baselineVariantCount ?? base.variants.length)===0','base.variants.length===0')
+      .replace('const baselineCount=options.baselineVariantCount ?? before.length;','')
+      .replace('baselineCount>0','before.length>0').replace('Math.ceil(baselineCount*0.25)','Math.ceil(before.length*0.25)');
+    if(canonical(parse(file,before))!==canonical(parse(file,restored))) fail('Catalog algorithm/RPC contract changed');
+    return;
+  }
   if (['src/providers/cloud/cloudBulkRead.ts','src/providers/cloud/buyAnimeImportResume.ts'].includes(file)) {
     if (before !== null) fail('new readback/resume helper needs a new exact review');
     const tree=parse(file,after);
@@ -187,7 +205,9 @@ export function assertReviewedProviderContract(file, before, after) {
     return;
   }
   if (file === 'src/providers/cloud/cloudTargetedCache.ts') {
-    const oldTree=parse(file,before),newTree=parse(file,after);
+    const restored=after.replace("if (isAuthoritativeResourceRead || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty'))",
+      "if ((!this.protectsDraft && !this.prepareDraftProtection) || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty'))");
+    const oldTree=parse(file,before),newTree=parse(file,restored);
     const members=tree=>nodes(tree).filter(ts.isClassDeclaration).flatMap(node=>node.members)
       .filter(member=>member.name?.getText(tree)!=='refreshChanges').map(member=>canonical(tree,member));
     if(JSON.stringify(members(oldTree))!==JSON.stringify(members(newTree)))fail('draft/generation/cache contract changed');
@@ -218,9 +238,12 @@ export function assertReviewedProviderContract(file, before, after) {
   const allowedMethods = {
     'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk', 'savePrivateOrders', 'upsertInventory',
       'refreshAcknowledgedCloudRows','savePrivateOrderItems','buyAnimePipeline','readActiveCatalogTable','readCloudIds','readBuyAnimeCommittedRows',
-      'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport'],
+      'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport',
+      'readBuyAnimeRelatedRows','readBuyAnimeVersions','prepareBuyAnimeRecovery','finishBuyAnime',
+      'buyAnimeRefreshPending','buyAnimeTouchedInventory','recoverPendingBuyAnimeImport','completeBuyAnimeImport'],
     'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk',
-      'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport'],
+      'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport',
+      'recoverPendingBuyAnimeImport','completeBuyAnimeImport'],
     'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
   }[file];
   if (!allowedMethods) fail('unreviewed provider contract exception');

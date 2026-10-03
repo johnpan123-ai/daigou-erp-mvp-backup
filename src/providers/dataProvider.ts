@@ -240,6 +240,21 @@ class DynamicDataProvider implements IDataProvider {
     if (!['cloud','fallback'].includes(getProviderMode())) throw new Error('BUYANIME_RESUME_CLOUD_ONLY');
     return this.guardedWrite(() => this.supabaseProvider.resumeBuyAnimeImport(record));
   }
+  async recoverPendingBuyAnimeImport(options: import('./cloud/buyAnimeImportCoordinator').BuyAnimeFlowOptions = {}): Promise<BuyAnimeImportRecord | null> {
+    if (!['cloud','fallback'].includes(getProviderMode())) return null;
+    // Reconcile reads first; every actual downstream write keeps provider
+    // permission/freshness checks and journal CAS. Never guard-read with stale UI.
+    const result = await this.supabaseProvider.recoverPendingBuyAnimeImport(options);
+    if (result) this.registerWrite();
+    return result;
+  }
+  async completeBuyAnimeImport(items: InventoryItem[], fileName: string, options: import('./cloud/buyAnimeImportCoordinator').BuyAnimeFlowOptions = {}): Promise<BuyAnimeImportRecord> {
+    if (!['cloud','fallback'].includes(getProviderMode())) throw new Error('BUYANIME_RESUME_CLOUD_ONLY');
+    this.guardStale();
+    const result = await this.supabaseProvider.completeBuyAnimeImport(items, fileName, options);
+    this.registerWrite();
+    return result;
+  }
   async getSalesOrders(): Promise<SalesOrder[]> {
     return this.getActiveProvider().getSalesOrders();
   }

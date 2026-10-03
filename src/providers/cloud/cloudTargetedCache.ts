@@ -244,7 +244,7 @@ export class CloudTargetedCache {
     const previousStatus = getCloudConnectivitySnapshot().readStatus;
     // A background record read must not revoke all unrelated editors' readiness.
     // Existing fresh authority remains valid; actual read failure still fails closed.
-    if ((!this.protectsDraft && !this.prepareDraftProtection) || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty')) {
+    if (isAuthoritativeResourceRead || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty')) {
       markCloudReadLoading();
     }
     try {

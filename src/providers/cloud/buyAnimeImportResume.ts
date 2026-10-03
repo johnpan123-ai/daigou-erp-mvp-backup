@@ -1,5 +1,4 @@
 import type { InventoryItem, ImportStats } from '../../lib/db';
-import { prepareInventoryUpsert } from '../../lib/db';
 import type { planCloudInventoryImport } from './inventoryImportPlan';
 import type { planCatalogTransaction } from './catalogTransaction';
 import { deterministicCloudUuid, toCloudFieldRow } from './cloudEntityPayload';
@@ -52,12 +51,15 @@ export async function proveInventoryRows(record: BuyAnimeImportRecord, rows: Inv
   if (!record.expected.length || rows.length !== record.expected.length) throw new BuyAnimeResumeError('BUYANIME_READBACK_COUNT_MISMATCH', record);
   const byId = new Map(rows.map(row => [row.database_id || row.id, row]));
   if (byId.size !== rows.length) throw new BuyAnimeResumeError('BUYANIME_READBACK_DUPLICATE_ID', record);
-  for (const expected of record.expected) {
+  for (let offset = 0; offset < record.expected.length; offset += 150) {
+    await Promise.all(record.expected.slice(offset, offset + 150).map(async expected => {
     const row = byId.get(expected.id);
     if (!row || row.id !== expected.id || (row.database_id && row.database_id !== expected.id)
       || row.latest_catalog_import_id !== record.batchId
       || stable(await inventoryProof(row)) !== stable(expected))
       throw new BuyAnimeResumeError('BUYANIME_READBACK_IDENTITY_OR_FIELDS_MISMATCH', record);
+    }));
+    if (offset + 150 < record.expected.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
 }
 const STAGES = new Set<BuyAnimeStage>(['PLANNED','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN',
@@ -85,7 +87,7 @@ export interface BuyAnimeImportPort {
   readInventory(record: BuyAnimeImportRecord): Promise<InventoryItem[]>;
   prepareInventory(items: InventoryItem[]): Promise<ReturnType<typeof planCloudInventoryImport>>;
   commitInventory(plan: ReturnType<typeof planCloudInventoryImport>): Promise<void>;
-  planCatalog(imported: InventoryItem[]): Promise<CatalogImportPlan | null>;
+  planCatalog(imported: InventoryItem[], inventory?: InventoryItem[]): Promise<CatalogImportPlan | null>;
   commitCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
   verifyCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
   ensureWacaEvidence(record: BuyAnimeImportRecord, imported: InventoryItem[]): Promise<void>;
@@ -94,11 +96,15 @@ export interface BuyAnimeImportPort {
 /** Durable progress lives in the existing import_batches.details JSON. No memory/session authority. */
 export class BuyAnimeImportPipeline {
   private readonly port: BuyAnimeImportPort;
+  private readonly verified = new WeakMap<BuyAnimeImportRecord, { rows: InventoryItem[]; inventory: InventoryItem[] }>();
+  onStage?: (stage: BuyAnimeStage) => void;
   constructor(port: BuyAnimeImportPort) { this.port = port; }
   private async store(record: BuyAnimeImportRecord, patch: Partial<BuyAnimeImportRecord>) {
     const next = { ...record, ...patch };
     assertImportRecord(next);
-    return this.port.save(next, record.version);
+    const saved = await this.port.save(next, record.version);
+    this.onStage?.(saved.stage);
+    return saved;
   }
   async start(items: InventoryItem[], fileName: string): Promise<BuyAnimeImportRecord> {
     const batchIds = new Set(items.map(row => row.latest_catalog_import_id));
@@ -107,8 +113,7 @@ export class BuyAnimeImportPipeline {
     const plan = await this.port.prepareInventory(items);
     // Excel parser rows may not yet have inventory_key. Reuse the existing
     // canonical projection/duplicate merge; never invent another key scheme.
-    const keys = new Set(prepareInventoryUpsert([], items).inventory.map(row => row.inventory_key));
-    const imported = plan.inventory.filter(row => keys.has(row.inventory_key));
+    const imported = plan.imported;
     let record: BuyAnimeImportRecord = {
       format: 'BUYANIME_IMPORT_RESUME_V1', batchId: items[0].latest_catalog_import_id!, fileName,
       observedAt: items[0].catalog_last_seen_at!, stage: 'PLANNED', version: 0,
@@ -136,8 +141,13 @@ export class BuyAnimeImportPipeline {
       record = await this.store(record, { stage: 'INVENTORY_READBACK_PENDING' });
     } catch (cause) { throw new BuyAnimeResumeError('BUYANIME_COMMITTED_READBACK_PENDING', record, cause); }
     try {
-      await this.verify(record);
-      return await this.store(record, { stage: 'INVENTORY_VERIFIED' });
+      const rows = await this.verify(record);
+      const saved = await this.store(record, { stage: 'INVENTORY_VERIFIED' });
+      // Reuse only the same attempt's proven rows, never an F5 cache. Versions
+      // remain dependencies of the subsequent atomic Catalog transaction.
+      const importedIds = new Set(rows.map(row => row.id));
+      this.verified.set(saved, { rows, inventory: [...plan.inventory.filter(row => !importedIds.has(row.id)), ...rows] });
+      return saved;
     } catch (cause) {
       throw new BuyAnimeResumeError('BUYANIME_COMMITTED_READBACK_PENDING', record, cause);
     }
@@ -156,13 +166,17 @@ export class BuyAnimeImportPipeline {
     if (record.stage === 'COMPLETE') return record;
     // No code path in resume calls prepareInventory or commitInventory.
     if (['PLANNED', 'FAILED_PRE_COMMIT'].includes(record.stage)) throw new BuyAnimeResumeError('BUYANIME_NOT_COMMITTED', record);
-    const rows = await this.verify(record);
-    if (record.version === 0) record = await this.port.save(record, 0); // Explicit user resume adopts legacy operational evidence.
+    const proven = this.verified.get(input);
+    this.verified.delete(input);
+    const reusable = proven && record.version === input.version && record.stage === input.stage
+      && stable(record.expected) === stable(input.expected);
+    const rows = reusable ? proven.rows : await this.verify(record);
+    if (record.version === 0) record = await this.port.save(record, 0); // Adopt proven legacy operational evidence without Inventory replay.
     if (['INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED'].includes(record.stage)) {
       record = await this.store(record, { stage: 'CATALOG_PENDING' });
     }
     if (record.stage === 'CATALOG_PENDING') {
-      const plan = await this.port.planCatalog(rows);
+      const plan = await this.port.planCatalog(rows, reusable ? proven.inventory : undefined);
       // Persist the EXACT request and stable key before RPC; close/relogin cannot regenerate it.
       record = await this.store(record, { stage: 'CATALOG_COMMITTING', catalog: { key: importCatalogKey(record.batchId), plan } });
     }

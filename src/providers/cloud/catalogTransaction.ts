@@ -10,7 +10,7 @@ export interface CatalogSnapshot {inventory:InventoryItem[];groups:ProductGroup[
 export const CATALOG_RPC='erp_apply_catalog_transaction';
 
 /** No IndexedDB, network, or persistence. Plan from a cloned authoritative snapshot. */
-export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMode,itemCodes:string[]=[]) {
+export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMode,itemCodes:string[]=[], options: { baselineVariantCount?: number } = {}) {
   const next=structuredClone(base);
   const ctx:CatalogAlgorithmContext={
     getInventory:async()=>next.inventory,getProductGroups:async()=>next.groups,getProductCategories:async()=>next.categories,
@@ -23,7 +23,7 @@ export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMo
     },
     saveProductGroups:async rows=>{next.groups=rows;},saveProductCategories:async rows=>{next.categories=rows;},
     saveProductVariants:async rows=>{next.variants=rows;},
-    readVariantSyncGuardSnapshot:async()=>({variants:next.variants,verifiedEmpty:base.variants.length===0}),
+    readVariantSyncGuardSnapshot:async()=>({variants:next.variants,verifiedEmpty:(options.baselineVariantCount ?? base.variants.length)===0}),
     // Preserve every durable identity; read-model duplicate collapsing is not a write plan.
     computeVariantDedupe:rows=>({canonical:rows}),
     assertVariantSyncCandidateSafe:(before,after,verifiedEmpty)=>{
@@ -35,7 +35,8 @@ export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMo
       }
       const beforeIds=new Set(before.map(v=>v.id));
       const newCount=after.filter(v=>!beforeIds.has(v.id)).length;
-      if(!verifiedEmpty && before.length>0 && newCount>=Math.max(50,Math.ceil(before.length*0.25)))
+      const baselineCount=options.baselineVariantCount ?? before.length;
+      if(!verifiedEmpty && baselineCount>0 && newCount>=Math.max(50,Math.ceil(baselineCount*0.25)))
         throw new Error('同步新增規格數量異常，本次未儲存；請先確認匯入資料。');
     },
   };

@@ -64,6 +64,13 @@ try {
     });
     await page.waitForFunction(() => document.body.innerText.includes('500'));
 
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.failNextBackup());
+    await page.locator('input[type=file]').setInputFiles({name:'backup-gated.xls',mimeType:'application/vnd.ms-excel',buffer:Buffer.from(makeHtmlXls('BACKUP-GATE','Backup gate'))});
+    await page.waitForFunction(() => document.body.innerText.includes('備份失敗'));
+    assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls,0,'Failed backup dispatches NO Inventory');
+    assert.equal(await page.getByRole('button',{name:'匯入主檔 XLS'}).isEnabled(),true);
+    assert.equal(await page.getByRole('button',{name:'重試同步'}).count(),0,'A failed pre-dispatch backup has no batch to resume');
+
     const importFile = async (name, sku, title, parent = '') => {
       const expectedUpserts = (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls + 1;
       const chooserPromise = page.waitForEvent('filechooser');
@@ -76,7 +83,10 @@ try {
     await importFile('new-unjoined.xls', 'NEW-UNJOINED-SKU', 'New Unjoined Product');
     await page.waitForFunction(() => document.body.innerText.includes('501'));
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 0);
-    assert.equal(dialogs.some(message => message.includes('主檔及後續同步完成')), true, 'New unjoined row completes without creating purchase groups');
+    await page.getByText(/匯入完成（新增/u).waitFor();
+    assert.equal(await page.getByRole('button', { name:'匯入主檔 XLS' }).isEnabled(), true);
+    assert.equal(await page.getByRole('button', { name:'重新核對雲端資料' }).count(), 0);
+    assert.equal(await page.getByRole('button', { name:'繼續商品／規格同步' }).count(), 0);
 
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.remount());
     await page.waitForFunction(() => document.body.innerText.includes('501'));
@@ -95,33 +105,28 @@ try {
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 601);
     await page.waitForFunction(() => document.body.innerText.includes('601'));
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 1);
-    const partial = dialogs.find(message => message.includes('主檔已儲存'));
-    assert.ok(partial, 'Committed inventory plus blocked follow-up must be reported as partial success');
-    assert.match(partial, /請勿重複匯入/u);
-    assert.doesNotMatch(partial, /匯入失敗/u);
+    await page.getByRole('button', { name:'重試同步' }).waitFor();
+    assert.equal(await page.getByRole('button', { name:'匯入主檔 XLS' }).isEnabled(),true,'A failed historical batch cannot permanently disable file selection');
 
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.remount());
-    await page.getByRole('button', { name: '繼續商品／規格同步' }).waitFor();
+    await page.getByRole('button', { name:'重試同步' }).waitFor();
     assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls, 2, 'F5 discovery cannot resubmit Inventory');
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.allowCatalogResume());
-    await page.getByRole('button', { name: '繼續商品／規格同步' }).click();
-    await page.locator('[data-testid=buyanime-import-recovery]').waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: '重試同步' }).click();
+    await page.waitForFunction(() => document.body.innerText.includes('匯入完成') && !document.body.innerText.includes('重試同步'));
     assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls, 2, 'User downstream resume cannot resubmit Inventory');
     await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.failNextPostCommitGroupRead());
     await importFile('readback-failure.xls', 'READBACK-FAILURE-SKU', 'Readback Failure Product');
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().inventoryCount === 602);
-    const readbackPartial = dialogs.find(message => message.includes('主檔已儲存'));
-    assert.ok(readbackPartial, 'A post-commit authoritative-read failure must not be reported as a wholly failed import');
-    assert.doesNotMatch(readbackPartial, /匯入失敗/u);
+    await page.getByRole('button', { name:'重試同步' }).waitFor();
     assert.deepEqual(await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot()), {
       callOrder: (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).callOrder,
       inventoryCount: 602,
-      syncCalls: 2,
+      syncCalls: (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).syncCalls,
       upsertCalls: 3,
     });
-    await page.getByRole('button', { name: '重新核對雲端資料' }).click();
-    await page.getByRole('button', { name: '繼續商品／規格同步' }).click();
-    await page.locator('[data-testid=buyanime-import-recovery]').waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: '重試同步' }).click();
+    await page.waitForFunction(() => document.body.innerText.includes('匯入完成') && !document.body.innerText.includes('重試同步'));
     await importFile('gp-evidence.xls', 'GP-EVIDENCE-G', 'GP Evidence Product', 'GP-EVIDENCE-001');
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot().commits === 1);
     const evidence = await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot());
@@ -135,4 +140,4 @@ try {
   vite.kill();
 }
 
-console.log('PASS Cloud catalog import preserves authoritative read order, persists GP→G evidence, and reports committed partial state truthfully');
+console.log('PASS one-file UI, no normal recovery controls, unlocked import button, simple bounded-failure retry, no Inventory replay, bootstrap/stale-race/GP evidence preserved');

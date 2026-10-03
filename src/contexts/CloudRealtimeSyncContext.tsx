@@ -14,6 +14,7 @@ import {
   type CloudRefreshResult,
 } from '../providers/cloud/cloudSyncDomain';
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
+import { registerBuyAnimeTargetedRefresh } from '../providers/cloud/buyAnimeImportCoordinator';
 import { cloudDraftScopeForOwner, cloudRowAffectsDraft, readCloudDraftRelations, type CloudDraftScope } from '../providers/cloud/cloudDraftScope';
 import { consumeLocalCloudEcho } from '../providers/cloud/cloudRealtimeEchoRegistry';
 import {
@@ -129,6 +130,19 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, globalRefresh);
 
   useEffect(() => {
+    if (!enabled || testBridge) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        await dataProvider.waitForCloudBootstrapConvergence();
+        const canWrite = await dataProvider.canWriteCloud();
+        if (active && canWrite) await dataProvider.recoverPendingBuyAnimeImport();
+      })().catch(() => { /* Bounded retry failure is exposed by the import presentation/diagnostics, not an unhandled rejection. */ });
+    }, 0);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [enabled, testBridge, user]);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
     const isCloudOffline = cloudMode && connectivity.status !== 'online';
     document.body.dataset.cloudConnectivity = isCloudOffline ? connectivity.status : 'inactive';
@@ -190,6 +204,14 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       onCommitted: async resources => { await Promise.all([...listeners.current].map(listener => listener(resources))); },
     });
     coordinatorRef.current = coordinator;
+    const unregisterBuyAnimeRefresh = registerBuyAnimeTargetedRefresh(async changes => {
+      const resources = [...new Set(changes.map(change => change.resource))];
+      const result = await cache.refreshWithResult({ reason: 'realtime', resources, changes });
+      if (result.conflicts.length) notifyConflict([...new Set(result.conflicts.map(change => change.resource))]);
+      // Only actually refreshed non-conflicting resources may clear stale flags.
+      notifyRefreshed(resources.filter(resource => !result.conflicts.some(change => change.resource === resource)));
+      await Promise.all([...listeners.current].map(listener => listener(resources)));
+    });
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
     let channelState: RealtimeChannelState = 'unavailable';
     const buildFaultSnapshot = (): StagingRealtimeFaultSnapshot => {
@@ -422,6 +444,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      unregisterBuyAnimeRefresh();
       disposed = true;
       channelGeneration += 1;
       window.removeEventListener('focus', handleFocus);

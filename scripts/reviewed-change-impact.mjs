@@ -10,6 +10,9 @@ const stable = value => Array.isArray(value) ? value.map(stable)
 export const impactHash = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
 export const regressionScripts = Object.freeze({
+  'buyanime-simple-flow': 'tests/buyanime-simple-flow.mjs',
+  'buyanime-flow-performance': 'tests/buyanime-flow-performance-isolated.mjs',
+  'buyanime-flow-review': 'tests/buyanime-flow-change-impact.mjs',
   'buyanime-bulk': 'tests/cloud-bulk-readback.mjs',
   'buyanime-resume': 'tests/buyanime-import-resume.mjs',
   'buyanime-resume-real': 'tests/buyanime-readback-resume-isolated.mjs',

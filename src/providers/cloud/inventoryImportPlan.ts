@@ -65,6 +65,7 @@ export function planCloudInventoryImport(
     (op.kind === 'patch' && importedKeys.has(nextById.get(op.id)?.inventory_key)));
   const newCount = importedOperations.filter(op => op.kind === 'create').length;
   const updatedCount = importedOperations.filter(op => op.kind === 'patch').length;
-  return { inventory, operations, stats: { ...projection.stats, newCount, updatedCount,
+  const imported = inventory.filter(row => importedKeys.has(row.inventory_key));
+  return { inventory, imported, operations, stats: { ...projection.stats, newCount, updatedCount,
     unchangedCount: importedKeys.size - newCount - updatedCount } };
 }
