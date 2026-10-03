@@ -2374,6 +2374,68 @@
           "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 unchanged."
         }
       ]
+    },
+    {
+      "id": "buyanime-final-fast-import-v1",
+      "beforeHead": "00f783c35e444ace6fdceb9012fd2801d0aeb951",
+      "reviewedHead": "536e7d6957d38b0d8b2702205ddddd508e3d1c44",
+      "patchSha256": "5a63a70444397063fc5d4674f27e1427203aece77046c69e0421d50fe1dbb6cd",
+      "requiredRegressions": [
+        "buyanime-simple-flow",
+        "buyanime-flow-performance",
+        "buyanime-flow-review",
+        "buyanime-cache-authority",
+        "buyanime-data-size",
+        "buyanime-lint-delta",
+        "buyanime-bulk",
+        "buyanime-resume",
+        "buyanime-resume-real",
+        "buyanime-resume-ui",
+        "buyanime-resume-review",
+        "buyanime-domain",
+        "buyanime-real",
+        "buyanime-ui",
+        "buyanime-provider",
+        "catalog",
+        "guard",
+        "promotion",
+        "domain",
+        "legacy-modern",
+        "cloud-next",
+        "registry",
+        "provider",
+        "execute-envelope",
+        "sync",
+        "cas",
+        "realtime",
+        "draft"
+      ],
+      "files": [
+        { "file": "scripts/post-adoption-descendant.mjs", "beforeHash": "b797556d4058da4d3c8d169d49f6008a52129e6244d4deefe838e87201ac5dd6", "afterHash": "edabb3cc3e0aef99b308d7512611cd807eda3aa1c2bba5cf53b51b30e07067ff", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["exact review policy for verified BuyAnime import evidence absorption"] },
+        { "file": "scripts/reviewed-change-impact.mjs", "beforeHash": "1fe1163aaec0267ea86cb387a685caff7596474e9ff1a26da74a8e63a2a76f91", "afterHash": "138921ffe8d0fcb201df92eca678fad8876ddab775a588f501f8c4f59736cdb3", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["final fast-path regression registry"] },
+        { "file": "src/components/BuyAnimeImportSuccessDialog.tsx", "beforeHash": null, "afterHash": "65bcbc46b92be388469895ea476e06fc6ae7d224da94d77f2a085e6597862937", "classification": "PRESENTATION_ONLY", "functions": ["BuyAnimeImportSuccessDialog"] },
+        { "file": "src/contexts/CloudRealtimeSyncContext.tsx", "beforeHash": "2e534777df0310f813b99302702222fdc1d3eb625940e4689b0d81d28dd11b2d", "afterHash": "7eb28c4c781dc1d9263abc427407d715da2824d53d9bcf918854027e557bccbf", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["verified authoritative evidence absorption and sync convergence"] },
+        { "file": "src/lib/dataSizeAdvisory.ts", "beforeHash": "8825a96a63170e437328e3215f48c55da5f830fecec32426ba31b8595e8dfeb6", "afterHash": "860189a59a7bd172c41a62e750d0d7636b01ca1afc4d8711d6e950c6273b76a1", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["non-blocking data-size health advisory"] },
+        { "file": "src/lib/db.ts", "beforeHash": "4d6b359dc14aa07cfe0ebe3bd0e72a14d8f8425e52b40740aa2a0584dfd89689", "afterHash": "4928b88d613e4ad76bd7315475643226a3aadabdb5f205b016a7f8da3cd4efa1", "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL", "functions": ["indexed in-memory matching without durable contract change"] },
+        { "file": "src/pages/Inventory.tsx", "beforeHash": "40ff2af70cc2d6c52cc54a43a43d4971b40cb7b7e54b2525f9e78ca066c32a82", "afterHash": "68e81da9c97b462d7f816fb125fd76e9bf5a6985c73ea02f35e7ea8b7cc7545e", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["handleFileChange", "authoritative-success modal gate"] },
+        { "file": "src/pages/Settings.tsx", "beforeHash": "7699f657d0c2271a98a27b75b9ccd10ebf4a6272099326329033b9ad7c588c69", "afterHash": "563b8cfe6b05955a22c04c114053388b6f992b48e7d2f9200ca5e78162b82d7a", "classification": "PRESENTATION_ONLY", "functions": ["owner-only system health advisory presentation"] },
+        { "file": "src/providers/cloud/buyAnimeImportCoordinator.ts", "beforeHash": "a0e7e371353a2e7b0794f00b849bf29aa604e978bfce5ff116732edae6dd1975", "afterHash": "ddb1a710f45a63b6f77e124e27645c82ea6f6a77729e2d936b3c75472c317011", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["coordinateBuyAnimeImport", "finishBuyAnimeImport"] },
+        { "file": "src/providers/cloud/buyAnimeImportJournal.ts", "beforeHash": "91c9888c65b388eb4494dd77d7d78ca105cd8a9d6ab83c79ecf4072a9d910718", "afterHash": "03c763d8aaade6f8b77ee493776f30a70dc213ea128db18c74dcd26f385d184e", "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL", "functions": ["backward-compatible compressed journal details"] },
+        { "file": "src/providers/cloud/buyAnimeImportResume.ts", "beforeHash": "dfe8d96a2cb7d656c46105169dd5d1154f60d75903f4084c1428dde6ed81ee30", "afterHash": "43ab3c7b6e04683768d7c31268c5c8399b8c5900b60e10999516481ab5f6765e", "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL", "functions": ["BuyAnimeImportPipeline", "verified downstream-only resume"] },
+        { "file": "src/providers/cloud/cloudTargetedCache.ts", "beforeHash": "2545b59da1e91e35234ba4caadc7728bef7a988db58aa037f54c0c51ebc1ac64", "afterHash": "0f1e391907b2e04287751f4184f7b1939e69a9c9d5b7733d353b868bfd5459e1", "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL", "functions": ["absorbVerifiedRows"] },
+        { "file": "src/providers/cloud/inventoryImportPlan.ts", "beforeHash": "b25ce066d36e4f71127e3c8c6a17348416c4dff98e6778f0b9fa60a553b71855", "afterHash": "163fb72b1b19b5222ff44d88f498ff5403e725c26e43d27b60ce2cdd9a35c883", "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL", "functions": ["planInventoryImport change-only mutation"] },
+        { "file": "src/providers/cloud/supabaseProvider.ts", "beforeHash": "4d6e2c13f0e41f68f1e396ebe76afda455d9389c8db341af513d9ab6edefb471", "afterHash": "9341dca63e8ae59327a04a8fad7675f5e0c8474e6b235467a8574d19761de8cf", "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL", "functions": ["BuyAnime exact readback", "scoped Catalog plan", "targeted WACA evidence"] },
+        { "file": "tests/buyanime-canonical-identity-isolated.mjs", "beforeHash": "96e12b02fd16fabf74fb5793f44764fb1e0219f3222d501264795523ceca8342", "afterHash": "79c1a44ccd1f2e00ca1472354ca07353c510e1f589c08ecd5184ece19a90476b", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["real-file canonical identity regression"] },
+        { "file": "tests/buyanime-flow-performance-isolated.mjs", "beforeHash": "f430ae112e27543542b2f93051ecf2c8ab244a169b5eaca5f36b3a6c2825558a", "afterHash": "9224c11d4fc5b8d57dd77143a8ab537fd2ef0358c2d1e14429c2aa2fb5799dd1", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["full-wall-clock UI benchmark and fault injection"] },
+        { "file": "tests/buyanime-import-resume.mjs", "beforeHash": "dee9e19577894c207b1d17bf1f1d4515d29d620ab14ff43d194b42d4b471562e", "afterHash": "a1e3cb73ad742a18e25884f9e7f05a288a7e7ebf08db620a7c394a67805b7586", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["resume contract regression"] },
+        { "file": "tests/buyanime-readback-resume-isolated.mjs", "beforeHash": "cefe4e54a00762fbb44480619f088dda1895a1cbdb0a90288d5e50514bcf1350", "afterHash": "63f9a9ed6e85362a5b47687d642ee363b48320fe8f6cf287215557be07567abb", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["real-file F5 and response-loss regression"] },
+        { "file": "tests/cloud-cache-authority.mjs", "beforeHash": "60e790a814c37ea811fa2c9ec55a552ff6b5a2a964d98081449ba5bb51d8f683", "afterHash": "b9f0f3832b9e005802fd82a75f9d0e2dcb35fc3f8bf2735df8f63c90b2e03a94", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["authoritative cache fail-closed regression"] },
+        { "file": "tests/data-size-advisory.mjs", "beforeHash": "5be8b2f943fa823d0247df5b7048685c753721dbff185c7df24a56b5dbbe305d", "afterHash": "d04d314842601ae5522681f8ff607892e66bc03776bfb7b87560e4a44549113f", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["non-blocking advisory regression"] },
+        { "file": "tests/fixtures/buyanime-performance-ui.tsx", "beforeHash": "c73556b2a0a83375310e5b01a340266a27b95e7d7f1d05501f862ea33c5d3069", "afterHash": "971b0b31b040d74d726bb2b988c7f870203c689a35abb7790b2f0ab77fb1c238", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["actual file-input to synced success fixture"] },
+        { "file": "tests/fixtures/buyanime-resume-provider-entry.ts", "beforeHash": "9d0b7f7f6b54b5ec03d8dbbd7961e2ee24897ef2aff56d02e72b6de7e07ad19d", "afterHash": "e0486b2af12ae354d98b36d7f4673d480e8392abf1cbe5955c381f4500303c76", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["resume provider test adapter"] },
+        { "file": "tests/fixtures/inventory-cloud-import-entry.tsx", "beforeHash": "3bb646641389060c6d470338280e81e09ad561d145a3a4f12cacd70f3dffc4ae", "afterHash": "98a7a0a9858ba25f29c519bb750f8abb357ddb0836963c58c27723ef56c2b9de", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["one-click success UI test entry"] },
+        { "file": "tests/inventory-cloud-import-flow.mjs", "beforeHash": "9c86e90ea9885ab90b47d24f42ef603b44f48b96e8f453583c551d68f97da2bc", "afterHash": "a0b049b43891d9bb8d5c3adf423784749bc87cbf6f89e0153b53420f749ec4ee", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["modal and no-recovery-controls regression"] }
+      ]
     }
   ]
 }
