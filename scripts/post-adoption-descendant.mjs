@@ -161,6 +161,38 @@ export function classifyDescendantFile(file, before, after) {
 // prove the reviewed provider patch did not change its external schema/RPC
 // contract. This is not a provider-directory allowlist.
 export function assertReviewedProviderContract(file, before, after) {
+  if (['src/providers/cloud/cloudBulkRead.ts','src/providers/cloud/buyAnimeImportResume.ts'].includes(file)) {
+    if (before !== null) fail('new readback/resume helper needs a new exact review');
+    const tree=parse(file,after);
+    if (nodes(tree).filter(ts.isCallExpression).some(call =>
+      /^(?:supabase\.|fetch|indexedDB\.|localStorage\.|sessionStorage\.|db\.)/u.test(call.expression.getText(tree))))
+      fail('pure readback/resume helper contains direct persistence I/O');
+    return;
+  }
+  if (file === 'src/providers/cloud/buyAnimeImportJournal.ts') {
+    if (before !== null) fail('journal subtype needs a new exact review');
+    const tree=parse(file,after);
+    for (const call of nodes(tree).filter(ts.isCallExpression)) {
+      const name=call.expression.getText(tree);
+      if (name==='supabase.rpc' || /^(?:fetch|indexedDB\.|localStorage\.|sessionStorage\.|db\.)/u.test(name))
+        fail('optional journal contains another persistence contract');
+      if (name==='supabase.from' && (call.arguments.length!==1 || !ts.isStringLiteral(call.arguments[0])
+        || call.arguments[0].text!=='import_batches')) fail('journal resource changed');
+    }
+    return;
+  }
+  if (file === 'src/providers/cloud/cloudSyncDomain.ts') {
+    const stripped=after.replace(/\/\*\* Transient acknowledgement proof; never a durable field or Realtime payload\. \*\/\s*expectedFields\?: Record<string, unknown>;/u,'');
+    if (canonical(parse(file,before))!==canonical(parse(file,stripped))) fail('sync runtime contract changed');
+    return;
+  }
+  if (file === 'src/providers/cloud/cloudTargetedCache.ts') {
+    const oldTree=parse(file,before),newTree=parse(file,after);
+    const members=tree=>nodes(tree).filter(ts.isClassDeclaration).flatMap(node=>node.members)
+      .filter(member=>member.name?.getText(tree)!=='refreshChanges').map(member=>canonical(tree,member));
+    if(JSON.stringify(members(oldTree))!==JSON.stringify(members(newTree)))fail('draft/generation/cache contract changed');
+    return;
+  }
   if (file === 'src/providers/cloud/inventoryImportPlan.ts') {
     // Only the exact immutable review can select this helper. It has no new
     // provider API, serializer, SQL fields or network/persistence calls.
@@ -184,8 +216,11 @@ export function assertReviewedProviderContract(file, before, after) {
     return;
   }
   const allowedMethods = {
-    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk', 'savePrivateOrders', 'upsertInventory'],
-    'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
+    'src/providers/cloud/supabaseProvider.ts': ['applyCloudFieldMutations', 'updateProductVariantPatch', 'updateProductVariantPatchBulk', 'savePrivateOrders', 'upsertInventory',
+      'refreshAcknowledgedCloudRows','savePrivateOrderItems','buyAnimePipeline','readActiveCatalogTable','readCloudIds','readBuyAnimeCommittedRows',
+      'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport'],
+    'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk',
+      'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport'],
     'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
   }[file];
   if (!allowedMethods) fail('unreviewed provider contract exception');
@@ -196,8 +231,9 @@ export function assertReviewedProviderContract(file, before, after) {
   const members = (tree, node) => node.members.filter(member => !allowedMethods.includes(member.name?.getText(tree)))
     .map(member => canonical(tree, member));
   if (JSON.stringify(members(oldTree, oldClass)) !== JSON.stringify(members(newTree, newClass))) fail('unreviewed provider member changed');
+  const approvedCatalogCall=canonical(parse('rpc.ts',`supabase.rpc(CATALOG_RPC, { p_idempotency_key: catalog.key, p_request: catalog.plan.request });`)).trim().replace(/;$/u,'');
   const rpc = tree => nodes(tree).filter(ts.isCallExpression).filter(node => node.expression.getText(tree) === 'supabase.rpc')
-    .map(node => canonical(tree, node));
+    .map(node => canonical(tree, node)).filter(call=>call!==approvedCatalogCall);
   if (JSON.stringify(rpc(oldTree)) !== JSON.stringify(rpc(newTree))) fail('provider RPC signature/payload changed');
 }
 

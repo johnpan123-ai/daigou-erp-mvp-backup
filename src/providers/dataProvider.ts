@@ -27,6 +27,7 @@ import { sanitizeCloudBusinessPatch } from './cloud/cloudFieldCas';
 import type { CloudResource } from './cloud/cloudSyncDomain';
 import { CloudStaleWriteError } from './cloud/cloudOptimisticLock';
 import { assertCloudWriteAllowed } from './cloud/cloudConnectivity';
+import type { BuyAnimeImportRecord } from './cloud/buyAnimeImportResume';
 import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTransaction';
 import type { PrivateOrderTransactionCommand } from './cloud/privateOrderTransaction';
 import type { RelatedTransactionCommand } from './cloud/relatedTransaction';
@@ -222,6 +223,22 @@ class DynamicDataProvider implements IDataProvider {
   }
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     return this.guardedWrite(() => this.getActiveProvider().upsertInventory(items));
+  }
+  async getBuyAnimeImportRecovery(): Promise<BuyAnimeImportRecord | null> {
+    if (!['cloud','fallback'].includes(getProviderMode())) return null;
+    return this.supabaseProvider.getBuyAnimeImportRecovery();
+  }
+  async verifyBuyAnimeImportRecovery(record: BuyAnimeImportRecord): Promise<void> {
+    if (!['cloud','fallback'].includes(getProviderMode())) throw new Error('BUYANIME_RESUME_CLOUD_ONLY');
+    return this.supabaseProvider.verifyBuyAnimeImportRecovery(record);
+  }
+  async importBuyAnimeInventory(items: InventoryItem[], fileName: string): Promise<BuyAnimeImportRecord> {
+    if (!['cloud','fallback'].includes(getProviderMode())) throw new Error('BUYANIME_RESUME_CLOUD_ONLY');
+    return this.guardedWrite(() => this.supabaseProvider.importBuyAnimeInventory(items, fileName));
+  }
+  async resumeBuyAnimeImport(record: BuyAnimeImportRecord): Promise<BuyAnimeImportRecord> {
+    if (!['cloud','fallback'].includes(getProviderMode())) throw new Error('BUYANIME_RESUME_CLOUD_ONLY');
+    return this.guardedWrite(() => this.supabaseProvider.resumeBuyAnimeImport(record));
   }
   async getSalesOrders(): Promise<SalesOrder[]> {
     return this.getActiveProvider().getSalesOrders();

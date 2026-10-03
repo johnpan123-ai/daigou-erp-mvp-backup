@@ -191,6 +191,13 @@ import { recordCloudRestoreRpcIntent } from './cloudRestoreRpcTransport';
 import type { IDataProvider } from '../types';
 import { buildPrivateOrderRequest, PRIVATE_ORDER_RPC, type PrivateOrderTransactionCommand } from './privateOrderTransaction';
 import { readFormIntent,stableFormIntent,clearFormIntent } from './privateOrderTransaction';
+import { readCloudRowsByIds } from './cloudBulkRead';
+import {
+  BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord,
+  type BuyAnimeImportRecord,
+} from './buyAnimeImportResume';
+import { readBuyAnimeJournal, readPendingBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
+import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../../waca/masterReference';
 import { planCatalogTransaction,CATALOG_RPC,type CatalogMode } from './catalogTransaction';
 import { buildRelatedRequest,submitRelatedIntent,RELATED_RPC,type RelatedTransactionCommand } from './relatedTransaction';
 import type { 
@@ -727,6 +734,7 @@ export class SupabaseProvider implements IDataProvider {
   private async applyCloudFieldMutations(
     entity: CloudMutableEntity,
     operations: CloudFieldMutationOperation[],
+    options: { readback?: boolean } = {},
   ): Promise<void> {
     if (operations.length === 0) return;
     assertCloudMutationOperations(entity, operations);
@@ -758,8 +766,13 @@ export class SupabaseProvider implements IDataProvider {
       if (isCloudFieldMutationError(mutationError)) notifyCloudFieldMutationConflict(mutationError);
       throw mutationError;
     }
+    if (options.readback === false) return;
     try {
-      await this.refreshAcknowledgedCloudRows(entity, ids.map(databaseId => ({ databaseId })));
+      await this.refreshAcknowledgedCloudRows(entity, operations.map(operation => ({
+        databaseId: operation.id,
+        expectedFields: operation.kind === 'create' ? operation.values
+          : operation.kind === 'delete' ? undefined : operation.changes,
+      })));
     } catch (readbackError) {
       clearLocalCloudWrites(entity, ids);
       throw new CloudMutationBoundaryError('committed-readback-pending', readbackError);
@@ -840,7 +853,7 @@ export class SupabaseProvider implements IDataProvider {
 
   private async refreshAcknowledgedCloudRows(
     table: string,
-    identities: Array<{ databaseId: string; canonicalId?: string }>,
+    identities: Array<{ databaseId: string; canonicalId?: string; expectedFields?: Record<string, unknown> }>,
   ): Promise<void> {
     const resource = CLOUD_TABLE_RESOURCE[table];
     if (!resource) throw new Error(`Unsupported Cloud mutation cache table: ${table}`);
@@ -859,6 +872,7 @@ export class SupabaseProvider implements IDataProvider {
         resource,
         kind: 'UPDATE',
         origin: 'local',
+        expectedFields: identity.expectedFields,
       })),
     });
   }
@@ -1463,6 +1477,143 @@ export class SupabaseProvider implements IDataProvider {
     return plan.stats;
   }
 
+  private readonly buyAnimePipeline = new BuyAnimeImportPipeline({
+    load: readBuyAnimeJournal,
+    save: async (record, version) => {
+      await this.requireCloudWritePermission();
+      assertCloudWriteAllowed();
+      return saveBuyAnimeJournal(record, version);
+    },
+    prepareInventory: async items => {
+      const rows = await fetchAll<InventoryItem & { deleted_at?: string | null }>(async (from, to) =>
+        supabase.from('inventory_items').select('*').order('id').range(from, to));
+      return planCloudInventoryImport(rows, items);
+    },
+    commitInventory: plan => this.applyCloudFieldMutations('inventory_items', plan.operations, { readback: false }),
+    readInventory: record => this.readBuyAnimeCommittedRows(record),
+    planCatalog: async imported => {
+      const [inventory, groups, categories, variants] = await Promise.all([
+        this.readActiveCatalogTable<InventoryItem>('inventory_items'),
+        this.readActiveCatalogTable<ProductGroup>('product_groups'),
+        this.readActiveCatalogTable<ProductCategory>('product_categories'),
+        this.readActiveCatalogTable<ProductVariant>('product_variants'),
+      ]);
+      const titles = new Set(imported.map(row => row.normalized_product_title || normalizeProductTitle(row.product_title)));
+      if (!groups.some(group => titles.has(group.normalized_title || normalizeProductTitle(group.title)))) return null;
+      return planCatalogTransaction({ inventory, groups, categories, variants }, 'sync');
+    },
+    commitCatalog: async catalog => {
+      if (!catalog.plan) return;
+      await this.requireCloudWritePermission();
+      assertCloudWriteAllowed();
+      let response;
+      try { response = await supabase.rpc(CATALOG_RPC, { p_idempotency_key: catalog.key, p_request: catalog.plan.request }); }
+      catch (cause) { markCloudRequestFailed(cause); throw new CloudMutationBoundaryError('result-unknown', cause); }
+      if (response.error) {
+        markCloudRequestFailed(response.error);
+        if (!response.error.code || response.status >= 500 || /^5/u.test(response.error.code))
+          throw new CloudMutationBoundaryError('result-unknown', response.error);
+        throw new BuyAnimeResumeError('BUYANIME_CATALOG_ROLLED_BACK', undefined, response.error);
+      }
+      if (response.data?.ok !== true) {
+        if (response.data?.code === 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH')
+          throw new BuyAnimeResumeError('BUYANIME_CATALOG_INTENT_CONFLICT');
+        if (response.data?.ok === false && ['FIELD_CONFLICT','TRANSACTION_REJECTED'].includes(response.data.code))
+          throw new BuyAnimeResumeError('BUYANIME_CATALOG_ROLLED_BACK', undefined, { code: response.data.code });
+        throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_CATALOG_RESPONSE_INVALID'));
+      }
+      if (response.data.idempotencyKey !== catalog.key)
+        throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_CATALOG_RESPONSE_IDENTITY_MISMATCH'));
+      markCloudReachable();
+    },
+    verifyCatalog: async catalog => {
+      if (!catalog.plan) return;
+      for (const [table, ops] of Object.entries(catalog.plan.request.operations)) {
+        if (!ops.length) continue;
+        const expected = new Map(ops.map(op => [op.id, op.kind === 'create' ? op.values : op.kind === 'delete'
+          ? {} : op.changes]));
+        await this.readCloudIds(table, ops.map(op => op.id), expected);
+      }
+    },
+    ensureWacaEvidence: async (record, imported) => {
+      const variants = await this.getAuthoritativeWacaVariants();
+      const evidence = linksFromMyAcgInventory(imported, variants, record.fileName, record.observedAt);
+      if (!evidence.links.length) return;
+      const snapshot = await this.getWacaSnapshot();
+      const masterLinks = mergeMyAcgMasterLinks(snapshot.masterLinks, evidence.links);
+      const canonical = (links: typeof masterLinks) => JSON.stringify([...links].sort((a, b) => a.childCode.localeCompare(b.childCode)));
+      // Read-after-response-loss sees the same durable evidence and does NOT commit again.
+      if (canonical(masterLinks) !== canonical(snapshot.masterLinks))
+        await this.commitWacaSnapshot({ ...snapshot, masterLinks }, snapshot.revision, false);
+    },
+  });
+  private async readActiveCatalogTable<T>(table: string): Promise<T[]> {
+    return fetchAll<T>(async (from, to) => supabase.from(table).select('*').is('deleted_at', null).order('id').range(from, to));
+  }
+  private async readCloudIds(
+    table: string, ids: string[], expected?: ReadonlyMap<string, Record<string, unknown>>,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      const rows = await readCloudRowsByIds({
+        table, ids, expected,
+        load: async (chunk, signal) => {
+          const result = await supabase.from(table).select('*').in('id', chunk).abortSignal(signal!);
+          if (result.error) throw { ...result.error, status: result.status };
+          return result.data || [];
+        },
+      });
+      markCloudReachable();
+      return rows;
+    } catch (cause) { markCloudRequestFailed(cause); throw cause; }
+  }
+  private async readBuyAnimeCommittedRows(record: BuyAnimeImportRecord): Promise<InventoryItem[]> {
+    const rows = await this.readCloudIds('inventory_items', record.expected.map(proof => proof.id));
+    if (rows.some(row => row.deleted_at)) throw new BuyAnimeResumeError('BUYANIME_COMMITTED_ROW_DELETED', record);
+    return rows as unknown as InventoryItem[];
+  }
+  async getBuyAnimeImportRecovery(): Promise<BuyAnimeImportRecord | null> {
+    const pending = await readPendingBuyAnimeJournal();
+    if (pending) return pending;
+    // Pre-journal runtimes already persisted the import identity on Inventory.
+    // Unknown downstream completion is shown explicitly, never inferred from global sync.
+    const latest = await supabase.from('inventory_items').select('latest_catalog_import_id,catalog_last_seen_at')
+      .is('deleted_at', null).not('latest_catalog_import_id', 'is', null)
+      .order('catalog_last_seen_at', { ascending: false, nullsFirst: false }).limit(1);
+    if (latest.error) throw latest.error;
+    const batchId = latest.data?.[0]?.latest_catalog_import_id;
+    if (!batchId) return null;
+    const journal = await readBuyAnimeJournal(batchId);
+    if (journal) return journal.stage === 'COMPLETE' ? null : journal;
+    const rows = await fetchAll<InventoryItem>(async (from, to) => supabase.from('inventory_items').select('*')
+      .eq('latest_catalog_import_id', batchId).order('id').range(from, to));
+    const observedAt = rows[0]?.catalog_last_seen_at;
+    if (!rows.length || !observedAt || rows.some(row => new Date(row.catalog_last_seen_at || '').getTime() !== new Date(observedAt).getTime()))
+      throw new BuyAnimeResumeError('BUYANIME_LEGACY_BATCH_EVIDENCE_INVALID');
+    const record: BuyAnimeImportRecord = {
+      format: 'BUYANIME_IMPORT_RESUME_V1', batchId, observedAt, fileName: 'committed-catalog:' + batchId,
+      stage: 'INVENTORY_COMMITTED', version: 0, legacy: true,
+      expected: await Promise.all(rows.map(inventoryProof)),
+      stats: { total: rows.length, newCount: 0, updatedCount: 0, unchangedCount: rows.length, groupCount: new Set(rows.map(row => row.normalized_product_title || row.product_title)).size },
+    };
+    assertImportRecord(record);
+    return record;
+  }
+  async verifyBuyAnimeImportRecovery(record: BuyAnimeImportRecord): Promise<void> {
+    await this.buyAnimePipeline.verify(record);
+  }
+  async importBuyAnimeInventory(items: InventoryItem[], fileName: string): Promise<BuyAnimeImportRecord> {
+    await this.requireCloudWritePermission();
+    assertCloudWriteAllowed();
+    const pending = await this.getBuyAnimeImportRecovery();
+    if (pending) throw new BuyAnimeResumeError('BUYANIME_EXISTING_BATCH_PENDING', pending);
+    return this.buyAnimePipeline.start(items, fileName);
+  }
+  async resumeBuyAnimeImport(record: BuyAnimeImportRecord): Promise<BuyAnimeImportRecord> {
+    await this.requireCloudWritePermission();
+    assertCloudWriteAllowed();
+    return this.buyAnimePipeline.resume(record);
+  }
+
   async getSalesOrders(): Promise<SalesOrder[]> {
     return db.getSalesOrders();
   }
@@ -1889,16 +2040,14 @@ export class SupabaseProvider implements IDataProvider {
 
       // 5. 確保父訂單已成功寫入雲端以避免外鍵衝突 (Foreign Key check)
       const parentOrderIds = Array.from(new Set(activeItems.map(i => i.private_order_id)));
-      const { data: existingParentOrders, error: checkError } = await supabase
-        .from('private_orders')
-        .select('id')
-        .in('id', parentOrderIds);
-
-      if (checkError) {
-        markCloudRequestFailed(checkError);
-        console.error('[Private Order Sync] failed to verify parent orders:', checkError);
-        throw checkError;
-      }
+      const existingParentOrders = await readCloudRowsByIds({
+        table: 'private_orders', ids: parentOrderIds, select: 'id',
+        load: async (ids, signal) => {
+          const result = await supabase.from('private_orders').select('id').in('id', ids).abortSignal(signal!);
+          if (result.error) { markCloudRequestFailed(result.error); throw result.error; }
+          return result.data || [];
+        },
+      });
       markCloudReachable();
 
       const existingParentSet = new Set(existingParentOrders?.map(o => o.id) || []);

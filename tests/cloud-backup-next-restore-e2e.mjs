@@ -11,6 +11,10 @@ const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0
 const actorId = uuid(900);
 const fixturePath = join(tmpdir(), `cloud-backup-next-source-exact-${process.pid}.json`);
 const localFixture = JSON.parse(readFileSync('tests/fixtures/core-regression.json', 'utf8'));
+// Pure journal proof helpers also import the existing browser adapter module.
+// This unresolved stub prevents Node from opening any real browser database.
+globalThis.indexedDB={open:()=>({})};
+globalThis.window={indexedDB:globalThis.indexedDB,location:{hostname:'127.0.0.1'},localStorage:{getItem:()=>null}};
 
 const moduleServer = await createServer({
   configFile: false,
@@ -22,6 +26,7 @@ const moduleServer = await createServer({
 
 let sourceExactDocument;
 let sourceExactPreview;
+let sourceResumeRecord;
 let realPreview = null;
 try {
   const restore = await moduleServer.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
@@ -81,6 +86,19 @@ try {
     created_groups_count: 1, completed_group_skus_count: 1, catalog_missing_count: 0,
     note: '', details: { source: 'cloud' },
   }));
+  // Optional resume progress is ordinary existing import_batches.details,
+  // not a new durable resource or a required field for legacy backups.
+  const resume = await moduleServer.ssrLoadModule('/src/providers/cloud/buyAnimeImportResume.ts');
+  const batchId='catalog_import_11111111-1111-4111-8111-111111111111';
+  const record={format:'BUYANIME_IMPORT_RESUME_V1',batchId,fileName:'synthetic-resume.xls',
+    observedAt:'2026-10-03T00:00:00.000Z',stage:'INVENTORY_READBACK_PENDING',version:1,
+    expected:[await resume.inventoryProof(seed.inventory[0])],
+    stats:{total:1,newCount:1,updatedCount:0,unchangedCount:0,groupCount:1}};
+  sourceResumeRecord=record;
+  seed.importBatches.push(withAudit({id:resume.importJournalId(batchId),local_id:resume.importJournalId(batchId),
+    platform:resume.BUYANIME_JOURNAL_PLATFORM,file_name:record.fileName,imported_at:record.observedAt,
+    total_rows:1,valid_rows:1,details:{newOrderItems:[],skippedDuplicateItems:[],createdGroups:[],
+      completedGroupSkus:[],catalogMissingSkus:[],buyAnimeImport:record},version:1}));
   seed.japanPackages.push(withAudit({ id: uuid(50), title: 'Cloud Package', status: 'registered', note: '' }));
   seed.japanPackageItems.push(withAudit({
     id: uuid(51), japan_package_id: uuid(50), product_group_id: uuid(10), product_variant_id: uuid(12),
@@ -265,6 +283,8 @@ try {
         privateOrders, privateItems, salesOrders, salesItems, packages, packageItems,
         shipments, shipmentItems, bundles, imports].map(rows => rows.length),
       variant: variants.find(row => row.id === 'cloud-variant-local'),
+      journal: imports.find(row => row.platform === 'buyanime-catalog-resume-v1')?.details?.buyAnimeImport,
+      importRecovery: await provider.getBuyAnimeImportRecovery(),
       waca: { orders: waca.orders.length, items: waca.items.length, mappings: waca.mappings.length,
         batches: waca.batches.length, links: waca.masterLinks.length, audit: waca.cutoverAudit.length,
         state: waca.cutoverState?.mode },
@@ -275,7 +295,9 @@ try {
   });
 
   const state = await readState();
-  assert.deepEqual(state.counts, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(state.counts, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2]);
+  assert.deepEqual(state.journal,sourceResumeRecord,'Existing Backup/Restore must retain optional committed batch intent');
+  assert.equal(state.importRecovery,null,'NEXT must never resume Cloud operational progress');
   assert.equal(state.variant.database_id, uuid(12));
   assert.equal(state.variant.waca_auto_quantity, 11);
   assert.equal(state.variant.waca_manual_adjustment, 2);

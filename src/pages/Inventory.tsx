@@ -23,6 +23,7 @@ import {
   isCloudRestoreDisabledMode,
 } from '../providers/cloudRestorePolicy';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
+import { BuyAnimeResumeError, buyAnimeRecoveryMessage, buyAnimeRecoveryDiagnostic, type BuyAnimeImportRecord } from '../providers/cloud/buyAnimeImportResume';
 
 interface InventoryGroup {
   title: string;
@@ -97,6 +98,11 @@ export default function Inventory() {
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [backupNotice, setBackupNotice] = useState<string>('');
   const [importDiagnostic, setImportDiagnostic] = useState<ReturnType<typeof myAcgImportDiagnostic> | null>(null);
+  const [importRecovery, setImportRecovery] = useState<BuyAnimeImportRecord | null>(null);
+  const [recoveryVerified, setRecoveryVerified] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(['cloud','fallback'].includes(currentMode));
+  const [recoveryError, setRecoveryError] = useState('');
   const [variantGuardProbeNotice, setVariantGuardProbeNotice] = useState<string>('');
   const showVariantGuardAcceptanceUi = isVariantSyncGuardAcceptanceUiEnabled();
   const injectVariantReadFailure = isVariantSyncReadFailureInjectionEnabled();
@@ -140,10 +146,31 @@ export default function Inventory() {
     };
   }, [loadItems]);
 
-  useCloudResourceSync(
+  // Discovery/readback is READ-ONLY. Never resume a business stage on mount,
+  // route switch, F5, focus, login or Global Sync success.
+  useEffect(() => {
+    if (!['cloud','fallback'].includes(currentMode)) return;
+    let active = true;
+    void (async () => {
+      try {
+        const record = await dataProvider.getBuyAnimeImportRecovery();
+        if (!active) return;
+        setImportRecovery(record);
+        if (record && !['PLANNED','FAILED_PRE_COMMIT'].includes(record.stage)) {
+          await dataProvider.verifyBuyAnimeImportRecovery(record);
+          if (active) setRecoveryVerified(true);
+        }
+      } catch {
+        if (active) setRecoveryError('雲端匯入進度核對尚未完成，請稍後重新核對；請勿重複匯入。');
+      } finally { if (active) setRecoveryLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [currentMode]);
+
+  const { refreshAuthoritative } = useCloudResourceSync(
     'inventory-catalog',
     ['inventory', 'products'],
-    isImporting || isRollbackPending,
+    isImporting || isRollbackPending || recoveryBusy,
     loadItems,
   );
 
@@ -152,7 +179,51 @@ export default function Inventory() {
   }, [productGroups]);
 
   const handleImportClick = () => {
+    if (importRecovery || recoveryError || recoveryLoading) return;
     fileInputRef.current?.click();
+  };
+
+  const handleVerifyCommittedImport = async () => {
+    setRecoveryBusy(true);
+    setRecoveryError('');
+    setRecoveryVerified(false);
+    try {
+      const record = await dataProvider.getBuyAnimeImportRecovery();
+      setImportRecovery(record);
+      if (record) {
+        await dataProvider.verifyBuyAnimeImportRecovery(record);
+      }
+      if (refreshAuthoritative && await refreshAuthoritative(['products','inventory']) === false)
+        throw new Error('BUYANIME_AUTHORITATIVE_REFRESH_UNAVAILABLE');
+      setRecoveryVerified(Boolean(record));
+      await loadItems();
+    } catch (cause) {
+      setImportDiagnostic(buyAnimeRecoveryDiagnostic(cause, importRecovery || undefined));
+      setRecoveryError('主檔／批次的雲端核對未完成，暫不能續跑；請勿重複匯入。');
+    } finally { setRecoveryBusy(false); }
+  };
+  const handleResumeCommittedImport = async () => {
+    if (!importRecovery || !recoveryVerified) return;
+    setRecoveryBusy(true);
+    setRecoveryError('');
+    let complete = false;
+    try {
+      const completed = await dataProvider.resumeBuyAnimeImport(importRecovery);
+      setImportRecovery(completed.stage === 'COMPLETE' ? null : completed);
+      setRecoveryVerified(false);
+      complete = completed.stage === 'COMPLETE';
+      setBackupNotice('買動漫主檔、商品／規格及 WACA 來源同步已完成；沒有重送主檔。');
+      if (refreshAuthoritative && await refreshAuthoritative(['products','inventory']) === false)
+        throw new Error('BUYANIME_AUTHORITATIVE_REFRESH_UNAVAILABLE');
+      await loadItems();
+    } catch (cause) {
+      setImportDiagnostic(buyAnimeRecoveryDiagnostic(cause, cause instanceof BuyAnimeResumeError ? cause.record : importRecovery));
+      if (cause instanceof BuyAnimeResumeError && cause.record) setImportRecovery(cause.record);
+      setRecoveryError(complete ? '匯入各階段已完成，但畫面雲端讀取尚未完成；請勿重複匯入，只需重新核對雲端資料。'
+        : '主檔不會重送；後續同步尚未完成。請重新核對後再繼續，技術資訊可供查證。');
+      try { setImportRecovery(await dataProvider.getBuyAnimeImportRecovery()); } catch { /* Keep the last proven committed identity. */ }
+      setRecoveryVerified(false);
+    } finally { setRecoveryBusy(false); }
   };
 
   const createPreImportBackup = async () => {
@@ -187,6 +258,11 @@ export default function Inventory() {
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (importRecovery || recoveryError || recoveryLoading) {
+      alert('已有待核對或待續跑的雲端匯入，請勿重新上傳同一份檔案。');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
 
     setIsImporting(true);
     setBackupNotice('');
@@ -213,9 +289,26 @@ export default function Inventory() {
         catalog_last_seen_at: currentTimestamp
       }));
       importPhase = 'commit';
+      if (currentMode === 'cloud' || currentMode === 'fallback') {
+        const committed = await dataProvider.importBuyAnimeInventory(itemsWithBatchMeta, file.name);
+        setImportRecovery(committed);
+        setRecoveryVerified(true);
+        const completed = await dataProvider.resumeBuyAnimeImport(committed);
+        setImportRecovery(completed.stage === 'COMPLETE' ? null : completed);
+        setRecoveryVerified(false);
+        try {
+          if (refreshAuthoritative && await refreshAuthoritative(['products','inventory']) === false)
+            throw new Error('BUYANIME_AUTHORITATIVE_REFRESH_UNAVAILABLE');
+          await loadItems();
+        } catch {
+          setRecoveryError('匯入各階段已完成，但畫面雲端讀取尚未完成；請勿重複匯入，只需重新核對雲端資料。');
+        }
+        alert(`買動漫主檔及後續同步完成（新增 ${completed.stats.newCount}、更新 ${completed.stats.updatedCount}）。`);
+        return;
+      }
       const stats = await dataProvider.upsertInventory(itemsWithBatchMeta);
 
-      const cloudMode = currentMode === 'cloud' || currentMode === 'fallback';
+      const cloudMode = false; // Cloud uses the durable staged pipeline above; NEXT remains local.
       let shouldSync = !cloudMode;
       let syncStats: Awaited<ReturnType<typeof dataProvider.syncProductGroupsWithInventory>> = {
         filledVariantsCount: 0,
@@ -293,6 +386,34 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
 
       alert(report);
     } catch (err) {
+      if (currentMode === 'cloud' || currentMode === 'fallback') {
+        if (err instanceof BuyAnimeResumeError && err.record) {
+          setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, err.record));
+          setImportRecovery(err.record);
+          setRecoveryVerified(false);
+          setRecoveryError(buyAnimeRecoveryMessage(err.record));
+          alert(buyAnimeRecoveryMessage(err.record));
+          // A pending downstream stage does not undo the proven Inventory commit.
+          // Refresh through the existing draft/generation-safe authoritative path only.
+          if (!['PLANNED','FAILED_PRE_COMMIT','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN'].includes(err.record.stage)) {
+            try {
+              if (refreshAuthoritative) await refreshAuthoritative(['products','inventory']);
+              await loadItems();
+            } catch { /* Keep batch recovery separate from Global Sync read failure. */ }
+          }
+          return;
+        }
+        try {
+          const pending = await dataProvider.getBuyAnimeImportRecovery();
+          if (pending) {
+            setImportRecovery(pending);
+            setRecoveryVerified(false);
+            setRecoveryError(buyAnimeRecoveryMessage(pending));
+            alert(buyAnimeRecoveryMessage(pending));
+            return;
+          }
+        } catch { /* Do not claim rollback without commit evidence. */ }
+      }
       const failure = classifyMyAcgImportError(err, importPhase);
       const diagnostic = myAcgImportDiagnostic(failure, importRequestId);
       setImportDiagnostic(diagnostic);
@@ -1334,7 +1455,7 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
               <Plus size={14} />
               <span>新增商品</span>
             </button>
-            <button className="btn-import-xls" onClick={handleImportClick} disabled={isImporting}>
+            <button className="btn-import-xls" onClick={handleImportClick} disabled={isImporting || recoveryBusy || recoveryLoading || Boolean(importRecovery) || Boolean(recoveryError)}>
               <Upload size={14} />
               <span>{isImporting ? '匯入中...' : '匯入主檔 XLS'}</span>
             </button>
@@ -1398,6 +1519,28 @@ ${cloudMode && !shouldSync ? '* 本次項目沒有對應既有訂購商品群組
                 {JSON.stringify(importDiagnostic, null, 2)}
               </pre>
             </details>
+          )}
+          {(importRecovery || recoveryLoading || recoveryError) && (
+            <section role="status" data-testid="buyanime-import-recovery" style={{ marginTop: '12px', padding: '12px', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '8px' }}>
+              <div>{importRecovery ? buyAnimeRecoveryMessage(importRecovery, recoveryVerified) : recoveryLoading ? '正在唯讀核對雲端匯入進度…' : '雲端匯入進度尚未確認。'}</div>
+              {recoveryError && <div style={{ color: '#b45309', marginTop: '6px' }}>{recoveryError}</div>}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                <button type="button" className="btn btn-secondary" onClick={handleVerifyCommittedImport} disabled={recoveryBusy || recoveryLoading || isImporting}>重新核對雲端資料</button>
+                {importRecovery && recoveryVerified && !['PLANNED','FAILED_PRE_COMMIT','COMPLETE'].includes(importRecovery.stage) && (
+                  <button type="button" className="btn btn-primary" onClick={handleResumeCommittedImport} disabled={recoveryBusy || isImporting}>繼續商品／規格同步</button>
+                )}
+                {importRecovery && ['PLANNED','FAILED_PRE_COMMIT'].includes(importRecovery.stage) && (
+                  <button type="button" className="btn btn-secondary" disabled={recoveryBusy || isImporting}
+                    onClick={() => { setImportRecovery(null); setRecoveryError(''); setRecoveryVerified(false); }}>
+                    返回選檔（主檔未提交）
+                  </button>
+                )}
+              </div>
+              {importRecovery && <details style={{ marginTop: '8px', fontSize: '12px' }}>
+                <summary>匯入進度技術資訊</summary>
+                <div style={{ overflowWrap: 'anywhere' }}>批次：{importRecovery.batchId}<br />階段：{importRecovery.stage}<br />預期／批次筆數：{importRecovery.expected.length}<br />商品／規格：{['CATALOG_VERIFIED','WACA_EVIDENCE_PENDING','COMPLETE'].includes(importRecovery.stage) ? '已核對' : '待完成／核對'}<br />WACA 來源：{importRecovery.stage === 'COMPLETE' ? '已完成' : '待完成'}</div>
+              </details>}
+            </section>
           )}
           {variantGuardProbeNotice && (
             <div

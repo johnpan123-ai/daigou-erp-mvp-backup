@@ -49,11 +49,13 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3}={
     await sql.query("insert into public.product_groups(id,title) values($1,'Synthetic group')",[uuid(1)]);
     await sql.query("insert into public.product_variants(id,product_group_id,myacg_item_code,product_title,variant_name) values($1,$2,'G-SYNTHETIC','Synthetic group','A')",[uuid(2),uuid(1)]);
   } catch(error){ await close(); throw error; }
-  const http=async(path,body,sub=owner)=>{
-    const response=await fetch(`http://127.0.0.1:${port}`+path,{method:body===undefined?'GET':'POST',headers:{
+  const http=async(path,body,sub=owner,options={})=>{
+    const response=await fetch(`http://127.0.0.1:${port}`+path,{method:options.method??(body===undefined?'GET':'POST'),headers:{
+      ...options.headers,
       ...(sub?{authorization:'Bearer '+token(sub)}:{}),...(body===undefined?{}:{'content-type':'application/json'}),
     },body:body===undefined?undefined:JSON.stringify(body)});
-    return {status:response.status,data:await response.json()};
+    const text=await response.text();
+    return {status:response.status,data:text?JSON.parse(text):null};
   };
   return {sql,url,close,http,async startPostgrest(){
     server=spawn('wsl.exe',['-e','env','PGRST_DB_URI='+url.toString(),'PGRST_DB_SCHEMAS=public',

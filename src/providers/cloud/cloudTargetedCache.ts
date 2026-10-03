@@ -13,6 +13,7 @@ import { cloudCacheDb as db } from '../../lib/db';
 import { supabase } from './supabaseClient';
 import type { CloudChange, CloudRefreshRequest, CloudRefreshResult, CloudResource } from './cloudSyncDomain';
 import { cloudBusinessRowsEqual } from './cloudRealtimeComparison';
+import { readCloudRowsByIds } from './cloudBulkRead';
 import { CLOUD_TABLE_RESOURCE, resolveCloudRowIdentity } from './cloudSyncDomain';
 import {
   getCloudConnectivitySnapshot,
@@ -340,7 +341,12 @@ export class CloudTargetedCache {
     const touchedIds = [...new Set(changes.map(change => change.canonicalId).filter(Boolean))];
     const databaseIds = [...new Set(changes.map(change => change.databaseId).filter(Boolean))];
     if (databaseIds.length === 0) return 0;
-    const rows = await this.query({ table, databaseIds, signal });
+    const rows = await readCloudRowsByIds({
+      table, ids: databaseIds, signal,
+      allowMissing: new Set(changes.filter(change => change.kind === 'DELETE').map(change => change.databaseId)),
+      expected: new Map(changes.filter(change => change.expectedFields).map(change => [change.databaseId, change.expectedFields!])),
+      load: (ids, chunkSignal) => this.query({ table, databaseIds: ids, signal: chunkSignal }),
+    });
     signal?.throwIfAborted();
     if (generation !== this.authoritativeGeneration) return 0;
     await this.merge(table, adapter, touchedIds, rows, conflicts);

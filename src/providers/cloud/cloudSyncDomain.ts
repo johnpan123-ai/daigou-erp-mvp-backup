@@ -19,6 +19,8 @@ export interface CloudChange {
   kind: CloudChangeKind;
   committedAt?: string;
   origin?: 'remote' | 'local';
+  /** Transient acknowledgement proof; never a durable field or Realtime payload. */
+  expectedFields?: Record<string, unknown>;
 }
 
 export interface CloudEntityIdentity {

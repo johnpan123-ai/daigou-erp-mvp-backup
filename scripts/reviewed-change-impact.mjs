@@ -10,6 +10,11 @@ const stable = value => Array.isArray(value) ? value.map(stable)
 export const impactHash = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
 export const regressionScripts = Object.freeze({
+  'buyanime-bulk': 'tests/cloud-bulk-readback.mjs',
+  'buyanime-resume': 'tests/buyanime-import-resume.mjs',
+  'buyanime-resume-real': 'tests/buyanime-readback-resume-isolated.mjs',
+  'buyanime-resume-ui': 'tests/inventory-cloud-import-flow.mjs',
+  'buyanime-resume-review': 'tests/buyanime-readback-change-impact.mjs',
   'buyanime-domain': 'tests/buyanime-canonical-identity.mjs',
   'buyanime-real': 'tests/buyanime-canonical-identity-isolated.mjs',
   'buyanime-ui': 'tests/buyanime-import-error-ui.mjs',

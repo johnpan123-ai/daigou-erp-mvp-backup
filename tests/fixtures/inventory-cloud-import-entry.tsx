@@ -2,11 +2,16 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { dataProvider } from '../../src/providers/dataProvider';
 import type { InventoryItem, ProductGroup } from '../../src/lib/db';
+import { normalizeProductTitle } from '../../src/lib/db';
 import Inventory from '../../src/pages/Inventory';
 import { ViewportProvider } from '../../src/contexts/ViewportContext';
+import { BuyAnimeResumeError, inventoryProof, proveInventoryRows, type BuyAnimeImportRecord } from '../../src/providers/cloud/buyAnimeImportResume';
+import { deterministicCloudUuid } from '../../src/providers/cloud/cloudEntityPayload';
+import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../../src/waca/masterReference';
 
 const inventoryRow = (index: number, title = `Authoritative ${index}`): InventoryItem => ({
   id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  version: 1,
   inventory_key: `key-${index}`,
   myacg_item_code: `SKU-${index}`,
   product_title: title,
@@ -57,6 +62,8 @@ let bootstrapPending = true;
 let resolveBootstrap: ((converged: boolean) => void) | null = null;
 const bootstrapConvergence = new Promise<boolean>(resolve => { resolveBootstrap = resolve; });
 let root: Root | null = null;
+let mockRecovery: BuyAnimeImportRecord | null = null;
+let allowCatalog = false;
 
 dataProvider.getProductGroups = async () => {
   callOrder.push('groups');
@@ -98,8 +105,8 @@ dataProvider.upsertInventory = async rows => {
   upsertCalls += 1;
   for (const row of rows) {
     const inventoryKey = row.inventory_key || row.myacg_item_code;
-    const canonicalRow = { ...row, inventory_key: inventoryKey };
     const index = inventory.findIndex(item => item.inventory_key === inventoryKey);
+    const canonicalRow = { ...row, inventory_key: inventoryKey, id: index >= 0 ? inventory[index].id : deterministicCloudUuid('inventory_items:' + inventoryKey), version: 1 };
     if (index >= 0) inventory[index] = { ...inventory[index], ...canonicalRow };
     else inventory.push(canonicalRow);
   }
@@ -111,7 +118,8 @@ dataProvider.upsertInventory = async rows => {
 };
 dataProvider.syncProductGroupsWithInventory = async () => {
   syncCalls += 1;
-  throw new Error('SERVER_AUTHORITATIVE_TRANSACTION_REQUIRED');
+  if (!allowCatalog) throw new Error('SERVER_AUTHORITATIVE_TRANSACTION_REQUIRED');
+  return { filledVariantsCount: 0, affectedGroupsCount: 0 };
 };
 dataProvider.getLastImportBackup = async () => null;
 dataProvider.saveLastImportBackup = async () => {};
@@ -138,6 +146,40 @@ dataProvider.commitNextWacaSnapshot = async snapshot => {
   wacaEvidenceCommits += 1;
   return wacaEvidenceCommits;
 };
+dataProvider.getBuyAnimeImportRecovery = async () => mockRecovery?.stage === 'COMPLETE' ? null : mockRecovery;
+dataProvider.verifyBuyAnimeImportRecovery = async record => {
+  const selected = inventory.filter(row => row.latest_catalog_import_id === record.batchId);
+  await proveInventoryRows(record, selected);
+};
+dataProvider.importBuyAnimeInventory = async (rows, fileName) => {
+  const stats = await dataProvider.upsertInventory(rows);
+  const imported = inventory.filter(row => row.latest_catalog_import_id === rows[0].latest_catalog_import_id);
+  mockRecovery = { format: 'BUYANIME_IMPORT_RESUME_V1', batchId: rows[0].latest_catalog_import_id!,
+    observedAt: rows[0].catalog_last_seen_at!, fileName, stats, stage: 'INVENTORY_VERIFIED', version: 1,
+    expected: await Promise.all(imported.map(inventoryProof)) };
+  return mockRecovery;
+};
+dataProvider.resumeBuyAnimeImport = async record => {
+  const imported = inventory.filter(row => row.latest_catalog_import_id === record.batchId);
+  try {
+    const currentGroups = await dataProvider.getProductGroups();
+    if (currentGroups.some(group => imported.some(row => normalizeProductTitle(row.product_title) === normalizeProductTitle(group.title))))
+      await dataProvider.syncProductGroupsWithInventory();
+    const variants = await dataProvider.getAuthoritativeWacaVariants();
+    const evidence = linksFromMyAcgInventory(imported, variants, record.fileName, record.observedAt);
+    if (evidence.links.length) {
+      const snapshot = await dataProvider.getNextWacaSnapshot();
+      const masterLinks = mergeMyAcgMasterLinks(snapshot.masterLinks, evidence.links);
+      if (JSON.stringify(masterLinks) !== JSON.stringify(snapshot.masterLinks))
+        await dataProvider.commitNextWacaSnapshot({ ...snapshot, masterLinks }, snapshot.revision, false);
+    }
+    mockRecovery = { ...record, stage: 'COMPLETE' };
+    return mockRecovery;
+  } catch (cause) {
+    mockRecovery = { ...record, stage: 'CATALOG_PENDING' };
+    throw new BuyAnimeResumeError('BUYANIME_CATALOG_PENDING', mockRecovery, cause);
+  }
+};
 dataProvider.getPurchaseBatches = empty as never;
 dataProvider.getPurchaseBatchItems = empty as never;
 dataProvider.getPrivateOrders = empty as never;
@@ -156,6 +198,7 @@ declare global {
     __INVENTORY_CLOUD_IMPORT_TEST__: {
       failNextImport: (error: { code?: string; message: string }) => void;
       failNextPostCommitGroupRead: () => void;
+      allowCatalogResume: () => void;
       completeBootstrap: () => void;
       prepareLateStaleRead: () => void;
       remount: () => void;
@@ -169,6 +212,7 @@ declare global {
 window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
   failNextImport: error => { nextImportError = error; },
   failNextPostCommitGroupRead: () => { armPostCommitGroupReadFailure = true; },
+  allowCatalogResume: () => { allowCatalog = true; },
   completeBootstrap: () => {
     if (!bootstrapPending) return;
     bootstrapPending = false;
