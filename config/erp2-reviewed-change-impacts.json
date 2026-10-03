@@ -2436,6 +2436,48 @@
         { "file": "tests/fixtures/inventory-cloud-import-entry.tsx", "beforeHash": "3bb646641389060c6d470338280e81e09ad561d145a3a4f12cacd70f3dffc4ae", "afterHash": "98a7a0a9858ba25f29c519bb750f8abb357ddb0836963c58c27723ef56c2b9de", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["one-click success UI test entry"] },
         { "file": "tests/inventory-cloud-import-flow.mjs", "beforeHash": "9c86e90ea9885ab90b47d24f42ef603b44f48b96e8f453583c551d68f97da2bc", "afterHash": "a0b049b43891d9bb8d5c3adf423784749bc87cbf6f89e0153b53420f749ec4ee", "classification": "APPLICATION_DOMAIN_ONLY", "functions": ["modal and no-recovery-controls regression"] }
       ]
+    },
+    {
+      "id": "buyanime-final-fast-import-branch-guard-v1",
+      "beforeHead": "d4fe1de2b85b5263a8d0db29ae4471bdd5f98c23",
+      "reviewedHead": "9b93a93106862f4ea12590b5dfd04944674699a6",
+      "patchSha256": "f04c1ca69b2b64d9bea887bacba8b9570891b1b832fd107840bb2310541528c9",
+      "requiredRegressions": [
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "config/erp-environment-identity.json",
+          "beforeHash": "f7f7c83ec6da1e832b817fb8ffbebc823b55edcdccd97c0c12e89222bb02e11e",
+          "afterHash": "d62f32215c87532089bc791ce3f67cf06b7ffec23a3b7355c3ec490207f3bd4f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["anchored codex/buyanime release branch family"],
+          "changedInputs": "Candidate branch name only.",
+          "changedOutputs": "BuyAnime release branches matching the exact anchored family may enter the existing Git, artifact, target and schema gates.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE: target account/project/Supabase/public fingerprint and lineage stay unchanged."
+        },
+        {
+          "file": "tests/erp2-promotion-guard.mjs",
+          "beforeHash": "40ef0d1d4e4ec4a7f71347b98a28165c56d4a91d2a71a3eb84ba89bf755ce1ab",
+          "afterHash": "c30301c007c1ec9ea869754a3e3ecbb67ac48d624ecac930afcd07fba5140b55",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["BuyAnime branch positive and unrelated-family negative regression"],
+          "changedInputs": "Synthetic Git branch identity fixtures.",
+          "changedOutputs": "Expected PASS for codex/buyanime-* and fail-closed for unrelated branch families.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        }
+      ]
     }
   ]
 }
