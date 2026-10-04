@@ -20,7 +20,11 @@ try {
   assert.deepEqual({rows:replay.links.length,inserted:replay.inserted,updated:replay.updated,unchanged:replay.unchanged},
     {rows:0,inserted:0,updated:0,unchanged:1},'timestamp-only observation must not churn evidence');
   const newSource=planMyAcgMasterLinkDelta(existing,[link('G-SYNTHETIC',{sourceFile:'new.xls',sourceFiles:['new.xls']})]);
-  assert.equal(newSource.links.length,1);assert.deepEqual(newSource.links[0].sourceFiles,['fixture.xls','new.xls']);
+  assert.deepEqual({rows:newSource.links.length,inserted:newSource.inserted,updated:newSource.updated,unchanged:newSource.unchanged},
+    {rows:0,inserted:0,updated:0,unchanged:1},'new file provenance alone must not rewrite every durable link');
+  const titleChange=planMyAcgMasterLinkDelta(existing,[link('G-SYNTHETIC',{sourceFile:'new.xls',sourceFiles:['new.xls'],variantTitle:'B'})]);
+  assert.equal(titleChange.links.length,1);assert.equal(titleChange.updated,1);
+  assert.deepEqual(titleChange.links[0].sourceFiles,['fixture.xls','new.xls'],'semantic updates retain merged provenance');
   assert.throws(()=>planMyAcgMasterLinkDelta(existing,[link('G-SYNTHETIC',{mainCode:'GP-CONFLICT'})]),/PARENT_CHILD_CONFLICT/u);
   const largeExisting=Array.from({length:10000},(_,i)=>link('G'+i));
   const smallDelta=planMyAcgMasterLinkDelta(largeExisting,[link('G9999'),link('G-NEW')]);

@@ -63,6 +63,23 @@ try {
   assert.equal(inventoryCommits,1);assert.equal(catalogCommits,1);assert.equal(wacaCommits,1);
   assert.deepEqual([...new Set(catalogKeys)],[importCatalogKey(batchId)]);
   assert.equal(new Set(catalogRequests).size,1,'Response-lost replay uses EXACT saved request');
+  // A pending provenance-only bulk intent from an older runtime is replanned
+  // against current authoritative links and closes without another WACA RPC.
+  const pendingBulk={...completed,stage:'WACA_EVIDENCE_PENDING',version:completed.version,waca:{
+    key:importWacaDeltaKey(batchId),expectedRevision:8,
+    links:Array.from({length:829},(_,index)=>({mainCode:'GP1',childCode:'G'+index,
+      productGroupId:uuid(900),productVariantId:uuid(901),variantTitle:'A',sourceFile:'new-file.xls',
+      sourceFiles:['old-file.xls','new-file.xls'],observedAt:'2026-10-04T10:25:26.372Z'})),
+    inserted:0,updated:829,unchanged:0,
+  }};
+  journal=structuredClone(pendingBulk);wacaCommits=0;
+  const originalPlanWaca=port.planWacaEvidence;
+  port.planWacaEvidence=async record=>({key:importWacaDeltaKey(record.batchId),expectedRevision:8,
+    links:[],inserted:0,updated:0,unchanged:829});
+  const reconciledBulk=await new BuyAnimeImportPipeline(port).resume(structuredClone(pendingBulk));
+  assert.equal(reconciledBulk.stage,'COMPLETE');assert.equal(wacaCommits,0,
+    'resumed provenance-only intent must not replay the 829-row WACA mutation');
+  port.planWacaEvidence=originalPlanWaca;
   await assert.rejects(() => proveInventoryRows(journal,authoritative.slice(1)),/COUNT_MISMATCH/);
   const corrupted = structuredClone(authoritative); corrupted[0].final_price++;
   await assert.rejects(() => proveInventoryRows(journal,corrupted),/FIELDS_MISMATCH/);

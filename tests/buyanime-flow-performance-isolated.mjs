@@ -73,7 +73,7 @@ try {
   await page.goto('http://127.0.0.1:4292/tests/fixtures/buyanime-resume-provider.html');
   await page.waitForFunction(()=>Boolean(window.__BUYANIME_RESUME_PROVIDER__));
   await page.evaluate(actor=>window.__BUYANIME_RESUME_PROVIDER__.setup(actor),owner);
-  const result=await page.evaluate(async ({base64,automatic,legacy,fault,uiBenchmark,changeOne,wacaDelta,preconditionWarm})=>{
+  const result=await page.evaluate(async ({base64,fileName,automatic,legacy,fault,uiBenchmark,changeOne,wacaDelta,preconditionWarm})=>{
     const bridge=window.__BUYANIME_RESUME_PROVIDER__, provider=bridge.provider();
     // T0 starts after the normal app bootstrap has a fresh authoritative
     // cache. Initial route loading is not part of selecting the XLS file.
@@ -126,7 +126,7 @@ try {
           record=await complete(candidate,...args);return record;
         };
         const {renderImportBenchmarkUi}=await import('/tests/fixtures/buyanime-performance-ui.tsx');
-        ui=await renderImportBenchmarkUi(provider,base64);
+        ui=await renderImportBenchmarkUi(provider,base64,fileName);
       } else {
         const {createAndDownloadWorkbenchBackup}=await import('/src/lib/workbenchJsonBackup.ts');
         await measure('Backup',()=>createAndDownloadWorkbenchBackup(provider,'isolated-before-import',new Date(),()=>{}));
@@ -135,8 +135,8 @@ try {
           ...(fault&&index===0?{myacg_sold_quantity:Number(row.myacg_sold_quantity||0)+1}:{}),
           latest_catalog_import_id:'catalog_import_411c6e55-cb73-41af-9ff1-61cf39cb532c',catalog_last_seen_at:'2026-10-03T04:52:25.877Z'})));
         if(legacy) record=await provider.recoverPendingBuyAnimeImport();
-        else if(automatic) record=await provider.completeBuyAnimeImport(rows,'399375_2026-10-03.xls');
-        else {record=await provider.importBuyAnimeInventory(rows,'399375_2026-10-03.xls');record=await provider.resumeBuyAnimeImport(record);}
+        else if(automatic) record=await provider.completeBuyAnimeImport(rows,fileName);
+        else {record=await provider.importBuyAnimeInventory(rows,fileName);record=await provider.resumeBuyAnimeImport(record);}
       }
     } catch(error) {
       const chain=[];for(let e=error,n=0;e&&n<6;e=e.cause,n++) chain.push({code:e.code,name:e.name,status:e.status,message:String(e.message||'')});
@@ -160,7 +160,7 @@ try {
     for(const span of spans){if(span.start>cursor)uncovered.push({start:cursor-total,end:span.start-total,duration:span.start-cursor});cursor=Math.max(cursor,span.end);}
     if(performance.now()>cursor)uncovered.push({start:cursor-total,end:performance.now()-total,duration:performance.now()-cursor});
     return {rows:record?.stats?.total??1505,stage:record.stage,inventoryPlanSummary,catalogPlanSummary,stages:Object.fromEntries(Object.entries(stages).map(([k,v])=>[k,Math.round(v)])),timeline:timeline.map(s=>({...s,start:Math.round(s.start-total),end:Math.round(s.end-total),duration:Math.round(s.duration)})),uncovered,longTasks,reactCommits:ui.commits,maxReactDurationMs:ui.maxDurationMs,modalText:ui.modalText,syncText:ui.syncText,trace:ui.trace,postSuccessCriticalRequests,metrics:bridge.metrics()};
-  },{base64:bytes.toString('base64'),automatic:process.env.BUYANIME_AUTO==='1',legacy:process.env.BUYANIME_LEGACY==='1',fault:process.env.BUYANIME_FAULT==='1',uiBenchmark:process.env.BUYANIME_UI_BENCHMARK==='1',changeOne:process.env.BUYANIME_CHANGE_ONE==='1',wacaDelta:process.env.BUYANIME_WACA_DELTA==='1',preconditionWarm:process.env.BUYANIME_PRECONDITION_WARM!=='0'});
+  },{base64:bytes.toString('base64'),fileName:process.env.BUYANIME_PERF_FILE_NAME||'399375_2026-10-03.xls',automatic:process.env.BUYANIME_AUTO==='1',legacy:process.env.BUYANIME_LEGACY==='1',fault:process.env.BUYANIME_FAULT==='1',uiBenchmark:process.env.BUYANIME_UI_BENCHMARK==='1',changeOne:process.env.BUYANIME_CHANGE_ONE==='1',wacaDelta:process.env.BUYANIME_WACA_DELTA==='1',preconditionWarm:process.env.BUYANIME_PRECONDITION_WARM!=='0'});
   if(result.failure) console.log(JSON.stringify(result));
   assert.equal(result.rows,1505);assert.equal(result.stage,'COMPLETE');
   if(process.env.BUYANIME_UI_BENCHMARK==='1')assert.equal(result.postSuccessCriticalRequests,0,'No Catalog/WACA/readback/sync request may continue after success');

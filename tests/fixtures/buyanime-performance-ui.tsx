@@ -78,7 +78,11 @@ const waitUntil = async (condition: () => boolean, code: string, timeoutMs = 30_
  * Starts the clock at the real file-input change and stops only when the
  * success dialog is visible while the shared Global Sync state is fresh.
  */
-export async function renderImportBenchmarkUi(provider: SupabaseProvider, base64: string) {
+export async function renderImportBenchmarkUi(
+  provider: SupabaseProvider,
+  base64: string,
+  fileName = '399375_2026-10-03.xls',
+) {
   bindProviderForImport(provider);
   setProviderMode('experimental');
   let controllerAttached = false;
@@ -123,7 +127,7 @@ export async function renderImportBenchmarkUi(provider: SupabaseProvider, base64
 
     const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
     const transfer = new DataTransfer();
-    transfer.items.add(new File([bytes], '399375_2026-10-03.xls', { type: 'application/vnd.ms-excel' }));
+    transfer.items.add(new File([bytes], fileName, { type: 'application/vnd.ms-excel' }));
     const input = node.querySelector<HTMLInputElement>('input[type="file"]');
     if (!input) throw new Error('ISOLATED_IMPORT_FILE_INPUT_MISSING');
     Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });

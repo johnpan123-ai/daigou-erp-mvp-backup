@@ -36,9 +36,10 @@ const comparableMasterLink = (link: MyAcgMasterLink) => JSON.stringify({
   productVariantId: link.productVariantId || '',
   productTitle: link.productTitle || '',
   variantTitle: link.variantTitle || '',
-  // sourceFile and observedAt identify an observation, not the durable
-  // parent/Variant relationship. sourceFiles is the monotonic provenance set.
-  sourceFiles: [...new Set(link.sourceFiles ?? (link.sourceFile ? [link.sourceFile] : []))].sort(),
+  // File names and observation timestamps are diagnostic provenance, not the
+  // durable parent/Variant relationship. Re-observing the same relationship
+  // in a newly downloaded catalog must not turn every master link into a
+  // business mutation.
 });
 
 export function linksFromMyAcgInventory(
@@ -107,9 +108,9 @@ export function mergeMyAcgMasterLinks(
 
 /**
  * Plan only the durable master-link rows whose semantic evidence changed.
- * Re-observing the same relationship in the same source file is a no-op even
- * when the import timestamp differs. A new source file remains durable
- * provenance and therefore is an update.
+ * Re-observing the same relationship is a no-op even when the import file or
+ * timestamp differs. Provenance is retained whenever a relationship itself
+ * is inserted or updated, but provenance alone never triggers an update.
  */
 export function planMyAcgMasterLinkDelta(
   existing: readonly MyAcgMasterLink[],

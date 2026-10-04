@@ -148,8 +148,8 @@ try{
   if(final.failure)console.log(JSON.stringify({phase:'final-recovery',...final}));
   assert.equal(final.stage,'COMPLETE');assert.equal(final.recovery,null);
   assert.equal(final.metrics.inventoryCommits,0);assert.equal(final.metrics.catalogRequests,0);
-  assert.equal(final.metrics.wacaRequests,wacaLoss.metrics.wacaRequests,
-    'Response-loss recovery must replay only the same idempotent WACA request');
+  assert.equal(final.metrics.wacaRequests,0,
+    'Response-loss recovery must reconcile committed evidence without replaying the WACA request');
   assert.equal((await db.sql.query('select revision from waca_state')).rows[0].revision,wacaRevision);
   assert.equal((await db.sql.query('select count(*)::int n from erp_idempotency_keys')).rows[0].n,ledgerAfterWaca);
   assert.equal(externalRequests,0);

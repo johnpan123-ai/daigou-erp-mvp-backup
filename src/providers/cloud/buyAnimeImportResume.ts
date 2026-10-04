@@ -202,6 +202,7 @@ export class BuyAnimeImportPipeline {
     let record = proven ? input : await this.port.load(input.batchId) ?? input;
     assertImportRecord(record);
     if (record.stage === 'COMPLETE') return record;
+    const resumedWacaIntent = record.stage === 'WACA_EVIDENCE_PENDING';
     // No code path in resume calls prepareInventory or commitInventory.
     if (['PLANNED', 'FAILED_PRE_COMMIT'].includes(record.stage)) throw new BuyAnimeResumeError('BUYANIME_NOT_COMMITTED', record);
     this.verified.delete(input);
@@ -272,8 +273,26 @@ export class BuyAnimeImportPipeline {
       // WACA evidence is part of the user-visible success contract. Keep the
       // durable intent, but never display success before this finishes.
       if (!record.waca) throw new BuyAnimeResumeError('BUYANIME_WACA_INTENT_MISSING', record);
-      await this.port.commitWacaEvidence(record.waca);
-      markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length, deltaRows: record.waca.links.length });
+      let waca = record.waca;
+      if (resumedWacaIntent) {
+        // Reconcile a durable pending intent against current authoritative
+        // evidence before replay. This closes response-loss safely and also
+        // lets older journals discard provenance-only bulk updates without
+        // resending Inventory or Catalog.
+        const reconciled = await this.port.planWacaEvidence(record, rows);
+        if (reconciled.key !== waca.key)
+          throw new BuyAnimeResumeError('BUYANIME_WACA_INTENT_CONFLICT', record);
+        if (reconciled.links.length === 0) {
+          markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length, deltaRows: 0 });
+          return this.store(record, { stage: 'COMPLETE', waca: undefined });
+        }
+        if (stable(reconciled) !== stable(waca)) {
+          record = await this.store(record, { stage: 'WACA_EVIDENCE_PENDING', waca: reconciled });
+          waca = reconciled;
+        }
+      }
+      await this.port.commitWacaEvidence(waca);
+      markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length, deltaRows: waca.links.length });
       record = await this.store(record, { stage: 'COMPLETE', waca: undefined });
     }
     return record;
