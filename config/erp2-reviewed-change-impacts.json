@@ -2478,6 +2478,147 @@
           "changedIdentitySemantics": "NONE"
         }
       ]
+    },
+    {
+      "id": "buyanime-production-wall-clock-trace-v1",
+      "beforeHead": "ccd18ca0de8644dbf9296e1e22e00da29b89d22d",
+      "reviewedHead": "fa347f5b10daf0007b967f40c86d06b084346ef6",
+      "patchSha256": "41f5fb469fd7beb9504116ec6bec1a2766ddc069530abc894f3c9d74226de191",
+      "requiredRegressions": [
+        "buyanime-production-trace",
+        "buyanime-simple-flow",
+        "buyanime-cache-authority",
+        "buyanime-resume",
+        "buyanime-resume-ui",
+        "buyanime-provider",
+        "buyanime-domain",
+        "buyanime-lint-delta",
+        "sync",
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "3bafccc1dd9096bb1f4e5e8f00bc67782aa2134948083e2e2990e61a78c3c1b2",
+          "afterHash": "7db2470c579904731f0515641c657599740fb8997eaa8e94698f1e3e894ee1dd",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["production trace regression registry"],
+          "changedInputs": "One exact regression identifier.",
+          "changedOutputs": "Guard can execute the production trace safety regression.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "src/contexts/CloudRealtimeSyncContext.tsx",
+          "beforeHash": "0b0dd15208d4b1fecbfa0f0475bd62a10b46d5cb49b1ffb76c31f3fbf41c4175",
+          "afterHash": "163ab82da83ba13d73c38c996e41e4c12d54e369247ca0c2f15fada323af1c12",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["refreshForBuyAnimeImport diagnostic markers"],
+          "changedInputs": "Existing BuyAnime refresh lifecycle only.",
+          "changedOutputs": "Safe T23-T29 timing events; refresh and sync results are unchanged.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "src/diagnostics/buyAnimeProductionTrace.ts",
+          "beforeHash": null,
+          "afterHash": "5b1b43e3e8af6b828d5c30741af4ed0f1618f7cf66ecf242180d133180e9b353",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["beginBuyAnimeProductionTrace", "markBuyAnimeTrace", "recordBuyAnimeReactCommit", "finishBuyAnimeProductionTrace", "getLatestBuyAnimeProductionTrace"],
+          "changedInputs": "Safe timing signals, file size/extension, resource timing metadata and stage status.",
+          "changedOutputs": "One local diagnostic trace with T00-T31, spans, network categories, long tasks and render counts; no business rows or secrets.",
+          "changedDurableFields": "NONE: diagnostics-only local key is not an ERP durable resource.",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "src/pages/Inventory.tsx",
+          "beforeHash": "696039d0f9d4b666f40bd93725ba1b9743cf5abcaaa82d55c09489d7dd489540",
+          "afterHash": "a5fce8a3e43fb96fccaac23add4206376210f0f856b9449eb5b7d162e78ee361",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["handleFileChange diagnostic lifecycle", "Inventory React profiler", "safe diagnostic copy panel"],
+          "changedInputs": "Existing file-selection and success/failure lifecycle.",
+          "changedOutputs": "T00/T05-T07/T25/T30-T31 timing evidence and a collapsed copyable safe diagnostic panel.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportResume.ts",
+          "beforeHash": "fd841d8c62e3f4793d68bef6518e16c3f49d9478fa2e9e077e5307c089d683d3",
+          "afterHash": "44bf097d56928c3103f0736853ba1aa7841d2db3d8c8550f6d4440bf753c17c7",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["BuyAnimeImportPipeline diagnostic markers"],
+          "changedInputs": "Existing inventory, acknowledgement, catalog and WACA stage boundaries.",
+          "changedOutputs": "T10-T22 timing events; mutations, arguments, retries, ordering and read-back behavior are unchanged.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "src/providers/cloud/inventoryImportPlan.ts",
+          "beforeHash": "43b1289e3c2087e11250aa61f123eb28514c544f522ef5533cd4467846213a06",
+          "afterHash": "a965539957e14d95b480e2b77ba61151cbe88d12c2a077c231ada3a60a8bcaad",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["buildInventoryIndex diagnostic markers"],
+          "changedInputs": "Existing in-memory inventory planning input.",
+          "changedOutputs": "T08-T09 timing events only; plan contents are unchanged.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "src/utils/myacgParser.ts",
+          "beforeHash": "c4321b0bb86401c567e5c33cc190082143158458a223518691a43e15b44c5bb3",
+          "afterHash": "d400395c26b2d9505e8ba16a84d31563fd14b39230642b1fae81d88195c2cc72",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["parseMyacgFile diagnostic markers"],
+          "changedInputs": "Existing file read and workbook parse lifecycle.",
+          "changedOutputs": "T01-T04 timing events only; parser output and validation are unchanged.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        },
+        {
+          "file": "tests/buyanime-production-trace.mjs",
+          "beforeHash": null,
+          "afterHash": "1ea3b34560fe411f3f1fcebf8374a3e5b29014d36b3cd7488d2016b91984bff3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["production trace safety, completeness, privacy and overhead regression"],
+          "changedInputs": "Synthetic timing events only.",
+          "changedOutputs": "Asserts T00-T31 coverage, safe storage, no file name, attributed wall clock and low overhead.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        }
+      ]
     }
   ]
 }
