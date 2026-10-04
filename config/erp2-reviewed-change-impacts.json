@@ -2803,6 +2803,51 @@
           "changedIdentitySemantics": "NONE"
         }
       ]
+    },
+    {
+      "id": "reviewed-resume-helper-contract-v1",
+      "beforeHead": "45d678946d51c2a91c672da29470c8c482b1d559",
+      "reviewedHead": "9c2f4c4675678623ec04bf29da5900f81db0934c",
+      "patchSha256": "6ec21210df7c066d0014c4f783cb85fc74dc57847baac883c6a519f3b736cccf",
+      "requiredRegressions": ["guard", "promotion", "buyanime-resume", "buyanime-resume-real"],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "320b081df9e0c109a120b4a1c4c395daa0215664d4fa238efa8e4e73fa6a9fbe",
+          "afterHash": "549a2095c2d5d37e8264ea8485c936abb06aa58f15d8a5c7b5921da3aedc788c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["assertReviewedProviderContract BuyAnime resume validation"],
+          "changedInputs": "An immutable exact review of the existing BuyAnime resume helper.",
+          "changedOutputs": "A revised exact helper is accepted only while its AST remains free of direct Supabase, fetch, IndexedDB, Web Storage and database calls.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "The existing port-only boundary remains mandatory; no direct provider or persistence API is allowed.",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE",
+          "dataFlow": "Static reviewed-source validation only.",
+          "persistenceBehavior": "NONE",
+          "writePath": "NONE",
+          "providerPath": "Guard validation of the existing resume helper.",
+          "externalContract": "No runtime or cloud contract change.",
+          "schemaExpectation": "Unchanged ERP2 semantic schema v3."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "030ed24a9ea187c050b5c39aba4a76e28d1e68bdc31f92baa4b327cce8f41df0",
+          "afterHash": "1ddd3673cf74d03e6384f655a8fa3ef665f2e834f1236ae0b021c20f3f6270f3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["resume helper positive and direct-I/O negative Guard regression"],
+          "changedInputs": "The exact success-gate resume patch and a synthetic direct-fetch mutation.",
+          "changedOutputs": "Asserts the reviewed port-only helper passes and a direct persistence escape fails closed.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        }
+      ]
     }
   ]
 }
