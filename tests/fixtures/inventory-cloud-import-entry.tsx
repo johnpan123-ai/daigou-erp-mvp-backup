@@ -7,7 +7,6 @@ import Inventory from '../../src/pages/Inventory';
 import { ViewportProvider } from '../../src/contexts/ViewportContext';
 import { BuyAnimeResumeError, inventoryProof, proveInventoryRows, type BuyAnimeImportRecord } from '../../src/providers/cloud/buyAnimeImportResume';
 import { deterministicCloudUuid } from '../../src/providers/cloud/cloudEntityPayload';
-import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../../src/waca/masterReference';
 import { coordinateBuyAnimeImport, finishBuyAnimeImport, publishBuyAnimeFlow, buyAnimeFlowLabel } from '../../src/providers/cloud/buyAnimeImportCoordinator';
 
 const inventoryRow = (index: number, title = `Authoritative ${index}`): InventoryItem => ({
@@ -167,14 +166,6 @@ dataProvider.resumeBuyAnimeImport = async record => {
     const currentGroups = await dataProvider.getProductGroups();
     if (currentGroups.some(group => imported.some(row => normalizeProductTitle(row.product_title) === normalizeProductTitle(group.title))))
       await dataProvider.syncProductGroupsWithInventory();
-    const variants = await dataProvider.getAuthoritativeWacaVariants();
-    const evidence = linksFromMyAcgInventory(imported, variants, record.fileName, record.observedAt);
-    if (evidence.links.length) {
-      const snapshot = await dataProvider.getNextWacaSnapshot();
-      const masterLinks = mergeMyAcgMasterLinks(snapshot.masterLinks, evidence.links);
-      if (JSON.stringify(masterLinks) !== JSON.stringify(snapshot.masterLinks))
-        await dataProvider.commitNextWacaSnapshot({ ...snapshot, masterLinks }, snapshot.revision, false);
-    }
     mockRecovery = { ...record, stage: 'COMPLETE' };
     return mockRecovery;
   } catch (cause) {

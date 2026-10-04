@@ -132,11 +132,10 @@ try {
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().recoveryStage === 'COMPLETE');
     assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls,3);
     await importFile('gp-evidence.xls', 'GP-EVIDENCE-G', 'GP Evidence Product', 'GP-EVIDENCE-001');
-    await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot().commits === 1);
+    await page.getByTestId('buyanime-import-success-modal').waitFor();
     const evidence = await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot());
-    assert.equal(evidence.links.length, 1, 'Cloud catalog import must persist GP → G evidence once');
-    assert.equal(evidence.links[0].mainCode, 'GP-EVIDENCE-001');
-    assert.equal(evidence.links[0].childCode, 'GP-EVIDENCE-G');
+    assert.equal(evidence.commits,0,'BuyAnime UI completion must not write WACA evidence');
+    assert.deepEqual(evidence.links,[],'Independent WACA workflow, not BuyAnime, persists WACA master evidence');
   } finally {
     await browser.close();
   }
@@ -144,4 +143,4 @@ try {
   vite.kill();
 }
 
-console.log('PASS one-file UI, no normal recovery controls, unlocked import button, simple bounded-failure retry, no Inventory replay, bootstrap/stale-race/GP evidence preserved');
+console.log('PASS one-file UI, no normal recovery controls, unlocked import button, simple bounded-failure retry, no Inventory replay, bootstrap/stale-race preserved, zero WACA evidence writes');
