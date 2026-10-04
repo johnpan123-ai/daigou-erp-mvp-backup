@@ -42,6 +42,32 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '053': {
+    sourceFile:'053_outbound_status_changed_at_restore_compatibility.sql',dependencies:['045c','052'],
+    risk:'LOW_INTERNAL_RESTORE_WRITER_COMPATIBILITY',idempotency:'CREATE_OR_REPLACE_STATE_GUARDED',
+    allowPartialApply:true,
+    preconditions:[
+      table('outbound_shipments'),column('outbound_shipments','status_changed_at','timestamp with time zone'),
+      fn('erp_set_outbound_status_changed_at()'),fn('erp_cloud_restore_insert_rows(regclass,jsonb)'),
+      fn('erp_merge_waca_master_links(uuid,jsonb)'),
+    ],
+    postconditions:[fn('erp_cloud_restore_insert_rows(regclass,jsonb)',{
+      owner:'postgres',returnType:'bigint',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:false,anonExecute:false,requiredConfig:['search_path=pg_catalog, public'],
+      definitionIncludes:['jsonb_to_recordset(p_rows)','status_changed_at',
+        'CLOUD_RESTORE_OUTBOUND_TIMESTAMP_EVIDENCE_MISSING',
+        'CLOUD_RESTORE_OUTBOUND_TIMESTAMP_ROW_COUNT_MISMATCH',
+        'CLOUD_RESTORE_OUTBOUND_TIMESTAMP_MISMATCH'],
+    }),fn('sync_audit_columns()',{
+      owner:'postgres',returnType:'trigger',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:false,anonExecute:false,requiredConfig:['search_path=public'],
+      definitionIncludes:['outbound_shipments','to_jsonb(new) - \'status_changed_at\''],
+    }),fn('erp_set_outbound_status_changed_at()',{
+      owner:'postgres',returnType:'trigger',securityDefiner:false,publicExecute:false,
+      authenticatedExecute:false,anonExecute:false,requiredConfig:['search_path=pg_catalog, public'],
+      definitionIncludes:['OUTBOUND_STATUS_TIMESTAMP_SYSTEM_MANAGED','current_user'],
+    }),q('trigger','public.outbound_shipments.erp_outbound_status_changed_at')],
+  },
   '052': {
     sourceFile:'052_waca_master_link_delta_merge.sql',dependencies:['044','051'],
     risk:'LOW_ADDITIVE_FUNCTION_ONLY',idempotency:'IDEMPOTENCY_STORE_AND_WACA_REVISION_CAS',

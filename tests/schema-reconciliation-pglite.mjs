@@ -10,11 +10,13 @@ import { fingerprintStructuralSnapshot, fingerprintStructuralSnapshotV2 } from '
 const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
-const releaseFiles = CANONICAL_FRESH_INSTALL_V3.slice(-4);
+const releaseFiles = CANONICAL_FRESH_INSTALL_V3.slice(-5);
 const saveabilityFiles = releaseFiles.slice(0, 3);
 const wacaDeltaFile = releaseFiles[3];
+const restoreCompatFile = releaseFiles[4];
 const v4Fingerprint = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
-const v5Fingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
+const v6Fingerprint = '1d39f5fa7f116ac740a9b42fb7add07fb16c63eab968a8d735319acc38f31008';
+const v7Fingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
 const partialPlans = [];
 
 async function createDatabase() {
@@ -59,16 +61,19 @@ const partialBridge = await createDatabase();
 const compatibility = await createDatabase();
 try {
   assert.deepEqual(saveabilityFiles.map(file => file.slice(0, 3)), ['049', '050', '051']);
-  await apply(fresh, CANONICAL_FRESH_INSTALL_V3.slice(0, -4), 'fresh-v4');
+  await apply(fresh, CANONICAL_FRESH_INSTALL_V3.slice(0, -5), 'fresh-v4');
   const freshV4Snapshot = await capture(fresh);
   assert.equal(fingerprintStructuralSnapshotV2(freshV4Snapshot), v4Fingerprint);
   await apply(fresh, saveabilityFiles, 'fresh-v5');
   const freshV5Snapshot = await capture(fresh);
   assert.equal(fingerprintStructuralSnapshot(freshV5Snapshot), 'ec63a2eb2c69cd7984ca9c61584e9f092ee22bcabb70c051e8ca7aad5f66bf4c');
   await apply(fresh, [wacaDeltaFile], 'fresh-v6');
+  const freshV6Snapshot = await capture(fresh);
+  assert.equal(fingerprintStructuralSnapshot(freshV6Snapshot), v6Fingerprint);
+  await apply(fresh, [restoreCompatFile], 'fresh-v7');
   const freshSnapshot = await capture(fresh);
-  assert.equal(fingerprintStructuralSnapshot(freshSnapshot), v5Fingerprint);
-  assert.equal(fingerprintStructuralSnapshotV2(freshSnapshot), '7c1af9ee6baf3be09c2640deece4ed4b397c5fbe5281f05c7e45958338e86521');
+  assert.equal(fingerprintStructuralSnapshot(freshSnapshot), v7Fingerprint);
+  assert.equal(fingerprintStructuralSnapshotV2(freshSnapshot), '64d84a4fe60bc9b73c1ba29e6392e7d2c254dcbb5faba8fb2aba9897cbd7e076');
   const bridgeIndex = CANONICAL_FRESH_INSTALL_V3.indexOf('026b_cloud_inventory_uuid_identity_bridge.sql');
   const wacaStart = CANONICAL_FRESH_INSTALL_V3.indexOf('044_waca_cloud_ledger.sql');
   await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(0, bridgeIndex), 'pre-bridge');
@@ -100,7 +105,7 @@ try {
 
   const registry = await buildMigrationEffectRegistry();
   const plan = planSchemaDelta(freshSnapshot, registry, { expectedSnapshot: upgradedSnapshot,
-    requiredBaselineId: 'erp2-canonical-schema-v6-waca-master-delta' });
+    requiredBaselineId: 'erp2-canonical-schema-v7-outbound-status-restore-compat' });
   const failed = plan.migrations.filter(item => item.state !== 'SATISFIED');
   assert.deepEqual(failed.map(item => ({ id: item.migrationId, state: item.state,
     failed: item.postconditions.filter(check => check.result !== 'MATCH').map(check => check.condition.object) })), []);
@@ -137,7 +142,7 @@ try {
   const repairedPlan = planSchemaDelta(repairedSnapshot, registry, { expectedSnapshot: freshSnapshot });
   assert.ok(['046','046b','047','048'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
   assert.equal(repairedPlan.readyForApply, true);
-  assert.deepEqual(repairedPlan.applyPlan.map(item => item.migrationId), ['049', '050', '051', '052']);
+  assert.deepEqual(repairedPlan.applyPlan.map(item => item.migrationId), ['049', '050', '051', '052', '053']);
   console.log('PASS fresh and repaired live-like 048 preserve the independent v4 baseline fingerprint');
 
   for (const [index, file] of releaseFiles.entries()) {
@@ -151,10 +156,10 @@ try {
     partialPlans.push({ applied: file.slice(0, 3), remaining });
   }
   const finalSnapshot = await capture(compatibility);
-  assert.equal(fingerprintStructuralSnapshot(finalSnapshot), v5Fingerprint);
+  assert.equal(fingerprintStructuralSnapshot(finalSnapshot), v7Fingerprint);
   assert.deepEqual(Object.keys(finalSnapshot.tables).sort(), Object.keys(repairedSnapshot.tables).sort());
-  await apply(compatibility, releaseFiles, 'v6-replay');
-  assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), v5Fingerprint);
+  await apply(compatibility, releaseFiles, 'v7-replay');
+  assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), v7Fingerprint);
 
   const partialV5 = structuredClone(finalSnapshot);
   delete partialV5.functions['public.erp_reconcile_private_order_transaction(uuid, jsonb)'];
@@ -170,7 +175,7 @@ try {
   const unknownV5Plan = planSchemaDelta(unknownV5, registry, { expectedSnapshot: freshSnapshot });
   assert.equal(unknownV5Plan.readyForApply, false);
   assert.ok(unknownV5Plan.migrations.some(item => item.state === 'UNKNOWN'));
-  console.log('PASS v4→049→050→051→052 partial planners, final v6, reapply, and UNKNOWN/PARTIAL fail-closed');
+  console.log('PASS v4→049→050→051→052→053 partial planners, final v7, reapply, and UNKNOWN/PARTIAL fail-closed');
 
   const owner = '00000000-0000-4000-8000-000000000099';
   await fresh.exec(`insert into auth.users(id,email) values('${owner}','owner@example.com');
@@ -178,7 +183,7 @@ try {
     set role authenticated; set request.jwt.claim.sub='${owner}';`);
   const metadata = JSON.stringify({ historicalMigrationExecutionClaimed: false,
     classification: 'ENVIRONMENT_LOCAL_NON_PORTABLE_OPS_METADATA' });
-  const args = ['BASELINE_ADOPTED','erp2-canonical-schema-v6-waca-master-delta','a'.repeat(64),'c'.repeat(40),
+  const args = ['BASELINE_ADOPTED','erp2-canonical-schema-v7-outbound-status-restore-compat','a'.repeat(64),'c'.repeat(40),
     'checkpoint-fixture','b'.repeat(64),'b'.repeat(64),'PRODUCTION','rhfdjsklfrgpoqsaqpkn','PASS',metadata];
   const placeholders = args.map((_, index) => index === args.length - 1
     ? `$${index + 1}::jsonb` : `$${index + 1}`).join(',');
@@ -194,5 +199,5 @@ try {
 }
 
 console.log(JSON.stringify({ result: 'PASS', engine: 'PGlite PostgreSQL 18',
-  v4Fingerprint, v5Fingerprint, partialPlans, reapply: true, unknownPartialFailClosed: true,
+  v4Fingerprint, v6Fingerprint, v7Fingerprint, partialPlans, reapply: true, unknownPartialFailClosed: true,
   liveMutation: 0 }));

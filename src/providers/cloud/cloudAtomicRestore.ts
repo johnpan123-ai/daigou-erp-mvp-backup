@@ -273,6 +273,12 @@ const normalizeRows = (
     for (const metadataField of SAFE_SNAPSHOT_METADATA) {
       if (metadataField in value) row[metadataField] = value[metadataField];
     }
+    // This timestamp is server-managed for normal mutations, but it is also
+    // durable business history. Preserve it only in the Atomic Restore
+    // candidate so the internal writer can restore the backup value exactly.
+    if (table === 'outbound_shipments' && 'status_changed_at' in value) {
+      row.status_changed_at = value.status_changed_at;
+    }
     delete row.version;
     return Object.fromEntries(Object.entries(row).filter(([, fieldValue]) => fieldValue !== undefined));
   });

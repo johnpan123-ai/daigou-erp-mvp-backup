@@ -51,6 +51,7 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '050_catalog_atomic_transaction.sql',
   '051_related_saveability_atomic_transactions.sql',
   '052_waca_master_link_delta_merge.sql',
+  '053_outbound_status_changed_at_restore_compatibility.sql',
 ]);
 
 // Checksum-bearing source history. These artifacts remain reviewable and are
@@ -70,6 +71,7 @@ export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
   '050_catalog_atomic_transaction.sql',
   '051_related_saveability_atomic_transactions.sql',
   '052_waca_master_link_delta_merge.sql',
+  '053_outbound_status_changed_at_restore_compatibility.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,
