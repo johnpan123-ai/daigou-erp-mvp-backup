@@ -18,7 +18,7 @@ import { readdir } from 'node:fs/promises';
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
-assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051','052','053'].sort());
+assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051','052','053','054'].sort());
 assert.deepEqual(registry['049'].dependencies, ['048']);
 assert.deepEqual(registry['050'].dependencies, ['049']);
 assert.deepEqual(registry['051'].dependencies, ['050']);

@@ -42,6 +42,17 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '054': {
+    sourceFile:'054_authoritative_backup_json_aggregation.sql',dependencies:['053'],
+    risk:'LOW_READ_ONLY_EXPORT_OPTIMIZATION',idempotency:'CREATE_OR_REPLACE_EXACT_OUTPUT_PARITY',
+    preconditions:[fn('erp_export_cloud_restore_snapshot()'),...WACA_TABLES.map(name=>table(name))],
+    postconditions:[fn('erp_export_cloud_restore_snapshot()',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=pg_catalog, public, extensions'],
+      definitionIncludes:['json_build_object','json_agg(t order by t.inventory_key)',
+        'json_agg(t order by t.id)','waca_state','import_batches','CLOUD_RESTORE_OWNER_REQUIRED'],
+    })],
+  },
   '053': {
     sourceFile:'053_outbound_status_changed_at_restore_compatibility.sql',dependencies:['045c','052'],
     risk:'LOW_INTERNAL_RESTORE_WRITER_COMPATIBILITY',idempotency:'CREATE_OR_REPLACE_STATE_GUARDED',

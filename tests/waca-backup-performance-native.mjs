@@ -1,0 +1,148 @@
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+import {randomUUID,createHash} from 'node:crypto';
+import {performance} from 'node:perf_hooks';
+import {createServer} from 'vite';
+import {transform} from 'esbuild';
+import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
+import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
+const migrationFile='054_authoritative_backup_json_aggregation.sql';
+const migration=readFileSync('supabase/sql/'+migrationFile,'utf8');
+assert.doesNotMatch(migration,/alter\s+role|set\s+statement_timeout|insert\s+into|update\s+public|create\s+table|alter\s+table/iu);
+const path=process.env.WACA_BACKUP_SCALE_FIXTURE;
+assert.ok(path,'WACA_BACKUP_SCALE_FIXTURE required: safe LOCAL snapshot only');
+const snapshot=JSON.parse(readFileSync(path,'utf8'));
+assert.equal(Object.keys(snapshot).length,24);
+assert.ok(Object.values(snapshot).reduce((n,rows)=>n+rows.length,0)>=25000);
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(file=>file!==migrationFile)});
+const vite=await createServer({configFile:false,server:{middlewareMode:true,hmr:false},optimizeDeps:{noDiscovery:true,include:[]}});
+const stats=times=>{const a=[...times].sort((a,b)=>a-b);return {runs:a.length,medianMs:a[Math.floor(a.length/2)],p95Ms:a[Math.ceil(a.length*.95)-1],minMs:a[0],maxMs:a.at(-1),timesMs:times};};
+const rpc=async(name,body={})=>{const result=await db.http('/rpc/'+name,body);if(result.status!==200)throw result.data;return result.data;};
+const summary={engine:'native PostgreSQL + PostgREST',resources:24,liveMutation:0};
+const assertRestoreParity=(expected,actual)=>{
+ const differences={};let disallowed=0;
+ for(const [table,rows]of Object.entries(expected)){
+  assert.equal(actual[table].length,rows.length,'RESTORE_COUNT:'+table);
+  const byId=new Map(actual[table].map(row=>[String(row.id??row.inventory_key),row]));
+  for(const row of rows){
+   const found=byId.get(String(row.id??row.inventory_key));assert.ok(found,'RESTORE_IDENTITY:'+table);
+   for(const key of new Set([...Object.keys(row),...Object.keys(found)])){
+    if(JSON.stringify(row[key])===JSON.stringify(found[key]))continue;
+    const equivalent=key.endsWith('_at')&&Number.isFinite(Date.parse(row[key]))&&Date.parse(row[key])===Date.parse(found[key]);
+    differences[table+'.'+key]=(differences[table+'.'+key]??0)+1;if(!equivalent)disallowed++;
+   }
+  }
+ }
+ console.log(JSON.stringify({stage:'restore-parity',disallowed,differences}));
+ assert.equal(disallowed,0,'RESTORE_SEMANTIC_PARITY');
+};
+let stage='restore';
+try {
+ const {sql}=db;
+ for(const id of new Set(Object.values(snapshot).flatMap(rows=>rows.map(row=>row.updated_by).filter(id=>id&&id!==owner)))){
+  await sql.query('insert into auth.users(id,email) values($1,$2) on conflict do nothing',[id,'isolated@example.invalid']);
+ }
+ const audit=(await sql.query('select public.erp_cloud_restore_audit_dataset($1) report',[snapshot])).rows[0].report;
+ const manifest={schemaVersion:'cloud-erp-snapshot-v2',resourceCount:24,counts:audit.table_counts,totalRows:Number(audit.total_rows),orphanCount:0,duplicateVariantIdCount:0,duplicateVariantLocalIdCount:0};
+ assert.equal((await sql.query("select public.erp_restore_cloud_snapshot($1,repeat('a',64),$2,$3,'isolated-native') result",[randomUUID(),snapshot,manifest])).rows[0].result.ok,true);
+ const timestamps=(await sql.query('select id,status_changed_at from public.outbound_shipments')).rows;
+ assert.equal(timestamps.length,37);
+ for(const row of timestamps)assert.equal(row.status_changed_at===null?null:new Date(row.status_changed_at).getTime(),snapshot.outbound_shipments.find(expected=>expected.id===row.id).status_changed_at===null?null:Date.parse(snapshot.outbound_shipments.find(expected=>expected.id===row.id).status_changed_at));
+ summary.outboundTimestamps='37/37 MATCH';summary.rows=manifest.totalRows;
+ // Database-local role configuration cannot change any other isolated database
+ // or production role. It disappears when this disposable database is dropped.
+ const database=(await sql.query('select current_database() name')).rows[0].name;
+ assert.match(database,/^waca_v3_save_[a-f0-9]+$/u);
+ await sql.query(`alter role authenticated in database ${database} set statement_timeout='8s'`);
+ // PostgREST does not necessarily hoist database-local role settings. Set the
+ // disposable connection startup budget too, and verify it inside HTTP rather
+ // than assuming an ALTER ROLE command proves the effective request budget.
+ db.url.searchParams.set('options','-cstatement_timeout=8s');
+ await sql.query("create function public.erp2_backup_probe_budget() returns text language sql stable as $$ select current_setting('statement_timeout') $$; grant execute on function public.erp2_backup_probe_budget() to authenticated");
+ await db.startPostgrest();
+ assert.equal(await rpc('erp2_backup_probe_budget'),'8s');
+ await sql.query('drop function public.erp2_backup_probe_budget()');
+ let original;
+ stage='http-before';const before=[];
+ for(let n=0;n<5;n++){const start=performance.now();const value=await rpc('erp_export_cloud_restore_snapshot');before.push(performance.now()-start);if(!original)original=value;else assert.deepEqual(value,original);}
+ summary.before=stats(before);console.log(JSON.stringify({stage,...summary.before}));
+ await sql.query(migration);
+ stage='http-after';const after=[];
+ for(let n=0;n<5;n++){const start=performance.now();const value=await rpc('erp_export_cloud_restore_snapshot');after.push(performance.now()-start);assert.deepEqual(value,original);}
+ summary.after=stats(after);assert.ok(summary.after.p95Ms<6500);console.log(JSON.stringify({stage,...summary.after}));
+ const profile=(await sql.query("select proconfig from pg_proc where oid='public.erp_export_cloud_restore_snapshot()'::regprocedure")).rows[0].proconfig;
+ assert.equal(profile.some(value=>value.startsWith('statement_timeout=')),false);
+ assert.notEqual((await db.http('/rpc/erp_export_cloud_restore_snapshot',{},null)).status,200);
+ assert.notEqual((await db.http('/rpc/erp_export_cloud_restore_snapshot',{},'00000000-0000-4000-8000-000000000098')).status,200);
+ summary.acl='PASS';summary.outputParity='PASS';summary.executionBudget='authenticated 8s unchanged';
+ const {buildCloudRestoreManifest}=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
+ const built=await buildCloudRestoreManifest(original,original);assert.ok(built);assert.equal(built.manifest.resourceCount,24);
+ summary.manifest='PASS';summary.relationships='PASS';summary.checksums='PASS';
+ stage='restore-after-export';
+ assert.equal((await sql.query("select public.erp_restore_cloud_snapshot($1,repeat('b',64),$2,$3,'isolated-optimized-backup') result",[randomUUID(),built.data,built.manifest])).rows[0].result.ok,true);
+ const restoredSnapshot=await rpc('erp_export_cloud_restore_snapshot');
+ const restoredManifest=await buildCloudRestoreManifest(restoredSnapshot,restoredSnapshot);assert.ok(restoredManifest);
+ // Existing official restore normalization resets CAS versions (they are not
+ // durable business history). Compare the official effective contract, not raw
+ // versions against the normalized Restore input; do not invent an ignorelist.
+ assertRestoreParity(built.data,restoredManifest.data);
+ assert.equal(restoredManifest.manifest.snapshotFingerprint,built.manifest.snapshotFingerprint);
+ assert.equal(restoredManifest.manifest.relationshipHash,built.manifest.relationshipHash);
+ summary.restore='PASS';
+ await sql.query("create function public.erp2_backup_restore_fault() returns trigger language plpgsql as $$ begin raise exception 'ISOLATED_ROLLBACK_PROOF'; end $$; create trigger erp2_backup_restore_fault before insert on public.waca_state for each row execute function public.erp2_backup_restore_fault();");
+ await assert.rejects(()=>sql.query("select public.erp_restore_cloud_snapshot($1,repeat('c',64),$2,$3,'isolated-fault')",[randomUUID(),built.data,built.manifest]),/ISOLATED_ROLLBACK_PROOF/);
+ await sql.query('drop trigger erp2_backup_restore_fault on public.waca_state; drop function public.erp2_backup_restore_fault()');
+ assert.deepEqual(await rpc('erp_export_cloud_restore_snapshot'),restoredSnapshot);summary.atomicRollback='PASS';
+ stage='incident-confirm';
+ const file=process.env.WACA_INCIDENT_FILE;assert.ok(file,'WACA_INCIDENT_FILE required');
+ assert.equal(createHash('sha256').update(readFileSync(file)).digest('hex'),'310de252a5ac987f7a3c9dea09424a200a3b0d0a9f1f17f43308a45a1891a304');
+ const {parseWacaWorkbook}=await vite.ssrLoadModule('/src/waca/workbookParser.ts');
+ const core=await vite.ssrLoadModule('/src/waca/orderCore.ts');
+ const storage=await vite.ssrLoadModule('/src/waca/nextStorage.ts');
+ const masterModule=await vite.ssrLoadModule('/src/waca/masterReference.ts');
+ const {reconcileWacaReadback}=await vite.ssrLoadModule('/src/waca/reconciliation.ts');
+ const {classifyWacaError,wacaNotice}=await vite.ssrLoadModule('/src/waca/importErrors.ts');
+ const variants=(await sql.query('select * from public.product_variants where deleted_at is null')).rows;
+ const inventory=(await sql.query('select * from public.inventory_items where deleted_at is null')).rows;
+ const current=await rpc('erp_read_waca_snapshot');
+ const links=masterModule.mergeMyAcgMasterLinks(masterModule.linksFromMyAcgInventory(inventory,variants,'isolated','').links,current.masterLinks);
+ const master=masterModule.buildWacaMasterReference(variants,links);
+ const rows=parseWacaWorkbook(readFileSync(file)).rows;
+ const run=(rows,current,importId)=>{const currentRepo=storage.repositoryFromSnapshot(current,variants);const candidate=core.cloneWacaRepository(currentRepo);const result=core.importWacaRows(rows,candidate,master,importId);core.refreshWacaMasterStatus(candidate,master);return {currentRepo,candidate,result};};
+ const importId=randomUUID();const preview=run(rows,current,importId);stage='incident-preview';assert.equal(preview.result.errors.length,0);
+ const importedKeys=new Set(rows.filter(row=>!core.isWacaDiscount(row)).map(row=>core.wacaOrderKey(row.orderNumber)+'::'+core.wacaFeature(row)));
+ const incidentItems=[...preview.candidate.items.values()].filter(item=>importedKeys.has(item.orderKey+'::'+item.feature));
+ assert.equal(incidentItems.length,17);assert.equal(new Set(incidentItems.map(item=>item.feature)).size,13);
+ assert.equal(incidentItems.filter(item=>!item.productVariantId).length,0);
+ const historicalPendingFeatures=new Set([...preview.candidate.items.values()].filter(item=>!item.productVariantId).map(item=>item.feature)).size;
+ console.log(JSON.stringify({stage,rows:rows.length,incidentItems:17,incidentFeatures:13,incidentPending:0,historicalPendingFeatures}));
+ const pendingImport={rows,revision:current.revision,importId,result:preview.result,links,fileName:'orders-EUF2Wm20261004230958.xlsx'};
+ const source=readFileSync('src/pages/WacaIntegration.tsx','utf8');
+ const handler=(await transform(source.slice(source.indexOf('  const confirmImport = async () => {'),source.indexOf('\n  const handleMasterFile')),{loader:'tsx',target:'esnext'})).code+'\nreturn confirmImport;';
+ const timings={backupMs:0,commitMs:0,readbackMs:0};let uiError;let uiMessage='';let mutationCalls=0;
+ const measure=async(key,action)=>{const start=performance.now();try{return await action();}finally{timings[key]+=performance.now()-start;}};
+ const provider={getNextWacaSnapshot:()=>measure('readbackMs',()=>rpc('erp_read_waca_snapshot')),
+  getAuthoritativeWacaVariants:()=>measure('readbackMs',async()=>(await sql.query('select * from public.product_variants where deleted_at is null')).rows),
+  exportData:()=>measure('backupMs',async()=>{const value=await rpc('erp_export_cloud_restore_snapshot');assert.ok(await buildCloudRestoreManifest(value,value));}),
+  commitNextWacaSnapshot:(value,revision,update)=>measure('commitMs',async()=>{mutationCalls++;const result=await rpc('erp_commit_waca_snapshot',{p_snapshot:value,p_expected_revision:revision,p_update_auto_quantity:update});assert.equal(result.revision,revision+1);}),};
+ const confirm=new Function('pendingImport','snapshot','dataProvider','setBusy','setError','setMessage','run','classifyWacaError','snapshotFromRepository','getProviderMode','reconcileWacaReadback','setPendingImport','setChosenFileName','load','isPending','setTab','wacaNotice','wacaOrderKey',handler)(
+  pendingImport,current,provider,()=>{},value=>{uiError=value;},value=>{uiMessage=value;},run,classifyWacaError,storage.snapshotFromRepository,()=> 'supabase',reconcileWacaReadback,()=>{},()=>{},async()=>{},item=>!item.productVariantId,()=>{},wacaNotice,core.wacaOrderKey);
+ const start=performance.now();await confirm();timings.totalConfirmMs=performance.now()-start;
+ console.log(JSON.stringify({stage:'incident-handler-result',category:uiError?.category,diagnostic:uiError?.diagnostic,completionMessage:uiMessage,completed:uiMessage.includes('WACA 更新完成'),mutationCalls}));
+ stage='incident-handler-ui';assert.ok(!uiError,uiError?.category);
+ // Historical unresolved products are not part of this incident's 13 matched
+ // features. Preserve the real UI's completed-save/pending notice; never
+ // fabricate mappings or demand a zero global pending count to pass a test.
+ assert.match(uiMessage,historicalPendingFeatures ? /WACA 訂單已保存/ : /WACA 更新完成/);assert.equal(mutationCalls,1);
+ stage='incident-quantity';
+ for(const [sku,expected]of [['G07595265',1],['G07607190',2]])assert.equal(Number((await sql.query('select waca_auto_quantity from public.product_variants where myacg_item_code=$1 and deleted_at is null',[sku])).rows[0].waca_auto_quantity),expected);
+ const saved=await rpc('erp_read_waca_snapshot');assert.equal(saved.revision,current.revision+1);assert.equal(new Set(saved.items.map(row=>row.key)).size,saved.items.length);
+ summary.incidentConfirm={result:'PASS',g07595265:1,g07607190:2,incidentMatchedFeatures:13,incidentPending:0,historicalPendingFeatures,mutationCalls,revisionBefore:current.revision,revisionAfter:saved.revision,timings,measurementEnd:'actual handler UI completed-save message after authoritative readback; no production browser interaction'};
+ stage='bounded-pathological-rpc';
+ await sql.query("create or replace function public.erp_export_cloud_restore_snapshot() returns jsonb language plpgsql security definer set search_path=pg_catalog,public,extensions as $$ begin perform pg_sleep(9); return '{}'::jsonb; end $$;");
+ const started=performance.now();const slow=await db.http('/rpc/erp_export_cloud_restore_snapshot',{});
+ assert.equal(slow.data.code,'57014');assert.ok(performance.now()-started<10000);summary.boundedTimeout='PASS';
+ await sql.query(migration);
+ mkdirSync('scratch/waca-backup-timeout',{recursive:true});writeFileSync('scratch/waca-backup-timeout/native-regression.json',JSON.stringify(summary,null,2));
+ console.log(JSON.stringify(summary));
+}catch(error){console.error(JSON.stringify({result:'FAIL',stage,code:error.code,message:error.code==='ERR_ASSERTION'?'ASSERTION_FAILED':String(error.message).slice(0,180)}));process.exitCode=1;}finally{await vite.close();await db.close();}
