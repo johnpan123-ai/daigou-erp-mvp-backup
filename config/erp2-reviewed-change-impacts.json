@@ -2758,6 +2758,51 @@
           "changedIdentitySemantics": "NONE"
         }
       ]
+    },
+    {
+      "id": "post-adoption-prebaseline-review-closure-v1",
+      "beforeHead": "e636274c23a84fbdd48bcafec63973c64ca0793c",
+      "reviewedHead": "122ca0cfbe1f7c5518525cdc27846e0fa31e0ac6",
+      "patchSha256": "350893eade8203b5d33fbed254e8d3dc4f6b813a4f33961c66d1efd7fbb9408d",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "6f0f49afd6baf5b0f1491f88a412bd9775695cd7ee56661daac00d7e0150ad73",
+          "afterHash": "ba9afb29d4a3ee8f79e70664bcb0db65180f4216cc6ab6eb8880d1cad3d21b6e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["reviewForCandidate adopted-baseline continuity proof"],
+          "changedInputs": "Existing immutable review chain and validated adopted baseline Git head.",
+          "changedOutputs": "A discontinuity whose current reviewed patch is already an ancestor of the adopted baseline is treated as historical; gaps after the baseline remain fail-closed.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE: the live fingerprint, ledger and baseline validation are unchanged.",
+          "changedIdentitySemantics": "NONE: only the temporal position of an immutable review relative to an adopted Git boundary is corrected.",
+          "dataFlow": "Git ancestry evidence only.",
+          "persistenceBehavior": "NONE",
+          "writePath": "NONE",
+          "providerPath": "NONE",
+          "externalContract": "No runtime or cloud contract change.",
+          "schemaExpectation": "The same adopted canonical fingerprint remains required."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "89e4ee27cc04a2cf69fe729b454cfdcade46f5e1d5e3b67d62667149383cd035",
+          "afterHash": "030ed24a9ea187c050b5c39aba4a76e28d1e68bdc31f92baa4b327cce8f41df0",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["v7 adopted pre-baseline review regression"],
+          "changedInputs": "The real v7 baseline and the reviewed BuyAnime success-gate candidate.",
+          "changedOutputs": "Asserts historical review gaps are absorbed by v7 while existing post-baseline and future-hunk negative tests remain enforced.",
+          "changedDurableFields": "NONE",
+          "changedRpcContract": "NONE",
+          "changedProviderContract": "NONE",
+          "changedBackupContract": "NONE",
+          "changedSchemaExpectations": "NONE",
+          "changedIdentitySemantics": "NONE"
+        }
+      ]
     }
   ]
 }
