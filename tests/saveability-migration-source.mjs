@@ -7,9 +7,10 @@ import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mj
 import {buildMigrationEffectRegistry} from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import {planSchemaDelta} from '../tools/schema-reconciliation/reconcile.mjs';
 import {fingerprintStructuralSnapshot,fingerprintStructuralSnapshotV2} from '../tools/schema-reconciliation/schemaContract.mjs';
-const files=CANONICAL_FRESH_INSTALL_V3.slice(-6);
-assert.deepEqual(files,['049_private_order_atomic_transaction.sql','050_catalog_atomic_transaction.sql','051_related_saveability_atomic_transactions.sql','052_waca_master_link_delta_merge.sql','053_outbound_status_changed_at_restore_compatibility.sql','054_authoritative_backup_json_aggregation.sql']);
-const base=CANONICAL_FRESH_INSTALL_V3.slice(0,-6);
+const releaseStart=CANONICAL_FRESH_INSTALL_V3.indexOf('049_private_order_atomic_transaction.sql');
+const files=CANONICAL_FRESH_INSTALL_V3.slice(releaseStart);
+assert.deepEqual(files,['049_private_order_atomic_transaction.sql','050_catalog_atomic_transaction.sql','051_related_saveability_atomic_transactions.sql','052_waca_master_link_delta_merge.sql','053_outbound_status_changed_at_restore_compatibility.sql','054_authoritative_backup_json_aggregation.sql','055_authoritative_backup_json_transport.sql']);
+const base=CANONICAL_FRESH_INSTALL_V3.slice(0,releaseStart);
 const read=p=>readFileSync(p,'utf8');
 const capture=async db=>{
   const snapshot=(await db.sql.query(read('tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql'))).rows[0].erp_schema_snapshot;
@@ -23,7 +24,7 @@ try{
   upgrade=await isolatedDatabase({migrations:base});
   const before=await capture(upgrade);const plan=planSchemaDelta(before,registry);
   assert.equal(fingerprintStructuralSnapshotV2(before),'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317');
-  assert.equal(plan.readyForApply,true);assert.deepEqual(plan.applyPlan.map(e=>e.migrationId),['049','050','051','052','053','054']);
+  assert.equal(plan.readyForApply,true);assert.deepEqual(plan.applyPlan.map(e=>e.migrationId),['049','050','051','052','053','054','055']);
   assert.equal(plan.blockers.length,0);
   const businessSnapshot=async db=>(await db.sql.query('select public.erp_cloud_restore_snapshot() result')).rows[0].result;
   const oldBusiness=await businessSnapshot(upgrade);
@@ -41,7 +42,7 @@ try{
   const after=await capture(upgrade);const canonical=await capture(fresh);
   const contract=JSON.parse(read('config/erp-environment-identity.json'));
   assert.equal(contract.schemaBaseline.canonicalFingerprint,fingerprintStructuralSnapshot(canonical),'Candidate canonical source identity stale');
-  assert.equal(contract.schemaBaseline.requiredBaselineId,'erp2-canonical-schema-v8-authoritative-backup-performance');
+  assert.equal(contract.schemaBaseline.requiredBaselineId,'erp2-canonical-schema-v9-authoritative-json-transport');
   assert.equal(fingerprintStructuralSnapshot(after),fingerprintStructuralSnapshot(canonical),'Fresh/048-upgrade schema drift');
   assert.deepEqual(Object.keys(after.tables).sort(),Object.keys(before.tables).sort(),'Migration added business tables');
   assert.deepEqual(await businessSnapshot(upgrade),oldBusiness,'Additive source changed business rows');

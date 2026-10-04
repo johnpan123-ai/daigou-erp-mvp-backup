@@ -48,6 +48,6 @@ export function classifyWacaError(cause: unknown, stage: WacaStage, requestId?: 
     : /^[A-Z][A-Z0-9_]+(?::[A-Z0-9_-]+)?$/u.test(error.message) ? error.message : 'STRUCTURED_ERROR';
   const safeCode = /^[A-Z0-9_]{2,80}$/u.test(error.code ?? '') ? error.code : undefined;
   return { ...wacaNotice(category), diagnostic: { stage, code: safeCode, reason, requestId,
-    rpc: stage === 'backup' ? 'erp_export_cloud_restore_snapshot'
+    rpc: stage === 'backup' ? 'erp_export_cloud_restore_snapshot_json'
       : stage === 'commit' ? 'erp_commit_waca_snapshot' : undefined } };
 }

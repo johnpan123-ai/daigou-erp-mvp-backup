@@ -8,6 +8,6 @@ try {
   const snapshot = (await db.sql.query(source)).rows[0].erp_schema_snapshot;
   const contract = JSON.parse(await readFile('config/erp-environment-identity.json', 'utf8'));
   assert.equal(fingerprintStructuralSnapshot(snapshot), contract.schemaBaseline.canonicalFingerprint);
-  assert.equal(fingerprintStructuralSnapshotV2(snapshot), '5a0230c6c31180fe83058c22a2f1c112338d1b5e67d4a794129f8341f64d4ac6');
+  assert.equal(fingerprintStructuralSnapshotV2(snapshot), 'fbe0d1f91e8452573885143bf23f69913cf1dbecd86d38608e7086e71c8b60e7');
   console.log('PASS native PostgreSQL fresh full schema equals PGlite/source canonical v3');
 } finally { await db.close(); }

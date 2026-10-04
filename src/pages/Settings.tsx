@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import { dataProvider } from '../providers/dataProvider';
+import { formatStructuredError } from '../utils/structuredError';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
 import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
@@ -58,6 +59,9 @@ const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: 
 ];
 
 export default function Settings() {
+  const [backupExport, setBackupExport] = useState<{
+    state: 'idle' | 'running' | 'complete' | 'error'; elapsedMs: number; code?: string;
+  }>({ state: 'idle', elapsedMs: 0 });
   const { isMobile } = useViewport();
   const { user, signOut } = useAuth();
   const { role, displayName, isProfileLoading } = useRole();
@@ -205,7 +209,17 @@ export default function Settings() {
   }, [countLoadGate, isSandbox, loadCounts]);
 
   const handleExport = async () => {
-    await dataProvider.exportData();
+    const started = performance.now();
+    setBackupExport({ state: 'running', elapsedMs: 0 });
+    try {
+      await dataProvider.exportData();
+      setBackupExport({ state: 'complete', elapsedMs: performance.now() - started });
+    } catch (error) {
+      const diagnostic = formatStructuredError(error);
+      const code = diagnostic.code && /^[A-Z0-9_]{1,64}$/.test(diagnostic.code)
+        ? diagnostic.code : 'BACKUP_EXPORT_FAILED';
+      setBackupExport({ state: 'error', elapsedMs: performance.now() - started, code });
+    }
   };
 
   const handleExportExcel = async () => {
@@ -461,10 +475,20 @@ export default function Settings() {
                 <div className="font-medium" style={{ marginBottom: '4px' }}>匯出 JSON 備份</div>
                 <div className="text-xs text-muted">下載當前所有資料庫資料的 JSON 檔案。</div>
               </div>
-              <button className="btn btn-outline" onClick={handleExport}>
+              <button className="btn btn-outline" onClick={handleExport} disabled={backupExport.state === 'running'}>
                 <Download size={16} /> 匯出 JSON
               </button>
             </div>
+            {backupExport.state !== 'idle' && (
+              <div role="status" aria-live="polite"
+                data-backup-export-state={backupExport.state}
+                data-backup-export-elapsed-ms={backupExport.elapsedMs.toFixed(1)}>
+                {backupExport.state === 'running' ? '正在讀取雲端資料並驗證備份…'
+                  : backupExport.state === 'complete'
+                    ? `備份準備完成，已開始下載（${(backupExport.elapsedMs / 1000).toFixed(2)} 秒）。`
+                    : `備份失敗（${backupExport.code}），請檢查雲端連線與權限。`}
+              </div>
+            )}
 
             <div className="flex items-center justify-between settings-action-card" style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
               <div>
