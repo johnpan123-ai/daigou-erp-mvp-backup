@@ -13,6 +13,7 @@ export const regressionScripts = Object.freeze({
   'buyanime-simple-flow': 'tests/buyanime-simple-flow.mjs',
   'buyanime-flow-performance': 'tests/buyanime-flow-performance-isolated.mjs',
   'buyanime-flow-review': 'tests/buyanime-flow-change-impact.mjs',
+  'buyanime-production-trace': 'tests/buyanime-production-trace.mjs',
   'buyanime-cache-authority': 'tests/cloud-cache-authority.mjs',
   'buyanime-data-size': 'tests/data-size-advisory.mjs',
   'buyanime-lint-delta': 'tests/p0-eslint-baseline-delta.mjs',
