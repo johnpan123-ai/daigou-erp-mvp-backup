@@ -2500,8 +2500,8 @@
       "files": [
         {
           "file": "scripts/reviewed-change-impact.mjs",
-          "beforeHash": "3bafccc1dd9096bb1f4e5e8f00bc67782aa2134948083e2e2990e61a78c3c1b2",
-          "afterHash": "7db2470c579904731f0515641c657599740fb8997eaa8e94698f1e3e894ee1dd",
+          "beforeHash": "138921ffe8d0fcb201df92eca678fad8876ddab775a588f501f8c4f59736cdb3",
+          "afterHash": "6f0f49afd6baf5b0f1491f88a412bd9775695cd7ee56661daac00d7e0150ad73",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["production trace regression registry"],
           "changedInputs": "One exact regression identifier.",
@@ -2515,8 +2515,8 @@
         },
         {
           "file": "src/contexts/CloudRealtimeSyncContext.tsx",
-          "beforeHash": "0b0dd15208d4b1fecbfa0f0475bd62a10b46d5cb49b1ffb76c31f3fbf41c4175",
-          "afterHash": "163ab82da83ba13d73c38c996e41e4c12d54e369247ca0c2f15fada323af1c12",
+          "beforeHash": "7eb28c4c781dc1d9263abc427407d715da2824d53d9bcf918854027e557bccbf",
+          "afterHash": "5b2575b4ae0680b7ff2b8ef3f31d7d14eb2851941b23ce1327b950de13cd9b26",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["refreshForBuyAnimeImport diagnostic markers"],
           "changedInputs": "Existing BuyAnime refresh lifecycle only.",
@@ -2531,7 +2531,7 @@
         {
           "file": "src/diagnostics/buyAnimeProductionTrace.ts",
           "beforeHash": null,
-          "afterHash": "5b1b43e3e8af6b828d5c30741af4ed0f1618f7cf66ecf242180d133180e9b353",
+          "afterHash": "72adba4092092e2ca5dffc1c555130f56247fc5234dd3d74b07117c30c2b78ca",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["beginBuyAnimeProductionTrace", "markBuyAnimeTrace", "recordBuyAnimeReactCommit", "finishBuyAnimeProductionTrace", "getLatestBuyAnimeProductionTrace"],
           "changedInputs": "Safe timing signals, file size/extension, resource timing metadata and stage status.",
@@ -2545,8 +2545,8 @@
         },
         {
           "file": "src/pages/Inventory.tsx",
-          "beforeHash": "696039d0f9d4b666f40bd93725ba1b9743cf5abcaaa82d55c09489d7dd489540",
-          "afterHash": "a5fce8a3e43fb96fccaac23add4206376210f0f856b9449eb5b7d162e78ee361",
+          "beforeHash": "68e81da9c97b462d7f816fb125fd76e9bf5a6985c73ea02f35e7ea8b7cc7545e",
+          "afterHash": "b8c769c901ff6f9f8c55112a0250b3e5b5d2b791b2b38a34a488eb07ee9ada8e",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["handleFileChange diagnostic lifecycle", "Inventory React profiler", "safe diagnostic copy panel"],
           "changedInputs": "Existing file-selection and success/failure lifecycle.",
@@ -2560,8 +2560,8 @@
         },
         {
           "file": "src/providers/cloud/buyAnimeImportResume.ts",
-          "beforeHash": "fd841d8c62e3f4793d68bef6518e16c3f49d9478fa2e9e077e5307c089d683d3",
-          "afterHash": "44bf097d56928c3103f0736853ba1aa7841d2db3d8c8550f6d4440bf753c17c7",
+          "beforeHash": "43ab3c7b6e04683768d7c31268c5c8399b8c5900b60e10999516481ab5f6765e",
+          "afterHash": "a769b6ef4c50f6070267b741f22b4cecc7e5858b9497cf575dfc6ed06f5cbed6",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["BuyAnimeImportPipeline diagnostic markers"],
           "changedInputs": "Existing inventory, acknowledgement, catalog and WACA stage boundaries.",
@@ -2575,8 +2575,8 @@
         },
         {
           "file": "src/providers/cloud/inventoryImportPlan.ts",
-          "beforeHash": "43b1289e3c2087e11250aa61f123eb28514c544f522ef5533cd4467846213a06",
-          "afterHash": "a965539957e14d95b480e2b77ba61151cbe88d12c2a077c231ada3a60a8bcaad",
+          "beforeHash": "163fb72b1b19b5222ff44d88f498ff5403e725c26e43d27b60ce2cdd9a35c883",
+          "afterHash": "09b463db19e53975af9563531f365fb80f391ac6a76a2622d060baff5ac1febe",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["buildInventoryIndex diagnostic markers"],
           "changedInputs": "Existing in-memory inventory planning input.",
@@ -2590,8 +2590,8 @@
         },
         {
           "file": "src/utils/myacgParser.ts",
-          "beforeHash": "c4321b0bb86401c567e5c33cc190082143158458a223518691a43e15b44c5bb3",
-          "afterHash": "d400395c26b2d9505e8ba16a84d31563fd14b39230642b1fae81d88195c2cc72",
+          "beforeHash": "4d7ba1ec79dae26d6f06545eb5e078f5bc58145e85e49da4bcc837dcec789a6c",
+          "afterHash": "13e076dbf256a20f24134ae14655e2a82084c75b32ffa1ac732915ade064e511",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["parseMyacgFile diagnostic markers"],
           "changedInputs": "Existing file read and workbook parse lifecycle.",
@@ -2606,7 +2606,7 @@
         {
           "file": "tests/buyanime-production-trace.mjs",
           "beforeHash": null,
-          "afterHash": "1ea3b34560fe411f3f1fcebf8374a3e5b29014d36b3cd7488d2016b91984bff3",
+          "afterHash": "e060eb955d23d54ce8879156654da64201cf3786aebb5d0d4490dbfce70ffd96",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["production trace safety, completeness, privacy and overhead regression"],
           "changedInputs": "Synthetic timing events only.",
