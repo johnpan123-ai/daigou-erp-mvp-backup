@@ -22,6 +22,25 @@ export interface LinkImportResult {
   missingParent: number;
 }
 
+export interface MyAcgMasterLinkDelta {
+  links: MyAcgMasterLink[];
+  inserted: number;
+  updated: number;
+  unchanged: number;
+}
+
+const comparableMasterLink = (link: MyAcgMasterLink) => JSON.stringify({
+  mainCode: link.mainCode,
+  childCode: link.childCode,
+  productGroupId: link.productGroupId || '',
+  productVariantId: link.productVariantId || '',
+  productTitle: link.productTitle || '',
+  variantTitle: link.variantTitle || '',
+  // sourceFile and observedAt identify an observation, not the durable
+  // parent/Variant relationship. sourceFiles is the monotonic provenance set.
+  sourceFiles: [...new Set(link.sourceFiles ?? (link.sourceFile ? [link.sourceFile] : []))].sort(),
+});
+
 export function linksFromMyAcgInventory(
   rows: readonly InventoryItem[],
   variants: readonly ProductVariant[],
@@ -84,6 +103,32 @@ export function mergeMyAcgMasterLinks(
     });
   }
   return [...byChild.values()].sort((a, b) => a.childCode.localeCompare(b.childCode));
+}
+
+/**
+ * Plan only the durable master-link rows whose semantic evidence changed.
+ * Re-observing the same relationship in the same source file is a no-op even
+ * when the import timestamp differs. A new source file remains durable
+ * provenance and therefore is an update.
+ */
+export function planMyAcgMasterLinkDelta(
+  existing: readonly MyAcgMasterLink[],
+  incoming: readonly MyAcgMasterLink[],
+): MyAcgMasterLinkDelta {
+  const current = new Map(existing.map(link => [link.childCode, link]));
+  const merged = new Map(mergeMyAcgMasterLinks(existing, incoming).map(link => [link.childCode, link]));
+  const links: MyAcgMasterLink[] = [];
+  let inserted = 0, updated = 0, unchanged = 0;
+  for (const childCode of new Set(incoming.map(link => link.childCode))) {
+    const target = merged.get(childCode);
+    if (!target) throw new Error(`MYACG_MASTER_DELTA_TARGET_MISSING:${childCode}`);
+    const prior = current.get(childCode);
+    if (!prior) { inserted += 1; links.push(target); continue; }
+    if (comparableMasterLink(prior) === comparableMasterLink(target)) { unchanged += 1; continue; }
+    updated += 1;
+    links.push(target);
+  }
+  return { links: links.sort((a, b) => a.childCode.localeCompare(b.childCode)), inserted, updated, unchanged };
 }
 
 export function buildWacaMasterReference(

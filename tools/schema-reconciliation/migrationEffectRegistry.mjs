@@ -42,6 +42,16 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '052': {
+    sourceFile:'052_waca_master_link_delta_merge.sql',dependencies:['044','051'],
+    risk:'LOW_ADDITIVE_FUNCTION_ONLY',idempotency:'IDEMPOTENCY_STORE_AND_WACA_REVISION_CAS',
+    preconditions:[table('waca_master_links'),table('waca_state'),table('erp_idempotency_keys'),fn('erp_waca_variant_id(text)')],
+    postconditions:[fn('erp_merge_waca_master_links(uuid,jsonb)',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
+      definitionIncludes:['waca_master_links','expectedRevision','erp_idempotency_keys'],
+    })],
+  },
   '051': {
     sourceFile:'051_related_saveability_atomic_transactions.sql',dependencies:['050'],
     risk:'LOW_ADDITIVE',idempotency:'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',

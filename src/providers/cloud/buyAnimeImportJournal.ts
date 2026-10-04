@@ -62,6 +62,12 @@ export async function readPendingBuyAnimeJournal(): Promise<BuyAnimeImportRecord
   if (result.error) throw result.error;
   return result.data?.length ? fromRow(result.data[0]) : null;
 }
+export async function readLatestBuyAnimeJournal(): Promise<BuyAnimeImportRecord | null> {
+  const result = await supabase.from('import_batches').select('*').eq('platform', BUYANIME_JOURNAL_PLATFORM)
+    .is('deleted_at', null).order('imported_at', { ascending: false }).limit(1);
+  if (result.error) throw result.error;
+  return result.data?.length ? fromRow(result.data[0]) : null;
+}
 export async function saveBuyAnimeJournal(record: BuyAnimeImportRecord, expectedVersion: number): Promise<BuyAnimeImportRecord> {
   assertImportRecord(record);
   if (record.version !== expectedVersion) throw new BuyAnimeResumeError('BUYANIME_JOURNAL_VERSION_MISMATCH');

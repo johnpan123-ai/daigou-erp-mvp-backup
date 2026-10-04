@@ -4,7 +4,7 @@ globalThis.indexedDB={open:()=>({})};
 globalThis.window={indexedDB:globalThis.indexedDB,location:{hostname:'127.0.0.1'},localStorage:{getItem:()=>null}};
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try {
-  const {BuyAnimeImportPipeline,BuyAnimeResumeError}=await vite.ssrLoadModule('/src/providers/cloud/buyAnimeImportResume.ts');
+  const {BuyAnimeImportPipeline,BuyAnimeResumeError,importWacaDeltaKey}=await vite.ssrLoadModule('/src/providers/cloud/buyAnimeImportResume.ts');
   const {planCloudInventoryImport}=await vite.ssrLoadModule('/src/providers/cloud/inventoryImportPlan.ts');
   const {finishBuyAnimeImport,coordinateBuyAnimeImport}=await vite.ssrLoadModule('/src/providers/cloud/buyAnimeImportCoordinator.ts');
   for(const size of [1505,5000,10000]) {
@@ -16,13 +16,15 @@ try {
       assert.equal(journal?.version||0,version);journal=structuredClone({...record,version:version+1});return structuredClone(journal);},
       prepareInventory:async incoming=>planCloudInventoryImport([],incoming),commitInventory:async plan=>{inventoryCommits++;rows=plan.inventory;},
       readInventory:async()=>{reads++;if(reads===1)throw new TypeError('Failed to fetch');return rows;},
-      planCatalog:async()=>null,commitCatalog:async()=>{catalogCommits++;},verifyCatalog:async()=>{},ensureWacaEvidence:async()=>{wacaCommits++;}};
+      planCatalog:async()=>null,commitCatalog:async()=>{catalogCommits++;},verifyCatalog:async()=>{},
+      planWacaEvidence:async record=>({key:importWacaDeltaKey(record.batchId),expectedRevision:0,links:[],inserted:0,updated:0,unchanged:0}),
+      commitWacaEvidence:async()=>{wacaCommits++;}};
     const t=performance.now();let record;
     try {await new BuyAnimeImportPipeline(port).start(input,'synthetic.xls');assert.fail('Failure missed');}
     catch(error){assert.equal(error.code,'BUYANIME_COMMITTED_READBACK_PENDING');record=error.record;}
     // New pipeline simulates F5/close: downstream retry succeeds without memory or Inventory dispatch.
     const complete=await finishBuyAnimeImport(record,value=>new BuyAnimeImportPipeline(port).resume(value),async()=>{},async()=>{});
-    assert.equal(complete.stage,'COMPLETE');assert.equal(inventoryCommits,1);assert.equal(catalogCommits,1);assert.equal(wacaCommits,1);
+    assert.equal(complete.stage,'COMPLETE');assert.equal(inventoryCommits,1);assert.equal(catalogCommits,0);assert.equal(wacaCommits,0);
     assert.equal(new Set(rows.map(r=>r.id)).size,size);assert.equal(new Set(rows.map(r=>r.inventory_key)).size,size);
     console.log(JSON.stringify({size,automaticRecovery:'PASS',inventoryCommits,stage:complete.stage,durationMs:Math.round(performance.now()-t)}));
   }

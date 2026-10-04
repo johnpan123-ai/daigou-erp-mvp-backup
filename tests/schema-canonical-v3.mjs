@@ -59,7 +59,7 @@ if (liveIndex >= 0 && sourceIndex >= 0) {
   const comparison = diffStructuralSnapshots(source, live);
   assert.equal(comparison.semanticEqual, true, JSON.stringify(comparison.semanticDifferences));
   assert.equal(fingerprintStructuralSnapshot(source), fingerprintStructuralSnapshot(live));
-  assert.equal(fingerprintStructuralSnapshotV2(source), '0bdcd2b4e65219107e4f815abecb8e54fc69886ac90bc5ccbb608e31243755ef');
+  assert.equal(fingerprintStructuralSnapshotV2(source), '7c1af9ee6baf3be09c2640deece4ed4b397c5fbe5281f05c7e45958338e86521');
   assert.equal(fingerprintStructuralSnapshotV2(live), '5962a7a5c54668408802e8061b8f393bd6d6ca0295adeee81cf5a993e8769640');
   const registry = await buildMigrationEffectRegistry();
   const baseline = planSchemaDelta(source, registry, { expectedSnapshot: source });

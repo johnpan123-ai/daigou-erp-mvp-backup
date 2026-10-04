@@ -195,11 +195,12 @@ import { readFormIntent,stableFormIntent,clearFormIntent } from './privateOrderT
 import { readCloudRowsByIds } from './cloudBulkRead';
 import {
   BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord, importCatalogKey,
+  importWacaDeltaKey,
   type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
-import { readBuyAnimeJournal, readPendingBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
+import { readBuyAnimeJournal, readLatestBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
 import { coordinateBuyAnimeImport, finishBuyAnimeImport, refreshBuyAnimeReadback, publishBuyAnimeFlow, buyAnimeFlowLabel, type BuyAnimeFlowOptions } from './buyAnimeImportCoordinator';
-import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../../waca/masterReference';
+import { linksFromMyAcgInventory, planMyAcgMasterLinkDelta, type MyAcgMasterLink } from '../../waca/masterReference';
 import { planCatalogTransaction,CATALOG_RPC,type CatalogMode } from './catalogTransaction';
 import { buildRelatedRequest,submitRelatedIntent,RELATED_RPC,type RelatedTransactionCommand } from './relatedTransaction';
 import type { 
@@ -1581,7 +1582,7 @@ export class SupabaseProvider implements IDataProvider {
       }
       this.buyAnimeCatalogRows.set(catalog.key, verified);
     },
-    ensureWacaEvidence: async (record, imported) => {
+    planWacaEvidence: async (record, imported) => {
       const localVariants = await db.getProductVariants({ raw: true });
       const catalogRows = this.buyAnimeCatalogRows.get(importCatalogKey(record.batchId))?.product_variants || [];
       const variantsById = new Map(localVariants.map(variant => [variant.id, variant]));
@@ -1591,13 +1592,58 @@ export class SupabaseProvider implements IDataProvider {
       }
       const variants = [...variantsById.values()];
       const evidence = linksFromMyAcgInventory(imported, variants, record.fileName, record.observedAt);
-      if (!evidence.links.length) return;
-      const snapshot = await this.getWacaSnapshot();
-      const masterLinks = mergeMyAcgMasterLinks(snapshot.masterLinks, evidence.links);
-      const canonical = (links: typeof masterLinks) => JSON.stringify([...links].sort((a, b) => a.childCode.localeCompare(b.childCode)));
-      // Read-after-response-loss sees the same durable evidence and does NOT commit again.
-      if (canonical(masterLinks) !== canonical(snapshot.masterLinks))
-        await this.commitWacaSnapshot({ ...snapshot, masterLinks }, snapshot.revision, false);
+      if (!evidence.links.length) return { key: importWacaDeltaKey(record.batchId), expectedRevision: 0,
+        links: [], inserted: 0, updated: 0, unchanged: 0 };
+      let linkRows: Record<string, unknown>[], state: { revision?: unknown } | null;
+      try {
+        [linkRows, state] = await Promise.all([
+          fetchAll<Record<string, unknown>>(async (from, to) => supabase.from('waca_master_links')
+            .select('id,child_code,main_code,product_variant_id,payload').order('id').range(from, to)),
+          supabase.from('waca_state').select('revision').single().then(result => {
+            if (result.error) throw result.error;
+            return result.data;
+          }),
+        ]);
+      } catch (cause) { markCloudRequestFailed(cause); throw cause; }
+      const revision = Number(state?.revision);
+      if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('WACA_MASTER_LINK_REVISION_INVALID');
+      const existing = linkRows.map(row => ({
+        ...((row.payload && typeof row.payload === 'object') ? row.payload : {}),
+        childCode: String(row.child_code || ''), mainCode: String(row.main_code || ''),
+        productVariantId: String(row.product_variant_id || ''),
+      })) as MyAcgMasterLink[];
+      const delta = planMyAcgMasterLinkDelta(existing, evidence.links);
+      markCloudReachable();
+      return { key: importWacaDeltaKey(record.batchId), expectedRevision: revision, ...delta };
+    },
+    commitWacaEvidence: async plan => {
+      if (!plan.links.length) return;
+      await this.requireCloudWritePermission();
+      assertCloudWriteAllowed();
+      let response;
+      try {
+        response = await supabase.rpc('erp_merge_waca_master_links', {
+          p_idempotency_key: plan.key,
+          p_request: { family: 'waca-master-links', expectedRevision: plan.expectedRevision, links: plan.links },
+        });
+      } catch (cause) { markCloudRequestFailed(cause); throw new CloudMutationBoundaryError('result-unknown', cause); }
+      if (response.error) {
+        markCloudRequestFailed(response.error);
+        if (!response.error.code || response.status >= 500 || /^5/u.test(response.error.code))
+          throw new CloudMutationBoundaryError('result-unknown', response.error);
+        throw new BuyAnimeResumeError('BUYANIME_WACA_DELTA_REJECTED', undefined, response.error);
+      }
+      const result = response.data as { ok?: unknown; code?: unknown; idempotencyKey?: unknown; changed?: unknown } | null;
+      if (result?.ok !== true) {
+        if (result?.code === 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH')
+          throw new BuyAnimeResumeError('BUYANIME_WACA_INTENT_CONFLICT');
+        if (['WACA_STALE_REVISION','WACA_MASTER_LINK_CONFLICT'].includes(String(result?.code || '')))
+          throw new BuyAnimeResumeError('BUYANIME_WACA_CONFLICT');
+        throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_WACA_DELTA_RESPONSE_INVALID'));
+      }
+      if (result.idempotencyKey !== plan.key || Number(result.changed) !== plan.links.length)
+        throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_WACA_DELTA_ACK_MISMATCH'));
+      markCloudReachable();
     },
   });
   private async readCloudIds(
@@ -1633,25 +1679,28 @@ export class SupabaseProvider implements IDataProvider {
     return rows as unknown as InventoryItem[];
   }
   async getBuyAnimeImportRecovery(): Promise<BuyAnimeImportRecord | null> {
-    const pending = await readPendingBuyAnimeJournal();
-    if (pending) return pending;
+    const latestJournalPromise = readLatestBuyAnimeJournal();
     // Pre-journal runtimes already persisted the import identity on Inventory.
     // Unknown downstream completion is shown explicitly, never inferred from global sync.
     const latest = await supabase.from('inventory_items').select('latest_catalog_import_id,catalog_last_seen_at')
       .is('deleted_at', null).not('latest_catalog_import_id', 'is', null)
       .order('catalog_last_seen_at', { ascending: false, nullsFirst: false }).limit(1);
     if (latest.error) throw latest.error;
+    const latestJournal = await latestJournalPromise;
     const batchId = latest.data?.[0]?.latest_catalog_import_id;
+    const observedAt = latest.data?.[0]?.catalog_last_seen_at;
+    if (latestJournal && (!batchId || latestJournal.batchId === batchId
+      || new Date(latestJournal.observedAt).getTime() >= new Date(observedAt || 0).getTime())) {
+      return latestJournal.stage === 'COMPLETE' ? null : latestJournal;
+    }
     if (!batchId) return null;
-    const journal = await readBuyAnimeJournal(batchId);
-    if (journal) return journal.stage === 'COMPLETE' ? null : journal;
     const rows = await fetchAll<InventoryItem>(async (from, to) => supabase.from('inventory_items').select('*')
       .eq('latest_catalog_import_id', batchId).order('id').range(from, to));
-    const observedAt = rows[0]?.catalog_last_seen_at;
-    if (!rows.length || !observedAt || rows.some(row => new Date(row.catalog_last_seen_at || '').getTime() !== new Date(observedAt).getTime()))
+    const legacyObservedAt = rows[0]?.catalog_last_seen_at;
+    if (!rows.length || !legacyObservedAt || rows.some(row => new Date(row.catalog_last_seen_at || '').getTime() !== new Date(legacyObservedAt).getTime()))
       throw new BuyAnimeResumeError('BUYANIME_LEGACY_BATCH_EVIDENCE_INVALID');
     const record: BuyAnimeImportRecord = {
-      format: 'BUYANIME_IMPORT_RESUME_V1', batchId, observedAt, fileName: 'committed-catalog:' + batchId,
+      format: 'BUYANIME_IMPORT_RESUME_V1', batchId, observedAt: legacyObservedAt, fileName: 'committed-catalog:' + batchId,
       stage: 'INVENTORY_COMMITTED', version: 0, legacy: true,
       expected: await Promise.all(rows.map(inventoryProof)),
       stats: { total: rows.length, newCount: 0, updatedCount: 0, unchangedCount: rows.length, groupCount: new Set(rows.map(row => row.normalized_product_title || row.product_title)).size },

@@ -25,10 +25,14 @@ try {
   assert.equal(evidence.links[0].mainCode, 'GP001');
   assert.equal(evidence.links[0].childCode, 'G001');
   const page = readFileSync('src/pages/Inventory.tsx', 'utf8');
-  assert.match(page, /currentMode === 'next' \|\| cloudMode/u);
+  assert.match(page, /currentMode === 'cloud' \|\| currentMode === 'fallback'/u);
+  assert.match(page, /completeBuyAnimeImport\(itemsWithBatchMeta/u);
+  assert.match(page, /currentMode === 'next'/u);
   assert.match(page, /commitNextWacaSnapshot\(\{ \.\.\.waca, masterLinks \}/u);
   const provider = readFileSync('src/providers/cloud/supabaseProvider.ts', 'utf8');
   assert.equal((provider.match(/myacg_parent_code: r\.myacg_parent_code \|\| undefined/gu) ?? []).length, 2);
+  assert.match(provider, /planWacaEvidence: async \(record, imported\)/u);
+  assert.match(provider, /linksFromMyAcgInventory\(imported, variants/u);
   assert.match(provider, /async getAuthoritativeWacaVariants\(\)/u);
   assert.match(readFileSync('src/pages/WacaIntegration.tsx', 'utf8'),
     /const savedVariants = await dataProvider\.getAuthoritativeWacaVariants\(\)/u);

@@ -140,12 +140,18 @@ export async function renderImportBenchmarkUi(provider: SupabaseProvider, base64
     const modalText = node.querySelector('[data-testid="buyanime-import-success-modal"]')?.textContent || '';
     const syncText = node.querySelector('[data-global-sync-control]')?.textContent || '';
     if (!modalText.includes('雲端資料已同步完成')) throw new Error('ISOLATED_IMPORT_MODAL_NOT_AUTHORITATIVE');
+    // The wall-clock endpoint above is authoritative. Wait only for the
+    // diagnostic layout-effect frame so the test can retrieve the complete
+    // T00→T31 breakdown without extending the reported import duration.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const trace = (window as unknown as Record<string, unknown>).__ERP2_BUYANIME_PRODUCTION_TRACE__;
     return {
       totalMs: Math.round(completedAt - startedAt),
       modalText,
       syncText,
       commits: durations.length,
       maxDurationMs: Math.max(0, ...durations),
+      trace,
     };
   } finally {
     root.unmount();

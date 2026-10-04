@@ -5,6 +5,7 @@ import { deterministicCloudUuid, toCloudFieldRow } from './cloudEntityPayload';
 import { CloudMutationBoundaryError } from './cloudFieldCas';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/myacgImportErrors';
 import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
+import type { MyAcgMasterLink } from '../../waca/masterReference';
 
 export const BUYANIME_JOURNAL_PLATFORM = 'buyanime-catalog-resume-v1';
 export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN'
@@ -13,6 +14,14 @@ export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMM
   | 'WACA_EVIDENCE_PENDING' | 'COMPLETE' | 'FAILED_PRE_COMMIT';
 export type CatalogImportPlan = Awaited<ReturnType<typeof planCatalogTransaction>>;
 export interface InventoryProof { id: string; key: string; hash: string }
+export interface WacaMasterLinkDeltaPlan {
+  key: string;
+  expectedRevision: number;
+  links: MyAcgMasterLink[];
+  inserted: number;
+  updated: number;
+  unchanged: number;
+}
 export interface BuyAnimeImportRecord {
   format: 'BUYANIME_IMPORT_RESUME_V1';
   batchId: string;
@@ -23,6 +32,7 @@ export interface BuyAnimeImportRecord {
   expected: InventoryProof[];
   stats: ImportStats;
   catalog?: { key: string; plan: CatalogImportPlan | null };
+  waca?: WacaMasterLinkDeltaPlan;
   legacy?: boolean;
 }
 export class BuyAnimeResumeError extends Error {
@@ -34,6 +44,7 @@ export class BuyAnimeResumeError extends Error {
 }
 export const importJournalId = (batchId: string) => deterministicCloudUuid('buyanime-import-journal:' + batchId);
 export const importCatalogKey = (batchId: string) => deterministicCloudUuid('buyanime-import-catalog:' + batchId);
+export const importWacaDeltaKey = (batchId: string) => deterministicCloudUuid('buyanime-import-waca-delta:' + batchId);
 const stable = (value: unknown): string => {
   if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
   if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
@@ -77,7 +88,11 @@ export function assertImportRecord(value: unknown): asserts value is BuyAnimeImp
       || !p.key || !/^[0-9a-f]{64}$/u.test(p.hash))
     || (['CATALOG_COMMITTING','CATALOG_COMMITTED'].includes(r.stage) && !r.catalog)
     || (r.catalog && (r.catalog.key !== importCatalogKey(r.batchId)
-      || (r.catalog.plan && (r.catalog.plan.request.family !== 'catalog' || r.catalog.plan.request.mode !== 'sync'))))) {
+      || (r.catalog.plan && (r.catalog.plan.request.family !== 'catalog' || r.catalog.plan.request.mode !== 'sync'))))
+    || (r.stage === 'WACA_EVIDENCE_PENDING' && !r.waca)
+    || (r.waca && (r.waca.key !== importWacaDeltaKey(r.batchId)
+      || !Number.isSafeInteger(r.waca.expectedRevision) || r.waca.expectedRevision < 0
+      || !Array.isArray(r.waca.links) || r.waca.links.some(link => !link.childCode || !link.mainCode)))) {
     throw new BuyAnimeResumeError('BUYANIME_JOURNAL_INVALID');
   }
 }
@@ -90,7 +105,8 @@ export interface BuyAnimeImportPort {
   planCatalog(imported: InventoryItem[], inventory?: InventoryItem[]): Promise<CatalogImportPlan | null>;
   commitCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
   verifyCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
-  ensureWacaEvidence(record: BuyAnimeImportRecord, imported: InventoryItem[]): Promise<void>;
+  planWacaEvidence(record: BuyAnimeImportRecord, imported: InventoryItem[]): Promise<WacaMasterLinkDeltaPlan>;
+  commitWacaEvidence(plan: WacaMasterLinkDeltaPlan): Promise<void>;
 }
 
 /** Durable progress lives in the existing import_batches.details JSON. No memory/session authority. */
@@ -125,16 +141,23 @@ export class BuyAnimeImportPipeline {
       expected: await Promise.all(imported.map(inventoryProof)), stats: plan.stats,
     };
     assertImportRecord(record);
-    // Must persist intent BEFORE sending the single Inventory transaction.
-    record = await this.port.save(record, 0);
+    // Persist intent only when an Inventory transaction can change rows. A
+    // proven no-op has no committed state to recover and reaches one durable
+    // COMPLETE write after all downstream evidence is proven.
+    if (plan.operations.length > 0) record = await this.port.save(record, 0);
     try {
       markBuyAnimeTrace('T12_INVENTORY_COMMIT_START', { mutationRows: plan.operations.length });
+      // Always hand the plan to the provider, even when it is a proven no-op.
+      // The cloud provider records the exact empty touched-set without sending
+      // an RPC, which lets the final targeted refresh prove that no Inventory
+      // rows need to be fetched. Skipping the port call loses that evidence and
+      // incorrectly turns a successful no-op import into read-back pending.
       await this.port.commitInventory(plan);
       markBuyAnimeTrace('T13_INVENTORY_COMMIT_RESPONSE', { mutationRows: plan.operations.length });
     } catch (cause) {
       const unknown = classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
       const committed = cause instanceof CloudMutationBoundaryError && cause.state === 'committed-readback-pending';
-      try {
+      if (record.version > 0) try {
         record = await this.store(record, { stage: unknown ? 'INVENTORY_COMMIT_UNKNOWN'
           : committed ? 'INVENTORY_READBACK_PENDING' : 'FAILED_PRE_COMMIT' });
       } catch { /* Durable COMMITTING intent remains. Never bypass offline/CAS protection to save progress. */ }
@@ -175,18 +198,18 @@ export class BuyAnimeImportPipeline {
   }
   async resume(input: BuyAnimeImportRecord): Promise<BuyAnimeImportRecord> {
     assertImportRecord(input);
-    let record = await this.port.load(input.batchId) ?? input;
+    const proven = this.verified.get(input);
+    let record = proven ? input : await this.port.load(input.batchId) ?? input;
     assertImportRecord(record);
     if (record.stage === 'COMPLETE') return record;
     // No code path in resume calls prepareInventory or commitInventory.
     if (['PLANNED', 'FAILED_PRE_COMMIT'].includes(record.stage)) throw new BuyAnimeResumeError('BUYANIME_NOT_COMMITTED', record);
-    const proven = this.verified.get(input);
     this.verified.delete(input);
     const reusable = proven && record.version === input.version
       && (record.stage === input.stage || (record.stage === 'INVENTORY_COMMITTING' && input.stage === 'INVENTORY_VERIFIED'))
       && stable(record.expected) === stable(input.expected);
     const rows = reusable ? proven.rows : await this.verify(record);
-    if (record.version === 0) record = await this.port.save(record, 0); // Adopt proven legacy operational evidence without Inventory replay.
+    if (record.version === 0 && record.legacy) record = await this.port.save(record, 0); // Adopt proven legacy operational evidence without Inventory replay.
     if (['INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED'].includes(record.stage)) {
       record = { ...record, stage: 'CATALOG_PENDING' };
     }
@@ -196,8 +219,19 @@ export class BuyAnimeImportPipeline {
       markBuyAnimeTrace('T17_CATALOG_PLAN_DONE', {
         catalogOperations: plan ? Object.values(plan.request.operations).reduce((sum, operations) => sum + operations.length, 0) : 0,
       });
-      // Persist the EXACT request and stable key before RPC; close/relogin cannot regenerate it.
-      record = await this.store(record, { stage: 'CATALOG_COMMITTING', catalog: { key: importCatalogKey(record.batchId), plan } });
+      const catalogOperations = plan
+        ? Object.values(plan.request.operations).reduce((sum, operations) => sum + operations.length, 0) : 0;
+      if (catalogOperations === 0) {
+        // A pure plan is the authoritative no-change proof. There is no RPC,
+        // read-back or durable crash boundary when no Catalog row can change.
+        markBuyAnimeTrace('T18_CATALOG_COMMIT_START', { catalogOperations: 0 });
+        markBuyAnimeTrace('T19_CATALOG_COMMIT_RESPONSE', { catalogOperations: 0 });
+        markBuyAnimeTrace('T20_CATALOG_READBACK_DONE', { catalogOperations: 0 });
+        record = { ...record, stage: 'CATALOG_VERIFIED', catalog: undefined };
+      } else {
+        // Persist the EXACT request and stable key before RPC; close/relogin cannot regenerate it.
+        record = await this.store(record, { stage: 'CATALOG_COMMITTING', catalog: { key: importCatalogKey(record.batchId), plan } });
+      }
     }
     if (record.stage === 'CATALOG_COMMITTING') {
       try {
@@ -221,18 +255,26 @@ export class BuyAnimeImportPipeline {
       record = { ...record, stage: 'CATALOG_VERIFIED' };
     }
     if (record.stage === 'CATALOG_VERIFIED') {
-      // The exact Catalog request is only needed until its authoritative
-      // read-back succeeds. Drop it from later journal writes so a normal
-      // import does not resend a large, already-verified plan twice.
-      record = await this.store(record, { stage: 'WACA_EVIDENCE_PENDING', catalog: undefined });
+      markBuyAnimeTrace('T21_WACA_EVIDENCE_START', { inventoryRows: rows.length });
+      const waca = await this.port.planWacaEvidence(record, rows);
+      if (waca.links.length === 0) {
+        markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length, deltaRows: 0 });
+        // No Inventory/Catalog/WACA mutation needs intermediate cloud states.
+        // One COMPLETE insert/update is the entire no-op journal roundtrip.
+        record = await this.store(record, { stage: 'COMPLETE', catalog: undefined, waca: undefined });
+      } else {
+        // Exact delta + idempotency key are durable before the mutation. F5
+        // replays this same request and never regenerates a broader snapshot.
+        record = await this.store(record, { stage: 'WACA_EVIDENCE_PENDING', catalog: undefined, waca });
+      }
     }
     if (record.stage === 'WACA_EVIDENCE_PENDING') {
       // WACA evidence is part of the user-visible success contract. Keep the
       // durable intent, but never display success before this finishes.
-      markBuyAnimeTrace('T21_WACA_EVIDENCE_START', { inventoryRows: rows.length });
-      await this.port.ensureWacaEvidence(record, rows);
-      markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length });
-      record = await this.store(record, { stage: 'COMPLETE' });
+      if (!record.waca) throw new BuyAnimeResumeError('BUYANIME_WACA_INTENT_MISSING', record);
+      await this.port.commitWacaEvidence(record.waca);
+      markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length, deltaRows: record.waca.links.length });
+      record = await this.store(record, { stage: 'COMPLETE', waca: undefined });
     }
     return record;
   }
@@ -264,5 +306,5 @@ export function buyAnimeRecoveryDiagnostic(error: unknown, record?: BuyAnimeImpo
   return { ...diagnostic, stage,
     reason: /^(?:BUYANIME_|CLOUD_)[A-Z_]+$/u.test(code) ? code : diagnostic.reason,
     rpc: stage?.startsWith('CATALOG') ? 'erp_apply_catalog_transaction'
-      : stage === 'WACA_EVIDENCE_PENDING' ? 'erp_commit_waca_snapshot' : diagnostic.rpc };
+      : stage === 'WACA_EVIDENCE_PENDING' ? 'erp_merge_waca_master_links' : diagnostic.rpc };
 }

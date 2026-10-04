@@ -16,7 +16,9 @@ declare global {
       loseReadback: (enabled: boolean) => void;
       loseCatalog: (enabled: boolean) => void;
       loseWaca: (enabled: boolean) => void;
-      metrics: () => { inventoryCommits:number;catalogRequests:number;wacaRequests:number;readQueries:number;maxUrlBytes:number;largestChunkLatencyMs:number; totalRequests:number; fullReads:number; fullSnapshotReads:number; readMs:number };
+      metrics: () => { inventoryCommits:number;catalogRequests:number;wacaRequests:number;wacaDeltaRequests:number;
+        fullWacaSnapshotReads:number;fullWacaSnapshotCommits:number;journalRequests:number;readQueries:number;
+        maxUrlBytes:number;largestChunkLatencyMs:number;totalRequests:number;fullReads:number;fullSnapshotReads:number;readMs:number };
       resetMetrics: () => void;
       failReadbackRequests: (count: number) => void;
       lastRecord?: BuyAnimeImportRecord;
@@ -25,7 +27,9 @@ declare global {
 }
 let readbackLost = false, catalogLost = false, wacaLost = false;
 let remainingReadFailures = 0;
-const metrics = { inventoryCommits:0,catalogRequests:0,wacaRequests:0,readQueries:0,maxUrlBytes:0,largestChunkLatencyMs:0,totalRequests:0,fullReads:0,fullSnapshotReads:0,readMs:0 };
+const metrics = { inventoryCommits:0,catalogRequests:0,wacaRequests:0,wacaDeltaRequests:0,
+  fullWacaSnapshotReads:0,fullWacaSnapshotCommits:0,journalRequests:0,readQueries:0,maxUrlBytes:0,
+  largestChunkLatencyMs:0,totalRequests:0,fullReads:0,fullSnapshotReads:0,readMs:0 };
 window.__BUYANIME_RESUME_PROVIDER__ = {
   setup(actor) {
     const isolated = createClient('http://127.0.0.1:4399','ephemeral-isolated-public-placeholder', {
@@ -37,6 +41,7 @@ window.__BUYANIME_RESUME_PROVIDER__ = {
         const method=String(init?.method||'GET');
         const started=performance.now();
         metrics.totalRequests++;
+        if(url.pathname==='/rest/v1/import_batches')metrics.journalRequests++;
         if(method==='GET' && !url.searchParams.has('id')) metrics.fullReads++;
         if(method==='GET' && url.searchParams.get('select')==='*' && !url.searchParams.has('id')
           && !url.searchParams.has('product_group_id') && !url.searchParams.has('product_category_id')) metrics.fullSnapshotReads++;
@@ -50,7 +55,9 @@ window.__BUYANIME_RESUME_PROVIDER__ = {
         }
         if(url.pathname==='/rest/v1/rpc/erp_apply_field_mutations')metrics.inventoryCommits++;
         if(url.pathname==='/rest/v1/rpc/erp_apply_catalog_transaction')metrics.catalogRequests++;
-        if(url.pathname==='/rest/v1/rpc/erp_commit_waca_snapshot')metrics.wacaRequests++;
+        if(url.pathname==='/rest/v1/rpc/erp_read_waca_snapshot')metrics.fullWacaSnapshotReads++;
+        if(url.pathname==='/rest/v1/rpc/erp_commit_waca_snapshot'){metrics.wacaRequests++;metrics.fullWacaSnapshotCommits++;}
+        if(url.pathname==='/rest/v1/rpc/erp_merge_waca_master_links'){metrics.wacaRequests++;metrics.wacaDeltaRequests++;}
         const result=await window.__BUYANIME_ISOLATED_HTTP__({
           path:path.replace(/^\/rest\/v1/u,''),method,body,prefer:new Headers(init?.headers).get('prefer')||undefined,
           accept:new Headers(init?.headers).get('accept')||undefined,
@@ -61,7 +68,7 @@ window.__BUYANIME_RESUME_PROVIDER__ = {
         if(result.status===200 && url.pathname==='/rest/v1/rpc/erp_apply_catalog_transaction' && catalogLost){
           catalogLost=false;throw new TypeError('Failed to fetch: isolated Catalog response lost after commit');
         }
-        if(result.status===200 && url.pathname==='/rest/v1/rpc/erp_commit_waca_snapshot' && wacaLost){
+        if(result.status===200 && url.pathname==='/rest/v1/rpc/erp_merge_waca_master_links' && wacaLost){
           wacaLost=false;throw new TypeError('Failed to fetch: isolated WACA response lost after commit');
         }
         return new Response(result.status===204?null:JSON.stringify(result.data),{

@@ -124,6 +124,9 @@ try{
   assert.equal(wacaLoss.metrics.catalogRequests,1,'Replayed EXACT Catalog request after close/relogin');
   assert.ok([0,1].includes(wacaLoss.metrics.wacaRequests),
     'The real fixture may require zero WACA evidence writes; if required it is dispatched at most once');
+  const ledgerAfterWaca=(await db.sql.query('select count(*)::int n from public.erp_idempotency_keys')).rows[0].n;
+  assert.equal(ledgerAfterWaca,ledgerAfter+wacaLoss.metrics.wacaRequests,
+    'A WACA delta must create exactly one idempotency result before response loss');
   assert.equal(hash((await db.sql.query(`select jsonb_build_object(
     'g',(select jsonb_agg(g order by id) from product_groups g),
     'c',(select jsonb_agg(c order by id) from product_categories c),
@@ -144,9 +147,11 @@ try{
   });
   if(final.failure)console.log(JSON.stringify({phase:'final-recovery',...final}));
   assert.equal(final.stage,'COMPLETE');assert.equal(final.recovery,null);
-  assert.equal(final.metrics.inventoryCommits,0);assert.equal(final.metrics.catalogRequests,0);assert.equal(final.metrics.wacaRequests,0);
+  assert.equal(final.metrics.inventoryCommits,0);assert.equal(final.metrics.catalogRequests,0);
+  assert.equal(final.metrics.wacaRequests,wacaLoss.metrics.wacaRequests,
+    'Response-loss recovery must replay only the same idempotent WACA request');
   assert.equal((await db.sql.query('select revision from waca_state')).rows[0].revision,wacaRevision);
-  assert.equal((await db.sql.query('select count(*)::int n from erp_idempotency_keys')).rows[0].n,ledgerAfter);
+  assert.equal((await db.sql.query('select count(*)::int n from erp_idempotency_keys')).rows[0].n,ledgerAfterWaca);
   assert.equal(externalRequests,0);
   // Existing grants/RLS, no migration changes: authenticated read, viewer/anon cannot write.
   const journal=(await db.sql.query('select id,details,version from import_batches limit 1')).rows[0];

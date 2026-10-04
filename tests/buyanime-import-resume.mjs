@@ -6,7 +6,8 @@ globalThis.window = { indexedDB: globalThis.indexedDB, location: { hostname: '12
 const vite = await createServer({ configFile: false, optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true, hmr: false } });
 try {
-  const { BuyAnimeImportPipeline, inventoryProof, importCatalogKey, proveInventoryRows, assertImportRecord, buyAnimeRecoveryMessage } = await vite.ssrLoadModule('/src/providers/cloud/buyAnimeImportResume.ts');
+  const { BuyAnimeImportPipeline, inventoryProof, importCatalogKey, importWacaDeltaKey,
+    proveInventoryRows, assertImportRecord, buyAnimeRecoveryMessage } = await vite.ssrLoadModule('/src/providers/cloud/buyAnimeImportResume.ts');
   const { planCloudInventoryImport } = await vite.ssrLoadModule('/src/providers/cloud/inventoryImportPlan.ts');
   const { CloudMutationBoundaryError } = await vite.ssrLoadModule('/src/providers/cloud/cloudFieldCas.ts');
   const uuid = n => `10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -18,7 +19,7 @@ try {
   let journal = null, authoritative = [], inventoryCommits = 0, catalogCommits = 0, wacaCommits = 0;
   let readFailure = true, lostCatalog = true, lostWaca = true;
   const catalogKeys = [], catalogRequests = [], seenKeys = new Set();
-  const plan = { request:{family:'catalog', mode:'sync', dependencies:{}, operations:{product_groups:[],product_categories:[],product_variants:[]}},
+  const plan = { request:{family:'catalog', mode:'sync', dependencies:{}, operations:{product_groups:[{kind:'create',id:uuid(900),values:{}}],product_categories:[],product_variants:[]}},
     summary:{filledVariantsCount:0,affectedGroupsCount:0,upgradedSkusCount:0} };
   const port = {
     load: async () => structuredClone(journal),
@@ -36,7 +37,9 @@ try {
       if(lostCatalog){ lostCatalog=false; throw new CloudMutationBoundaryError('result-unknown',new Error('Failed to fetch')); }
     },
     verifyCatalog: async () => {},
-    ensureWacaEvidence: async () => {
+    planWacaEvidence: async record => ({key:importWacaDeltaKey(record.batchId),expectedRevision:0,
+      links:[{mainCode:'GP1',childCode:'G1',productGroupId:uuid(900),productVariantId:uuid(901),variantTitle:'A',sourceFile:record.fileName,sourceFiles:[record.fileName],observedAt:record.observedAt}],inserted:1,updated:0,unchanged:0}),
+    commitWacaEvidence: async () => {
       if(wacaCommits===0)wacaCommits++;
       if(lostWaca){lostWaca=false;throw new Error('response lost after WACA evidence commit');}
     },
@@ -105,5 +108,26 @@ try {
   await assert.rejects(()=>new BuyAnimeImportPipeline(port).resume(journal),/CATALOG_PENDING/);
   assert.equal(journal.stage,'CATALOG_PENDING');assert.equal(journal.catalog,undefined);
   port.commitCatalog=normalCatalog;
+  // Production no-change fast path: the Inventory port receives the empty
+  // touched-set but sends no RPC; Catalog/WACA mutation stay skipped, there is
+  // no resume read and exactly one durable COMPLETE journal write.
+  let noOpLoads=0,noOpSaves=0,noOpInventory=0,noOpCatalog=0,noOpWaca=0,noOpJournal=null;
+  const noOpPlan={operations:[],inventory:incoming,imported:incoming,batchId,
+    stats:{total:incoming.length,newCount:0,updatedCount:0,unchangedCount:incoming.length,groupCount:1}};
+  const noOpPort={
+    load:async()=>{noOpLoads++;return structuredClone(noOpJournal);},
+    save:async(record,version)=>{noOpSaves++;assert.equal(version,0);noOpJournal={...record,version:1};return structuredClone(noOpJournal);},
+    prepareInventory:async()=>noOpPlan,commitInventory:async()=>{noOpInventory++;},readInventory:async()=>[],
+    planCatalog:async()=>({request:{family:'catalog',mode:'sync',dependencies:{},operations:{product_groups:[],product_categories:[],product_variants:[]}},summary:{}}),
+    commitCatalog:async()=>{noOpCatalog++;},verifyCatalog:async()=>{},
+    planWacaEvidence:async record=>({key:importWacaDeltaKey(record.batchId),expectedRevision:7,links:[],inserted:0,updated:0,unchanged:12}),
+    commitWacaEvidence:async()=>{noOpWaca++;},
+  };
+  const noOpPipeline=new BuyAnimeImportPipeline(noOpPort);
+  const noOpStarted=await noOpPipeline.start(incoming,'same-file.xls');
+  const noOpComplete=await noOpPipeline.resume(noOpStarted);
+  assert.equal(noOpComplete.stage,'COMPLETE');
+  assert.deepEqual({noOpLoads,noOpSaves,noOpInventory,noOpCatalog,noOpWaca},
+    {noOpLoads:0,noOpSaves:1,noOpInventory:1,noOpCatalog:0,noOpWaca:0});
   console.log('PASS 1505 rows: committed/readback-pending, full expected fields+UUID proof, read-only verify, F5/close/relogin, Inventory exactly once, exact Catalog replay, WACA retry, legacy resume, fail-closed unknown, COMPLETE');
 } finally { await vite.close(); }

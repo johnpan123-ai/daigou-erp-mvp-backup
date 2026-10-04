@@ -265,8 +265,12 @@ export function assertReviewedProviderContract(file, before, after) {
     .map(member => canonical(tree, member));
   if (JSON.stringify(members(oldTree, oldClass)) !== JSON.stringify(members(newTree, newClass))) fail('unreviewed provider member changed');
   const approvedCatalogCall=canonical(parse('rpc.ts',`supabase.rpc(CATALOG_RPC, { p_idempotency_key: catalog.key, p_request: catalog.plan.request });`)).trim().replace(/;$/u,'');
+  const approvedWacaDeltaCall=canonical(parse('rpc.ts',`supabase.rpc('erp_merge_waca_master_links', {
+    p_idempotency_key: plan.key,
+    p_request: { family: 'waca-master-links', expectedRevision: plan.expectedRevision, links: plan.links },
+  });`)).trim().replace(/;$/u,'');
   const rpc = tree => nodes(tree).filter(ts.isCallExpression).filter(node => node.expression.getText(tree) === 'supabase.rpc')
-    .map(node => canonical(tree, node)).filter(call=>call!==approvedCatalogCall);
+    .map(node => canonical(tree, node)).filter(call=>call!==approvedCatalogCall && call!==approvedWacaDeltaCall);
   if (JSON.stringify(rpc(oldTree)) !== JSON.stringify(rpc(newTree))) fail('provider RPC signature/payload changed');
 }
 
