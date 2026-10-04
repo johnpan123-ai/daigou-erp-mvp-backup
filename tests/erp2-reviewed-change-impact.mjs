@@ -118,6 +118,11 @@ const falseBoundaryGit = args => args[0] === '--no-replace-objects' && args[2] =
   && args[3] === v5Baseline.sourceHead && args[4] === buyAnimeReview.beforeHead
   ? (() => { throw new Error('false adoption boundary'); })() : v5Git(args);
 assert.throws(() => reviewForCandidate(falseBoundaryGit, buyAnimeCandidate.head, v5Baseline.sourceHead), /FAILED_CLOSED/u);
+const v7BaselineHead = '60ca9f03aee353243b57b5d4d54b3f407ba085e2';
+const successGateCandidateHead = 'e636274c23a84fbdd48bcafec63973c64ca0793c';
+assert.ok(reviewForCandidate(realGit, successGateCandidateHead, v7BaselineHead)
+  .some(review => review.id === 'buyanime-success-gate-provenance-reconciliation-v1'),
+  'a v7 baseline must absorb discontinuities that are fully historical while preserving the exact post-baseline patch');
 const buyAnimeInspection = inspectSafeDescendant({ git: v5Git, candidate: buyAnimeCandidate, baselineRecord: v5Baseline });
 assert.equal(buyAnimeInspection.result, 'PASS');
 assert.equal(buyAnimeInspection.schemaSensitiveFiles, 0);

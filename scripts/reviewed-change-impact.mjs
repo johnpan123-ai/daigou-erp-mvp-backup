@@ -75,9 +75,16 @@ export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = nul
           // Git boundary can reset the chain; gaps after adoption stay blocked.
           if (!adoptedBaselineHead) fail(`unreviewed gap between exact patches: ${row.file}`);
           try {
-            git(['--no-replace-objects', 'merge-base', '--is-ancestor', previous.review.reviewedHead, adoptedBaselineHead]);
-            git(['--no-replace-objects', 'merge-base', '--is-ancestor', adoptedBaselineHead, review.beforeHead]);
-          } catch { fail(`unreviewed post-baseline gap: ${row.file}`); }
+            // The current reviewed patch may itself already be part of the
+            // adopted tree. In that case the baseline has verified the whole
+            // earlier gap and it must not be reclassified as post-baseline.
+            git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, adoptedBaselineHead]);
+          } catch {
+            try {
+              git(['--no-replace-objects', 'merge-base', '--is-ancestor', previous.review.reviewedHead, adoptedBaselineHead]);
+              git(['--no-replace-objects', 'merge-base', '--is-ancestor', adoptedBaselineHead, review.beforeHead]);
+            } catch { fail(`unreviewed post-baseline gap: ${row.file}`); }
+          }
         }
         try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', previous.review.reviewedHead, review.beforeHead]); }
         catch { fail(`review chain is not chronological: ${row.file}`); }
