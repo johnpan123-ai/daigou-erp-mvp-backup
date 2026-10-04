@@ -28,6 +28,7 @@ import {
   type WacaVariantPreviewComparison,
 } from '../waca/previewReconciliation';
 import { supportsWacaProvider } from '../waca/providerSupport';
+import { classifyWacaError, wacaNotice, type WacaStage, type WacaUiError } from '../waca/importErrors';
 import './WacaIntegration.css';
 
 type Tab = 'import' | 'orders' | 'mappings' | 'history' | 'pending';
@@ -79,8 +80,7 @@ const resolutionText = (item: WacaItem): string => {
 const quantity = (value: number) => value.toLocaleString('zh-TW');
 const signedQuantity = (value: number) => value > 0 ? `+${quantity(value)}` : quantity(value);
 const isPending = (item: WacaItem) => !item.productVariantId;
-const readErrorText = (cause: unknown): string => cause && typeof cause === 'object' && 'message' in cause
-  ? String(cause.message) : String(cause);
+const readErrorText = (cause: unknown) => classifyWacaError(cause, 'read');
 
 export default function WacaIntegration() {
   const [tab, setTab] = useState<Tab>('import');
@@ -101,7 +101,10 @@ export default function WacaIntegration() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  const [error, setErrorState] = useState<WacaUiError | null>(null);
+  const setError = useCallback((value: WacaUiError | string) => setErrorState(
+    typeof value === 'string' ? value ? wacaNotice('VALIDATION_ERROR', value) : null : value,
+  ), []);
 
   const load = useCallback(async () => {
     // Cloud groups wait for the existing atomic catalog pull. Read its inventory
@@ -117,12 +120,12 @@ export default function WacaIntegration() {
     setInventory(nextInventory);
     setGroups(nextGroups);
     setError('');
-  }, []);
+  }, [setError]);
 
   useEffect(() => {
     if (!supportsWacaProvider(getProviderMode(), supabaseEnvironment.projectRef)) return;
     void Promise.resolve().then(load).catch(cause => setError(readErrorText(cause)));
-  }, [load]);
+  }, [load, setError]);
 
   const masterState = useMemo(() => {
     if (!snapshot) return { links: [] as MyAcgMasterLink[], master: [] as MasterVariant[], error: '' };
@@ -131,7 +134,8 @@ export default function WacaIntegration() {
       const links = mergeMyAcgMasterLinks(fromInventory.links, snapshot.masterLinks);
       return { links, master: buildWacaMasterReference(variants, links), error: '' };
     } catch (cause) {
-      return { links: snapshot.masterLinks, master: buildWacaMasterReference(variants, snapshot.masterLinks), error: String(cause) };
+      return { links: snapshot.masterLinks, master: buildWacaMasterReference(variants, snapshot.masterLinks),
+        error: classifyWacaError(cause, 'validation').message };
     }
   }, [snapshot, variants, inventory]);
 
@@ -285,17 +289,21 @@ export default function WacaIntegration() {
         links: masterState.links,
         comparisonByVariant,
       });
-    } catch (cause) { setChosenFileName(''); setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setChosenFileName(''); setError(classifyWacaError(cause, 'parse')); }
     finally { setBusy(false); }
   };
 
   const confirmImport = async () => {
     if (!pendingImport || !snapshot || pendingImport.result.errors.length) return;
     setBusy(true); setError(''); setMessage('');
+    let stage: WacaStage = 'read';
     try {
       const current = await dataProvider.getNextWacaSnapshot();
+      stage = 'validation';
       if (current.revision !== pendingImport.revision) throw new Error('WACA 資料已變更，請重新預覽檔案。');
+      stage = 'backup';
       await dataProvider.exportData();
+      stage = 'validation';
       const { candidate, result } = run(pendingImport.rows, current, pendingImport.importId, pendingImport.links);
       const conflicts = new Set(result.statusConflicts);
       const batch: WacaBatch = {
@@ -305,7 +313,9 @@ export default function WacaIntegration() {
         conflictRows: pendingImport.rows.filter(row => conflicts.has(wacaOrderKey(row.orderNumber))),
       };
       const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
+      stage = 'commit';
       await dataProvider.commitNextWacaSnapshot(next, current.revision, true);
+      stage = 'readback';
       const saved = await dataProvider.getNextWacaSnapshot();
       const savedVariants = await dataProvider.getAuthoritativeWacaVariants();
       const checked = reconcileWacaReadback(saved, savedVariants);
@@ -328,14 +338,14 @@ export default function WacaIntegration() {
       const integrityIssues = finalCheck.issues.filter(issue => issue.reason !== 'UNMATCHED_SOURCE');
       if (integrityIssues.length || result.statusConflicts.length) {
         setTab('pending');
-        setError(`WACA 訂單已保存，但有 ${integrityIssues.length + result.statusConflicts.length} 個對帳或訂單狀態問題需要確認。`);
+        setError(wacaNotice('CONFLICT', `WACA 訂單已保存，但有 ${integrityIssues.length + result.statusConflicts.length} 個對帳或訂單狀態問題需要確認。`));
       } else if (pendingFeatures) {
         setTab('pending');
         setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。建立商品後重新匯入 WACA Excel，即可自動配對並更新數量。`);
       } else {
         setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。`);
       }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage, pendingImport.importId)); }
     finally { setBusy(false); }
   };
 
@@ -347,22 +357,27 @@ export default function WacaIntegration() {
       const result = linksFromMyAcgInventory(parsed, variants, file.name, new Date().toISOString());
       const links = mergeMyAcgMasterLinks(masterState.links, result.links);
       setPendingLinks({ fileName: file.name, revision: snapshot.revision, result, links });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setError(classifyWacaError(cause, 'parse')); }
     finally { setBusy(false); }
   };
 
   const confirmMasterLinks = async () => {
     if (!snapshot || !pendingLinks) return;
     setBusy(true); setError('');
+    let stage: WacaStage = 'read';
     try {
       const current = await dataProvider.getNextWacaSnapshot();
+      stage = 'validation';
       if (current.revision !== pendingLinks.revision) throw new Error('對照資料已變更，請重新選擇買動漫檔案。');
+      stage = 'backup';
       await dataProvider.exportData();
+      stage = 'commit';
       await dataProvider.commitNextWacaSnapshot({ ...current, masterLinks: pendingLinks.links }, current.revision, false);
+      stage = 'readback';
       setPendingLinks(null);
       await load();
       setMessage(`已保存 ${pendingLinks.result.accepted} 筆買動漫 GP → G 對照證據。`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage)); }
     finally { setBusy(false); }
   };
 
@@ -382,10 +397,14 @@ export default function WacaIntegration() {
     const chosen = choicesFor(item).find(row => row.variantId === selectedVariant[item.feature]);
     if (!chosen || !chosen.variantId) { setError('請先選擇已確認商品底下的規格；有規格編號時必須與編號一致。'); return; }
     setBusy(true); setError('');
+    let stage: WacaStage = 'read';
     try {
       const current = await dataProvider.getNextWacaSnapshot();
+      stage = 'validation';
       if (current.revision !== snapshot.revision) throw new Error('WACA 資料已變更，請重新讀取。');
+      stage = 'backup';
       await dataProvider.exportData();
+      stage = 'validation';
       const candidate = repositoryFromSnapshot(current, variants);
       setWacaMapping(candidate, {
         feature: item.feature, myacgMainId: chosen.mainCode || item.productCode, myacgVariantId: chosen.childCode,
@@ -393,14 +412,16 @@ export default function WacaIntegration() {
         historicalProductTitle: item.productTitle, historicalVariantTitle: chosen.variantTitle,
         masterStatus: 'ACTIVE',
       }, masterIndex, selectedParent[item.feature]);
+      stage = 'commit';
       await dataProvider.commitNextWacaSnapshot(
         snapshotFromRepository(current, candidate, current.batches, masterState.links), current.revision, true,
       );
+      stage = 'readback';
       await load();
       setMessage('商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage)); }
     finally { setBusy(false); }
-  }, [snapshot, choicesFor, selectedVariant, selectedParent, variants, masterState.links, masterIndex, load]);
+  }, [snapshot, choicesFor, selectedVariant, selectedParent, variants, masterState.links, masterIndex, load, setError]);
 
   const parentConfirmation = useCallback((item: WacaItem) => item.diagnostic !== 'SOURCE_SPEC_IDENTITY_CONFLICT' && !item.specCode.trim()
     && !matchByFeature.get(item.feature)?.candidates.length ? <label>先人工確認商品群組
@@ -432,10 +453,14 @@ export default function WacaIntegration() {
     const status = selectedStatus[orderKey];
     if (!status) { setError('請選擇此訂單的正確狀態。'); return; }
     setBusy(true); setError('');
+    let stage: WacaStage = 'read';
     try {
       const current = await dataProvider.getNextWacaSnapshot();
+      stage = 'validation';
       if (current.revision !== snapshot.revision) throw new Error('WACA 資料已變更，請重新讀取。');
+      stage = 'backup';
       await dataProvider.exportData();
+      stage = 'validation';
       const resolutionRows = rows.map(row => ({ ...row, orderStatus: status }));
       const importId = crypto.randomUUID();
       const { candidate, result } = run(resolutionRows, current, importId);
@@ -448,12 +473,14 @@ export default function WacaIntegration() {
         rows: resolutionRows.length, inserted: result.inserted, updated: result.updated,
         unchanged: result.unchanged, result, conflictRows: [],
       });
+      stage = 'commit';
       await dataProvider.commitNextWacaSnapshot(
         snapshotFromRepository(current, candidate, batches, masterState.links), current.revision, true,
       );
+      stage = 'readback';
       await load();
       setMessage(`${orderKey} 已按「${status}」重新計算。`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage)); }
     finally { setBusy(false); }
   };
 
@@ -491,7 +518,15 @@ export default function WacaIntegration() {
       <div><h1>WACA 匯入</h1><p>日常只需匯入一份 WACA 訂單 Excel。確認後會更新訂單、重算數量並自動對帳。</p></div>
       <button className="btn btn-md btn-outline" onClick={() => void load().catch(cause => setError(readErrorText(cause)))} disabled={busy}><RefreshCw size={16} /> 重新讀取</button>
     </PageHeader>
-    {error && <div className="waca-notice waca-error" role="alert"><span className="badge badge-danger">需確認</span> {error}</div>}
+    {error && <div className="waca-notice waca-error" role="alert"><span className="badge badge-danger">{error.label}</span> {error.message}
+      {error.diagnostic && <details className="waca-tech"><summary>技術資訊</summary>
+        <small>類型：{error.category}／階段：{error.diagnostic.stage}</small>
+        {error.diagnostic.code && <small>代碼：{error.diagnostic.code}</small>}
+        <small>原因：{error.diagnostic.reason}</small>
+        {error.diagnostic.rpc && <small>RPC：{error.diagnostic.rpc}</small>}
+        {error.diagnostic.requestId && <small>請求：{error.diagnostic.requestId}</small>}
+      </details>}
+    </div>}
     {!snapshot && !error && <p role="status">正在讀取 WACA 訂單資料…</p>}
     {message && <div className="waca-notice" role="status"><span className="badge badge-success">已完成</span> {message}</div>}
     {snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED' &&
