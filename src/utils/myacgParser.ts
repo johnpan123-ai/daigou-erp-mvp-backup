@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import type { InventoryItem } from '../lib/db';
 import { classifyMyAcgImportError, MyAcgImportError } from './myacgImportErrors';
+import { markBuyAnimeTrace } from '../diagnostics/buyAnimeProductionTrace';
 
 const getSoldQty = (rowData: Record<string, unknown>) => {
   const normKeys = Object.keys(rowData).map(k => ({
@@ -99,11 +100,14 @@ const listedKeys = ['刊登時間', '上架時間', '刊登日期'];
 
 export async function parseMyAcgFile(file: File): Promise<InventoryItem[]> {
   let text: string;
-  try { text = await file.text(); }
+  markBuyAnimeTrace('T01_FILE_READ_START');
+  try { text = await file.text(); markBuyAnimeTrace('T02_FILE_READ_DONE', { fileBytes: file.size }); }
   catch (cause) { throw classifyMyAcgImportError(cause, 'file-read'); }
+  markBuyAnimeTrace('T03_PARSE_START');
   try {
     const items = /<(?:table|html)\b/iu.test(text) ? parseHtmlTable(text) : await parseXlsxFile(file);
     if (!items.length) throw new MyAcgImportError('VALIDATION_ERROR', 'validation');
+    markBuyAnimeTrace('T04_PARSE_DONE', { parsedRows: items.length });
     return items;
   } catch (cause) {
     throw classifyMyAcgImportError(cause, 'parse');

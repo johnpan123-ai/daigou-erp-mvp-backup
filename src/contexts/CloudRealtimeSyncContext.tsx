@@ -40,6 +40,7 @@ import {
   type StagingRealtimeFaultSnapshot,
 } from '../lib/stagingRealtimeFaultControl';
 import { assertP04HarnessBoundary } from '../lib/stagingP04AuthenticatedHarness';
+import { markBuyAnimeTrace } from '../diagnostics/buyAnimeProductionTrace';
 
 interface CloudRealtimeContextValue {
   conflictedResources: ReadonlySet<CloudResource>;
@@ -207,17 +208,23 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const unregisterBuyAnimeRefresh = registerBuyAnimeTargetedRefresh(async evidence => {
       const { changes, rowsByTable } = evidence;
       const resources = [...new Set(changes.map(change => change.resource))];
+      markBuyAnimeTrace('T23_TARGETED_REFRESH_START', { changedRows: changes.length, resources: resources.length });
       await cache.absorbVerifiedRows(changes, rowsByTable);
       notifyRefreshed(resources);
       await Promise.all([...listeners.current].map(listener => listener(resources)));
+      markBuyAnimeTrace('T24_TARGETED_REFRESH_DONE', { changedRows: changes.length, resources: resources.length });
       // A concurrently requested global refresh is part of the visible sync
       // state. Success must not race ahead of its final presentation.
+      markBuyAnimeTrace('T26_GLOBAL_SYNC_WAIT_START');
+      markBuyAnimeTrace('T27_GLOBAL_SYNC_AUTHORITATIVE_READ_START', { inFlight: Boolean(globalRefreshInFlight.current) });
       if (globalRefreshInFlight.current) await globalRefreshInFlight.current;
+      markBuyAnimeTrace('T28_GLOBAL_SYNC_AUTHORITATIVE_READ_DONE', { inFlight: Boolean(globalRefreshInFlight.current) });
       const status = getCloudConnectivitySnapshot();
       if (status.status !== 'online' || status.authoritativeReadPending
         || !['fresh-online', 'fresh-empty'].includes(status.readStatus)) {
         throw new Error('BUYANIME_GLOBAL_SYNC_NOT_CONVERGED');
       }
+      markBuyAnimeTrace('T29_GLOBAL_SYNC_SYNCED', { readStatus: status.readStatus });
     });
     const activeResources = () => [...new Set([...editingOwners.current.values()].flatMap(scope => [...scope.resources]))];
     let channelState: RealtimeChannelState = 'unavailable';

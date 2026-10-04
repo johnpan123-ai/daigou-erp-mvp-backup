@@ -1,6 +1,7 @@
 import { prepareInventoryUpsert, type InventoryItem } from '../../lib/db';
 import { canonicalCloudId, toCloudFieldRow } from './cloudEntityPayload';
 import { buildCloudCollectionMutationPlan } from './cloudFieldCas';
+import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
 
 type AuthoritativeInventory = InventoryItem & { deleted_at?: string | null };
 
@@ -13,6 +14,7 @@ type AuthoritativeInventory = InventoryItem & { deleted_at?: string | null };
 export function planCloudInventoryImport(
   authoritative: AuthoritativeInventory[], incoming: InventoryItem[],
 ) {
+  markBuyAnimeTrace('T08_INDEX_BUILD_START', { authoritativeRows: authoritative.length, incomingRows: incoming.length });
   const byKey = new Map<string, AuthoritativeInventory>();
   for (const row of authoritative) {
     if (!row.inventory_key || byKey.has(row.inventory_key)) {
@@ -74,6 +76,7 @@ export function planCloudInventoryImport(
   const newCount = importedOperations.filter(op => op.kind === 'create').length;
   const updatedCount = importedOperations.filter(op => op.kind === 'patch').length;
   const imported = inventory.filter(row => importedKeys.has(row.inventory_key));
+  markBuyAnimeTrace('T09_INDEX_BUILD_DONE', { authoritativeRows: authoritative.length, incomingRows: incoming.length });
   return { inventory, imported, operations, batchId: incoming[0]?.latest_catalog_import_id, stats: { ...projection.stats, newCount, updatedCount,
     unchangedCount: importedKeys.size - newCount - updatedCount } };
 }

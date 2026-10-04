@@ -4,6 +4,7 @@ import type { planCatalogTransaction } from './catalogTransaction';
 import { deterministicCloudUuid, toCloudFieldRow } from './cloudEntityPayload';
 import { CloudMutationBoundaryError } from './cloudFieldCas';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/myacgImportErrors';
+import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
 
 export const BUYANIME_JOURNAL_PLATFORM = 'buyanime-catalog-resume-v1';
 export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN'
@@ -109,7 +110,12 @@ export class BuyAnimeImportPipeline {
     const batchIds = new Set(items.map(row => row.latest_catalog_import_id));
     const timestamps = new Set(items.map(row => row.catalog_last_seen_at));
     if (batchIds.size !== 1 || timestamps.size !== 1 || !items.length) throw new BuyAnimeResumeError('BUYANIME_BATCH_IDENTITY_INVALID');
+    markBuyAnimeTrace('T10_INVENTORY_PLAN_START', { incomingRows: items.length });
     const plan = await this.port.prepareInventory(items);
+    markBuyAnimeTrace('T11_INVENTORY_PLAN_DONE', {
+      incomingRows: items.length, mutationRows: plan.operations.length,
+      newRows: plan.stats.newCount, updatedRows: plan.stats.updatedCount, unchangedRows: plan.stats.unchangedCount,
+    });
     // Excel parser rows may not yet have inventory_key. Reuse the existing
     // canonical projection/duplicate merge; never invent another key scheme.
     const imported = plan.imported;
@@ -122,7 +128,9 @@ export class BuyAnimeImportPipeline {
     // Must persist intent BEFORE sending the single Inventory transaction.
     record = await this.port.save(record, 0);
     try {
+      markBuyAnimeTrace('T12_INVENTORY_COMMIT_START', { mutationRows: plan.operations.length });
       await this.port.commitInventory(plan);
+      markBuyAnimeTrace('T13_INVENTORY_COMMIT_RESPONSE', { mutationRows: plan.operations.length });
     } catch (cause) {
       const unknown = classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
       const committed = cause instanceof CloudMutationBoundaryError && cause.state === 'committed-readback-pending';
@@ -141,9 +149,11 @@ export class BuyAnimeImportPipeline {
       const mutatedIds = new Set(plan.operations.map(operation => operation.id));
       const unchangedRows = plan.imported.filter(row => !mutatedIds.has(row.id));
       const changedExpected = record.expected.filter(proof => mutatedIds.has(proof.id));
+      markBuyAnimeTrace('T14_INVENTORY_ACK_READ_START', { ids: changedExpected.length, chunks: Math.ceil(changedExpected.length / 150) });
       const changedRows = changedExpected.length
         ? await this.port.readInventory({ ...record, expected: changedExpected })
         : [];
+      markBuyAnimeTrace('T15_INVENTORY_ACK_READ_DONE', { ids: changedExpected.length, chunks: Math.ceil(changedExpected.length / 150) });
       const rows = [...unchangedRows, ...changedRows];
       await proveInventoryRows(record, rows);
       const saved = { ...record, stage: 'INVENTORY_VERIFIED' as const };
@@ -181,12 +191,22 @@ export class BuyAnimeImportPipeline {
       record = { ...record, stage: 'CATALOG_PENDING' };
     }
     if (record.stage === 'CATALOG_PENDING') {
+      markBuyAnimeTrace('T16_CATALOG_PLAN_START', { inventoryRows: rows.length });
       const plan = await this.port.planCatalog(rows, reusable ? proven.inventory : undefined);
+      markBuyAnimeTrace('T17_CATALOG_PLAN_DONE', {
+        catalogOperations: plan ? Object.values(plan.request.operations).reduce((sum, operations) => sum + operations.length, 0) : 0,
+      });
       // Persist the EXACT request and stable key before RPC; close/relogin cannot regenerate it.
       record = await this.store(record, { stage: 'CATALOG_COMMITTING', catalog: { key: importCatalogKey(record.batchId), plan } });
     }
     if (record.stage === 'CATALOG_COMMITTING') {
-      try { await this.port.commitCatalog(record.catalog!); }
+      try {
+        const catalogOperations = record.catalog?.plan
+          ? Object.values(record.catalog.plan.request.operations).reduce((sum, operations) => sum + operations.length, 0) : 0;
+        markBuyAnimeTrace('T18_CATALOG_COMMIT_START', { catalogOperations });
+        await this.port.commitCatalog(record.catalog!);
+        markBuyAnimeTrace('T19_CATALOG_COMMIT_RESPONSE', { catalogOperations });
+      }
       catch (cause) {
         // A proven rollback may replan; an uncertain result MUST retain the exact request.
         if (cause instanceof BuyAnimeResumeError && cause.code === 'BUYANIME_CATALOG_ROLLED_BACK')
@@ -197,6 +217,7 @@ export class BuyAnimeImportPipeline {
     }
     if (record.stage === 'CATALOG_COMMITTED') {
       await this.port.verifyCatalog(record.catalog!);
+      markBuyAnimeTrace('T20_CATALOG_READBACK_DONE');
       record = { ...record, stage: 'CATALOG_VERIFIED' };
     }
     if (record.stage === 'CATALOG_VERIFIED') {
@@ -208,7 +229,9 @@ export class BuyAnimeImportPipeline {
     if (record.stage === 'WACA_EVIDENCE_PENDING') {
       // WACA evidence is part of the user-visible success contract. Keep the
       // durable intent, but never display success before this finishes.
+      markBuyAnimeTrace('T21_WACA_EVIDENCE_START', { inventoryRows: rows.length });
       await this.port.ensureWacaEvidence(record, rows);
+      markBuyAnimeTrace('T22_WACA_EVIDENCE_DONE', { inventoryRows: rows.length });
       record = await this.store(record, { stage: 'COMPLETE' });
     }
     return record;

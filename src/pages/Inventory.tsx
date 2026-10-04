@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { dataProvider } from '../providers/dataProvider';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import {
@@ -25,6 +25,14 @@ import {
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { BuyAnimeResumeError, buyAnimeRecoveryDiagnostic } from '../providers/cloud/buyAnimeImportResume';
 import { buyAnimeFlowLabel } from '../providers/cloud/buyAnimeImportCoordinator';
+import {
+  beginBuyAnimeProductionTrace,
+  finishBuyAnimeProductionTrace,
+  getLatestBuyAnimeProductionTrace,
+  markBuyAnimeTrace,
+  recordBuyAnimeReactCommit,
+  type BuyAnimeProductionTrace,
+} from '../diagnostics/buyAnimeProductionTrace';
 
 interface InventoryGroup {
   title: string;
@@ -91,6 +99,7 @@ export default function Inventory() {
   const [importDiagnostic, setImportDiagnostic] = useState<ReturnType<typeof myAcgImportDiagnostic> | null>(null);
   const [importStatus, setImportStatus] = useState('');
   const [successStats, setSuccessStats] = useState<ImportStats | null>(null);
+  const [performanceTrace, setPerformanceTrace] = useState<BuyAnimeProductionTrace | null>(() => getLatestBuyAnimeProductionTrace());
   const [variantGuardProbeNotice, setVariantGuardProbeNotice] = useState<string>('');
   const showVariantGuardAcceptanceUi = isVariantSyncGuardAcceptanceUiEnabled();
   const injectVariantReadFailure = isVariantSyncReadFailureInjectionEnabled();
@@ -151,6 +160,7 @@ export default function Inventory() {
   };
 
   const createPreImportBackup = async () => {
+    markBuyAnimeTrace('T06_PREIMPORT_BACKUP_START');
     const timestamp = new Date();
     const timestampIso = timestamp.toISOString();
     let backup;
@@ -164,8 +174,20 @@ export default function Inventory() {
     }
     setLastBackupTime(timestampIso);
     setBackupNotice(`已建立匯入前備份：${backup.filename}`);
+    markBuyAnimeTrace('T07_PREIMPORT_BACKUP_DONE', { backupBytes: backup.json.length });
     return backup;
   };
+
+  useLayoutEffect(() => {
+    if (!successStats) return;
+    markBuyAnimeTrace('T30_REACT_FINAL_COMMIT');
+    const frame = window.requestAnimationFrame(() => {
+      markBuyAnimeTrace('T31_SUCCESS_MODAL_VISIBLE');
+      const trace = finishBuyAnimeProductionTrace('SUCCESS');
+      if (trace) setPerformanceTrace(trace);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [successStats]);
 
   const handleManualExportBackup = async () => {
     setIsExportingBackup(true);
@@ -187,6 +209,8 @@ export default function Inventory() {
     if (!file) return;
     if (isImporting) return;
 
+    beginBuyAnimeProductionTrace(file);
+
     setIsImporting(true);
     setBackupNotice('');
     setImportDiagnostic(null);
@@ -203,6 +227,7 @@ export default function Inventory() {
         latest_catalog_import_id: currentImportId,
         catalog_last_seen_at: currentTimestamp
       }));
+      markBuyAnimeTrace('T05_NORMALIZE_DONE', { normalizedRows: itemsWithBatchMeta.length });
       importPhase = 'commit';
       if (currentMode === 'cloud' || currentMode === 'fallback') {
         const completed = await dataProvider.completeBuyAnimeImport(itemsWithBatchMeta, file.name, {
@@ -213,6 +238,7 @@ export default function Inventory() {
         // authoritative read-back, targeted cache refresh and Global Sync all
         // converge. Do not perform a second full fetch after this point.
         setImportStatus('');
+        markBuyAnimeTrace('T25_IMPORT_STATE_UPDATE', { totalRows: completed.stats.total });
         setSuccessStats(completed.stats);
         return;
       }
@@ -271,6 +297,8 @@ export default function Inventory() {
     } catch (err) {
       if (err instanceof Error && err.name === 'BuyAnimeBackupError') {
         setImportStatus('匯入前 JSON 備份失敗，已中止 XLS 匯入。');
+        const trace = finishBuyAnimeProductionTrace('ERROR', 'BUYANIME_BACKUP_FAILED');
+        if (trace) setPerformanceTrace(trace);
         alert('匯入前 JSON 備份失敗，已中止 XLS 匯入。');
         return;
       }
@@ -278,6 +306,8 @@ export default function Inventory() {
         if (err instanceof BuyAnimeResumeError && err.record) {
           setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, err.record));
           setImportStatus('匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。');
+          const trace = finishBuyAnimeProductionTrace('ERROR', err.code);
+          if (trace) setPerformanceTrace(trace);
           return;
         }
         try {
@@ -285,6 +315,8 @@ export default function Inventory() {
           if (pending) {
             setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, pending));
             setImportStatus('匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。');
+            const trace = finishBuyAnimeProductionTrace('ERROR', err instanceof BuyAnimeResumeError ? err.code : 'BUYANIME_PENDING_RECOVERY');
+            if (trace) setPerformanceTrace(trace);
             return;
           }
         } catch { /* Do not claim rollback without commit evidence. */ }
@@ -294,6 +326,8 @@ export default function Inventory() {
       setImportDiagnostic(diagnostic);
       setImportStatus('匯入未完成');
       console.error('[BuyAnime Import]', diagnostic);
+      const trace = finishBuyAnimeProductionTrace('ERROR', failure.code);
+      if (trace) setPerformanceTrace(trace);
       alert(
         isVariantDestructiveSyncGuardError(err)
           ? VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE
@@ -610,7 +644,12 @@ export default function Inventory() {
     return pages;
   };
 
+  const recordTraceProfiler = useCallback((_id: string, _phase: string, actualDuration: number) => {
+    recordBuyAnimeReactCommit(actualDuration);
+  }, []);
+
   return (
+    <React.Profiler id="buyanime-inventory" onRender={recordTraceProfiler}>
     <PageShell className="inventory-container">
       <input 
         type="file" 
@@ -1396,6 +1435,20 @@ export default function Inventory() {
               </pre>
             </details>
           )}
+          {performanceTrace && (
+            <details data-testid="buyanime-production-performance-trace" style={{ marginTop: '8px', fontSize: '12px' }}>
+              <summary>匯入效能診斷</summary>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => void navigator.clipboard.writeText(JSON.stringify(performanceTrace, null, 2))}
+                style={{ margin: '8px 0' }}
+              >複製效能診斷</button>
+              <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '240px', overflow: 'auto' }}>
+                {JSON.stringify(performanceTrace, null, 2)}
+              </pre>
+            </details>
+          )}
           {importStatus && (
             <section role="status" data-testid="buyanime-import-status" style={{ marginTop: '12px', fontSize: '13px' }}>
               <div>{importStatus}</div>
@@ -1909,5 +1962,6 @@ export default function Inventory() {
         )}
       </div>
     </PageShell>
+    </React.Profiler>
   );
 }
