@@ -154,4 +154,12 @@ assertReviewedProviderContract(provider, beforeProvider, afterProvider);
 assert.throws(() => assertReviewedProviderContract(provider, beforeProvider,
   afterProvider.replace("supabase.rpc('erp_apply_field_mutations'", "supabase.rpc('erp_unsafe_write'")), /FAILED_CLOSED/u);
 assert.equal(classifyDescendantFile('src/providers/cloud/futurePlanner.ts', null, 'unknown'), 'SCHEMA_SENSITIVE_OR_UNREVIEWED');
+const successGateReview = reviewedImpacts.reviews.find(review => review.id === 'buyanime-success-gate-provenance-reconciliation-v1');
+assert.ok(successGateReview);
+const resumeFile = 'src/providers/cloud/buyAnimeImportResume.ts';
+const resumeBefore = realGit(['show', `${successGateReview.beforeHead}:${resumeFile}`]);
+const resumeAfter = realGit(['show', `${successGateReview.reviewedHead}:${resumeFile}`]);
+assert.doesNotThrow(() => assertReviewedProviderContract(resumeFile, resumeBefore, resumeAfter));
+assert.throws(() => assertReviewedProviderContract(resumeFile, resumeBefore,
+  resumeAfter.replace('const reconciled =', "fetch('/unsafe'); const reconciled =")), /FAILED_CLOSED/u);
 console.log('PASS exact BuyAnime canonical identity diff and SHA; future planner/provider/DB/parser/RPC/migration/backup/canonical hunks fail closed');

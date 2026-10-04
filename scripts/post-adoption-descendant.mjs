@@ -179,8 +179,17 @@ export function assertReviewedProviderContract(file, before, after) {
     if(canonical(parse(file,before))!==canonical(parse(file,restored))) fail('Catalog algorithm/RPC contract changed');
     return;
   }
-  if (['src/providers/cloud/cloudBulkRead.ts','src/providers/cloud/buyAnimeImportResume.ts'].includes(file)) {
+  if (file === 'src/providers/cloud/cloudBulkRead.ts') {
     if (before !== null) fail('new readback/resume helper needs a new exact review');
+    const tree=parse(file,after);
+    if (nodes(tree).filter(ts.isCallExpression).some(call =>
+      /^(?:supabase\.|fetch|indexedDB\.|localStorage\.|sessionStorage\.|db\.)/u.test(call.expression.getText(tree))))
+      fail('pure readback/resume helper contains direct persistence I/O');
+    return;
+  }
+  if (file === 'src/providers/cloud/buyAnimeImportResume.ts') {
+    // Later exact reviews may refine the coordinator state machine, but it
+    // must remain a port-only domain helper with no direct persistence API.
     const tree=parse(file,after);
     if (nodes(tree).filter(ts.isCallExpression).some(call =>
       /^(?:supabase\.|fetch|indexedDB\.|localStorage\.|sessionStorage\.|db\.)/u.test(call.expression.getText(tree))))
