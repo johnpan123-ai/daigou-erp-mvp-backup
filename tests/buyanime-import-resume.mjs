@@ -17,7 +17,7 @@ try {
     final_price:10, myacg_available_quantity:0,myacg_sold_quantity:1,myacg_listed_at:'',
     latest_catalog_import_id:batchId,catalog_last_seen_at:'2026-10-03T04:52:25.877Z'}));
   let journal = null, authoritative = [], inventoryCommits = 0, catalogCommits = 0, wacaCommits = 0;
-  let readFailure = true, lostCatalog = true, lostWaca = true;
+  let readFailure = true, lostCatalog = true;
   const catalogKeys = [], catalogRequests = [], seenKeys = new Set();
   const plan = { request:{family:'catalog', mode:'sync', dependencies:{}, operations:{product_groups:[{kind:'create',id:uuid(900),values:{}}],product_categories:[],product_variants:[]}},
     summary:{filledVariantsCount:0,affectedGroupsCount:0,upgradedSkusCount:0} };
@@ -39,10 +39,7 @@ try {
     verifyCatalog: async () => {},
     planWacaEvidence: async record => ({key:importWacaDeltaKey(record.batchId),expectedRevision:0,
       links:[{mainCode:'GP1',childCode:'G1',productGroupId:uuid(900),productVariantId:uuid(901),variantTitle:'A',sourceFile:record.fileName,sourceFiles:[record.fileName],observedAt:record.observedAt}],inserted:1,updated:0,unchanged:0}),
-    commitWacaEvidence: async () => {
-      if(wacaCommits===0)wacaCommits++;
-      if(lostWaca){lostWaca=false;throw new Error('response lost after WACA evidence commit');}
-    },
+    commitWacaEvidence: async () => { wacaCommits++; throw new Error('WACA must not be called by BuyAnime'); },
   };
   await assert.rejects(() => new BuyAnimeImportPipeline(port).start(incoming,'399375_2026-10-03.xls'), /COMMITTED_READBACK_PENDING/);
   assert.equal(inventoryCommits,1);
@@ -55,16 +52,14 @@ try {
   await assert.rejects(() => new BuyAnimeImportPipeline(port).resume(structuredClone(journal)), /CATALOG_PENDING/);
   assert.equal(journal.stage,'CATALOG_COMMITTING');
   assert.equal(catalogCommits,1);
-  await assert.rejects(() => new BuyAnimeImportPipeline(port).resume(structuredClone(journal)), /response lost/);
-  assert.equal(journal.stage,'WACA_EVIDENCE_PENDING');
   const completed = await new BuyAnimeImportPipeline(port).resume(structuredClone(journal));
   assert.equal(completed.stage,'COMPLETE');
   await new BuyAnimeImportPipeline(port).resume(completed);
-  assert.equal(inventoryCommits,1);assert.equal(catalogCommits,1);assert.equal(wacaCommits,1);
+  assert.equal(inventoryCommits,1);assert.equal(catalogCommits,1);assert.equal(wacaCommits,0);
   assert.deepEqual([...new Set(catalogKeys)],[importCatalogKey(batchId)]);
   assert.equal(new Set(catalogRequests).size,1,'Response-lost replay uses EXACT saved request');
-  // A pending provenance-only bulk intent from an older runtime is replanned
-  // against current authoritative links and closes without another WACA RPC.
+  // An older WACA-pending journal rechecks Inventory and current Catalog,
+  // then closes the BuyAnime scope without reading or replaying WACA.
   const pendingBulk={...completed,stage:'WACA_EVIDENCE_PENDING',version:completed.version,waca:{
     key:importWacaDeltaKey(batchId),expectedRevision:8,
     links:Array.from({length:829},(_,index)=>({mainCode:'GP1',childCode:'G'+index,
@@ -73,13 +68,13 @@ try {
     inserted:0,updated:829,unchanged:0,
   }};
   journal=structuredClone(pendingBulk);wacaCommits=0;
-  const originalPlanWaca=port.planWacaEvidence;
-  port.planWacaEvidence=async record=>({key:importWacaDeltaKey(record.batchId),expectedRevision:8,
-    links:[],inserted:0,updated:0,unchanged:829});
+  const originalPlanCatalog=port.planCatalog;
+  port.planCatalog=async (_rows,_inventory,fresh)=>{assert.equal(fresh,true);return null;};
   const reconciledBulk=await new BuyAnimeImportPipeline(port).resume(structuredClone(pendingBulk));
   assert.equal(reconciledBulk.stage,'COMPLETE');assert.equal(wacaCommits,0,
     'resumed provenance-only intent must not replay the 829-row WACA mutation');
-  port.planWacaEvidence=originalPlanWaca;
+  assert.deepEqual(reconciledBulk.waca,pendingBulk.waca,'Legacy WACA intent retained, never claimed committed');
+  port.planCatalog=originalPlanCatalog;
   await assert.rejects(() => proveInventoryRows(journal,authoritative.slice(1)),/COUNT_MISMATCH/);
   const corrupted = structuredClone(authoritative); corrupted[0].final_price++;
   await assert.rejects(() => proveInventoryRows(journal,corrupted),/FIELDS_MISMATCH/);
@@ -146,5 +141,5 @@ try {
   assert.equal(noOpComplete.stage,'COMPLETE');
   assert.deepEqual({noOpLoads,noOpSaves,noOpInventory,noOpCatalog,noOpWaca},
     {noOpLoads:0,noOpSaves:1,noOpInventory:1,noOpCatalog:0,noOpWaca:0});
-  console.log('PASS 1505 rows: committed/readback-pending, full expected fields+UUID proof, read-only verify, F5/close/relogin, Inventory exactly once, exact Catalog replay, WACA retry, legacy resume, fail-closed unknown, COMPLETE');
+  console.log('PASS 1505 rows: committed/readback-pending, UUID proof, Inventory exactly once, Catalog exact replay, WACA calls zero, legacy WACA intent preserved, fail-closed unknown, COMPLETE');
 } finally { await vite.close(); }

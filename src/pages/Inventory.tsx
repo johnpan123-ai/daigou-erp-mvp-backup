@@ -16,7 +16,6 @@ import { BuyAnimeImportSuccessDialog } from '../components/BuyAnimeImportSuccess
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
-import { linksFromMyAcgInventory, mergeMyAcgMasterLinks } from '../waca/masterReference';
 import { getProviderMode } from '../providers/providerMode';
 import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
@@ -234,7 +233,7 @@ export default function Inventory() {
           beforeStart: createPreImportBackup,
           onStage: stage => setImportStatus(buyAnimeFlowLabel(stage)),
         });
-        // completeBuyAnimeImport resolves only after Catalog, WACA evidence,
+        // completeBuyAnimeImport resolves only after Inventory and Catalog,
         // authoritative read-back, targeted cache refresh and Global Sync all
         // converge. Do not perform a second full fetch after this point.
         setImportStatus('');
@@ -259,23 +258,8 @@ export default function Inventory() {
           postCommitIssue = 'group-sync';
         }
       }
-      // The catalog is the authoritative GP → G evidence source in both
-      // environments. Persist it while the uploaded parent code is still
-      // available; a later WACA import must not require this file again.
-      if (!postCommitIssue && currentMode === 'next') {
-        try {
-          const variants = await dataProvider.getAuthoritativeWacaVariants();
-          const evidence = linksFromMyAcgInventory(itemsWithBatchMeta, variants, file.name, currentTimestamp);
-          if (evidence.links.length) {
-            const waca = await dataProvider.getNextWacaSnapshot();
-            const masterLinks = mergeMyAcgMasterLinks(waca.masterLinks, evidence.links);
-            await dataProvider.commitNextWacaSnapshot({ ...waca, masterLinks }, waca.revision, false);
-          }
-        } catch (error) {
-          console.error('[NEXT MyACG master link capture]', error);
-          postCommitIssue = 'group-sync';
-        }
-      }
+      // WACA resolves parent/master evidence from this Inventory/Catalog on
+      // its own route. BuyAnime must not write WACA stores in NEXT either.
       try {
         await loadItems();
       } catch {

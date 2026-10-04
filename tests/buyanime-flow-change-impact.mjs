@@ -17,7 +17,7 @@ for(const file of ['src/providers/cloud/buyAnimeImportCoordinator.ts','src/provi
   if(file.endsWith('cloudTargetedCache.ts'))assert.throws(()=>assertReviewedProviderContract(file,before,after.replace('markCloudReadFailed(error','markCloudReadFresh(error')),/FAILED_CLOSED/u);
   if(file.endsWith('supabaseProvider.ts')){
     assert.throws(()=>assertReviewedProviderContract(file,before,after.replace('p_request: catalog.plan.request','p_unsafe: catalog.plan.request')),/FAILED_CLOSED/u);
-    assert.throws(()=>assertReviewedProviderContract(file,before,after.replace("family: 'waca-master-links'","family: 'unsafe-waca-contract'")),/FAILED_CLOSED/u);
+    assert.throws(()=>assertReviewedProviderContract(file,before,after+"\\nsupabase.rpc('unexpected-waca-write', {});"),/FAILED_CLOSED/u);
   }
 }
 for(const file of ['supabase/sql/050_catalog_atomic_transaction.sql','src/lib/durableResourceRegistry.ts','tools/schema-reconciliation/schemaContract.mjs','src/providers/cloud/unreviewed.ts'])

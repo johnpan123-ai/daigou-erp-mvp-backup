@@ -99,9 +99,16 @@ try {
     // Instrument only this disposable provider; never change production diagnostics or dump rows.
     const port=provider.buyAnimePipeline.port;
     for(const [name,label]of Object.entries({load:'JournalLoad',save:'JournalSave',prepareInventory:'InventoryMatchingPlanning',commitInventory:'InventoryCommit',readInventory:'Readback',planCatalog:'CatalogPlanning',commitCatalog:'CatalogCommit',verifyCatalog:'CatalogReadback',planWacaEvidence:'WacaEvidencePlanning',commitWacaEvidence:'WacaEvidenceCommit'})){
-      const original=port[name];port[name]=(...args)=>measure(label,async()=>{
+      const original=port[name];
+      if(typeof original!=='function')continue;
+      port[name]=(...args)=>measure(label,async()=>{
         const value=await original(...args);
-        if(name==='prepareInventory') inventoryPlanSummary={operations:value.operations.length,stats:value.stats};
+        if(name==='prepareInventory') {
+          const changedFields={};
+          for(const operation of value.operations)for(const field of Object.keys(operation.changes||{}))
+            changedFields[field]=(changedFields[field]||0)+1;
+          inventoryPlanSummary={operations:value.operations.length,stats:value.stats,changedFields};
+        }
         if(name==='planCatalog') catalogPlanSummary=value?Object.fromEntries(Object.entries(value.request.operations).map(([table,ops])=>[table,ops.length])):{};
         return value;
       });
@@ -162,11 +169,14 @@ try {
     return {rows:record?.stats?.total??1505,stage:record.stage,inventoryPlanSummary,catalogPlanSummary,stages:Object.fromEntries(Object.entries(stages).map(([k,v])=>[k,Math.round(v)])),timeline:timeline.map(s=>({...s,start:Math.round(s.start-total),end:Math.round(s.end-total),duration:Math.round(s.duration)})),uncovered,longTasks,reactCommits:ui.commits,maxReactDurationMs:ui.maxDurationMs,modalText:ui.modalText,syncText:ui.syncText,trace:ui.trace,postSuccessCriticalRequests,metrics:bridge.metrics()};
   },{base64:bytes.toString('base64'),fileName:process.env.BUYANIME_PERF_FILE_NAME||'399375_2026-10-04 (3).xls',automatic:process.env.BUYANIME_AUTO==='1',legacy:process.env.BUYANIME_LEGACY==='1',fault:process.env.BUYANIME_FAULT==='1',uiBenchmark:process.env.BUYANIME_UI_BENCHMARK==='1',changeOne:process.env.BUYANIME_CHANGE_ONE==='1',wacaDelta:process.env.BUYANIME_WACA_DELTA==='1',preconditionWarm:process.env.BUYANIME_PRECONDITION_WARM!=='0'});
   if(result.failure) console.log(JSON.stringify(result));
-  assert.equal(result.rows,1505);assert.equal(result.stage,'COMPLETE');
+  assert.equal(result.rows,Number(process.env.BUYANIME_PERF_EXPECTED_ROWS||1505));assert.equal(result.stage,'COMPLETE');
   if(process.env.BUYANIME_UI_BENCHMARK==='1')assert.equal(result.postSuccessCriticalRequests,0,'No Catalog/WACA/readback/sync request may continue after success');
   assert.equal(result.metrics.inventoryCommits,process.env.BUYANIME_LEGACY==='1'||result.inventoryPlanSummary?.operations===0?0:1);
   assert.equal(result.metrics.fullWacaSnapshotReads,0,'BuyAnime must never read the full WACA snapshot');
   assert.equal(result.metrics.fullWacaSnapshotCommits,0,'BuyAnime must never commit the full WACA snapshot');
+  assert.equal(result.metrics.wacaRequests,0,'BuyAnime must never call any WACA mutation, including nonzero evidence deltas');
+  assert.equal(result.stages.WacaEvidencePlanning||0,0,'No WACA planning belongs on the BuyAnime critical path');
+  assert.equal(result.stages.WacaEvidenceCommit||0,0,'No WACA commit belongs on the BuyAnime critical path');
   if(result.catalogPlanSummary && Object.values(result.catalogPlanSummary).every(count=>count===0))
     assert.equal(result.metrics.catalogRequests,0,'A zero-operation Catalog plan must not call its RPC');
   if(process.env.BUYANIME_UI_BENCHMARK==='1' && result.inventoryPlanSummary?.operations===0

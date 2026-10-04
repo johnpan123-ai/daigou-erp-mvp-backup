@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { isolatedDatabase, owner, viewer } from './helpers/saveability-isolated.mjs';
@@ -122,8 +123,7 @@ try{
   });
   assert.equal(wacaLoss.metrics.inventoryCommits,0);
   assert.equal(wacaLoss.metrics.catalogRequests,1,'Replayed EXACT Catalog request after close/relogin');
-  assert.ok([0,1].includes(wacaLoss.metrics.wacaRequests),
-    'The real fixture may require zero WACA evidence writes; if required it is dispatched at most once');
+  assert.equal(wacaLoss.metrics.wacaRequests,0,'BuyAnime never reads or writes WACA, even when the WACA transport fails');
   const ledgerAfterWaca=(await db.sql.query('select count(*)::int n from public.erp_idempotency_keys')).rows[0].n;
   assert.equal(ledgerAfterWaca,ledgerAfter+wacaLoss.metrics.wacaRequests,
     'A WACA delta must create exactly one idempotency result before response loss');
@@ -152,6 +152,31 @@ try{
     'Response-loss recovery must reconcile committed evidence without replaying the WACA request');
   assert.equal((await db.sql.query('select revision from waca_state')).rows[0].revision,wacaRevision);
   assert.equal((await db.sql.query('select count(*)::int n from erp_idempotency_keys')).rows[0].n,ledgerAfterWaca);
+  // An actual older durable WACA stage is closed only after fresh Catalog
+  // SELECT verification. Its uncommitted WACA intent is audit, not a receipt.
+  const {importWacaDeltaKey}=await vite.ssrLoadModule('/src/providers/cloud/buyAnimeImportResume.ts');
+  const completedJournal=(await db.sql.query('select id,details,version from import_batches limit 1')).rows[0];
+  const decode=details=>details.buyAnimeImportGzip
+    ? JSON.parse(gunzipSync(Buffer.from(details.buyAnimeImportGzip,'base64')).toString('utf8')):details.buyAnimeImport;
+  const completedRecord=decode(completedJournal.details);
+  const oldIntent={key:importWacaDeltaKey(completedRecord.batchId),expectedRevision:Number(wacaRevision),
+    links:[{mainCode:'GP-SYNTHETIC',childCode:'G-SYNTHETIC',productGroupId:'',productVariantId:'',variantTitle:'A',sourceFile:'synthetic.xls',observedAt:'2026-10-04T00:00:00.000Z'}],
+    inserted:1,updated:0,unchanged:0};
+  const legacyPending={...completedRecord,stage:'WACA_EVIDENCE_PENDING',waca:oldIntent,version:completedJournal.version};
+  const {buyAnimeImportGzip:_gzip,...legacyDetails}=completedJournal.details;
+  await db.sql.query('update import_batches set details=$2 where id=$1',[completedJournal.id,{...legacyDetails,buyAnimeImport:legacyPending}]);
+  await page.close();page=await connect();
+  const legacyWacaRecovery=await page.evaluate(async()=>{
+    const bridge=window.__BUYANIME_RESUME_PROVIDER__;bridge.fresh();
+    const provider=bridge.provider();await provider.waitForCloudBootstrapConvergence();bridge.resetMetrics();
+    const record=await provider.recoverPendingBuyAnimeImport();return {stage:record.stage,metrics:bridge.metrics()};
+  });
+  assert.equal(legacyWacaRecovery.stage,'COMPLETE');
+  assert.equal(legacyWacaRecovery.metrics.inventoryCommits,0);assert.equal(legacyWacaRecovery.metrics.catalogRequests,0);
+  assert.equal(legacyWacaRecovery.metrics.wacaRequests,0);assert.equal(legacyWacaRecovery.metrics.fullWacaSnapshotReads,0);
+  assert.deepEqual(decode((await db.sql.query('select details from import_batches where id=$1',[completedJournal.id])).rows[0].details).waca,oldIntent);
+  assert.equal((await db.sql.query('select revision from waca_state')).rows[0].revision,wacaRevision);
+  assert.equal((await db.sql.query('select count(*)::int n from erp_idempotency_keys')).rows[0].n,ledgerAfterWaca);
   assert.equal(externalRequests,0);
   // Existing grants/RLS, no migration changes: authenticated read, viewer/anon cannot write.
   const journal=(await db.sql.query('select id,details,version from import_batches limit 1')).rows[0];
@@ -169,7 +194,7 @@ try{
   assert.ok(JSON.stringify(exported).includes('BUYANIME_IMPORT_RESUME_V1'),'Existing Backup lost optional journal details');
   console.log(JSON.stringify({result:'PASS',fixture:'exact 399375_2026-10-03.xls + reconstructed authoritative incident state',
     rows:1505,inventoryCommits:1,inventoryUUIDChurn:0,fullFieldHashProof:'PASS',closeReloginRecovery:'PASS',
-    catalogReplayNoChange:'PASS',wacaResponseLossNoDuplicate:'PASS',pipeline:final.stage,journalRlsCas:'PASS',
+    catalogReplayNoChange:'PASS',wacaDecoupled:'PASS',legacyWacaFreshCatalogRecovery:'PASS',pipeline:final.stage,journalRlsCas:'PASS',
     existingBackupJournalPreserved:'PASS',legacyIncidentReadOnlyDiscovery:'PASS',readback:{...verify.metrics,totalLatencyMs:verify.latencyMs},externalRequests,liveWrites:0}));
 }catch(error){
   // No private source rows, SQL DETAIL, HTTP bodies or credentials in diagnostics.

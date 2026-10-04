@@ -195,12 +195,10 @@ import { readFormIntent,stableFormIntent,clearFormIntent } from './privateOrderT
 import { readCloudRowsByIds } from './cloudBulkRead';
 import {
   BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord, importCatalogKey,
-  importWacaDeltaKey,
   type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
 import { readBuyAnimeJournal, readLatestBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
 import { coordinateBuyAnimeImport, finishBuyAnimeImport, refreshBuyAnimeReadback, publishBuyAnimeFlow, buyAnimeFlowLabel, type BuyAnimeFlowOptions } from './buyAnimeImportCoordinator';
-import { linksFromMyAcgInventory, planMyAcgMasterLinkDelta, type MyAcgMasterLink } from '../../waca/masterReference';
 import { planCatalogTransaction,CATALOG_RPC,type CatalogMode } from './catalogTransaction';
 import { buildRelatedRequest,submitRelatedIntent,RELATED_RPC,type RelatedTransactionCommand } from './relatedTransaction';
 import type { 
@@ -1505,9 +1503,14 @@ export class SupabaseProvider implements IDataProvider {
       return this.applyCloudFieldMutations('inventory_items', plan.operations, { readback: false });
     },
     readInventory: record => this.readBuyAnimeCommittedRows(record),
-    planCatalog: async (imported, verifiedInventory) => {
+    planCatalog: async (imported, verifiedInventory, fresh = false) => {
       const [allGroups, allCategories, allVariants] = await Promise.all([
-        db.getProductGroups(), db.getProductCategories(), db.getProductVariants({ raw: true }),
+        fresh ? fetchAll<ProductGroup>(async (from, to) => supabase.from('product_groups')
+          .select('*').is('deleted_at', null).order('id').range(from, to)) : db.getProductGroups(),
+        fresh ? fetchAll<ProductCategory>(async (from, to) => supabase.from('product_categories')
+          .select('*').is('deleted_at', null).order('id').range(from, to)) : db.getProductCategories(),
+        fresh ? fetchAll<ProductVariant>(async (from, to) => supabase.from('product_variants')
+          .select('*').is('deleted_at', null).order('id').range(from, to)) : db.getProductVariants({ raw: true }),
       ]);
       const titles = new Set(imported.map(row => row.normalized_product_title || normalizeProductTitle(row.product_title)));
       const groups = allGroups.filter(group => titles.has(group.normalized_title || normalizeProductTitle(group.title)));
@@ -1581,69 +1584,6 @@ export class SupabaseProvider implements IDataProvider {
           new Set(ops.filter(op => op.kind === 'delete').map(op => op.id)));
       }
       this.buyAnimeCatalogRows.set(catalog.key, verified);
-    },
-    planWacaEvidence: async (record, imported) => {
-      const localVariants = await db.getProductVariants({ raw: true });
-      const catalogRows = this.buyAnimeCatalogRows.get(importCatalogKey(record.batchId))?.product_variants || [];
-      const variantsById = new Map(localVariants.map(variant => [variant.id, variant]));
-      for (const row of catalogRows) {
-        if (row.deleted_at) variantsById.delete(String(row.id));
-        else variantsById.set(String(row.id), { ...row, id: String(row.id) } as unknown as ProductVariant);
-      }
-      const variants = [...variantsById.values()];
-      const evidence = linksFromMyAcgInventory(imported, variants, record.fileName, record.observedAt);
-      if (!evidence.links.length) return { key: importWacaDeltaKey(record.batchId), expectedRevision: 0,
-        links: [], inserted: 0, updated: 0, unchanged: 0 };
-      let linkRows: Record<string, unknown>[], state: { revision?: unknown } | null;
-      try {
-        [linkRows, state] = await Promise.all([
-          fetchAll<Record<string, unknown>>(async (from, to) => supabase.from('waca_master_links')
-            .select('id,child_code,main_code,product_variant_id,payload').order('id').range(from, to)),
-          supabase.from('waca_state').select('revision').single().then(result => {
-            if (result.error) throw result.error;
-            return result.data;
-          }),
-        ]);
-      } catch (cause) { markCloudRequestFailed(cause); throw cause; }
-      const revision = Number(state?.revision);
-      if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('WACA_MASTER_LINK_REVISION_INVALID');
-      const existing = linkRows.map(row => ({
-        ...((row.payload && typeof row.payload === 'object') ? row.payload : {}),
-        childCode: String(row.child_code || ''), mainCode: String(row.main_code || ''),
-        productVariantId: String(row.product_variant_id || ''),
-      })) as MyAcgMasterLink[];
-      const delta = planMyAcgMasterLinkDelta(existing, evidence.links);
-      markCloudReachable();
-      return { key: importWacaDeltaKey(record.batchId), expectedRevision: revision, ...delta };
-    },
-    commitWacaEvidence: async plan => {
-      if (!plan.links.length) return;
-      await this.requireCloudWritePermission();
-      assertCloudWriteAllowed();
-      let response;
-      try {
-        response = await supabase.rpc('erp_merge_waca_master_links', {
-          p_idempotency_key: plan.key,
-          p_request: { family: 'waca-master-links', expectedRevision: plan.expectedRevision, links: plan.links },
-        });
-      } catch (cause) { markCloudRequestFailed(cause); throw new CloudMutationBoundaryError('result-unknown', cause); }
-      if (response.error) {
-        markCloudRequestFailed(response.error);
-        if (!response.error.code || response.status >= 500 || /^5/u.test(response.error.code))
-          throw new CloudMutationBoundaryError('result-unknown', response.error);
-        throw new BuyAnimeResumeError('BUYANIME_WACA_DELTA_REJECTED', undefined, response.error);
-      }
-      const result = response.data as { ok?: unknown; code?: unknown; idempotencyKey?: unknown; changed?: unknown } | null;
-      if (result?.ok !== true) {
-        if (result?.code === 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH')
-          throw new BuyAnimeResumeError('BUYANIME_WACA_INTENT_CONFLICT');
-        if (['WACA_STALE_REVISION','WACA_MASTER_LINK_CONFLICT'].includes(String(result?.code || '')))
-          throw new BuyAnimeResumeError('BUYANIME_WACA_CONFLICT');
-        throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_WACA_DELTA_RESPONSE_INVALID'));
-      }
-      if (result.idempotencyKey !== plan.key || Number(result.changed) !== plan.links.length)
-        throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_WACA_DELTA_ACK_MISMATCH'));
-      markCloudReachable();
     },
   });
   private async readCloudIds(
