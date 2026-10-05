@@ -205,9 +205,10 @@ if (!existsSync(snapshotPath)) {
       effectiveFingerprint: effective.manifest.snapshotFingerprint }));
     assert.equal(source.manifest.totalRows, 17659);
     assert.equal(Object.values(source.manifest.counts).reduce((sum, count) => sum + count, 0), 17659);
-    assert.equal(source.manifest.snapshotFingerprint, '6142386ba283402cd7964d8e870dd810ee6dea32fa93d54727ffbb11ef3e0134');
+    // The verified legacy source gains Restore-only NULL status history.
+    assert.equal(source.manifest.snapshotFingerprint, '3e5c335a49ec28e34b0424ef5c57a0d14cdc7dad7bec15ba143d895c8e44891f');
     assert.equal(effective.portability.totalTransformedRows, 15395);
-    assert.equal(effective.manifest.snapshotFingerprint, 'd5fdcdd74554005de410b9852860f77d9605c521a68e5831fe674765c6366245');
+    assert.equal(effective.manifest.snapshotFingerprint, '2d56823144717f1080e856225ef5853ab38e41866590b0d4bca68095b2607cb9');
     assert.equal(Object.values(effective.data).reduce((sum, rows) => sum + rows.length, 0), 17659);
     assert.equal(Object.values(effective.data).flat().filter(row => row.updated_by !== null).length, 0);
     assert.equal(verified.mode, 'cross-environment');

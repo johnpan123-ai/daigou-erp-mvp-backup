@@ -10,6 +10,8 @@ const stable = value => Array.isArray(value) ? value.map(stable)
 export const impactHash = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
 export const regressionScripts = Object.freeze({
+  'erp1-v1-exact-restore': 'tests/erp1-v1-restore-compatibility.mjs',
+  'erp1-v1-restore-review': 'tests/erp1-v1-restore-change-impact.mjs',
   'waca-v3-native-replay': 'tests/waca-resolver-v3-replay.mjs',
   'waca-atomic-confirm': 'tests/waca-atomic-confirm-native.mjs',
   'waca-confirm-contract': 'tests/waca-atomic-confirm-contract.mjs',

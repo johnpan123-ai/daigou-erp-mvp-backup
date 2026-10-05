@@ -619,6 +619,13 @@ export async function prepareCloudRestoreSnapshot(
       || oldManifest.relationshipHash !== await sha256Hex(stableCloudRestoreJson(oldProjection))) {
       throw new CloudRestoreValidationError('LEGACY_CLOUD_BACKUP_INVALID', '舊版雲端備份驗證失敗，已取消還原。');
     }
+    // ERP1 v1 exports predate the outbound status-history field. Authenticate
+    // the unmodified historical manifest first, then represent unavailable
+    // history as NULL in the current Restore-only candidate (033 is nullable).
+    // Never invent a clock time or apply this downgrade to a current v2 file.
+    for (const row of normalized.outbound_shipments) {
+      if (!('status_changed_at' in row)) row.status_changed_at = null;
+    }
     assertCurrentCloudRestoreDataContract(normalized);
     const manifest = await manifestFor(normalized);
     const serialized = typeof input === 'string' ? input : stableCloudRestoreJson(input);

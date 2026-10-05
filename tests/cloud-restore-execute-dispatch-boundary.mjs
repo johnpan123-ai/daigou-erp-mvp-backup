@@ -183,7 +183,8 @@ try {
     console.log('RESTORE_LIVE_SHAPE_BYTES', JSON.stringify(measurements));
     assert.equal(measurements.rows, 18060); // legacy 15-resource fixture + durable WACA cutover state
     assert.equal(measurements.transforms, 15711);
-    assert.equal(measurements.legacyExecuteBytes, 14222089);
+    // 25 legacy outbound rows now carry explicit NULL timestamp evidence.
+    assert.equal(measurements.legacyExecuteBytes, 14222864);
     assert(measurements.provenExecuteBytes < 512);
     assert(measurements.legacyExecuteBytes / measurements.provenExecuteBytes > 20_000);
   } else {

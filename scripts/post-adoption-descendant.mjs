@@ -160,7 +160,40 @@ export function classifyDescendantFile(file, before, after) {
 // Exact patch hashes remain mandatory. These structural checks additionally
 // prove the reviewed provider patch did not change its external schema/RPC
 // contract. This is not a provider-directory allowlist.
+// Only this verified legacy-adapter patch may differ from the adopted Backup
+// source. It cannot change collections, serializers, RPCs or any other code.
+// The caller also requires an immutable before/after hash review and tests.
+export function assertReviewedRestoreAdapterContract(file, before, after) {
+  if (file !== 'src/providers/cloud/cloudAtomicRestore.ts' || before === null || after === null) {
+    fail('unreviewed Restore adapter contract exception');
+  }
+  const legacyAddition = canonical(parse(file, `
+    for (const row of normalized.outbound_shipments) {
+      if (!('status_changed_at' in row)) row.status_changed_at = null;
+    }
+  `)).trim();
+  const afterTree = parse(file, after);
+  const removals = [];
+  for (const addition of [legacyAddition]) {
+    const matches = nodes(afterTree).filter(node => ts.isStatement(node)
+      && canonical(afterTree, node).trim() === addition);
+    if (matches.length !== 1) fail('Restore adapter approved statement missing or repeated');
+    removals.push({ start: matches[0].getStart(afterTree), end: matches[0].end });
+  }
+  let reviewed = after;
+  for (const range of removals.sort((a,b) => b.start-a.start)) {
+    reviewed = reviewed.slice(0, range.start) + reviewed.slice(range.end);
+  }
+  if (canonical(parse(file, reviewed)) !== canonical(parse(file, before))) {
+    fail('Restore schema/resource/RPC or unreviewed adapter contract changed');
+  }
+}
+
 export function assertReviewedProviderContract(file, before, after) {
+  if (file === 'src/providers/cloud/cloudAtomicRestore.ts') {
+    assertReviewedRestoreAdapterContract(file, before, after);
+    return;
+  }
   if (file === 'src/providers/cloud/buyAnimeImportCoordinator.ts') {
     if (before !== null) fail('coordinator needs a new exact review');
     const tree=parse(file,after);
@@ -349,9 +382,19 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   if (!checksumParity) fail('migration/source SQL checksum changed since adopted baseline');
   if (!canonicalParity) fail('canonical schema/fingerprint contract changed since adopted baseline');
   if (sensitive.length) fail(`schema-sensitive or unreviewed descendant diff: ${sensitive.map(row => row.file).join(', ')}`);
-  const contractParity = predicate => [...new Set([...oldFiles, ...newFiles].filter(predicate))].every(file =>
-    oldSet.has(file) && newSet.has(file) && sourceHash(source(baseline, file, true)) === sourceHash(source(candidate.head, file, true)));
-  const backupParity = contractParity(file => /(?:durableResourceRegistry|workbenchJsonBackup|closingDateSidecarBackup|backupFormat|CloudAtomicRestore|cloudAtomicRestore)/u.test(file));
+  const backupFiles = [...new Set([...oldFiles, ...newFiles].filter(file =>
+    /(?:durableResourceRegistry|workbenchJsonBackup|closingDateSidecarBackup|backupFormat|CloudAtomicRestore|cloudAtomicRestore)/u.test(file)))];
+  const backupParity = backupFiles.every(file => {
+    if (!oldSet.has(file) || !newSet.has(file)) return false;
+    const before = source(baseline, file, true), after = source(candidate.head, file, true);
+    if (sourceHash(before) === sourceHash(after)) return true;
+    const reviewed = classifyReviewedFile({ file, after, reviews });
+    if (file !== 'src/providers/cloud/cloudAtomicRestore.ts'
+      || reviewed?.review.id !== 'erp1-v1-outbound-timestamp-adapter-v1'
+      || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;
+    assertReviewedRestoreAdapterContract(file, before, after);
+    return true;
+  });
   const providerFiles = [...new Set([...oldFiles, ...newFiles].filter(file => file.startsWith('src/providers/')))];
   const providerParity = providerFiles.every(file => {
     if (!newSet.has(file)) return false;
