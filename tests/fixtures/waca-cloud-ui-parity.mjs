@@ -29,6 +29,20 @@ const inventory = variants.map(row => ({ id: row.id, inventory_key: row.id,
   myacg_item_code: row.myacg_item_code, myacg_parent_code: 'GP-A', product_title: title,
   raw_variant_name: row.variant_name, listing_type: '', final_price: 100, myacg_sold_quantity: 0 }));
 let snapshot = { revision: 0, orders: [], items: [], mappings: [], batches: [], masterLinks: [], cutoverAudit: [] };
+if (params.get('pending') === '1') {
+  const items = Array.from({length:84},(_,n)=>{
+    const featureNumber=n<45?n:n-45;
+    return {key:`pending-${n}`,orderKey:`WACA::PENDING-${n}`,feature:`feature-${featureNumber}`,
+      productCode:`GP-PENDING-${featureNumber}`,productTitle:`歷史商品 ${featureNumber}`,spec1:'歷史規格',spec2:'',specCode:'',
+      quantity:1,subtotal:100,productVariantId:null,match:'UNMATCHED',diagnostic:'MASTER_EVIDENCE_MISSING'};
+  });
+  snapshot = {...snapshot,revision:9,items,orders:items.map((item,n)=>({key:item.orderKey,orderNumber:`PENDING-${n}`,
+    purchasedAt:'2026-09-28',status:n===43?'取消':n===44?'失敗':'處理中'})),
+    cutoverAudit:[{productVariantId:'historical-audit',sku:'G-HISTORY',legacyWacaQuantity:0,newOrderDerivedQuantity:0}],
+    batches:params.get('noBatch')==='1'?[]:[{id:'latest-batch',fileName:'current-isolated.xlsx',importedAt:'2026-10-05',
+      rows:20,inserted:4,updated:13,unchanged:0,conflictRows:[],result:{ordersTotal:14,productRows:17,matched:params.get('lastPending')==='1'?16:17,
+        unmatched:params.get('lastPending')==='1'?1:0,multipleCandidates:0,statusConflicts:[],cancelledOrders:0,failedOrders:1}}]};
+}
 let readFailure = params.get('failure') === '1';
 const calls = { reads: 0, commits: 0, tables: {}, unexpectedWrites: 0 };
 const user = { id: '50000000-0000-4000-8000-000000000001', aud: 'authenticated', role: 'authenticated',

@@ -727,10 +727,25 @@ export default function WacaIntegration() {
       </tbody></table></div>
     </section>}
     {tab === 'pending' && <section className="waca-panel"><h2>需要處理的項目</h2>
+      <div className="waca-pending-card" role="status" aria-label="待處理來源摘要">
+        <strong>累積待處理，不是本次新增筆數</strong>
+        <p>未配對訂單列：{pendingItems.length} 列（{new Set(pendingItems.map(item => item.feature)).size} 種商品特徵）。</p>
+        <p>有效數量摘要：{reconciliation?.issues.filter(issue => issue.reason === 'UNMATCHED_SOURCE').length ?? 0} 項，與上述訂單列重疊；
+          其他對帳異常：{reconciliation?.issues.filter(issue => issue.reason !== 'UNMATCHED_SOURCE').length ?? 0} 項；狀態衝突：{conflicts.length} 筆。</p>
+        <p>分頁數字是上述列示項目的合計，不是商品種類數，也不是最近匯入新增的錯誤數。</p>
+        {latestBatch ? <>
+          <p>最近已完成匯入：{latestBatch.fileName}</p>
+          <p>該檔案：{latestBatch.result.ordersTotal} 張訂單、{latestBatch.result.productRows} 商品列；
+            已配對：{latestBatch.result.matched} 列，待配對：{latestBatch.result.unmatched + latestBatch.result.multipleCandidates} 列，
+            狀態衝突：{latestBatch.result.statusConflicts.length} 筆。</p>
+          {latestBatch.result.unmatched + latestBatch.result.multipleCandidates === 0 && !latestBatch.result.statusConflicts.length
+            && pendingItems.length > 0 && <p>最近檔案沒有未配對商品；下方保留的是歷史訂單待處理，不是這次匯入失敗。</p>}
+        </> : <p>目前沒有已完成匯入紀錄，無法判定最近檔案的結果。</p>}
+      </div>
       {reconciliation?.issues.map((issue, index) => <div className="waca-pending-card" key={`reconcile-${issue.variantId}-${issue.sku}-${index}`}>
         <strong>{displayNameForVariant(issue.variantId, issue.productTitle)}／{issue.variantTitle}</strong>
-        <p>SKU：{issue.sku}</p>{issue.reason === 'UNMATCHED_SOURCE'
-          ? <p>此商品尚未對應訂購紀錄表；有效訂單 {issue.sourceQuantity} 件已保存為待處理，暫不計入 WACA 數量。建立商品／規格後重新匯入，即可自動配對並更新數量；也可在商品對照中人工確認。</p>
+        <p>{issue.reason === 'UNMATCHED_SOURCE' ? 'WACA 商品編號' : 'SKU'}：{issue.sku}</p>{issue.reason === 'UNMATCHED_SOURCE'
+          ? <p>此商品尚未對應訂購紀錄表；有效訂單商品數量 {issue.sourceQuantity} 件已保存為待處理，暫不計入 WACA 數量。商品編號是商品／Parent 證據，不等於已確認的規格 SKU。建立商品／規格後重新匯入，即可自動配對並更新數量；也可在商品對照中人工確認。</p>
           : <><p>來源訂單數量 {issue.sourceQuantity}，系統 WACA 數量 {issue.storedQuantity}，差異 {issue.difference > 0 ? '+' : ''}{issue.difference}。</p>
             <p>訂購紀錄表顯示 {issue.displayedQuantity}。請重新讀取後確認；若仍不一致，先不要繼續匯入。</p></>}
         <details className="waca-tech"><summary>查看技術資訊</summary>{issue.reason}／{issue.variantId}</details>

@@ -6,6 +6,10 @@ import { chromium } from 'playwright';
 import * as XLSX from 'xlsx';
 import { createServer } from 'vite';
 
+// Include pending count/provenance and decoupled historical rematch in the
+// existing required provider regression; no Guard path exemption is added.
+await import('./waca-pending-history-summary.mjs');
+
 const ssr = await createServer({ configFile: false, optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true, hmr: false }, appType: 'custom' });
 try {
