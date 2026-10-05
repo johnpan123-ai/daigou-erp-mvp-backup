@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as XLSX from 'xlsx';
 import { createServer } from 'vite';
+import { catalogProofOracle } from './helpers/waca-resolution-proof.mjs';
 
 // Offline, read-only user-provided evidence. Never import into the normal NEXT or cloud DB.
 const downloads = join(process.env.USERPROFILE, 'Downloads');
@@ -28,6 +29,7 @@ try {
     links = mergeMyAcgMasterLinks(links, linksFromMyAcgInventory(inventory, erp.productVariants, name, '').links);
   }
   const master = buildWacaMasterReference(erp.productVariants, links);
+  const names = await vite.ssrLoadModule('/src/waca/nameEvidence.ts');
   const index = indexWacaMaster(master);
   for (const name of workbookNames) {
     const allRows = parseWacaWorkbook(readFileSync(join(downloads, name))).rows;
@@ -43,20 +45,13 @@ try {
     assert.deepEqual(result.errors, []);
     assert.deepEqual(result.statusConflicts, []);
     const resolved = rows.map(r => ({ row: r, match: matchWacaItem(r, index) }));
+    const oracle = catalogProofOracle(master, names, normalizeWacaText);
     let proofViolations = 0;
     for (const { row, match } of resolved) {
       assert.ok(match.resolution, 'no silent unresolved row');
       if (!match.candidate) { assert.ok(match.diagnostic); continue; }
-      if (match.resolution === 'SPEC_CODE_EXACT') {
-        if (normalizeWacaText(match.candidate.childCode) !== normalizeWacaText(row.specCode)) proofViolations++;
-      } else {
-        assert.equal(normalizeWacaText(row.specCode), '');
-        assert.ok(match.candidates.every(v => v.productGroupId === match.candidate.productGroupId));
-        if (match.resolution === 'SPEC_NAME_EXACT_UNIQUE') {
-          if (!wacaSpecNamesMatch(row, match.candidate)
-            || match.candidates.filter(v => wacaSpecNamesMatch(row, v)).length !== 1) proofViolations++;
-        } else if (match.resolution !== 'UNIQUE_PARENT_VARIANT' || match.candidates.length !== 1) proofViolations++;
-      }
+      const proof = oracle(row);
+      if (!proof.permitted || proof.candidates[0].variantId !== match.candidate.variantId) proofViolations++;
     }
     assert.equal(proofViolations, 0);
     const quantities = new Map(repo.autoQuantities);

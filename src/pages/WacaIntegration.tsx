@@ -76,6 +76,11 @@ const resolutionText = (item: WacaItem): string => {
   if (item.match === 'MANUAL_MATCH') return '人工確認對照';
   if (item.resolution === 'SPEC_NAME_EXACT_UNIQUE') return '依規格名稱唯一配對';
   if (item.resolution === 'UNIQUE_PARENT_VARIANT') return '無規格商品／唯一規格自動配對';
+  if (item.resolution === 'PRODUCT_SPEC_EXACT' || item.resolution === 'PRODUCT_UNIQUE_SPEC') return '商品名稱與規格唯一配對';
+  if (item.resolution === 'PRODUCT_SINGLE_VARIANT') return '商品名稱唯一／單一規格自動配對';
+  if (item.resolution === 'GLOBAL_UNIQUE_COMBINATION') return '完整商品與規格組合唯一配對';
+  if (item.resolution === 'ALIAS_UNIQUE') return '商品別名與規格唯一配對';
+  if (item.resolution === 'LEARNED_PARENT_SPEC') return '已驗證商品對照／規格唯一配對';
   return '已配對';
 };
 
@@ -597,11 +602,15 @@ export default function WacaIntegration() {
             ['訂單', pendingImport.result.ordersTotal], ['商品列', pendingImport.result.productRows],
             ['商品規格', previewFeatures.length],
             ['已配對', previewFeatures.filter(item => Boolean(item.productVariantId)).length],
+            ['自動配對', previewFeatures.filter(item => item.match === 'AUTO_MATCH' && Boolean(item.productVariantId)).length],
             ['有效數量', pendingImport.result.effectiveQuantity], ['折扣忽略', pendingImport.result.discountIgnored],
             ['待處理', previewFeatures.filter(item => !item.productVariantId).length + pendingImport.result.statusConflicts.length],
             ['數量變動', changedPreviewVariants],
           ] as const).map(([label, value]) => <div key={label}><strong>{quantity(value)}</strong><span>{label}</span></div>)}
         </div>
+        {!!previewFeatures.length && previewFeatures.every(item => item.match === 'AUTO_MATCH' && item.productVariantId && !isPending(item))
+          && !pendingImport.result.errors.length && !pendingImport.result.statusConflicts.length
+          && <p className="waca-notice">全部商品已完成自動配對。</p>}
         <p className="waca-equation">新增 {pendingImport.result.inserted}、更新 {pendingImport.result.updated}、未變更 {pendingImport.result.unchanged}；
           取消／失敗 {pendingImport.result.cancelledOrders + pendingImport.result.failedOrders} 張訂單不計入數量。</p>
         {pendingImport.items.some(isPending) && <p className="waca-notice">未配對商品會先保存為待處理，暫不計入商品 WACA 數量；建立商品後重新匯入即可更新。</p>}

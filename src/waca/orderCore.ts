@@ -1,4 +1,5 @@
 /** Isolated WACA order domain. It never invokes ERP providers. */
+import { wacaAliasKey, wacaProductKey, wacaProductTokens, wacaSourceSpecKeys, wacaSpecKey } from './nameEvidence';
 export type WacaStatus = '處理中' | '完成付款' | '取消' | '失敗';
 
 export interface WacaRow {
@@ -42,7 +43,9 @@ export interface WacaMapping {
 
 export type WacaResolution = 'SPEC_CODE_EXACT' | 'SPEC_NAME_EXACT_UNIQUE' | 'UNIQUE_PARENT_VARIANT'
   | 'MANUAL_CONFIRMED_MAPPING' | 'PENDING_AMBIGUOUS' | 'PENDING_PRODUCT_MISSING'
-  | 'PENDING_NAME_CONFLICT' | 'PENDING_SPEC_NAME' | 'CONFLICT_MANUAL_VS_SPEC';
+  | 'PENDING_NAME_CONFLICT' | 'PENDING_SPEC_NAME' | 'CONFLICT_MANUAL_VS_SPEC'
+  | 'PRODUCT_SPEC_EXACT' | 'PRODUCT_UNIQUE_SPEC' | 'PRODUCT_SINGLE_VARIANT'
+  | 'GLOBAL_UNIQUE_COMBINATION' | 'ALIAS_UNIQUE' | 'LEARNED_PARENT_SPEC';
 
 export interface WacaOrder {
   key: string;
@@ -111,7 +114,7 @@ const legacyWacaFeature = (row: Pick<WacaRow, 'productCode' | 'productTitle' | '
 export const wacaFeature = (row: Pick<WacaRow, 'productCode' | 'productTitle' | 'spec1' | 'spec2' | 'specCode'>): string =>
   JSON.stringify([row.productCode, row.productTitle, row.spec1, row.spec2, row.specCode].map(normalizeWacaText));
 
-export const isWacaDiscount = (row: WacaRow): boolean =>
+export const isWacaDiscount = (row: Pick<WacaRow, 'productCode' | 'productTitle' | 'spec1'>): boolean =>
   normalizeWacaText(row.productCode) === 'COUPON'
   || normalizeWacaText(row.productTitle) === 'HIPPOSEP60'
   || normalizeWacaText(row.spec1) === normalizeWacaText('小河馬09月份60元折扣券');
@@ -140,11 +143,17 @@ export interface WacaMasterIndex {
   byMain: Map<string, MasterVariant[]>;
   byGroup: Map<string, MasterVariant[]>;
   byVariant: Map<string, MasterVariant>;
+  byName: Map<string, MasterVariant[]>;
+  byAlias: Map<string, MasterVariant[]>;
+  byTokens: Map<string, MasterVariant[]>;
+  bySpec: Map<string, MasterVariant[]>;
+  learnedParents: Map<string, Set<string>>;
 }
 
 /** Built once per catalogue/import, never once per tab or order row. */
 export function indexWacaMaster(master: readonly MasterVariant[]): WacaMasterIndex {
-  const result: WacaMasterIndex = { byChild: new Map(), byMain: new Map(), byGroup: new Map(), byVariant: new Map() };
+  const result: WacaMasterIndex = { byChild: new Map(), byMain: new Map(), byGroup: new Map(), byVariant: new Map(),
+    byName: new Map(), byAlias: new Map(), byTokens: new Map(), bySpec: new Map(), learnedParents: new Map() };
   const add = (map: Map<string, MasterVariant[]>, key: string, value: MasterVariant) => {
     if (key) { const rows = map.get(key) ?? []; rows.push(value); map.set(key, rows); }
   };
@@ -153,6 +162,14 @@ export function indexWacaMaster(master: readonly MasterVariant[]): WacaMasterInd
     add(result.byChild, normalizeWacaText(variant.childCode), variant);
     add(result.byMain, normalizeWacaText(variant.mainCode), variant);
     add(result.byGroup, variant.productGroupId, variant);
+    if (variant.variantId && variant.productGroupId) {
+      add(result.byName, wacaProductKey(variant.productTitle), variant);
+      add(result.byAlias, wacaAliasKey(variant.productTitle), variant);
+      add(result.byTokens, wacaProductTokens(variant.productTitle), variant);
+      for (const name of new Set([variant.variantTitle, ...(variant.variantTitles ?? [])].map(wacaSpecKey))) {
+        if (name) add(result.bySpec, `${variant.productGroupId}\u001f${name}`, variant);
+      }
+    }
     if (variant.variantId) result.byVariant.set(variant.variantId, variant);
   }
   return result;
@@ -163,11 +180,49 @@ const uniqueVariants = (rows: readonly MasterVariant[]): MasterVariant[] =>
 
 /** Lossless renderings of the two source fields, not fuzzy punctuation removal. */
 export function wacaSpecNamesMatch(row: Pick<WacaRow, 'spec1' | 'spec2'>, candidate: MasterVariant): boolean {
-  const parts = [row.spec1, row.spec2].map(normalizeWacaText).filter(Boolean);
-  if (!parts.length) return false;
-  const names = new Set([parts.join(' '), parts.join(' / ')]);
+  const names = new Set(wacaSourceSpecKeys(row.spec1, row.spec2));
   return [candidate.variantTitle, ...(candidate.variantTitles ?? [])]
-    .some(title => names.has(normalizeWacaText(title)));
+    .some(title => names.has(wacaSpecKey(title)));
+}
+
+const parentIds = (rows: readonly MasterVariant[]) => new Set(rows.map(v => v.productGroupId).filter(Boolean));
+
+function discoverWacaParent(row: ResolutionRow, index: WacaMasterIndex): WacaMatch | null {
+  if (!normalizeWacaText(row.productCode) || !wacaProductKey(row.productTitle)) return null;
+  const specKeys = wacaSourceSpecKeys(row.spec1, row.spec2);
+  const select = (rows: MasterVariant[], resolution: WacaResolution, requireOneGroup = false): WacaMatch | null => {
+    if (!rows.length) return null;
+    const groups = parentIds(rows);
+    const allowed = new Set(rows.map(v => v.variantId));
+    const exact = uniqueVariants(specKeys.length ? [...groups].flatMap(id => specKeys
+      .flatMap(spec => index.bySpec.get(`${id}\u001f${spec}`) ?? [])).filter(v => allowed.has(v.variantId)) : rows);
+    if (groups.size === 1 && specKeys.length && !exact.length) return {
+      kind: 'UNMATCHED', candidate: null, candidates: uniqueVariants(rows),
+      diagnostic: 'SPEC_NAME_NOT_MATCHED', resolution: 'PENDING_SPEC_NAME',
+    };
+    if ((requireOneGroup && groups.size !== 1) || exact.length !== 1 || (!specKeys.length && groups.size !== 1)) {
+      return { kind: 'MANUAL_REVIEW', candidate: null, candidates: uniqueVariants(rows), diagnostic: 'AMBIGUOUS_VARIANT', resolution: 'PENDING_AMBIGUOUS' };
+    }
+    if (!specKeys.length && uniqueVariants(index.byGroup.get(exact[0].productGroupId) ?? []).length !== 1) return null;
+    return { kind: 'AUTO_MATCH', candidate: { ...exact[0], mainCode: normalizeWacaText(row.productCode) },
+      candidates: exact, diagnostic: null, resolution: specKeys.length ? resolution : 'PRODUCT_SINGLE_VARIANT' };
+  };
+  const exactName = index.byName.get(wacaProductKey(row.productTitle)) ?? [];
+  if (exactName.length) return select(exactName, parentIds(exactName).size === 1 ? 'PRODUCT_UNIQUE_SPEC' : 'PRODUCT_SPEC_EXACT');
+  const alias = index.byAlias.get(wacaAliasKey(row.productTitle)) ?? [];
+  if (alias.length) {
+    const result = select(alias, 'ALIAS_UNIQUE', true);
+    return result?.candidate ? { ...result, resolution: 'ALIAS_UNIQUE' } : result;
+  }
+  return select(index.byTokens.get(wacaProductTokens(row.productTitle)) ?? [], 'GLOBAL_UNIQUE_COMBINATION', true);
+}
+
+function learnWacaParent(row: ResolutionRow, match: WacaMatch, index: WacaMasterIndex): void {
+  if (!match.candidate?.productGroupId || match.diagnostic || !normalizeWacaText(row.productCode)) return;
+  const code = normalizeWacaText(row.productCode);
+  const groups = index.learnedParents.get(code) ?? new Set<string>();
+  groups.add(match.candidate.productGroupId);
+  index.learnedParents.set(code, groups);
 }
 
 const specification = (value: string): string => normalizeWacaText(value)
@@ -196,12 +251,28 @@ export function matchWacaItem(
     const parentCode = normalizeWacaText(row.productCode);
     // A child code may identify a GROUP, never a selected child. Enumerate the whole group.
     const anchors = [...(index.byMain.get(parentCode) ?? []), ...(index.byChild.get(parentCode) ?? [])];
-    const groupIds = new Set(anchors.map(v => v.productGroupId).filter(Boolean));
-    if (!groupIds.size) return pending('MASTER_EVIDENCE_MISSING', 'PENDING_PRODUCT_MISSING');
+    const learned = index.learnedParents.get(parentCode) ?? new Set<string>();
+    const groupIds = new Set([...anchors.map(v => v.productGroupId).filter(Boolean), ...learned]);
+    if (!groupIds.size) return discoverWacaParent(row, index)
+      ?? pending('PRODUCT_NOT_IN_MASTER', 'PENDING_PRODUCT_MISSING');
     if (groupIds.size !== 1) return pending('PARENT_AMBIGUOUS', 'PENDING_AMBIGUOUS');
     const groupId = [...groupIds][0];
     const all = index.byGroup.get(groupId) ?? [];
-    if (!normalizeWacaText(row.productTitle) || !all.some(v => v.productTitle && verifiesTitle(row, v))) {
+    const nameGroups = parentIds(index.byName.get(wacaProductKey(row.productTitle)) ?? []);
+    const aliasGroups = parentIds(index.byAlias.get(wacaAliasKey(row.productTitle)) ?? []);
+    if (learned.has(groupId) && nameGroups.size && !nameGroups.has(groupId)) {
+      return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
+    }
+    // A revalidated, feature-proven GP link is a strong parent identity even
+    // when another same-GP source line uses a placeholder title. A different
+    // known Catalog product name above is still a conflict, never an override.
+    const learnedTitle = learned.has(groupId) && !nameGroups.size && !aliasGroups.size
+      && Boolean(wacaProductKey(row.productTitle));
+    if (!learnedTitle && (!normalizeWacaText(row.productTitle)
+      || !all.some(v => v.productTitle && verifiesTitle(row, v)))) {
+      const discovered = discoverWacaParent(row, index);
+      if (discovered?.candidate?.productGroupId === groupId) return discovered;
+      if (discovered?.resolution === 'PENDING_AMBIGUOUS') return discovered;
       return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
     }
     const candidates = uniqueVariants(all);
@@ -216,11 +287,11 @@ export function matchWacaItem(
         return pending('VARIANT_NOT_IN_ERP', 'PENDING_PRODUCT_MISSING', candidates);
       }
       if (exact.length === 1) {
-        if (!exact[0].productTitle || !verifiesTitle(row, exact[0])) {
+        if (!learnedTitle && (!exact[0].productTitle || !verifiesTitle(row, exact[0]))) {
           return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
         }
-        return { kind: 'AUTO_MATCH', candidate: exact[0], candidates,
-          diagnostic: null, resolution: 'SPEC_NAME_EXACT_UNIQUE' };
+        return { kind: 'AUTO_MATCH', candidate: learned.has(groupId) ? { ...exact[0], mainCode: parentCode } : exact[0], candidates,
+          diagnostic: null, resolution: learned.has(groupId) ? 'LEARNED_PARENT_SPEC' : 'SPEC_NAME_EXACT_UNIQUE' };
       }
       return pending(exact.length > 1 ? 'AMBIGUOUS_VARIANT' : 'SPEC_NAME_NOT_MATCHED',
         exact.length > 1 ? 'PENDING_AMBIGUOUS' : 'PENDING_SPEC_NAME', candidates);
@@ -229,10 +300,10 @@ export function matchWacaItem(
     const incomplete = knownChildren.some(child => !child.variantId);
     if (incomplete) return pending('VARIANT_NOT_IN_ERP', 'PENDING_PRODUCT_MISSING', candidates);
     if (candidates.length !== 1) return pending('AMBIGUOUS_VARIANT', 'PENDING_AMBIGUOUS', candidates);
-    if (!candidates[0].productTitle || !verifiesTitle(row, candidates[0])) {
+    if (!learnedTitle && (!candidates[0].productTitle || !verifiesTitle(row, candidates[0]))) {
       return pending('PARENT_NAME_CONFLICT', 'PENDING_NAME_CONFLICT');
     }
-    return { kind: 'AUTO_MATCH', candidate: candidates[0], candidates,
+    return { kind: 'AUTO_MATCH', candidate: learned.has(groupId) ? { ...candidates[0], mainCode: parentCode } : candidates[0], candidates,
       diagnostic: null, resolution: 'UNIQUE_PARENT_VARIANT' };
   }
   const direct = index.byChild.get(code) ?? [];
@@ -405,6 +476,26 @@ export function importWacaRows(
   rows: readonly WacaRow[], repo: WacaRepository, master: readonly MasterVariant[], importId: string,
 ): WacaImportResult {
   const masterIndex = indexWacaMaster(master);
+  // Rebuild parent evidence from the current Catalog, not a permanently locked
+  // AUTO decision. Existing mapping JSON retains the GP, title/spec and target.
+  for (const mapping of repo.mappings.values()) {
+    if (mapping.method !== 'AUTO') continue;
+    try {
+      const fields: unknown = JSON.parse(mapping.feature);
+      if (!Array.isArray(fields) || fields.length !== 5 || fields.some(v => typeof v !== 'string')) continue;
+      const [productCode, productTitle, spec1, spec2, specCode] = fields;
+      const row = { productCode, productTitle, spec1, spec2, specCode };
+      const proof = specCode ? matchWacaItem(row, masterIndex) : discoverWacaParent(row, masterIndex);
+      if (proof?.candidate?.variantId === mapping.productVariantId) learnWacaParent(row, proof, masterIndex);
+    } catch { /* Legacy feature identities are revalidated through their order rows below. */ }
+  }
+  // Batch-wide prepass makes GP learning independent of row order. It never
+  // writes persistence: mappings are saved only in the existing atomic snapshot.
+  for (const row of [...repo.items.values(), ...rows]) {
+    if (isWacaDiscount(row)) continue;
+    const proof = normalizeWacaText(row.specCode) ? matchWacaItem(row, masterIndex) : discoverWacaParent(row, masterIndex);
+    if (proof) learnWacaParent(row, proof, masterIndex);
+  }
   const grouped = new Map<string, WacaRow[]>();
   const errors: string[] = [];
   let discountIgnored = 0;

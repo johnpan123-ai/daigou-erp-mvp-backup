@@ -5,6 +5,10 @@ import {performance} from 'node:perf_hooks';
 import {createServer} from 'vite';
 import {chromium} from 'playwright';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
+import {readUtf8Json} from './helpers/utf8-json-stream.mjs';
+const utf8Probe={feature:'中文／日文【規格】',productTitle:'代理版 商品 Ａ'};
+const probeBytes=Buffer.from(JSON.stringify(utf8Probe));
+assert.deepEqual(await readUtf8Json((async function*(){for(const byte of probeBytes)yield Buffer.from([byte]);})()),utf8Probe);
 const fixture=process.env.WACA_INCIDENT_FILE;
 assert.ok(fixture,'WACA_INCIDENT_FILE required');
 assert.equal(createHash('sha256').update(readFileSync(fixture)).digest('hex'),'310de252a5ac987f7a3c9dea09424a200a3b0d0a9f1f17f43308a45a1891a304');
@@ -13,7 +17,7 @@ assert.equal(Object.keys(data).length,24);
 const db=await isolatedDatabase();let browser;
 const allowedTables=new Set(Object.keys(data));
 const allowedRpc=new Set(['erp_read_waca_snapshot','erp_commit_waca_snapshot']);
-let backupCalls=0;
+let backupCalls=0,lastCommitPayload;
 const vite=await createServer({configFile:false,mode:'staging',define:{
  'import.meta.env.VITE_SUPABASE_URL':JSON.stringify('https://rhfdjsklfrgpoqsaqpkn.supabase.co'),
  'import.meta.env.VITE_SUPABASE_ANON_KEY':JSON.stringify('isolated-not-a-credential'),
@@ -22,8 +26,8 @@ const vite=await createServer({configFile:false,mode:'staging',define:{
  cacheDir:'node_modules/.vite-waca-atomic-native',
  optimizeDeps:{include:['react','react-dom/client','react-router-dom','react/jsx-runtime','lucide-react','xlsx','@supabase/supabase-js']},plugins:[{name:'isolated-native-transport',configureServer(server){
   server.middlewares.use('/__waca_isolated',async(req,res)=>{
-   try{let input='';for await(const chunk of req)input+=chunk;
-    const {path,body}=JSON.parse(input);assert.equal(req.method,'POST');
+   try{const {path,body}=await readUtf8Json(req);assert.equal(req.method,'POST');
+    if(path==='/rpc/erp_commit_waca_snapshot')lastCommitPayload=body.p_snapshot;
     if(path.startsWith('/rpc/'))assert.ok(allowedRpc.has(path.slice(5)),'RPC_NOT_ALLOWED');
     else assert.ok(allowedTables.has(path.slice(1).split('?')[0]),'TABLE_NOT_ALLOWED');
     if(/export_cloud_restore|backup/i.test(path)){backupCalls++;throw new Error('BACKUP_FORBIDDEN');}
@@ -115,7 +119,28 @@ try{
   await page.getByRole('button',{name:'確認更新',exact:true}).waitFor();
   await page.evaluate(()=>window.wacaAtomicTest.reset());
   const start=performance.now();await page.getByRole('button',{name:'確認更新',exact:true}).click();
-  await page.getByRole('dialog',{name:'WACA 更新完成'}).waitFor({timeout:30000});
+  try {await page.getByRole('dialog',{name:'WACA 更新完成'}).waitFor({timeout:30000});}
+  catch(error){
+    const actual=await rpc('erp_read_waca_snapshot');
+    const canonical=value=>JSON.stringify(value,(key,item)=>key==='productVariantId'&&(item===null||item==='')?null:
+      item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
+    const differences=[];
+    for(const [collection,key]of [['orders','key'],['items','key'],['mappings','feature'],['masterLinks','childCode']]){
+      const byKey=new Map(actual[collection].map(r=>[r[key],r]));
+      if(byKey.size!==actual[collection].length)differences.push({collection,duplicateKeys:true});
+      for(const row of lastCommitPayload?.[collection]??[]){const saved=byKey.get(row[key]);
+        if(!saved){differences.push({collection,missing:true});continue;}
+        if(canonical(row)!==canonical(saved)){
+          const changed=Object.keys(row).filter(k=>canonical({[k]:row[k]})!==canonical({[k]:saved[k]}));
+          const strings=changed.map(k=>{const a=String(row[k]),b=String(saved[k]);let at=0;while(at<Math.min(a.length,b.length)&&a[at]===b[at])at++;
+            return {field:k,expectedType:typeof row[k],actualType:typeof saved[k],expectedLength:a.length,actualLength:b.length,
+              firstDifference:at,expectedCodes:[...a.slice(at,at+5)].map(c=>c.codePointAt(0)),actualCodes:[...b.slice(at,at+5)].map(c=>c.codePointAt(0))};});
+          differences.push({collection,fields:changed,strings,inDelta:(lastCommitPayload?.[collection]??[]).some(r=>r[key]===row[key])});
+        }
+      }
+    }
+    console.error(JSON.stringify({run:n,uiErrors:await page.locator('.waca-error').allTextContents(),differences,
+      sync:await page.getByTestId('actual-global-sync').innerText(),metrics:await page.evaluate(()=>window.wacaAtomicTest.metrics())}));throw error;}
   assert.equal(await page.getByTestId('actual-global-sync').innerText(),'fresh');
   const elapsed=performance.now()-start;const metrics=await page.evaluate(()=>({...window.wacaAtomicTest.metrics(),stages:performance.getEntriesByType('mark').filter(x=>x.name.startsWith('waca-confirm:')).map(x=>({name:x.name,time:x.startTime}))}));
   assert.equal(metrics.calls.backup,0);assert.equal(metrics.calls.commit,1);assert.equal(downloads,0);assert.equal(external,0);assert.deepEqual(errors,[]);

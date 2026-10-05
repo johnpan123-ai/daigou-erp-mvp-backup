@@ -31,7 +31,8 @@ try {
   assert.equal(match(row({ spec1: ' ｒＥｄ ' })).resolution, 'SPEC_NAME_EXACT_UNIQUE');
   assert.equal(match(row({ spec1: 'Blue' })).candidate.variantId, 'blue');
   assert.equal(match(row({ spec1: 'Red' })).candidate.variantId, 'red', 'no cross-parent search');
-  assert.equal(match(row({ productCode: 'UNKNOWN', spec1: 'Red' })).resolution, 'PENDING_PRODUCT_MISSING');
+  assert.equal(match(row({ productCode: 'UNKNOWN', spec1: 'Red' })).resolution, 'PENDING_AMBIGUOUS',
+    'V3 discovers both same-name Catalog parents and never picks the first');
   assert.equal(match(row({ productTitle: 'Other Product' }), [red]).resolution, 'PENDING_NAME_CONFLICT');
   assert.equal(match(row({ productTitle: '' }), [red]).candidate, null);
   assert.equal(match(row({ spec1: 'Blue' }), [red, { ...blue, productTitle: 'Unrelated product' }]).candidate, null,
@@ -149,3 +150,6 @@ try {
   assert.equal(normalizeWacaText('2026／Red-L'), '2026/RED-L');
   console.log('PASS WACA evidence v2: exact/equal spec, locked parent, strict names, unique/ambiguous/missing, structure revalidation, manual/conflict, historical quantity, idempotency and JSON provenance restore');
 } finally { await vite.close(); }
+
+// The official evidence-resolver Guard gate also covers the V3 descendant.
+await import('./waca-resolver-v3.mjs');

@@ -6,13 +6,15 @@ import {createServer} from 'vite';
 import {chromium} from 'playwright';
 import ts from 'typescript';
 
-// The fix is presentation-only, not a covert rematch or quantity write.
+// The pending summary itself never triggers a rematch or quantity write.
 const file='src/pages/WacaIntegration.tsx';
 const before=execFileSync('git',['show',`bf8185c4cadcffbfc6ccc11b0cfd13324df37311:${file}`],{encoding:'utf8'});
 const nonJsx=source=>{
   const tree=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
   const transform=ts.transform(tree,[context=>{
-    const visit=node=>ts.isJsxElement(node)||ts.isJsxSelfClosingElement(node)||ts.isJsxFragment(node)
+    const visit=node=>ts.isVariableDeclaration(node)&&node.name.getText(tree)==='resolutionText'
+      ?ts.factory.updateVariableDeclaration(node,node.name,node.exclamationToken,node.type,ts.factory.createNull())
+      :ts.isJsxElement(node)||ts.isJsxSelfClosingElement(node)||ts.isJsxFragment(node)
       ?ts.factory.createNull():ts.visitEachChild(node,visit,context);
     return node=>ts.visitNode(node,visit);
   }]);
