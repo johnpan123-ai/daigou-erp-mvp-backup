@@ -10,6 +10,10 @@ const stable = value => Array.isArray(value) ? value.map(stable)
 export const impactHash = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
 export const regressionScripts = Object.freeze({
+  'waca-atomic-confirm': 'tests/waca-atomic-confirm-native.mjs',
+  'waca-confirm-contract': 'tests/waca-atomic-confirm-contract.mjs',
+  'waca-confirm-errors': 'tests/waca-import-errors.mjs',
+  'waca-confirm-next-ui': 'tests/next-waca-ui.mjs',
   'buyanime-simple-flow': 'tests/buyanime-simple-flow.mjs',
   'buyanime-flow-performance': 'tests/buyanime-flow-performance-isolated.mjs',
   'buyanime-flow-review': 'tests/buyanime-flow-change-impact.mjs',

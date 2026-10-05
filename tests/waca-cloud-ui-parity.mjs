@@ -109,7 +109,7 @@ try {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `overflow at ${width}`);
   }
   await page.goto(`${origin}${fixture}?failure=1`);
-  await page.getByRole('alert').filter({ hasText: '隔離測試：訂單讀取失敗' }).waitFor();
+  await page.getByRole('alert').filter({ hasText: 'WACA 資料驗證未通過' }).waitFor();
   await page.evaluate(() => window.wacaUiFixture.recover());
   await page.getByRole('button', { name: '重新讀取' }).click();
   await page.waitForFunction(() => !document.querySelector('.waca-error'));

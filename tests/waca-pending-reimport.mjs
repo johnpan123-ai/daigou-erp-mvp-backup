@@ -74,7 +74,9 @@ try {
     await page.getByRole('heading', { name: '匯入預覽：cap-and-existing.xlsx' }).waitFor();
   };
   const confirm = async () => {
-    await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
+    await page.getByRole('button', { name: '確認更新' }).click();
+    await page.getByRole('dialog', { name: 'WACA 更新完成' }).waitFor();
+    await page.getByRole('dialog').getByRole('button', { name: '確定' }).click();
   };
   const read = () => page.evaluate(async () => ({
     snapshot: await window.dataProvider.getNextWacaSnapshot(),

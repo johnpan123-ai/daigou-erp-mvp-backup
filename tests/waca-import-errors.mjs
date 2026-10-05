@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {transform} from 'esbuild';
 import {createServer} from 'vite';
 const vite=await createServer({configFile:false,server:{middlewareMode:true,hmr:false},optimizeDeps:{noDiscovery:true,include:[]}});
 try {
@@ -23,15 +22,12 @@ try {
  assert.equal(wacaNotice('PENDING').label,'待處理');assert.equal(wacaNotice('CONFLICT').label,'需核對衝突');
  const source=readFileSync('src/pages/WacaIntegration.tsx','utf8');
  assert.doesNotMatch(source,/String\(cause\)|cause instanceof Error \? cause.message/);
- const handler=(await transform(source.slice(source.indexOf('  const confirmImport = async () => {'),source.indexOf('\n  const handleMasterFile')),{loader:'tsx',target:'esnext'})).code+'\nreturn confirmImport;';
- for(const failure of [timeout,{code:'42501',message:'permission denied'},new Error('Failed to fetch'),{error:[timeout]}]){
-  let error;let mutationCalls=0;
-  const confirm=new Function('pendingImport','snapshot','dataProvider','setBusy','setError','setMessage','run','classifyWacaError',handler)(
-   {revision:8,importId:'isolated-request',result:{errors:[]}},{revision:8},
-   {getNextWacaSnapshot:async()=>({revision:8}),exportData:async()=>{throw failure;},commitNextWacaSnapshot:async()=>{mutationCalls++;}},
-   ()=>{},value=>{error=value;},()=>{},()=>{throw new Error('DOMAIN_MUST_NOT_RUN');},classifyWacaError);
-  await confirm();assert.equal(mutationCalls,0);assert.match(error.message,/尚未寫入/);
-  assert.equal(error.diagnostic.stage,'backup');assert.equal(error.diagnostic.requestId,'isolated-request');
- }
- console.log('PASS WACA structured envelopes/cycles/nesting, stage classification, no raw object render, backup failure mutation=0');
+ const handler=source.slice(source.indexOf('  const confirmImport = async () => {'),source.indexOf('\n  const handleMasterFile'));
+ assert.doesNotMatch(handler,/exportData|stage = 'backup'|erp_export_cloud_restore_snapshot|download/);
+ assert.match(handler,/commitAndVerifyWaca/);
+ assert.equal(classifyWacaError({code:'40001',message:'WACA_STALE_REVISION'},'commit').category,'STALE_CONFLICT');
+ assert.equal(classifyWacaError(new Error('WACA_STALE_REVISION'),'validation').category,'STALE_CONFLICT');
+ // Other explicit maintenance operations retain Backup protection/formatting.
+ assert.match(source.slice(source.indexOf('  const confirmMasterLinks')),/await dataProvider.exportData\(\)/);
+ console.log('PASS structured errors, stale CAS, no full Backup in normal Confirm; maintenance Backup preserved');
 }finally{await vite.close();}

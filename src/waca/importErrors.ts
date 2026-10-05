@@ -3,11 +3,12 @@ import { formatStructuredError } from '../utils/structuredError';
 export type WacaStage = 'read' | 'parse' | 'validation' | 'backup' | 'commit' | 'readback';
 export type WacaErrorCategory = 'BACKUP_TIMEOUT' | 'BACKUP_FAILED' | 'FILE_PARSE_ERROR' | 'VALIDATION_ERROR'
   | 'WACA_COMMIT_REJECTED' | 'WACA_COMMIT_UNKNOWN' | 'READBACK_FAILED' | 'PERMISSION_ERROR'
-  | 'NETWORK_ERROR' | 'PENDING' | 'CONFLICT';
+  | 'NETWORK_ERROR' | 'PENDING' | 'CONFLICT' | 'STALE_CONFLICT';
 export type WacaUiError = { category: WacaErrorCategory; label: string; message: string;
   diagnostic?: { stage: WacaStage; code?: string; reason: string; requestId?: string; rpc?: string } };
 
 const messages: Record<WacaErrorCategory, string> = {
+  STALE_CONFLICT: 'WACA 資料已由其他操作更新，本次未提交。請重新讀取並預覽檔案。',
   BACKUP_TIMEOUT: '匯入前備份逾時，本次 WACA 尚未寫入。請稍後再試。',
   BACKUP_FAILED: '匯入前備份失敗，本次 WACA 尚未寫入。請查看技術資訊。',
   FILE_PARSE_ERROR: 'WACA Excel 解析失敗，本次尚未寫入。請確認必要欄位與檔案內容。',
@@ -21,6 +22,7 @@ const messages: Record<WacaErrorCategory, string> = {
   CONFLICT: '訂單狀態或商品對照有衝突，需要確認。',
 };
 const labels: Record<WacaErrorCategory, string> = {
+  STALE_CONFLICT: '資料版本衝突',
   BACKUP_TIMEOUT: '備份逾時', BACKUP_FAILED: '備份失敗', FILE_PARSE_ERROR: '檔案解析失敗',
   VALIDATION_ERROR: '驗證失敗', WACA_COMMIT_REJECTED: '更新被拒絕', WACA_COMMIT_UNKNOWN: '更新結果待確認',
   READBACK_FAILED: '已保存／讀回失敗', PERMISSION_ERROR: '權限不足', NETWORK_ERROR: '連線失敗',
@@ -37,7 +39,9 @@ export function classifyWacaError(cause: unknown, stage: WacaStage, requestId?: 
   const network = /fetch|network|connection|socket|offline/iu.test(error.message);
   // Phase always wins: a lost commit response is not proof of rollback, and
   // failure AFTER acknowledgment must not tell the user to resend the import.
-  const category: WacaErrorCategory = stage === 'backup' ? timeout ? 'BACKUP_TIMEOUT' : 'BACKUP_FAILED'
+  const category: WacaErrorCategory = (stage === 'validation' || stage === 'commit')
+    && (error.code === '40001' || error.message === 'WACA_STALE_REVISION') ? 'STALE_CONFLICT'
+    : stage === 'backup' ? timeout ? 'BACKUP_TIMEOUT' : 'BACKUP_FAILED'
     : stage === 'readback' ? 'READBACK_FAILED'
     : stage === 'commit' ? /^[0-9A-Z]{5}$/u.test(error.code ?? '') ? 'WACA_COMMIT_REJECTED' : 'WACA_COMMIT_UNKNOWN'
     : permission ? 'PERMISSION_ERROR' : network || timeout ? 'NETWORK_ERROR'

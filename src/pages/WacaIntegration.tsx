@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileSpreadsheet, Link2, RefreshCw } from 'lucide-react';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { FileUploadButton } from '../components/FileUploadButton';
@@ -29,6 +29,8 @@ import {
 } from '../waca/previewReconciliation';
 import { supportsWacaProvider } from '../waca/providerSupport';
 import { classifyWacaError, wacaNotice, type WacaStage, type WacaUiError } from '../waca/importErrors';
+import { commitAndVerifyWaca } from '../waca/confirmFlow';
+import { useCloudResourceSync, useGlobalSyncControl } from '../contexts/CloudRealtimeSyncContext';
 import './WacaIntegration.css';
 
 type Tab = 'import' | 'orders' | 'mappings' | 'history' | 'pending';
@@ -101,6 +103,11 @@ export default function WacaIntegration() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [completion, setCompletion] = useState<{ orders: number; variants: number; pending: number } | null>(null);
+  const confirming = useRef(false);
+  const sync = useGlobalSyncControl();
+  const syncRef = useRef(sync.presentation);
+  useEffect(() => { syncRef.current = sync.presentation; }, [sync.presentation]);
   const [error, setErrorState] = useState<WacaUiError | null>(null);
   const setError = useCallback((value: WacaUiError | string) => setErrorState(
     typeof value === 'string' ? value ? wacaNotice('VALIDATION_ERROR', value) : null : value,
@@ -121,6 +128,9 @@ export default function WacaIntegration() {
     setGroups(nextGroups);
     setError('');
   }, [setError]);
+
+  const { refreshAuthoritative } = useCloudResourceSync('waca-orders', ['products'], false,
+    useCallback(async () => { if (!confirming.current) await load(); }, [load]));
 
   useEffect(() => {
     if (!supportsWacaProvider(getProviderMode(), supabaseEnvironment.projectRef)) return;
@@ -294,17 +304,22 @@ export default function WacaIntegration() {
   };
 
   const confirmImport = async () => {
-    if (!pendingImport || !snapshot || pendingImport.result.errors.length) return;
-    setBusy(true); setError(''); setMessage('');
+    if (confirming.current || !pendingImport || !snapshot || pendingImport.result.errors.length) return;
+    confirming.current = true;
+    for (const name of ['click', 'validation', 'commit', 'readback', 'refresh', 'sync', 'verified']) {
+      performance.clearMarks(`waca-confirm:${name}`);
+    }
+    performance.mark('waca-confirm:click');
+    setBusy(true); setError(''); setMessage('正在更新並同步 WACA 資料…'); setCompletion(null);
     let stage: WacaStage = 'read';
     try {
       const current = await dataProvider.getNextWacaSnapshot();
+      performance.mark('waca-confirm:validation');
       stage = 'validation';
-      if (current.revision !== pendingImport.revision) throw new Error('WACA 資料已變更，請重新預覽檔案。');
-      stage = 'backup';
-      await dataProvider.exportData();
-      stage = 'validation';
+      if (current.revision !== pendingImport.revision) throw new Error('WACA_STALE_REVISION');
       const { candidate, result } = run(pendingImport.rows, current, pendingImport.importId, pendingImport.links);
+      if (result.errors.length) throw new Error('WACA_PREVIEW_VALIDATION_FAILED');
+      performance.mark('waca-confirm:commit');
       const conflicts = new Set(result.statusConflicts);
       const batch: WacaBatch = {
         id: pendingImport.importId, fileName: pendingImport.fileName, importedAt: new Date().toISOString(),
@@ -313,40 +328,49 @@ export default function WacaIntegration() {
         conflictRows: pendingImport.rows.filter(row => conflicts.has(wacaOrderKey(row.orderNumber))),
       };
       const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
-      stage = 'commit';
-      await dataProvider.commitNextWacaSnapshot(next, current.revision, true);
-      stage = 'readback';
-      const saved = await dataProvider.getNextWacaSnapshot();
-      const savedVariants = await dataProvider.getAuthoritativeWacaVariants();
-      const checked = reconcileWacaReadback(saved, savedVariants);
-      const recorded = { status: checked.status, passed: checked.passed, total: checked.total,
-        effectiveQuantity: checked.effectiveQuantity, checkedAt: new Date().toISOString() };
-      const recordedBatches = saved.batches.map(row => row.id === batch.id ? { ...row, reconciliation: recorded } : row);
-      if (getProviderMode() === 'next') {
-        await dataProvider.commitNextWacaSnapshot({ ...saved, batches: recordedBatches }, saved.revision, false);
+      const cloud = getProviderMode() !== 'next';
+      const { snapshot: finalSnapshot, variants: finalVariants, checked: finalCheck } = await commitAndVerifyWaca({
+        provider: dataProvider, current, candidate: next, requestId: batch.id, cloud,
+        onStage: value => { stage = value; if (value === 'readback') performance.mark('waca-confirm:readback'); },
+      });
+      performance.mark('waca-confirm:refresh');
+      if (cloud) {
+        if (!refreshAuthoritative) throw new Error('WACA_TARGETED_REFRESH_UNAVAILABLE');
+        const refreshed = await refreshAuthoritative(['products']);
+        if (!refreshed || refreshed.conflicts.length) throw new Error('WACA_TARGETED_REFRESH_CONFLICT');
       }
-      const finalSnapshot = await dataProvider.getNextWacaSnapshot();
-      const finalVariants = await dataProvider.getAuthoritativeWacaVariants();
-      const finalCheck = reconcileWacaReadback(finalSnapshot, finalVariants);
-      if (finalSnapshot.batches.at(-1)?.reconciliation?.status !== finalCheck.status) {
-        throw new Error('匯入紀錄與數量對帳結果不一致，請重新讀取並檢查待處理。');
+      // Never claim success while the shared header still shows cached/loading.
+      // Read the actual shared presentation; do not clear/fake global freshness.
+      const deadline = Date.now() + 10_000;
+      performance.mark('waca-confirm:sync');
+      while (cloud && (syncRef.current.status !== 'fresh' || !syncRef.current.writeAllowed)) {
+        if (Date.now() >= deadline) throw new Error('WACA_GLOBAL_SYNC_NOT_CONVERGED');
+        await new Promise(resolve => setTimeout(resolve, 25));
       }
+      setSnapshot(finalSnapshot);
+      performance.mark('waca-confirm:verified');
+      setVariants(finalVariants);
       setPendingImport(null);
       setChosenFileName('');
-      await load();
       const pendingFeatures = new Set(finalSnapshot.items.filter(isPending).map(item => item.feature)).size;
       const integrityIssues = finalCheck.issues.filter(issue => issue.reason !== 'UNMATCHED_SOURCE');
       if (integrityIssues.length || result.statusConflicts.length) {
         setTab('pending');
         setError(wacaNotice('CONFLICT', `WACA 訂單已保存，但有 ${integrityIssues.length + result.statusConflicts.length} 個對帳或訂單狀態問題需要確認。`));
       } else if (pendingFeatures) {
-        setTab('pending');
+        // Historical pending items are retained and counted, but do not open
+        // thousands of manual-choice controls behind the completion dialog.
+        // The visible Pending tab remains available; no work is deferred.
         setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。建立商品後重新匯入 WACA Excel，即可自動配對並更新數量。`);
       } else {
         setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。`);
       }
-    } catch (cause) { setError(classifyWacaError(cause, stage, pendingImport.importId)); }
-    finally { setBusy(false); }
+      if (!integrityIssues.length && !result.statusConflicts.length) setCompletion({
+        orders: new Set(pendingImport.rows.map(row => wacaOrderKey(row.orderNumber))).size,
+        variants: result.quantityChanges.length, pending: pendingFeatures,
+      });
+    } catch (cause) { setMessage(''); setError(classifyWacaError(cause, stage, pendingImport.importId)); }
+    finally { confirming.current = false; setBusy(false); }
   };
 
   const handleMasterFile = async (file?: File) => {
@@ -514,6 +538,16 @@ export default function WacaIntegration() {
 
   if (!supportsWacaProvider(getProviderMode(), supabaseEnvironment.projectRef)) return <PageShell><p>請使用 ERP 2.0 雲端或 NEXT 本機環境開啟 WACA 匯入。</p></PageShell>;
   return <PageShell className="waca-page">
+    {completion && (getProviderMode() === 'next' || (sync.presentation.status === 'fresh' && sync.presentation.writeAllowed)) &&
+      <div className="modal-overlay active" role="presentation" data-testid="waca-update-success-modal">
+        <section className="modal-content" role="dialog" aria-modal="true" aria-labelledby="waca-success-title">
+          <h2 id="waca-success-title">WACA 更新完成</h2>
+          <p>已完成 WACA 訂單與數量更新。</p>
+          <p>更新訂單：{completion.orders}<br />更新商品規格：{completion.variants}<br />待處理：{completion.pending}</p>
+          <p>{getProviderMode() === 'next' ? '本機' : '雲端'}資料已同步完成。</p>
+          <button className="btn btn-primary" autoFocus onClick={() => setCompletion(null)}>確定</button>
+        </section>
+      </div>}
     <PageHeader className="waca-heading">
       <div><h1>WACA 匯入</h1><p>日常只需匯入一份 WACA 訂單 Excel。確認後會更新訂單、重算數量並自動對帳。</p></div>
       <button className="btn btn-md btn-outline" onClick={() => void load().catch(cause => setError(readErrorText(cause)))} disabled={busy}><RefreshCw size={16} /> 重新讀取</button>

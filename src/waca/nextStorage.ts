@@ -7,7 +7,7 @@ import {
   type WacaRow,
 } from './orderCore';
 import type { MyAcgMasterLink } from './masterReference';
-import { buildWacaCutoverAudit } from './reconciliation';
+import { buildWacaCutoverAudit, reconcileWacaReadback } from './reconciliation';
 import type { WacaCutoverState } from './backupFormat';
 
 export interface WacaBatch {
@@ -241,7 +241,15 @@ export async function commitNextWacaSnapshot(
           store.put(snapshot.orders, NEXT_WACA_KEYS.orders);
           store.put(snapshot.items, NEXT_WACA_KEYS.items);
           store.put(snapshot.mappings, NEXT_WACA_KEYS.mappings);
-          store.put(snapshot.batches, NEXT_WACA_KEYS.batches);
+          // Persist the read-back audit with the ledger and quantities, not a
+          // second transaction/revision after the import has already committed.
+          const checked = updateAutoQuantity
+            ? reconcileWacaReadback({ ...snapshot, cutoverAudit, cutoverState }, nextVariants) : null;
+          const batches = checked ? snapshot.batches.map(batch => batch.reconciliation ? batch : {
+            ...batch, reconciliation: { status: checked.status, passed: checked.passed,
+              total: checked.total, effectiveQuantity: checked.effectiveQuantity, checkedAt: new Date().toISOString() },
+          }) : snapshot.batches;
+          store.put(batches, NEXT_WACA_KEYS.batches);
           store.put(snapshot.masterLinks, NEXT_WACA_KEYS.masterLinks);
           store.put(cutoverAudit, NEXT_WACA_KEYS.cutoverAudit);
           store.put(cutoverState, NEXT_WACA_KEYS.cutoverState);

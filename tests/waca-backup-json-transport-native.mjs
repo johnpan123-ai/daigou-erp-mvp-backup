@@ -3,7 +3,6 @@ import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {randomUUID,createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
 import {createServer} from 'vite';
-import {transform} from 'esbuild';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
 import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
 import {fingerprintStructuralSnapshot} from '../tools/schema-reconciliation/schemaContract.mjs';
@@ -122,57 +121,10 @@ try {
  await assert.rejects(()=>sql.query("select public.erp_restore_cloud_snapshot($1,repeat('c',64),$2,$3,'isolated-fault')",[randomUUID(),built.data,built.manifest]),/ISOLATED_ROLLBACK_PROOF/);
  await sql.query('drop trigger erp2_backup_restore_fault on public.waca_state; drop function public.erp2_backup_restore_fault()');
  assert.deepEqual(await rpc('erp_export_cloud_restore_snapshot'),restoredSnapshot);summary.atomicRollback='PASS';
- stage='incident-confirm';
- const file=process.env.WACA_INCIDENT_FILE;assert.ok(file,'WACA_INCIDENT_FILE required');
- assert.equal(createHash('sha256').update(readFileSync(file)).digest('hex'),'310de252a5ac987f7a3c9dea09424a200a3b0d0a9f1f17f43308a45a1891a304');
- const {parseWacaWorkbook}=await vite.ssrLoadModule('/src/waca/workbookParser.ts');
- const core=await vite.ssrLoadModule('/src/waca/orderCore.ts');
- const storage=await vite.ssrLoadModule('/src/waca/nextStorage.ts');
- const masterModule=await vite.ssrLoadModule('/src/waca/masterReference.ts');
- const {reconcileWacaReadback}=await vite.ssrLoadModule('/src/waca/reconciliation.ts');
- const {classifyWacaError,wacaNotice}=await vite.ssrLoadModule('/src/waca/importErrors.ts');
- const confirmRuns=[];
- for(let confirmRun=0;confirmRun<5;confirmRun++){
- assert.equal((await sql.query("select public.erp_restore_cloud_snapshot($1,repeat('d',64),$2,$3,'isolated-confirm-reset') result",[randomUUID(),built.data,built.manifest])).rows[0].result.ok,true);
- const variants=(await sql.query('select * from public.product_variants where deleted_at is null')).rows;
- const inventory=(await sql.query('select * from public.inventory_items where deleted_at is null')).rows;
- const current=await rpc('erp_read_waca_snapshot');
- const links=masterModule.mergeMyAcgMasterLinks(masterModule.linksFromMyAcgInventory(inventory,variants,'isolated','').links,current.masterLinks);
- const master=masterModule.buildWacaMasterReference(variants,links);
- const rows=parseWacaWorkbook(readFileSync(file)).rows;
- const run=(rows,current,importId)=>{const currentRepo=storage.repositoryFromSnapshot(current,variants);const candidate=core.cloneWacaRepository(currentRepo);const result=core.importWacaRows(rows,candidate,master,importId);core.refreshWacaMasterStatus(candidate,master);return {currentRepo,candidate,result};};
- const importId=randomUUID();const preview=run(rows,current,importId);stage='incident-preview';assert.equal(preview.result.errors.length,0);
- const importedKeys=new Set(rows.filter(row=>!core.isWacaDiscount(row)).map(row=>core.wacaOrderKey(row.orderNumber)+'::'+core.wacaFeature(row)));
- const incidentItems=[...preview.candidate.items.values()].filter(item=>importedKeys.has(item.orderKey+'::'+item.feature));
- assert.equal(incidentItems.length,17);assert.equal(new Set(incidentItems.map(item=>item.feature)).size,13);
- assert.equal(incidentItems.filter(item=>!item.productVariantId).length,0);
- const historicalPendingFeatures=new Set([...preview.candidate.items.values()].filter(item=>!item.productVariantId).map(item=>item.feature)).size;
- console.log(JSON.stringify({stage,rows:rows.length,incidentItems:17,incidentFeatures:13,incidentPending:0,historicalPendingFeatures}));
- const pendingImport={rows,revision:current.revision,importId,result:preview.result,links,fileName:'orders-EUF2Wm20261004230958.xlsx'};
- const source=readFileSync('src/pages/WacaIntegration.tsx','utf8');
- const handler=(await transform(source.slice(source.indexOf('  const confirmImport = async () => {'),source.indexOf('\n  const handleMasterFile')),{loader:'tsx',target:'esnext'})).code+'\nreturn confirmImport;';
- const timings={backupMs:0,commitMs:0,readbackMs:0};let uiError;let uiMessage='';let mutationCalls=0;
- const measure=async(key,action)=>{const start=performance.now();try{return await action();}finally{timings[key]+=performance.now()-start;}};
- const provider={getNextWacaSnapshot:()=>measure('readbackMs',()=>rpc('erp_read_waca_snapshot')),
-  getAuthoritativeWacaVariants:()=>measure('readbackMs',async()=>(await sql.query('select * from public.product_variants where deleted_at is null')).rows),
-  exportData:()=>measure('backupMs',async()=>{const value=await rpc('erp_export_cloud_restore_snapshot');assert.ok(await buildCloudRestoreManifest(value,value));}),
-  commitNextWacaSnapshot:(value,revision,update)=>measure('commitMs',async()=>{mutationCalls++;const result=await rpc('erp_commit_waca_snapshot',{p_snapshot:value,p_expected_revision:revision,p_update_auto_quantity:update});assert.equal(result.revision,revision+1);}),};
- const confirm=new Function('pendingImport','snapshot','dataProvider','setBusy','setError','setMessage','run','classifyWacaError','snapshotFromRepository','getProviderMode','reconcileWacaReadback','setPendingImport','setChosenFileName','load','isPending','setTab','wacaNotice','wacaOrderKey',handler)(
-  pendingImport,current,provider,()=>{},value=>{uiError=value;},value=>{uiMessage=value;},run,classifyWacaError,storage.snapshotFromRepository,()=> 'supabase',reconcileWacaReadback,()=>{},()=>{},async()=>{},item=>!item.productVariantId,()=>{},wacaNotice,core.wacaOrderKey);
- const start=performance.now();await confirm();timings.totalConfirmMs=performance.now()-start;
- console.log(JSON.stringify({stage:'incident-handler-result',category:uiError?.category,diagnostic:uiError?.diagnostic,completionMessage:uiMessage,completed:uiMessage.includes('WACA 更新完成'),mutationCalls}));
- stage='incident-handler-ui';assert.ok(!uiError,uiError?.category);
- // Historical unresolved products are not part of this incident's 13 matched
- // features. Preserve the real UI's completed-save/pending notice; never
- // fabricate mappings or demand a zero global pending count to pass a test.
- assert.match(uiMessage,historicalPendingFeatures ? /WACA 訂單已保存/ : /WACA 更新完成/);assert.equal(mutationCalls,1);
- stage='incident-quantity';
- for(const [sku,expected]of [['G07595265',1],['G07607190',2]])assert.equal(Number((await sql.query('select waca_auto_quantity from public.product_variants where myacg_item_code=$1 and deleted_at is null',[sku])).rows[0].waca_auto_quantity),expected);
- const saved=await rpc('erp_read_waca_snapshot');assert.equal(saved.revision,current.revision+1);assert.equal(new Set(saved.items.map(row=>row.key)).size,saved.items.length);
- summary.incidentConfirm={result:'PASS',g07595265:1,g07607190:2,incidentMatchedFeatures:13,incidentPending:0,historicalPendingFeatures,mutationCalls,revisionBefore:current.revision,revisionAfter:saved.revision,timings,measurementEnd:'actual handler UI completed-save message after authoritative readback; no production browser interaction'};
- confirmRuns.push(timings.totalConfirmMs);
- }
- summary.confirm=stats(confirmRuns);console.log(JSON.stringify({stage:'confirm-five-runs',...summary.confirm}));
+ // Normal Confirm no longer invokes Backup. Its real XLS, response-loss,
+ // rollback, readback and synced-modal benchmark now live in the native
+ // tests/waca-atomic-confirm-native.mjs suite. Keep this suite focused on
+ // the unchanged manual Backup / Restore and migration transport contracts.
  stage='bounded-pathological-rpc';
  await sql.query("create or replace function public.erp_export_cloud_restore_snapshot_json() returns json language plpgsql security definer set search_path=pg_catalog,public,extensions as $$ begin perform pg_sleep(9); return '{}'::json; end $$;");
  const started=performance.now();const slow=await db.http('/rpc/erp_export_cloud_restore_snapshot_json',{});
