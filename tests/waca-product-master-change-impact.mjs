@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { classifyDescendantFile } from '../scripts/post-adoption-descendant.mjs';
+import { assertReviewedProviderContract, classifyDescendantFile } from '../scripts/post-adoption-descendant.mjs';
 
 const base = '0fca8fd13ad90cc59fc73443f5eba9a1663341b0';
 const git = args => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -16,6 +16,12 @@ assert.equal(catalog.match(/CATALOG_RPC\s*=\s*['"]([^'"]+)/u)?.[1],
   beforeCatalog.match(/CATALOG_RPC\s*=\s*['"]([^'"]+)/u)?.[1]);
 assert.match(catalog, /mode:mode==='master'\?'sync':mode/u, 'master planner must use the adopted sync wire mode');
 assert.doesNotMatch(catalog, /CATALOG_RPC\s*=\s*['"](?!erp_apply_catalog_transaction)/u);
+assert.doesNotThrow(() => assertReviewedProviderContract(
+  'src/providers/cloud/catalogTransaction.ts', beforeCatalog, catalog));
+assert.throws(() => assertReviewedProviderContract(
+  'src/providers/cloud/catalogTransaction.ts', beforeCatalog,
+  catalog.replace("mode:mode==='master'?'sync':mode", "mode:mode==='master'?'create':mode")),
+/adopted sync wire contract/u);
 const provider = readFileSync('src/providers/cloud/supabaseProvider.ts', 'utf8');
 assert.match(provider, /commitCatalog\('master',itemCodes\)/u);
 assert.doesNotMatch(provider, /erp_apply_product_master|p_master_request/u,

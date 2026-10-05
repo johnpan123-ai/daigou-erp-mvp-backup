@@ -202,14 +202,40 @@ export function assertReviewedProviderContract(file, before, after) {
     return;
   }
   if (file === 'src/providers/cloud/catalogTransaction.ts') {
-    // Exact reviewed patch changes only the transient FULL-registry guard count.
-    // Matching, quantity, request keys and field serialization stay identical.
+    // Exact reviewed patches may change the transient FULL-registry guard count
+    // and add Product Master as an application planning strategy. `master`
+    // must still serialize through the already-adopted `sync` wire mode; it
+    // cannot introduce a new RPC, field, collection or payload contract.
+    const tree = parse(file, after);
+    const masterBranch = nodes(tree).filter(ts.isIfStatement).filter(node =>
+      node.expression.getText(tree) === "mode==='master'"
+      && node.thenStatement.getText(tree) === 'await ensureProductMasterFromInventory.call(ctx,itemCodes);');
+    const masterWireMode = nodes(tree).filter(ts.isConditionalExpression).filter(node =>
+      node.condition.getText(tree) === "mode==='master'"
+      && node.whenTrue.getText(tree) === "'sync'"
+      && node.whenFalse.getText(tree) === 'mode');
+    const hasMasterMode = after.includes("'master'");
+    if (hasMasterMode && (masterBranch.length !== 1 || masterWireMode.length !== 1)) {
+      fail('Catalog Product Master must use the adopted sync wire contract');
+    }
     const restored=after
+      .replace('createPurchaseRecordFromInventory,ensureProductMasterFromInventory,reparseProductVariants',
+        'createPurchaseRecordFromInventory,reparseProductVariants')
+      .replace("export type CatalogMode='create'|'master'|'sync'|'reparse';",
+        "export type CatalogMode='create'|'sync'|'reparse';")
+      .replace("  else if(mode==='master') await ensureProductMasterFromInventory.call(ctx,itemCodes);\n", '')
+      .replace("mode:mode==='master'?'sync':mode", 'mode');
+    if (canonical(parse(file,before)) === canonical(parse(file,restored))) return;
+    // Earlier exact review: only the transient FULL-registry guard count was
+    // added. Keep this path separate so a Product Master review cannot absorb
+    // another unrelated Catalog change.
+    const transientGuardRestored=after
       .replace(", options: { baselineVariantCount?: number } = {}",'')
       .replace('(options.baselineVariantCount ?? base.variants.length)===0','base.variants.length===0')
       .replace('const baselineCount=options.baselineVariantCount ?? before.length;','')
-      .replace('baselineCount>0','before.length>0').replace('Math.ceil(baselineCount*0.25)','Math.ceil(before.length*0.25)');
-    if(canonical(parse(file,before))!==canonical(parse(file,restored))) fail('Catalog algorithm/RPC contract changed');
+      .replace('baselineCount>0','before.length>0')
+      .replace('Math.ceil(baselineCount*0.25)','Math.ceil(before.length*0.25)');
+    if(canonical(parse(file,before))!==canonical(parse(file,transientGuardRestored))) fail('Catalog algorithm/RPC contract changed');
     return;
   }
   if (file === 'src/providers/cloud/cloudBulkRead.ts') {
