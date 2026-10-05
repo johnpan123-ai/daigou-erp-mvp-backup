@@ -117,6 +117,7 @@ try{
   await page.waitForFunction(()=>document.querySelector('input[aria-label="選擇 WACA Excel"]')?.disabled===false);
   await page.getByLabel('選擇 WACA Excel').setInputFiles(fixture);
   await page.getByRole('button',{name:'確認更新',exact:true}).waitFor();
+  const revisionBeforeUiConfirm=(await rpc('erp_read_waca_snapshot')).revision;
   await page.evaluate(()=>window.wacaAtomicTest.reset());
   const start=performance.now();await page.getByRole('button',{name:'確認更新',exact:true}).click();
   try {await page.getByRole('dialog',{name:'WACA 更新完成'}).waitFor({timeout:30000});}
@@ -144,7 +145,7 @@ try{
   assert.equal(await page.getByTestId('actual-global-sync').innerText(),'fresh');
   const elapsed=performance.now()-start;const metrics=await page.evaluate(()=>({...window.wacaAtomicTest.metrics(),stages:performance.getEntriesByType('mark').filter(x=>x.name.startsWith('waca-confirm:')).map(x=>({name:x.name,time:x.startTime}))}));
   assert.equal(metrics.calls.backup,0);assert.equal(metrics.calls.commit,1);assert.equal(downloads,0);assert.equal(external,0);assert.deepEqual(errors,[]);
-  const state=await rpc('erp_read_waca_snapshot');assert.equal(state.revision,9);
+  const state=await rpc('erp_read_waca_snapshot');assert.equal(state.revision,revisionBeforeUiConfirm+1);
   const values=await variants();for(const [sku,q]of [['G07595265',1],['G07607190',2]])assert.equal(values.find(r=>r.myacg_item_code===sku).waca_auto_quantity,q);
   if(n)summary.runs.push({totalMs:elapsed,...metrics.timings,stages:metrics.stages});else summary.warmupMs=elapsed;
   console.log(JSON.stringify({stage:'confirm-synced-modal',run:n,totalMs:elapsed,backupCalls:0,commitCalls:1,stages:metrics.stages}));await context.close();

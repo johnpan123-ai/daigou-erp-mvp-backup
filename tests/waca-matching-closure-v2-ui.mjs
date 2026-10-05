@@ -121,11 +121,12 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true,
       `WACA preview overflows at ${width}px`);
   }
-  await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
+  await page.getByRole('button', { name: '確認更新' }).click();
   await page.getByText(/WACA 更新完成：60 \/ 60/).waitFor().catch(async error => {
     console.log('WACA CONFIRM SCREEN', (await page.locator('main').innerText()).slice(0, 2500));
     throw error;
   });
+  await page.getByRole('dialog', { name: 'WACA 更新完成' }).getByRole('button', { name: '確定' }).click();
   assert.match(await page.locator('[aria-label="WACA 目前驗收摘要"]').innerText(), /60\s+已配對特徵/);
   const measureTab = label => page.evaluate(async tabLabel => {
     const button = [...document.querySelectorAll('.waca-tabs button')].find(row => row.textContent.trim() === tabLabel);
@@ -184,15 +185,20 @@ try {
   await page.getByLabel('顯示未變更商品').check();
   assert.ok(await page.locator('.waca-group').count() > 0, 'unchanged toggle reveals audit detail');
   await page.getByLabel('顯示未變更商品').uncheck();
-  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
+  await page.getByRole('button', { name: '確認更新' }).click();
+  await page.getByRole('dialog', { name: 'WACA 更新完成' }).waitFor();
+  await page.getByRole('dialog', { name: 'WACA 更新完成' }).getByRole('button', { name: '確定' }).click();
+  // WACA confirm deliberately performs no full backup. Exercise the preserved
+  // manual backup feature explicitly before the isolated restore assertion.
+  const [download] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.dataProvider.exportData())]);
   const backup = JSON.parse(readFileSync(await download.path(), 'utf8'));
   assert.equal(backup.wacaOrders.length, 71);
   assert.equal(backup.wacaItems.length, 115);
   assert.equal(backup.wacaMappings.length, 60);
   assert.equal(backup.myacgMasterLinks.length, 1267);
-  assert.equal(backup.wacaImportBatches.length, 1);
+  assert.equal(backup.wacaImportBatches.length, 2, 'both idempotent confirms retain their audit receipt');
   assert.equal(backup.wacaCutoverAudit.length, erp.productVariants.length);
-  assert.equal(backup.wacaImportBatches[0].reconciliation.status, 'PASS');
+  assert.ok(backup.wacaImportBatches.every(row => row.reconciliation.status === 'PASS'));
   assert.equal(backup.productVariants.filter(row => Number(row.waca_manual_adjustment ?? 0) !== 0).length, 0);
   assert.equal(backup.productVariants.length, erp.productVariants.length, 'NEXT JSON export must retain raw variants');
   const workbenchBackup = await page.evaluate(async () => {

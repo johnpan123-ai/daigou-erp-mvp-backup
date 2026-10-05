@@ -7,7 +7,8 @@ import {
   isVariantSyncReadFailureInjectionEnabled,
   VARIANT_DESTRUCTIVE_SYNC_GUARD_MESSAGE,
 } from '../lib/db';
-import type { ImportStats, InventoryItem, ProductGroup } from '../lib/db';
+import type { ImportStats, InventoryItem, ProductGroup, ProductVariant } from '../lib/db';
+import { purchaseRecordGroupIds } from '../lib/productGroupDisplayName';
 import { parseMyAcgFile } from '../utils/myacgParser';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../utils/myacgImportErrors';
 import { Upload, Download, RefreshCw, RotateCcw, PackageX, ChevronDown, ChevronRight, Search, ShoppingBag, CheckCircle, Clock, Building2, Play, Heart, SlidersHorizontal, Plus } from 'lucide-react';
@@ -72,6 +73,7 @@ export default function Inventory() {
   const isCloudRestoreDisabled = isCloudRestoreDisabledMode(currentMode);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all'); // 'all', 'hololive', 'vspo', 'other'
@@ -108,8 +110,10 @@ export default function Inventory() {
     const convergence = dataProvider.waitForCloudBootstrapConvergence();
     await dataProvider.getProductGroups();
     let snapshot = await dataProvider.getInventoryCatalogSnapshot();
+    let nextVariants = await dataProvider.getProductVariants({ raw: true });
     if (generation !== loadGenerationRef.current) return;
     setProductGroups(snapshot.productGroups);
+    setProductVariants(nextVariants);
     setItems(snapshot.inventory);
 
     // The four-second freshness boundary may intentionally expose the previous
@@ -117,8 +121,10 @@ export default function Inventory() {
     // replaces the cache, re-read the paired collections for this generation.
     if (await convergence) {
       snapshot = await dataProvider.getInventoryCatalogSnapshot();
+      nextVariants = await dataProvider.getProductVariants({ raw: true });
       if (generation !== loadGenerationRef.current) return;
       setProductGroups(snapshot.productGroups);
+      setProductVariants(nextVariants);
       setItems(snapshot.inventory);
     }
     
@@ -150,8 +156,10 @@ export default function Inventory() {
   );
 
   const existingGroupTitles = useMemo(() => {
-    return new Set(productGroups.map(g => g.normalized_title || g.title));
-  }, [productGroups]);
+    const projected = purchaseRecordGroupIds(productVariants);
+    return new Set(productGroups.filter(group => projected.has(group.id))
+      .map(group => group.normalized_title || group.title));
+  }, [productGroups, productVariants]);
 
   const handleImportClick = () => {
     if (isImporting) return;
@@ -253,7 +261,7 @@ export default function Inventory() {
       }
       if (!postCommitIssue) {
         try {
-          await dataProvider.syncProductGroupsWithInventory();
+          await dataProvider.ensureProductMasterFromInventory(itemsWithBatchMeta.map(item => item.myacg_item_code));
         } catch {
           postCommitIssue = 'group-sync';
         }

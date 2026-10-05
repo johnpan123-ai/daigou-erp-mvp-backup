@@ -418,6 +418,9 @@ class DynamicDataProvider implements IDataProvider {
   async clearPurchaseRecords(): Promise<void> {
     return this.guardedWrite(() => this.getActiveProvider().clearPurchaseRecords());
   }
+  async ensureProductMasterFromInventory(itemCodes: string[]): Promise<void> {
+    return this.guardedWrite(() => this.getActiveProvider().ensureProductMasterFromInventory(itemCodes));
+  }
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
     return this.guardedWrite(() => this.getActiveProvider().createPurchaseRecordFromInventory(itemCodes));
   }

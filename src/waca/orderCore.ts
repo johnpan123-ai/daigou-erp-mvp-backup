@@ -449,6 +449,77 @@ export function refreshWacaMasterStatus(repo: WacaRepository, master: readonly M
   }
 }
 
+export interface WacaHistoricalRematchResult {
+  inspected: number;
+  changed: number;
+  autoResolved: number;
+  becamePending: number;
+  remainingPending: number;
+  quantityChanges: Array<{ variantId: string; before: number; after: number }>;
+}
+
+/** WACA-owned, deterministic rematch against the current Product Master.
+ * `affectedCodes` contains changed parent/child identities from the durable
+ * master-link delta, so the normal no-change page load does no historical scan. */
+export function rematchHistoricalWaca(
+  repo: WacaRepository,
+  master: readonly MasterVariant[],
+  requestId: string,
+  affectedCodes?: ReadonlySet<string>,
+): WacaHistoricalRematchResult {
+  const index = indexWacaMaster(master);
+  const wanted = affectedCodes && affectedCodes.size
+    ? new Set([...affectedCodes].map(normalizeWacaText)) : null;
+  const target = [...repo.items.values()].filter(item => !wanted
+    || wanted.has(normalizeWacaText(item.productCode))
+    || wanted.has(normalizeWacaText(item.specCode)));
+  if (!target.length) return { inspected: 0, changed: 0, autoResolved: 0,
+    becamePending: 0, remainingPending: [...repo.items.values()].filter(item => !item.productVariantId).length,
+    quantityChanges: [] };
+
+  // Rebuild learned parent evidence only from current Product Master proof.
+  for (const mapping of repo.mappings.values()) {
+    if (mapping.method !== 'AUTO') continue;
+    try {
+      const fields: unknown = JSON.parse(mapping.feature);
+      if (!Array.isArray(fields) || fields.length !== 5 || fields.some(value => typeof value !== 'string')) continue;
+      const [productCode, productTitle, spec1, spec2, specCode] = fields;
+      const row = { productCode, productTitle, spec1, spec2, specCode };
+      const proof = specCode ? matchWacaItem(row, index) : discoverWacaParent(row, index);
+      if (proof?.candidate?.variantId === mapping.productVariantId) learnWacaParent(row, proof, index);
+    } catch { /* Legacy feature identities are revalidated through order rows. */ }
+  }
+  for (const item of target) {
+    const proof = normalizeWacaText(item.specCode) ? matchWacaItem(item, index) : discoverWacaParent(item, index);
+    if (proof) learnWacaParent(item, proof, index);
+  }
+
+  const conflicts = sourceSpecConflicts(repo);
+  const beforeQuantity = new Map(repo.autoQuantities);
+  let changed = 0, autoResolved = 0, becamePending = 0;
+  for (const item of target) {
+    const before = JSON.stringify({ productVariantId: item.productVariantId, match: item.match,
+      diagnostic: item.diagnostic, resolution: item.resolution, candidateCount: item.candidateCount });
+    const wasResolved = Boolean(item.productVariantId);
+    resolveWacaItem(item, repo, index, requestId, conflicts);
+    const isResolved = Boolean(item.productVariantId);
+    const after = JSON.stringify({ productVariantId: item.productVariantId, match: item.match,
+      diagnostic: item.diagnostic, resolution: item.resolution, candidateCount: item.candidateCount });
+    if (before !== after) changed += 1;
+    if (!wasResolved && isResolved) autoResolved += 1;
+    if (wasResolved && !isResolved) becamePending += 1;
+  }
+  refreshWacaMasterStatus(repo, master);
+  recomputeWacaQuantities(repo);
+  const quantityChanges = [...new Set([...beforeQuantity.keys(), ...repo.autoQuantities.keys()])]
+    .sort().map(variantId => ({ variantId, before: beforeQuantity.get(variantId) ?? 0,
+      after: repo.autoQuantities.get(variantId) ?? 0 }))
+    .filter(change => change.before !== change.after);
+  return { inspected: target.length, changed, autoResolved, becamePending,
+    remainingPending: [...repo.items.values()].filter(item => !item.productVariantId).length,
+    quantityChanges };
+}
+
 export interface WacaImportResult {
   ordersTotal: number;
   effectiveOrders: number;

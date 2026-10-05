@@ -88,6 +88,7 @@ export interface IDataProvider {
   importData(jsonString: string): Promise<boolean>;
   clearData(): Promise<void>;
   clearPurchaseRecords(): Promise<void>;
+  ensureProductMasterFromInventory(itemCodes: string[]): Promise<void>;
   createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void>;
   reparseProductVariants(): Promise<void>;
   reparseProductTitles(): Promise<void>;

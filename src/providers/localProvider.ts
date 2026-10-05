@@ -253,6 +253,9 @@ export class LocalProvider implements IDataProvider {
   async clearPurchaseRecords(): Promise<void> {
     return db.clearPurchaseRecords();
   }
+  async ensureProductMasterFromInventory(itemCodes: string[]): Promise<void> {
+    return db.ensureProductMasterFromInventory(itemCodes);
+  }
   async createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void> {
     await db.createPurchaseRecordFromInventory(itemCodes);
     const inventory = await db.getInventory();

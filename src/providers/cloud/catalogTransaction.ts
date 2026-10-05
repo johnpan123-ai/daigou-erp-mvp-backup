@@ -1,11 +1,11 @@
 import type { InventoryItem,ProductGroup,ProductCategory,ProductVariant } from '../../lib/db';
 import { calculateFinalMyacgDemand } from '../../lib/db';
-import { createPurchaseRecordFromInventory,reparseProductVariants,syncProductGroupsWithInventory,
+import { createPurchaseRecordFromInventory,ensureProductMasterFromInventory,reparseProductVariants,syncProductGroupsWithInventory,
   type CatalogAlgorithmContext } from '../../lib/catalogAlgorithms';
 import { buildCloudCollectionMutationPlan } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
 
-export type CatalogMode='create'|'sync'|'reparse';
+export type CatalogMode='create'|'master'|'sync'|'reparse';
 export interface CatalogSnapshot {inventory:InventoryItem[];groups:ProductGroup[];categories:ProductCategory[];variants:ProductVariant[]}
 export const CATALOG_RPC='erp_apply_catalog_transaction';
 
@@ -42,6 +42,7 @@ export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMo
   };
   let summary={filledVariantsCount:0,affectedGroupsCount:0,upgradedSkusCount:0};
   if(mode==='create') await createPurchaseRecordFromInventory.call(ctx,itemCodes);
+  else if(mode==='master') await ensureProductMasterFromInventory.call(ctx,itemCodes);
   else if(mode==='reparse') await reparseProductVariants.call(ctx);
   else summary=await syncProductGroupsWithInventory.call(ctx);
   await ctx.getProductVariants({recalc:true});
@@ -56,5 +57,8 @@ export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMo
     product_categories:buildCloudCollectionMutationPlan('product_categories',base.categories.map(r=>toCloudFieldRow('product_categories',r)),next.categories.map(r=>toCloudFieldRow('product_categories',r))),
     product_variants:buildCloudCollectionMutationPlan('product_variants',base.variants.map(r=>toCloudFieldRow('product_variants',r)),next.variants.map(r=>toCloudFieldRow('product_variants',r))),
   };
-  return {request:{family:'catalog',mode,dependencies,operations},summary};
+  // `master` is an application planning strategy, not a new persistence
+  // protocol. The adopted atomic RPC executes these ordinary Catalog UPSERTs
+  // through its existing `sync` wire contract.
+  return {request:{family:'catalog',mode:mode==='master'?'sync':mode,dependencies,operations},summary};
 }

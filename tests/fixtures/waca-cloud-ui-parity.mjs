@@ -74,7 +74,20 @@ supabase.rpc = async (name, args) => {
   if (name === 'erp_commit_waca_snapshot') {
     calls.commits++;
     if (args.p_expected_revision !== snapshot.revision) return { data: null, error: { message: 'stale revision' } };
-    snapshot = { ...clone(args.p_snapshot), revision: snapshot.revision + 1 };
+    const delta = clone(args.p_snapshot);
+    const merge = (current, incoming, key) => {
+      const rows = new Map(current.map(row => [key(row), row]));
+      for (const row of incoming ?? []) rows.set(key(row), row);
+      return [...rows.values()];
+    };
+    snapshot = { ...snapshot, ...delta, revision: snapshot.revision + 1,
+      orders: merge(snapshot.orders, delta.orders, row => row.key),
+      items: merge(snapshot.items, delta.items, row => row.key),
+      mappings: merge(snapshot.mappings, delta.mappings, row => row.feature),
+      batches: merge(snapshot.batches, delta.batches, row => row.id),
+      masterLinks: merge(snapshot.masterLinks, delta.masterLinks, row => row.childCode),
+      cutoverAudit: merge(snapshot.cutoverAudit ?? [], delta.cutoverAudit ?? [], row => row.productVariantId),
+    };
     return { data: { revision: snapshot.revision }, error: null };
   }
   throw new Error(`Unexpected fixture RPC ${name}`);

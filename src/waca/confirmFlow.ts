@@ -40,15 +40,8 @@ export interface WacaConfirmProvider {
   commitNextWacaSnapshot(snapshot: NextWacaSnapshot, revision: number, updateQuantity: boolean): Promise<unknown>;
 }
 
-function assertReceipt(saved: NextWacaSnapshot, expected: NextWacaSnapshot, requestId: string, revision: number) {
+function assertState(saved: NextWacaSnapshot, expected: NextWacaSnapshot, revision: number) {
   if (saved.revision !== revision + 1) throw new Error('WACA_READBACK_REVISION_CHANGED');
-  const actualBatch = saved.batches.find(row => row.id === requestId);
-  const wantedBatch = expected.batches.find(row => row.id === requestId);
-  if (!actualBatch || !wantedBatch) throw new Error('WACA_COMMIT_RECEIPT_MISSING');
-  // Reconciliation is server-generated; everything else is the exact request receipt.
-  if (canonical({ ...actualBatch, reconciliation: undefined }) !== canonical({ ...wantedBatch, reconciliation: undefined })) {
-    throw new Error('WACA_COMMIT_RECEIPT_MISMATCH');
-  }
   const compare = <T,>(wanted: T[], actual: T[], key: (row: T) => string) => {
     const found = new Map(actual.map(row => [key(row), canonical(row)]));
     if (found.size !== actual.length || wanted.some(row => found.get(key(row)) !== canonical(row))) {
@@ -59,6 +52,17 @@ function assertReceipt(saved: NextWacaSnapshot, expected: NextWacaSnapshot, requ
   compare(expected.items, saved.items, row => row.key);
   compare(expected.mappings, saved.mappings, row => row.feature);
   compare(expected.masterLinks, saved.masterLinks, row => row.childCode);
+}
+
+function assertReceipt(saved: NextWacaSnapshot, expected: NextWacaSnapshot, requestId: string, revision: number) {
+  assertState(saved, expected, revision);
+  const actualBatch = saved.batches.find(row => row.id === requestId);
+  const wantedBatch = expected.batches.find(row => row.id === requestId);
+  if (!actualBatch || !wantedBatch) throw new Error('WACA_COMMIT_RECEIPT_MISSING');
+  // Reconciliation is server-generated; everything else is the exact request receipt.
+  if (canonical({ ...actualBatch, reconciliation: undefined }) !== canonical({ ...wantedBatch, reconciliation: undefined })) {
+    throw new Error('WACA_COMMIT_RECEIPT_MISMATCH');
+  }
 }
 
 /** No Backup capability is accepted here. An ambiguous response is reconciled
@@ -91,5 +95,36 @@ export async function commitAndVerifyWaca(options: {
   if (checked.issues.some(issue => issue.reason !== 'UNMATCHED_SOURCE')) throw new Error('WACA_READBACK_QUANTITY_MISMATCH');
   const batch = snapshot.batches.find(row => row.id === requestId)!;
   if (cloud && batch.reconciliation?.status !== checked.status) throw new Error('WACA_READBACK_AUDIT_MISMATCH');
+  return { snapshot, variants, checked };
+}
+
+/** Atomic master-link refresh + historical rematch. There is no import batch:
+ * CAS revision and exact read-back are the receipt, including response loss. */
+export async function commitAndVerifyWacaRematch(options: {
+  provider: WacaConfirmProvider;
+  current: NextWacaSnapshot;
+  candidate: NextWacaSnapshot;
+  cloud: boolean;
+}) {
+  const { provider, current, candidate, cloud } = options;
+  const payload = cloud ? wacaAtomicDelta(current, candidate) : candidate;
+  let saved: NextWacaSnapshot | undefined;
+  try {
+    await provider.commitNextWacaSnapshot(payload, current.revision, true);
+  } catch (error) {
+    try {
+      saved = await provider.getNextWacaSnapshot();
+      assertState(saved, candidate, current.revision);
+    } catch { throw error; }
+  }
+  const [snapshot, variants] = await Promise.all([
+    saved ? Promise.resolve(saved) : provider.getNextWacaSnapshot(),
+    provider.getAuthoritativeWacaVariants(),
+  ]);
+  assertState(snapshot, candidate, current.revision);
+  const checked = reconcileWacaReadback(snapshot, variants);
+  if (checked.issues.some(issue => issue.reason !== 'UNMATCHED_SOURCE')) {
+    throw new Error('WACA_READBACK_QUANTITY_MISMATCH');
+  }
   return { snapshot, variants, checked };
 }

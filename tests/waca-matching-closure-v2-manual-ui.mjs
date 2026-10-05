@@ -59,8 +59,9 @@ try {
     buffer: XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) });
   await page.getByRole('heading', { name: '匯入預覽：manual.xlsx' }).waitFor();
   assert.match(await page.locator('[aria-label="WACA 匯入預覽摘要"]').innerText(), /2\s+待處理/);
-  await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '確認更新' }).click()]);
+  await page.getByRole('button', { name: '確認更新' }).click();
   await page.getByText(/WACA 訂單已保存/).waitFor();
+  await page.getByRole('dialog', { name: 'WACA 更新完成' }).getByRole('button', { name: '確定' }).click();
   await page.getByRole('navigation', { name: 'WACA 功能' }).getByRole('button', { name: /待處理/ }).click();
   const ambiguous = page.locator('.waca-pending-card').filter({ hasText: 'WACA 商品：GP-A' });
   await ambiguous.waitFor();

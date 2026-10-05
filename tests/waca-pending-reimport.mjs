@@ -108,7 +108,8 @@ try {
   assert.equal(restoredLedger.items.filter(row => !row.productVariantId).length, 1);
   await restoredContext.close();
 
-  // The user adds the missing catalogue product. Reads alone must not count it.
+  // The user adds the missing Product Master. WACA owns the next atomic rematch;
+  // no historical Excel upload is required.
   await page.evaluate(async ({ group, variant }) => {
     await window.dataProvider.saveProductGroups([{ ...group, id: 'cap-group', title: '胡桃誕生日記念' }]);
     await window.dataProvider.saveProductVariants([{ ...variant, id: 'cap-variant', product_group_id: 'cap-group',
@@ -118,10 +119,7 @@ try {
   assert.equal(saved.variants.find(row => row.id === 'cap-variant').waca_auto_quantity, 0);
   await page.reload();
   await page.waitForFunction(() => document.querySelector('input[aria-label="選擇 WACA Excel"]')?.disabled === false);
-  await upload();
-  assert.match(await page.locator('.waca-group').innerText(), /胡桃誕生日記念/);
-  await confirm();
-  await page.getByRole('status').filter({ hasText: 'WACA 更新完成' }).waitFor();
+  await page.getByRole('status').filter({ hasText: '歷史待處理資料' }).waitFor();
   saved = await read();
   assert.equal(saved.variants.find(row => row.id === 'cap-variant').waca_auto_quantity, 1);
   assert.equal(saved.variants.find(row => row.id === variant.id).waca_auto_quantity, 2);
@@ -129,18 +127,20 @@ try {
   assert.deepEqual(saved.snapshot.cutoverAudit, [audit]);
   assert.equal(saved.snapshot.orders.length, 2);
   assert.equal(saved.snapshot.items.length, 2);
-  await upload();
-  assert.equal(await page.locator('.waca-group').count(), 0, 'repeat import produces no quantity changes');
-  await confirm();
-  await page.getByRole('status').filter({ hasText: 'WACA 更新完成' }).waitFor();
-  saved = await read();
-  assert.equal(saved.variants.find(row => row.id === 'cap-variant').waca_auto_quantity, 1);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await upload();
+    assert.equal(await page.locator('.waca-group').count(), 0, 'repeat import produces no quantity changes');
+    await confirm();
+    await page.getByRole('status').filter({ hasText: 'WACA 更新完成' }).waitFor();
+    saved = await read();
+    assert.equal(saved.variants.find(row => row.id === 'cap-variant').waca_auto_quantity, 1);
+  }
   await page.goto(origin + '/purchase-records');
   await page.getByRole('row').filter({ hasText: '胡桃誕生日記念' }).first().waitFor();
   assert.match(await page.getByRole('row').filter({ hasText: '胡桃誕生日記念' }).first().innerText(), /\b1\b/);
   assert.equal(cloudRequests, 0, 'NEXT must never contact Supabase');
   assert.deepEqual(errors, []);
-  console.log('PASS orphan cutover read/restore, mixed import, pending preservation, catalogue add + re-import 0→1, repeated import, Purchase Records and zero Cloud requests');
+  console.log('PASS orphan cutover read/restore, mixed import, pending preservation, Product Master add + automatic historical rematch 0→1 without reupload, 5x idempotency, Purchase Records and zero Cloud requests');
   await context.close();
 } finally {
   await browser?.close();

@@ -27,16 +27,17 @@ try {
   const page = readFileSync('src/pages/Inventory.tsx', 'utf8');
   assert.match(page, /currentMode === 'cloud' \|\| currentMode === 'fallback'/u);
   assert.match(page, /completeBuyAnimeImport\(itemsWithBatchMeta/u);
-  assert.match(page, /currentMode === 'next'/u);
-  assert.match(page, /commitNextWacaSnapshot\(\{ \.\.\.waca, masterLinks \}/u);
+  assert.match(page, /ensureProductMasterFromInventory/u);
+  assert.doesNotMatch(page, /commitNextWacaSnapshot/u,
+    'BuyAnime must materialize Product Master without making WACA part of its success gate');
   const provider = readFileSync('src/providers/cloud/supabaseProvider.ts', 'utf8');
   assert.equal((provider.match(/myacg_parent_code: r\.myacg_parent_code \|\| undefined/gu) ?? []).length, 2);
-  assert.match(provider, /planWacaEvidence: async \(record, imported\)/u);
-  assert.match(provider, /linksFromMyAcgInventory\(imported, variants/u);
   assert.match(provider, /async getAuthoritativeWacaVariants\(\)/u);
-  assert.match(readFileSync('src/pages/WacaIntegration.tsx', 'utf8'),
-    /const savedVariants = await dataProvider\.getAuthoritativeWacaVariants\(\)/u);
+  const wacaPage = readFileSync('src/pages/WacaIntegration.tsx', 'utf8');
+  assert.match(wacaPage, /ensureProductMasterFromInventory/u);
+  assert.match(wacaPage, /commitAndVerifyWacaRematch/u,
+    'WACA owns the targeted master-link refresh and historical rematch');
   const sql = readFileSync('supabase/sql/046_waca_myacg_parent_evidence.sql', 'utf8');
   assert.match(sql, /alter table public\.inventory_items add column if not exists myacg_parent_code text/u);
-  console.log('PASS Cloud BuyAnime GP evidence survives payload, CAS, reload, and WACA matching');
+  console.log('PASS Cloud BuyAnime parent evidence survives payload/CAS while WACA owns Product Master rematch');
 } finally { await vite.close(); }

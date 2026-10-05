@@ -63,13 +63,19 @@ try{
    const recovery=await provider.getBuyAnimeImportRecovery();if(recovery)throw new Error('STALE_RECOVERY_BLOCK');
    bridge.resetMetrics();
    const {renderImportBenchmarkUi}=await import('/tests/fixtures/buyanime-performance-ui.tsx');
-   const ui=await renderImportBenchmarkUi(provider,base64,'399375_2026-10-05 (2).xls');
-   return {label,parsedRows:parsed.length,totalMs:ui.totalMs,syncText:ui.syncText,successVisible:ui.modalText.includes('匯入成功'),trace:ui.trace,metrics:bridge.metrics()};
+   try {
+    const ui=await renderImportBenchmarkUi(provider,base64,'399375_2026-10-05 (2).xls');
+    return {label,parsedRows:parsed.length,totalMs:ui.totalMs,syncText:ui.syncText,successVisible:ui.modalText.includes('匯入成功'),trace:ui.trace,metrics:bridge.metrics()};
+   } catch(error) {
+    return {label,parsedRows:parsed.length,error:String(error?.message||error),
+      trace:window.__ERP2_BUYANIME_PRODUCTION_TRACE__,metrics:bridge.metrics()};
+   }
   },{base64:xls.toString('base64'),label});
  };
  stage='ERP1 Restore -> immediate BuyAnime';
  for(let n=0;n<5;n++){
   const runResult=await run('ERP1-repeat-'+(n+1));
+  assert.equal(runResult.error,undefined,JSON.stringify(runResult));
   assert.equal(runResult.successVisible,true);assert.match(runResult.syncText,/已同步/u);
   assert.equal(runResult.metrics.wacaRequests,0);result.runs.push(runResult);
  }
@@ -140,5 +146,5 @@ try{
  assert.equal(result.externalRequests,0);result.result='PASS';
  await mkdir(root,{recursive:true});await writeFile(root+'/post-restore-regression.json',JSON.stringify(result,null,2));
  console.log(JSON.stringify({result:'PASS',parsedRows:1551,legacyRestore:result.legacyRestore,erp1BuyAnime:result.erp1BuyAnime,erp2BuyAnime:result.erp2BuyAnime,oldAuditPreserved:result.oldAuditPreserved,sameFile5x:result.sameFile5x,erp1Waca:result.erp1Waca,externalRequests:0,liveMutation:0}));
-}catch(e){console.log(JSON.stringify({stage,errorCode:e.code,errorName:e.name}));throw new Error('POST_RESTORE_ISOLATED_GATE_FAILED: '+stage);}
+}catch(e){console.log(JSON.stringify({stage,errorCode:e.code,errorName:e.name,errorMessage:e.message}));throw new Error('POST_RESTORE_ISOLATED_GATE_FAILED: '+stage);}
 finally{if(browser)await browser.close();await server.close();await vite.close();await db.close();}

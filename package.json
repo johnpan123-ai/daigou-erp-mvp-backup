@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test:waca-product-master-rematch": "node tests/waca-product-master-rematch.mjs",
+    "audit:waca-product-master-census": "node tests/waca-product-master-census.mjs",
     "test:buyanime-recovery-epoch": "node tests/buyanime-recovery-epoch.mjs",
     "test:erp2-post-restore-release-gate": "node tests/erp2-post-restore-release-gate.mjs",
     "dev": "vite",

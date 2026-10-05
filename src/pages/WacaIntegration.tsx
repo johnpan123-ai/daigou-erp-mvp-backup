@@ -10,11 +10,13 @@ import { normalizeProductTitle, type InventoryItem, type ProductGroup, type Prod
 import { productGroupDisplayName } from '../lib/productGroupDisplayName';
 import {
   cloneWacaRepository, importWacaRows, indexWacaMaster,
-  isWacaDiscount, matchWacaItem, refreshWacaMasterStatus, setWacaMapping, wacaFeature, wacaOrderKey,
+  isWacaDiscount, matchWacaItem, refreshWacaMasterStatus, rematchHistoricalWaca,
+  setWacaMapping, wacaFeature, wacaOrderKey,
   type MasterVariant, type WacaImportResult, type WacaItem, type WacaRow, type WacaStatus,
 } from '../waca/orderCore';
 import {
   buildWacaMasterReference, linksFromMyAcgInventory, mergeMyAcgMasterLinks,
+  planMyAcgMasterLinkDelta,
   type LinkImportResult, type MyAcgMasterLink,
 } from '../waca/masterReference';
 import {
@@ -29,7 +31,7 @@ import {
 } from '../waca/previewReconciliation';
 import { supportsWacaProvider } from '../waca/providerSupport';
 import { classifyWacaError, wacaNotice, type WacaStage, type WacaUiError } from '../waca/importErrors';
-import { commitAndVerifyWaca } from '../waca/confirmFlow';
+import { commitAndVerifyWaca, commitAndVerifyWacaRematch } from '../waca/confirmFlow';
 import { useCloudResourceSync, useGlobalSyncControl } from '../contexts/CloudRealtimeSyncContext';
 import './WacaIntegration.css';
 
@@ -110,6 +112,7 @@ export default function WacaIntegration() {
   const [message, setMessage] = useState('');
   const [completion, setCompletion] = useState<{ orders: number; variants: number; pending: number } | null>(null);
   const confirming = useRef(false);
+  const masterRefreshRunning = useRef(false);
   const sync = useGlobalSyncControl();
   const syncRef = useRef(sync.presentation);
   useEffect(() => { syncRef.current = sync.presentation; }, [sync.presentation]);
@@ -119,19 +122,97 @@ export default function WacaIntegration() {
   ), []);
 
   const load = useCallback(async () => {
+    if (masterRefreshRunning.current) return;
+    masterRefreshRunning.current = true;
     // Cloud groups wait for the existing atomic catalog pull. Read its inventory
     // evidence afterwards so the first visit cannot pair fresh variants with old cache.
-    const nextGroups = await dataProvider.getProductGroups();
-    const [nextSnapshot, nextVariants, nextInventory] = await Promise.all([
-      dataProvider.getNextWacaSnapshot(),
-      dataProvider.getAuthoritativeWacaVariants(),
-      dataProvider.getInventory(),
-    ]);
-    setSnapshot(nextSnapshot);
-    setVariants(nextVariants);
-    setInventory(nextInventory);
-    setGroups(nextGroups);
-    setError('');
+    try {
+      let nextGroups = await dataProvider.getProductGroups();
+      let [nextSnapshot, nextVariants, nextInventory] = await Promise.all([
+        dataProvider.getNextWacaSnapshot(),
+        dataProvider.getAuthoritativeWacaVariants(),
+        dataProvider.getInventory(),
+      ]);
+
+      // Repair only Product Master rows needed by historical pending items.
+      // This Catalog transaction is independent of WACA and never opts the
+      // created variants into Purchase Records.
+      const pendingItems = nextSnapshot.items.filter(row => !row.productVariantId);
+      const pendingCodes = new Set<string>();
+      for (const item of pendingItems) {
+        pendingCodes.add(item.productCode.trim().toUpperCase());
+        if (item.specCode) pendingCodes.add(item.specCode.trim().toUpperCase());
+      }
+      const variantCodes = new Set(nextVariants.map(row => row.myacg_item_code.trim().toUpperCase()));
+      const inventoryByChild = new Map(nextInventory.map(row => [row.myacg_item_code.trim().toUpperCase(), row]));
+      const inventoryByParent = new Map<string, InventoryItem[]>();
+      for (const row of nextInventory) {
+        const parent = (row.myacg_parent_code ?? '').trim().toUpperCase();
+        if (parent) inventoryByParent.set(parent, [...(inventoryByParent.get(parent) ?? []), row]);
+      }
+      const missingCodes = new Set<string>();
+      for (const item of pendingItems) {
+        const explicit = item.specCode.trim().toUpperCase();
+        const parent = item.productCode.trim().toUpperCase();
+        const candidates = explicit ? [inventoryByChild.get(explicit)].filter((row): row is InventoryItem => Boolean(row))
+          : [...(inventoryByParent.get(parent) ?? []), ...([inventoryByChild.get(parent)]
+            .filter((row): row is InventoryItem => Boolean(row)))];
+        for (const inventoryRow of candidates) {
+          const child = inventoryRow.myacg_item_code.trim().toUpperCase();
+          if (!variantCodes.has(child)) missingCodes.add(inventoryRow.myacg_item_code);
+        }
+      }
+      if (missingCodes.size) {
+        await dataProvider.ensureProductMasterFromInventory([...missingCodes]);
+        [nextGroups, nextVariants, nextInventory] = await Promise.all([
+          dataProvider.getProductGroups(),
+          dataProvider.getAuthoritativeWacaVariants(),
+          dataProvider.getInventory(),
+        ]);
+      }
+
+      const fromInventory = linksFromMyAcgInventory(nextInventory, nextVariants, 'ERP2_CURRENT_BUYANIME_MASTER', '');
+      // A WACA page visit must not materialize the entire BuyAnime link graph.
+      // Persist only evidence that can resolve the current historical backlog;
+      // with no pending items the page remains strictly read-only.
+      const relevantLinks = fromInventory.links.filter(link => pendingCodes.has(link.mainCode.trim().toUpperCase())
+        || pendingCodes.has(link.childCode.trim().toUpperCase()));
+      const mergedLinks = mergeMyAcgMasterLinks(nextSnapshot.masterLinks, relevantLinks);
+      const linkDelta = planMyAcgMasterLinkDelta(nextSnapshot.masterLinks, mergedLinks);
+      const affectedCodes = new Set<string>([...missingCodes]);
+      for (const link of linkDelta.links) { affectedCodes.add(link.mainCode); affectedCodes.add(link.childCode); }
+      // Existing backlog is bounded by pending rows, never by the whole order
+      // history. This allows a newly deployed resolver to close safely provable
+      // items even when the durable link itself was already current.
+      for (const item of pendingItems) {
+        affectedCodes.add(item.productCode);
+        if (item.specCode) affectedCodes.add(item.specCode);
+      }
+      if (affectedCodes.size) {
+        const repo = repositoryFromSnapshot(nextSnapshot, nextVariants);
+        const candidate = cloneWacaRepository(repo);
+        const master = buildWacaMasterReference(nextVariants, mergedLinks);
+        const result = rematchHistoricalWaca(candidate, master, crypto.randomUUID(), affectedCodes);
+        refreshWacaMasterStatus(candidate, master);
+        if (result.changed || result.quantityChanges.length || linkDelta.links.length) {
+          const wanted = snapshotFromRepository(nextSnapshot, candidate, nextSnapshot.batches, mergedLinks);
+          const verified = await commitAndVerifyWacaRematch({ provider: dataProvider,
+            current: nextSnapshot, candidate: wanted, cloud: getProviderMode() !== 'next' });
+          nextSnapshot = verified.snapshot;
+          nextVariants = verified.variants;
+          setMessage(result.autoResolved
+            ? `商品主檔更新後已自動配對 ${result.autoResolved} 筆歷史待處理資料，WACA 數量已重新計算。`
+            : '商品主檔對照證據已更新。');
+        }
+      }
+      setSnapshot(nextSnapshot);
+      setVariants(nextVariants);
+      setInventory(nextInventory);
+      setGroups(nextGroups);
+      setError('');
+    } finally {
+      masterRefreshRunning.current = false;
+    }
   }, [setError]);
 
   const { refreshAuthoritative } = useCloudResourceSync('waca-orders', ['products'], false,
@@ -366,7 +447,7 @@ export default function WacaIntegration() {
         // Historical pending items are retained and counted, but do not open
         // thousands of manual-choice controls behind the completion dialog.
         // The visible Pending tab remains available; no work is deferred.
-        setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。建立商品後重新匯入 WACA Excel，即可自動配對並更新數量。`);
+        setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。商品主檔建立後，系統會自動重新配對並更新數量，不必重傳 WACA Excel。`);
       } else {
         setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。`);
       }
@@ -613,7 +694,7 @@ export default function WacaIntegration() {
           && <p className="waca-notice">全部商品已完成自動配對。</p>}
         <p className="waca-equation">新增 {pendingImport.result.inserted}、更新 {pendingImport.result.updated}、未變更 {pendingImport.result.unchanged}；
           取消／失敗 {pendingImport.result.cancelledOrders + pendingImport.result.failedOrders} 張訂單不計入數量。</p>
-        {pendingImport.items.some(isPending) && <p className="waca-notice">未配對商品會先保存為待處理，暫不計入商品 WACA 數量；建立商品後重新匯入即可更新。</p>}
+        {pendingImport.items.some(isPending) && <p className="waca-notice">未配對商品會先保存為待處理，暫不計入商品 WACA 數量；商品主檔建立後會自動重新配對，不必重傳 WACA Excel。</p>}
         {pendingImport.result.errors.length > 0 && <p className="waca-danger">資料列錯誤：{pendingImport.result.errors.join('、')}</p>}
         <h3>商品數量變化</h3>
         <p>{rebaselinePreview
@@ -754,7 +835,7 @@ export default function WacaIntegration() {
       {reconciliation?.issues.map((issue, index) => <div className="waca-pending-card" key={`reconcile-${issue.variantId}-${issue.sku}-${index}`}>
         <strong>{displayNameForVariant(issue.variantId, issue.productTitle)}／{issue.variantTitle}</strong>
         <p>{issue.reason === 'UNMATCHED_SOURCE' ? 'WACA 商品編號' : 'SKU'}：{issue.sku}</p>{issue.reason === 'UNMATCHED_SOURCE'
-          ? <p>此商品尚未對應訂購紀錄表；有效訂單商品數量 {issue.sourceQuantity} 件已保存為待處理，暫不計入 WACA 數量。商品編號是商品／Parent 證據，不等於已確認的規格 SKU。建立商品／規格後重新匯入，即可自動配對並更新數量；也可在商品對照中人工確認。</p>
+          ? <p>尚未建立對應的商品主檔／規格；有效訂單商品數量 {issue.sourceQuantity} 件已保存為待處理，暫不計入 WACA 數量。商品主檔建立後系統會自動重新配對；也可在商品對照中人工確認，不需要先加入訂購紀錄表。</p>
           : <><p>來源訂單數量 {issue.sourceQuantity}，系統 WACA 數量 {issue.storedQuantity}，差異 {issue.difference > 0 ? '+' : ''}{issue.difference}。</p>
             <p>訂購紀錄表顯示 {issue.displayedQuantity}。請重新讀取後確認；若仍不一致，先不要繼續匯入。</p></>}
         <details className="waca-tech"><summary>查看技術資訊</summary>{issue.reason}／{issue.variantId}</details>

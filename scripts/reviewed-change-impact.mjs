@@ -20,6 +20,8 @@ export const regressionScripts = Object.freeze({
   'waca-confirm-contract': 'tests/waca-atomic-confirm-contract.mjs',
   'waca-confirm-errors': 'tests/waca-import-errors.mjs',
   'waca-confirm-next-ui': 'tests/next-waca-ui.mjs',
+  'product-master-rematch-review': 'tests/waca-product-master-change-impact.mjs',
+  'product-master-rematch': 'tests/waca-product-master-rematch.mjs',
   'buyanime-simple-flow': 'tests/buyanime-simple-flow.mjs',
   'buyanime-flow-performance': 'tests/buyanime-flow-performance-isolated.mjs',
   'buyanime-flow-review': 'tests/buyanime-flow-change-impact.mjs',

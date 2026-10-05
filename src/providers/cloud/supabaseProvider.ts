@@ -1517,7 +1517,6 @@ export class SupabaseProvider implements IDataProvider {
       ]);
       const titles = new Set(imported.map(row => row.normalized_product_title || normalizeProductTitle(row.product_title)));
       const groups = allGroups.filter(group => titles.has(group.normalized_title || normalizeProductTitle(group.title)));
-      if (!groups.length) return null;
       const ids = new Set(groups.map(group => group.id));
       // After F5/close/relogin the route cache can predate the Inventory
       // commit. `imported` has just been read back and hash-verified from
@@ -1534,9 +1533,15 @@ export class SupabaseProvider implements IDataProvider {
       // Keep category-only historical variants as well as direct group members.
       const variants = allVariants.filter(variant => (variant.product_group_id ? ids.has(variant.product_group_id) : false)
         || (variant.product_category_id ? categoryIds.has(variant.product_category_id) : false));
-      // Same Catalog algorithm and RPC contract; only imported parent groups
-      // participate. Other groups are neither recomputed nor marked missing.
-      const plan = await planCatalogTransaction({ inventory, groups, categories, variants }, 'sync', [], { baselineVariantCount: allVariants.length });
+      // BuyAnime owns Product Master materialisation. New ProductGroup/Variant
+      // rows remain inventory-only until the user explicitly projects them to
+      // Purchase Records; WACA can already resolve their canonical Variant IDs.
+      // Other groups are neither recomputed nor marked missing.
+      const itemCodes = [...new Set(imported.map(row => row.myacg_item_code).filter(Boolean))];
+      const plan = await planCatalogTransaction(
+        { inventory, groups, categories, variants }, 'master', itemCodes,
+        { baselineVariantCount: allVariants.length },
+      );
       // 050 intentionally checks the COMPLETE active identity/version sets.
       // Preserve that contract using small metadata reads, never weaken it to
       // scoped dependencies. Scoped rows retain their observed CAS versions.
@@ -2749,6 +2754,7 @@ export class SupabaseProvider implements IDataProvider {
       await this.mutationCache.refresh({reason:'realtime',resources:[...new Set(changes.map(c=>c.resource))],changes});
     }catch(error){clearEcho();throw new CloudMutationBoundaryError('committed-readback-pending',error);}
   }
+  async ensureProductMasterFromInventory(itemCodes:string[]):Promise<void> { await this.commitCatalog('master',itemCodes); }
   async createPurchaseRecordFromInventory(itemCodes:string[]):Promise<void> { await this.commitCatalog('create',itemCodes); }
   async reparseProductVariants():Promise<void> { await this.commitCatalog('reparse'); }
   async reparseProductTitles():Promise<void> {

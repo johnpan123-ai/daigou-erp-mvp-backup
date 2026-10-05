@@ -67,7 +67,10 @@ try {
   assert.equal(matchWacaItem({ ...kaela, specCode: 'G07487794' }, withoutHistoricKaela).diagnostic, 'VARIANT_NOT_IN_ERP');
   const unknownGp = { ...kaela, productCode: 'GP-NOT-OBSERVED' };
   assert.equal(matchWacaItem({ ...unknownGp, specCode: 'G07487794' }, master).candidate?.childCode, 'G07487794');
-  assert.equal(matchWacaItem({ ...unknownGp, specCode: '' }, master).diagnostic, 'MASTER_EVIDENCE_MISSING');
+  assert.equal(matchWacaItem({ ...unknownGp, specCode: '' }, master).candidate?.childCode, 'G07487794',
+    'an exact unique Product Master name/spec can rebuild missing parent evidence');
+  assert.equal(matchWacaItem({ ...unknownGp, productTitle: 'Not A Catalog Product', specCode: '' }, master).diagnostic,
+    'PRODUCT_NOT_IN_MASTER', 'unknown parent and unknown master title must stay pending');
   const absentErp = links.find(link => !link.productVariantId && link.variantTitle && link.productTitle);
   assert.ok(absentErp, 'source GP → G evidence must survive when ERP lacks the G');
   assert.equal(matchWacaItem({ ...kaela, productCode: absentErp.mainCode, productTitle: absentErp.productTitle,

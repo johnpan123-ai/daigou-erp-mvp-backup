@@ -11,7 +11,7 @@ import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTria
 import { EmptyState } from '../components/empty/EmptyState';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { productGroupDisplayName, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
+import { productGroupDisplayName, purchaseRecordGroupIds, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
 import {
@@ -1121,8 +1121,9 @@ export default function PurchaseRecords() {
 
   const baseGroups = useMemo(() => {
     if (linkedGroupId !== null) return groups.filter(group => group.id === linkedGroupId);
+    const projected = purchaseRecordGroupIds(variants);
     try {
-      let result = [...groups];
+      let result = groups.filter(group => projected.has(group.id));
 
       // Filter by activeTab
       if (activeTab === 'c108') {
@@ -1171,12 +1172,12 @@ export default function PurchaseRecords() {
     } catch (err) {
       console.error('[PurchaseRecords] baseGroups filter failed:', err);
       logCrash('baseGroups useMemo', err);
-      return [...groups];
+      return groups.filter(group => projected.has(group.id));
     }
     // Classification helpers are pure projections of groups/isProxyProductMap and are
     // intentionally represented by those stable data dependencies rather than function identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groups, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments, linkedGroupId]);
+  }, [groups, variants, deferredSearchTerm, filterSource, filterType, activeTab, isProxyProductMap, purchaseRecordSearchDocuments, linkedGroupId]);
 
   const checkHasMissingJpyCost = (g: ProductGroup): boolean => {
     if (isProxyProduct(g)) return false;

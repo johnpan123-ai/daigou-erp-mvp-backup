@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { dataProvider } from '../../src/providers/dataProvider';
-import type { InventoryItem, ProductGroup } from '../../src/lib/db';
+import type { InventoryItem, ProductGroup, ProductVariant } from '../../src/lib/db';
 import { normalizeProductTitle } from '../../src/lib/db';
 import Inventory from '../../src/pages/Inventory';
 import { ViewportProvider } from '../../src/contexts/ViewportContext';
@@ -50,6 +50,12 @@ const groups: ProductGroup[] = [
   product_url: '',
   },
 ];
+const projectedVariants: ProductVariant[] = groups.slice(0, 684).map((group, index) => ({
+  id: `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+  product_group_id: group.id, myacg_item_code: authoritative[index].myacg_item_code,
+  product_title: group.title, variant_name: '規格', note: '', sort_order: 0,
+  source: 'myacg_order_import',
+}));
 let syncCalls = 0;
 let upsertCalls = 0;
 let nextImportError: { code?: string; message: string } | null = null;
@@ -129,7 +135,7 @@ const empty = async () => [];
 dataProvider.getSalesOrders = empty as never;
 dataProvider.getSalesOrderItems = empty as never;
 dataProvider.getProductCategories = empty as never;
-dataProvider.getProductVariants = async () => [{
+dataProvider.getProductVariants = async () => [...projectedVariants, {
   id: '10000000-0000-4000-8000-000000008888', product_group_id: '10000000-0000-4000-8000-000000008887',
   myacg_item_code: 'GP-EVIDENCE-G', product_title: 'GP Evidence Product', variant_name: '規格',
 }] as never;

@@ -14,7 +14,11 @@ export interface CatalogAlgorithmContext {
   computeVariantDedupe(rows:ProductVariant[]):{canonical:ProductVariant[]};
   assertVariantSyncCandidateSafe(before:ProductVariant[],after:ProductVariant[],verifiedEmpty:boolean):void;
 }
-export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmContext, itemCodes: string[]): Promise<void> {
+async function materializeProductMasterFromInventory(
+  this: CatalogAlgorithmContext,
+  itemCodes: string[],
+  projectToPurchaseRecords: boolean,
+): Promise<void> {
     const allInventory = await this.getInventory();
     const targetItems = allInventory.filter(i => itemCodes.includes(i.myacg_item_code));
     if (targetItems.length === 0) return;
@@ -38,7 +42,8 @@ export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmCo
       const itemsInGroup = itemsByTitle[title];
       
       // 1. Group
-      let group = groups.find(g => g.title === title);
+      const normalizedTitle = normalizeProductTitle(title);
+      let group = groups.find(g => (g.normalized_title || normalizeProductTitle(g.title)) === normalizedTitle);
       if (!group) {
         group = {
           id: crypto.randomUUID(),
@@ -51,6 +56,7 @@ export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmCo
           release_month: '',
           has_official_site: false,
           product_url: '',
+          show_in_purchase_list: projectToPurchaseRecords,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
@@ -63,6 +69,10 @@ export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmCo
           group.listing_type = determineListingType(title);
           groupsUpdated = true;
         }
+      }
+      if (projectToPurchaseRecords && group.show_in_purchase_list !== true) {
+        group.show_in_purchase_list = true;
+        groupsUpdated = true;
       }
 
       // We should resolve specs using ALL variants in this group + new items
@@ -109,7 +119,8 @@ export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmCo
             effective_myacg_quantity: 0,
             waca_auto_quantity: 0,
             note: '',
-            sort_order: variants.filter(v => v.product_group_id === group!.id).length
+            sort_order: variants.filter(v => v.product_group_id === group!.id).length,
+            source: projectToPurchaseRecords ? 'myacg_order_import' : 'inventory_import',
           };
           variants.push(variant);
           variantsUpdated = true;
@@ -126,11 +137,20 @@ export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmCo
             variant.product_category_id = categoryId;
             variantsUpdated = true;
           }
+          if (projectToPurchaseRecords && variant.source !== 'manual' && variant.source !== 'myacg_order_import') {
+            variant.source = 'myacg_order_import';
+            variantsUpdated = true;
+          }
         }
       }
       
       // Update existing variants that were already in the group
       for (const existingVar of existingVars) {
+        if (projectToPurchaseRecords && existingVar.source !== 'manual'
+          && existingVar.source !== 'myacg_order_import') {
+          existingVar.source = 'myacg_order_import';
+          variantsUpdated = true;
+        }
         const invItem = findMatchingInventoryItem(existingVar, targetItems);
         const rawName = invItem ? invItem.raw_variant_name : existingVar.raw_variant_name;
         if (rawName) {
@@ -193,6 +213,20 @@ export async function createPurchaseRecordFromInventory(this: CatalogAlgorithmCo
     if (categoriesUpdated) await this.saveProductCategories(categories);
     if (variantsUpdated) await this.saveProductVariants(variants);
   }
+
+/** Materialise the BuyAnime Product Master without opting it into Purchase Records. */
+export async function ensureProductMasterFromInventory(
+  this: CatalogAlgorithmContext, itemCodes: string[],
+): Promise<void> {
+  return materializeProductMasterFromInventory.call(this, itemCodes, false);
+}
+
+/** Explicit user projection from Product Master into Purchase Records. */
+export async function createPurchaseRecordFromInventory(
+  this: CatalogAlgorithmContext, itemCodes: string[],
+): Promise<void> {
+  return materializeProductMasterFromInventory.call(this, itemCodes, true);
+}
 
 export async function reparseProductVariants(this: CatalogAlgorithmContext): Promise<void> {
     const allInventory = await this.getInventory();

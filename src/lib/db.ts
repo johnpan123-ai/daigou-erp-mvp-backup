@@ -1,6 +1,7 @@
 import { reportStorageWriteFailure } from './storageGuard';
 import { RELATED_STORAGE,relatedWriteEntities,mergeRelatedCollections,type RelatedTransactionCommand } from '../providers/cloud/relatedTransaction';
-import { createPurchaseRecordFromInventory as createCatalogRecords, reparseProductVariants as reparseCatalogVariants,
+import { createPurchaseRecordFromInventory as createCatalogRecords, ensureProductMasterFromInventory as ensureCatalogMaster,
+  reparseProductVariants as reparseCatalogVariants,
   syncProductGroupsWithInventory as syncCatalogGroups, type CatalogAlgorithmContext } from './catalogAlgorithms';
 import { mergePrivateOrderState, type PrivateOrderTransactionCommand } from '../providers/cloud/privateOrderTransaction';
 
@@ -578,6 +579,7 @@ export interface DatabaseAdapter {
   importData(jsonString: string): Promise<boolean>;
   clearData(): Promise<void>;
   clearPurchaseRecords(): Promise<void>;
+  ensureProductMasterFromInventory(itemCodes: string[]): Promise<void>;
   createPurchaseRecordFromInventory(itemCodes: string[]): Promise<void>;
   reparseProductVariants(): Promise<void>;
   reparseProductTitles(): Promise<void>;
@@ -1233,6 +1235,20 @@ export class LocalStorageAdapter implements DatabaseAdapter {
     if (groupsUpdated) await this.saveProductGroups(groups);
     if (categoriesUpdated) await this.saveProductCategories(categories);
     if (variantsUpdated) await this.saveProductVariants(variants);
+  }
+
+  async ensureProductMasterFromInventory(itemCodes: string[]): Promise<void> {
+    const before = new Set((await this.getProductVariants()).map(row => row.id));
+    await this.createPurchaseRecordFromInventory(itemCodes);
+    const variants = await this.getProductVariants();
+    let changed = false;
+    for (const variant of variants) {
+      if (!before.has(variant.id) && !variant.source) {
+        variant.source = 'inventory_import';
+        changed = true;
+      }
+    }
+    if (changed) await this.saveProductVariants(variants);
   }
 
   async reparseProductVariants(): Promise<void> {
@@ -2848,6 +2864,7 @@ export class IndexedDbAdapter implements DatabaseAdapter {
     };
   }
   async createPurchaseRecordFromInventory(itemCodes:string[]):Promise<void> { return createCatalogRecords.call(this.catalogContext(),itemCodes); }
+  async ensureProductMasterFromInventory(itemCodes:string[]):Promise<void> { return ensureCatalogMaster.call(this.catalogContext(),itemCodes); }
   async reparseProductVariants():Promise<void> { return reparseCatalogVariants.call(this.catalogContext()); }
   async syncProductGroupsWithInventory():Promise<{filledVariantsCount:number;affectedGroupsCount:number;upgradedSkusCount:number}> { return syncCatalogGroups.call(this.catalogContext()); }
 
