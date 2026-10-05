@@ -4012,6 +4012,210 @@
                       "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
                 }
           ]
+    },
+    {
+      "id": "erp1-v1-outbound-timestamp-adapter-v1",
+      "beforeHead": "c2bf972a1d00604f979fb7c653d24b85f9e130a0",
+      "reviewedHead": "fe8690ccb2ddcd5afdece3252c4695689df95e33",
+      "patchSha256": "d472fb0027912e040150187ec43890eb69b5e93c0e6b8d3c6ef5cfb08a9752a4",
+      "requiredRegressions": [
+        "erp1-v1-exact-restore",
+        "erp1-v1-restore-review",
+        "guard",
+        "promotion",
+        "legacy-modern",
+        "cloud-next",
+        "registry",
+        "cloud-restore",
+        "execute-envelope",
+        "sync"
+      ],
+      "files": [
+        {
+          "file": "docs/erp1-v1-restore-compatibility-20261005.md",
+          "beforeHash": null,
+          "afterHash": "066865408f6f9714b12427c33674951bfd87d028eb36c3e823f34367c3860eab",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "549a2095c2d5d37e8264ea8485c936abb06aa58f15d8a5c7b5921da3aedc788c",
+          "afterHash": "0c90ace1f80e00622ea732460efdff04d6fd011c6c62fa77bf33e308fd2efd29",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "2ea904f36f9273aba8b930bda4c6c2f6d6a5a52634cde923d526857b702572de",
+          "afterHash": "448505adf1e2ec9cc7188bed422dccfced17553ac00a0b87f1f0e74fc4972f8a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "src/providers/cloud/cloudAtomicRestore.ts",
+          "beforeHash": "028be837c2288e87bd224a6af55910311e0510b9681d557375c94d885fbd8f07",
+          "afterHash": "435b0c75d8624b82c4d73a9943653cecd928e327b0ec7b87425aa0f81525f3bc",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "prepareCloudRestoreSnapshot (verified v1 branch only)"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "After original v1 integrity verification only, absent outbound status_changed_at becomes NULL; supplied history and current v2 behavior unchanged. Current 24-resource candidate/proof rebuilt.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "tests/cloud-restore-execute-dispatch-boundary.mjs",
+          "beforeHash": "ea3c0f71a1c47f50f5da6aaaf0f591960f29b329ddc8da17724bd42e69ca4797",
+          "afterHash": "34fbdcd7264af6f136d9a669b91bee1a1d948da2192ab5768f49eff4af6886e8",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "tests/cloud-restore-final-closure.mjs",
+          "beforeHash": "8499ba94c764c5472e78dc4d1449eb1cabcf210ad3e84948a04bd0bb5d54e069",
+          "afterHash": "87cc78b1b9625f095abc443c671a1eec2b5f25963bb7650a74f179adc90a9581",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "tests/erp1-v1-restore-change-impact.mjs",
+          "beforeHash": null,
+          "afterHash": "cf8bf91d3f6a9932faa3aeb8cd8c75bb82347c2c11482c24f0d74ab4241766ab",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "tests/erp1-v1-restore-compatibility.mjs",
+          "beforeHash": null,
+          "afterHash": "0d3880faa17b788fa2e91c9634acaa77649ab746eb02b940223583e4a580a89c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact Restore regression, immutable diff verifier or aggregate documentation"
+          ],
+          "changedInputs": "Existing versioned snapshot, original v1 manifest/hash and existing nullable outbound status_changed_at field. No new required ERP1 field.",
+          "changedOutputs": "Exact-file native parity, current v2, malformed/version confusion, 041/042/043/269-byte and rollback/ACL evidence. Guard accepts only exact hash + AST-equivalent verified v1 adapter statement.",
+          "changedDurableFields": "NONE: existing nullable outbound_shipments.status_changed_at only.",
+          "changedRpcContract": "NONE: existing proof, prepare, short Execute, reconciliation and export signatures unchanged.",
+          "changedProviderContract": "No writer/serializer change: existing legacy adapter supplies an existing nullable column to the existing 053 Restore writer.",
+          "changedBackupContract": "15 shared v1 and current 24-resource registry/hash algorithms unchanged; no new resource. Original v1 file authenticated before projection. Existing ERP2-only policy unchanged.",
+          "changedSchemaExpectations": "NONE: canonical v9, 052/053/054/055 sources and fingerprint algorithm unchanged.",
+          "changedIdentitySemantics": "NONE: canonical UUIDs, inventory keys, FKs, proof/attempt/request identities unchanged.",
+          "dataFlow": "Original verified v1 -> existing normalized candidate -> missing historical timestamp = NULL -> existing current manifest -> existing audit-null portability -> proof -> atomic Restore.",
+          "persistenceBehavior": "Legacy-only compatibility of an existing nullable column; no new durable fields or resources, no target-time synthesis, no v2 validation downgrade.",
+          "writePath": "Existing native Atomic Restore only; no new business I/O, no Live retry or post-commit repair.",
+          "providerPath": "Existing Cloud proof/prepare/Execute and isolated NEXT adapter unchanged.",
+          "externalContract": "Current 24 resources, Deadline stores, SQL/RLS/ACL/RPC/ledger/Baseline unchanged.",
+          "schemaExpectation": "Adopted ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        }
+      ]
     }
   ]
 }
