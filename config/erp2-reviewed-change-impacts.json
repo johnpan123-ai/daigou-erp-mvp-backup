@@ -5301,6 +5301,65 @@
           "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
         }
       ]
+    },
+    {
+      "id": "waca-product-master-provider-guard-closure-v1",
+      "beforeHead": "a62c2f1629a7cad2c9a975506fc0c034780af7cd",
+      "reviewedHead": "c8fc02bbbb40eaea0b819dc11c18a2f2a5c346e6",
+      "patchSha256": "12b3007187407bf1d78ad6177d5aec5a3179bc1f1b4b0e0942f212b493798307",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "product-master-rematch-review"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "10f44912d80a4e257369921e04896c6776c741b9dcbaaea27343bd01a4167a00",
+          "afterHash": "2ce737fcdf22f112bd03c8decebfef5aa496b756c84bd804ec7b76e5d6e68a99",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "assertReviewedProviderContract Catalog Product Master sync-wire proof"
+          ],
+          "changedInputs": "Exact immutable Product Master Catalog planner diff and adopted baseline source.",
+          "changedOutputs": "Fail-closed proof that master planning serializes only through the existing Catalog sync wire contract.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: CATALOG_RPC and serialized mode remain the adopted erp_apply_catalog_transaction/sync contract.",
+          "changedProviderContract": "No provider runtime change; release-control proof only.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: canonical v9 remains unchanged.",
+          "changedIdentitySemantics": "NONE: exact ProductVariant canonical identity remains unchanged.",
+          "dataFlow": "Immutable source diff -> structural AST proof -> fail-closed SAFE_DESCENDANT classification.",
+          "persistenceBehavior": "NONE: no runtime persistence behavior.",
+          "writePath": "NONE.",
+          "providerPath": "Release-control verification only.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        },
+        {
+          "file": "tests/waca-product-master-change-impact.mjs",
+          "beforeHash": "48262a6647c33868f7f0a7b897dcf7f2dd3ff0c72e01b84b462013210da2a37c",
+          "afterHash": "a00ea479973d240c0ec64234f83796e66ed605248d76575c26a44e60b9c1ee6d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Product Master Guard positive/negative regression"
+          ],
+          "changedInputs": "Exact immutable Product Master Catalog planner diff and adopted baseline source.",
+          "changedOutputs": "Fail-closed proof that master planning serializes only through the existing Catalog sync wire contract.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: CATALOG_RPC and serialized mode remain the adopted erp_apply_catalog_transaction/sync contract.",
+          "changedProviderContract": "No provider runtime change; release-control proof only.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: canonical v9 remains unchanged.",
+          "changedIdentitySemantics": "NONE: exact ProductVariant canonical identity remains unchanged.",
+          "dataFlow": "Immutable source diff -> structural AST proof -> fail-closed SAFE_DESCENDANT classification.",
+          "persistenceBehavior": "NONE: no runtime persistence behavior.",
+          "writePath": "NONE.",
+          "providerPath": "Release-control verification only.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
+        }
+      ]
     }
   ]
 }
