@@ -326,6 +326,21 @@ export function assertReviewedProviderContract(file, before, after) {
     }
     return;
   }
+  if (file === 'src/providers/types.ts') {
+    if (before === null) fail('provider interface needs a new exact review');
+    const tree = parse(file, after);
+    const methods = nodes(tree).filter(ts.isMethodSignature).filter(node =>
+      node.name.getText(tree) === 'ensureProductMasterFromInventory');
+    if (methods.length !== 1
+      || canonical(tree, methods[0]) !== 'ensureProductMasterFromInventory(itemCodes: string[]): Promise<void>;') {
+      fail('Product Master provider interface contract changed');
+    }
+    const restored = after.replace(/\s*ensureProductMasterFromInventory\(itemCodes: string\[\]\): Promise<void>;/u, '');
+    if (canonical(parse(file, before)) !== canonical(parse(file, restored))) {
+      fail('unreviewed provider interface member changed');
+    }
+    return;
+  }
   if (before === null) fail('unreviewed provider contract exception');
   const oldTree = parse(file, before); const newTree = parse(file, after);
   if (file === 'src/providers/cloud/cloudFieldCas.ts') {
@@ -339,11 +354,11 @@ export function assertReviewedProviderContract(file, before, after) {
       'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport',
       'readBuyAnimeRelatedRows','readBuyAnimeVersions','prepareBuyAnimeRecovery','finishBuyAnime',
       'buyAnimeRefreshPending','buyAnimeTouchedInventory','buyAnimeInventoryRows','buyAnimeCatalogPlans','buyAnimeCatalogRows',
-      'recoverPendingBuyAnimeImport','completeBuyAnimeImport'],
+      'recoverPendingBuyAnimeImport','completeBuyAnimeImport','ensureProductMasterFromInventory'],
     'src/providers/dataProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk',
       'getBuyAnimeImportRecovery','verifyBuyAnimeImportRecovery','importBuyAnimeInventory','resumeBuyAnimeImport',
-      'recoverPendingBuyAnimeImport','completeBuyAnimeImport'],
-    'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk'],
+      'recoverPendingBuyAnimeImport','completeBuyAnimeImport','ensureProductMasterFromInventory'],
+    'src/providers/localProvider.ts': ['updateProductVariantPatch', 'updateProductVariantPatchBulk','ensureProductMasterFromInventory'],
   }[file];
   if (!allowedMethods) fail('unreviewed provider contract exception');
   const findClass = tree => tree.statements.find(node => ts.isClassDeclaration(node)

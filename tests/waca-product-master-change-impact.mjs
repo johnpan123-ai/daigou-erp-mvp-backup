@@ -26,6 +26,13 @@ const provider = readFileSync('src/providers/cloud/supabaseProvider.ts', 'utf8')
 assert.match(provider, /commitCatalog\('master',itemCodes\)/u);
 assert.doesNotMatch(provider, /erp_apply_product_master|p_master_request/u,
   'no new Product Master RPC or payload contract is permitted');
+const providerTypes = readFileSync('src/providers/types.ts', 'utf8');
+const beforeProviderTypes = git(['show', `${base}:src/providers/types.ts`]);
+assert.doesNotThrow(() => assertReviewedProviderContract('src/providers/types.ts', beforeProviderTypes, providerTypes));
+assert.throws(() => assertReviewedProviderContract('src/providers/types.ts', beforeProviderTypes,
+  providerTypes.replace('ensureProductMasterFromInventory(itemCodes: string[]): Promise<void>;',
+    'ensureProductMasterFromInventory(itemCodes: string[]): Promise<{ durableField: string }>;')),
+/provider interface contract changed|unreviewed provider interface member changed/u);
 const domain = readFileSync('src/waca/orderCore.ts', 'utf8');
 assert.doesNotMatch(domain, /PurchaseBatch|purchaseRecords|purchase_record/u,
   'WACA resolution must not depend on Purchase Records');
