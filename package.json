@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test:buyanime-recovery-epoch": "node tests/buyanime-recovery-epoch.mjs",
+    "test:erp2-post-restore-release-gate": "node tests/erp2-post-restore-release-gate.mjs",
     "dev": "vite",
     "dev:next": "vite --mode next --host 127.0.0.1 --port 4192 --strictPort --configLoader runner",
     "dev:experimental": "vite --mode experimental --host 127.0.0.1 --port 4193 --strictPort",

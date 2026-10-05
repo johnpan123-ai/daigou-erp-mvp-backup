@@ -198,6 +198,8 @@ import {
   type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
 import { readBuyAnimeJournal, readLatestBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
+import { readBuyAnimeRestoreGeneration, classifyBuyAnimeRecoveryGeneration,
+  assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent } from './buyAnimeRecoveryEpoch';
 import { coordinateBuyAnimeImport, finishBuyAnimeImport, refreshBuyAnimeReadback, publishBuyAnimeFlow, buyAnimeFlowLabel, type BuyAnimeFlowOptions } from './buyAnimeImportCoordinator';
 import { planCatalogTransaction,CATALOG_RPC,type CatalogMode } from './catalogTransaction';
 import { buildRelatedRequest,submitRelatedIntent,RELATED_RPC,type RelatedTransactionCommand } from './relatedTransaction';
@@ -1479,6 +1481,7 @@ export class SupabaseProvider implements IDataProvider {
   }
 
   private readonly buyAnimePipeline = new BuyAnimeImportPipeline({
+    readRestoreGeneration: readBuyAnimeRestoreGeneration,
     load: readBuyAnimeJournal,
     save: async (record, version) => {
       await this.requireCloudWritePermission();
@@ -1619,16 +1622,29 @@ export class SupabaseProvider implements IDataProvider {
     return rows as unknown as InventoryItem[];
   }
   async getBuyAnimeImportRecovery(): Promise<BuyAnimeImportRecord | null> {
-    const latestJournalPromise = readLatestBuyAnimeJournal();
+    try {
+    const generation = await readBuyAnimeRestoreGeneration();
+    if (this.buyAnimeRefreshPending && classifyBuyAnimeRecoveryGeneration(this.buyAnimeRefreshPending, generation) === 'STALE_AFTER_RESTORE') {
+      const batch = this.buyAnimeRefreshPending.batchId;
+      this.buyAnimeRefreshPending = undefined;
+      this.buyAnimeTouchedInventory.delete(batch);
+      this.buyAnimeInventoryRows.delete(batch);
+      this.buyAnimeCatalogPlans.delete(importCatalogKey(batch));
+      this.buyAnimeCatalogRows.delete(importCatalogKey(batch));
+    }
     // Pre-journal runtimes already persisted the import identity on Inventory.
     // Unknown downstream completion is shown explicitly, never inferred from global sync.
-    const latest = await supabase.from('inventory_items').select('latest_catalog_import_id,catalog_last_seen_at')
+    const [latest, journal] = await Promise.all([supabase.from('inventory_items').select('latest_catalog_import_id,catalog_last_seen_at')
       .is('deleted_at', null).not('latest_catalog_import_id', 'is', null)
-      .order('catalog_last_seen_at', { ascending: false, nullsFirst: false }).limit(1);
+      .order('catalog_last_seen_at', { ascending: false, nullsFirst: false }).limit(1), readLatestBuyAnimeJournal()]);
     if (latest.error) throw latest.error;
-    const latestJournal = await latestJournalPromise;
-    const batchId = latest.data?.[0]?.latest_catalog_import_id;
-    const observedAt = latest.data?.[0]?.catalog_last_seen_at;
+    assertBuyAnimeGenerationUnchanged(generation, await readBuyAnimeRestoreGeneration());
+    const latestJournal = journal && classifyBuyAnimeRecoveryGeneration(journal, generation) === 'CURRENT' ? journal : null;
+    const candidate = latest.data?.[0];
+    const currentCandidate = candidate && classifyBuyAnimeRecoveryGeneration({ observedAt: candidate.catalog_last_seen_at }, generation) === 'CURRENT'
+      ? candidate : null;
+    const batchId = currentCandidate?.latest_catalog_import_id;
+    const observedAt = currentCandidate?.catalog_last_seen_at;
     if (latestJournal && (!batchId || latestJournal.batchId === batchId
       || new Date(latestJournal.observedAt).getTime() >= new Date(observedAt || 0).getTime())) {
       return latestJournal.stage === 'COMPLETE' ? null : latestJournal;
@@ -1642,11 +1658,18 @@ export class SupabaseProvider implements IDataProvider {
     const record: BuyAnimeImportRecord = {
       format: 'BUYANIME_IMPORT_RESUME_V1', batchId, observedAt: legacyObservedAt, fileName: 'committed-catalog:' + batchId,
       stage: 'INVENTORY_COMMITTED', version: 0, legacy: true,
+      restoreEpoch: generation.epoch,
       expected: await Promise.all(rows.map(inventoryProof)),
       stats: { total: rows.length, newCount: 0, updatedCount: 0, unchangedCount: rows.length, groupCount: new Set(rows.map(row => row.normalized_product_title || row.product_title)).size },
     };
     assertImportRecord(record);
+    assertBuyAnimeGenerationUnchanged(generation, await readBuyAnimeRestoreGeneration());
     return record;
+    } catch (cause) {
+      // This scanner performs SELECTs only. Its failure is not evidence that
+      // the NEW request reached erp_apply_field_mutations.
+      throw classifyMyAcgImportError(cause, 'recovery');
+    }
   }
   async verifyBuyAnimeImportRecovery(record: BuyAnimeImportRecord): Promise<void> {
     await this.buyAnimePipeline.verify(record);
@@ -1683,6 +1706,7 @@ export class SupabaseProvider implements IDataProvider {
   private readonly buyAnimeCatalogPlans = new Map<string,NonNullable<BuyAnimeImportRecord['catalog']>['plan']>();
   private readonly buyAnimeCatalogRows = new Map<string,Record<string, Record<string, unknown>[]>>();
   private async finishBuyAnime(record: BuyAnimeImportRecord, options: BuyAnimeFlowOptions): Promise<BuyAnimeImportRecord> {
+    assertBuyAnimeRecoveryCurrent(record, await readBuyAnimeRestoreGeneration());
     this.buyAnimePipeline.onStage = stage => { publishBuyAnimeFlow(buyAnimeFlowLabel(stage)); options.onStage?.(stage); };
     const completed = await finishBuyAnimeImport(record,
       value => this.buyAnimePipeline.resume(value), () => this.prepareBuyAnimeRecovery());
@@ -1715,10 +1739,12 @@ export class SupabaseProvider implements IDataProvider {
         return [table, rows.filter(row => wanted.has(String(row.id)))];
       }));
     try {
+      assertBuyAnimeRecoveryCurrent(completed, await readBuyAnimeRestoreGeneration());
       await finishBuyAnimeImport(completed, async value => {
         await refreshBuyAnimeReadback({ changes, rowsByTable }, () => this.mutationCache.absorbVerifiedRows(changes, rowsByTable));
         return value;
       }, async () => {}); // Read-only targeted retry; never repeat a completed mutation.
+      assertBuyAnimeRecoveryCurrent(completed, await readBuyAnimeRestoreGeneration());
       this.buyAnimeRefreshPending = undefined;
       this.buyAnimeTouchedInventory.delete(completed.batchId);
       this.buyAnimeInventoryRows.delete(completed.batchId);

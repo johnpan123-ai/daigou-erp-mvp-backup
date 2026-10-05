@@ -2,8 +2,8 @@ import { CloudMutationBoundaryError, isCloudFieldMutationError } from '../provid
 
 export type MyAcgImportErrorCode = 'FILE_READ_ERROR' | 'PARSER_ERROR' | 'REQUIRED_FIELD_MISSING'
   | 'VALIDATION_ERROR' | 'CLOUD_STAGING_ERROR' | 'CLOUD_COMMIT_ERROR' | 'PERMISSION_ERROR'
-  | 'NETWORK_ERROR' | 'COMMIT_RESULT_UNKNOWN' | 'COMMITTED_READBACK_PENDING';
-export type MyAcgImportPhase = 'file-read' | 'parse' | 'validation' | 'staging' | 'commit' | 'readback';
+  | 'NETWORK_ERROR' | 'COMMIT_RESULT_UNKNOWN' | 'COMMITTED_READBACK_PENDING' | 'RECOVERY_STATE_ERROR';
+export type MyAcgImportPhase = 'file-read' | 'parse' | 'validation' | 'staging' | 'recovery' | 'commit' | 'readback';
 
 const messages: Record<MyAcgImportErrorCode, string> = {
   FILE_READ_ERROR: '無法讀取檔案，請確認檔案可開啟後重新選取。',
@@ -16,6 +16,7 @@ const messages: Record<MyAcgImportErrorCode, string> = {
   NETWORK_ERROR: '網路／服務連線失敗，匯入尚未開始儲存。請確認連線。',
   COMMIT_RESULT_UNKNOWN: '雲端儲存結果尚未確認。請先同步並核對資料，勿重複匯入。',
   COMMITTED_READBACK_PENDING: '已儲存至雲端，但資料讀回尚未完成。請同步後確認，勿重複匯入。',
+  RECOVERY_STATE_ERROR: '資料還原世代或匯入復原狀態無法核對。請同步後查看技術資訊，勿重複匯入。',
 };
 
 export class MyAcgImportError extends Error {
@@ -46,7 +47,7 @@ export function classifyMyAcgImportError(error: unknown, phase: MyAcgImportPhase
   if (network || (Number(value?.status) >= 500 && !/^[0-9A-Z]{5}$/u.test(code))) {
     return new MyAcgImportError(phase === 'commit' ? 'COMMIT_RESULT_UNKNOWN' : 'NETWORK_ERROR', phase, error);
   }
-  const category = phase === 'file-read' ? 'FILE_READ_ERROR' : phase === 'parse' ? 'PARSER_ERROR'
+  const category = phase === 'recovery' ? 'RECOVERY_STATE_ERROR' : phase === 'file-read' ? 'FILE_READ_ERROR' : phase === 'parse' ? 'PARSER_ERROR'
     : phase === 'validation' ? 'VALIDATION_ERROR' : phase === 'staging' ? 'CLOUD_STAGING_ERROR'
       : isCloudFieldMutationError(error) || /^[0-9A-Z]{5}$/u.test(code) ? 'CLOUD_COMMIT_ERROR'
         : 'COMMIT_RESULT_UNKNOWN';
@@ -61,7 +62,7 @@ export function myAcgImportDiagnostic(error: MyAcgImportError, requestId: string
   const code = String(cause?.code ?? inner?.code ?? '');
   return { category: error.code, phase: error.phase, requestId,
     postgresCode: /^[0-9A-Z]{5}$/u.test(code) ? code : undefined,
-    reason: /^(?:CLOUD_|REQUIRED_|VALIDATION_)[A-Z_]+$/u.test(message) ? message : undefined,
+    reason: /^(?:CLOUD_|REQUIRED_|VALIDATION_|BUYANIME_)[A-Z_]+$/u.test(message) ? message : undefined,
     constraint: message.match(/constraint "([a-z0-9_]+)"/iu)?.[1],
     rpc: ['commit', 'readback'].includes(error.phase) ? 'erp_apply_field_mutations' : undefined,
     serverPhase: code === '23505' ? 'INSERT' : undefined,

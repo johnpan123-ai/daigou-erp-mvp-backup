@@ -6,6 +6,7 @@ import { CloudMutationBoundaryError } from './cloudFieldCas';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/myacgImportErrors';
 import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
 import type { MyAcgMasterLink } from '../../waca/masterReference';
+import { assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent, type BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
 
 export const BUYANIME_JOURNAL_PLATFORM = 'buyanime-catalog-resume-v1';
 export const BUYANIME_COMPLETION_CONTRACT = 'INVENTORY_CATALOG_AUTHORITATIVE';
@@ -28,6 +29,8 @@ export interface BuyAnimeImportRecord {
   batchId: string;
   fileName: string;
   observedAt: string;
+  /** Optional operational metadata in existing details JSON; old backups stay valid. */
+  restoreEpoch?: number;
   stage: BuyAnimeStage;
   version: number;
   expected: InventoryProof[];
@@ -82,6 +85,7 @@ export function assertImportRecord(value: unknown): asserts value is BuyAnimeImp
   if (!r || r.format !== 'BUYANIME_IMPORT_RESUME_V1' || !/^catalog_import_[0-9a-f-]{36}$/iu.test(r.batchId)
     || !STAGES.has(r.stage) || !Number.isSafeInteger(r.version) || r.version < 0
     || typeof r.fileName !== 'string' || !Number.isFinite(Date.parse(r.observedAt))
+    || (r.restoreEpoch !== undefined && (!Number.isSafeInteger(r.restoreEpoch) || r.restoreEpoch < 0))
     || !Array.isArray(r.expected) || r.expected.length === 0 || !r.stats
     || new Set(r.expected.map(p => p.id)).size !== r.expected.length
     || new Set(r.expected.map(p => p.key)).size !== r.expected.length
@@ -98,6 +102,7 @@ export function assertImportRecord(value: unknown): asserts value is BuyAnimeImp
   }
 }
 export interface BuyAnimeImportPort {
+  readRestoreGeneration?: () => Promise<BuyAnimeRestoreGeneration>;
   load(batchId: string): Promise<BuyAnimeImportRecord | null>;
   save(record: BuyAnimeImportRecord, expectedVersion: number): Promise<BuyAnimeImportRecord>;
   readInventory(record: BuyAnimeImportRecord): Promise<InventoryItem[]>;
@@ -114,7 +119,11 @@ export class BuyAnimeImportPipeline {
   private readonly verified = new WeakMap<BuyAnimeImportRecord, { rows: InventoryItem[]; inventory: InventoryItem[] }>();
   onStage?: (stage: BuyAnimeStage) => void;
   constructor(port: BuyAnimeImportPort) { this.port = port; }
+  private async assertCurrent(record: BuyAnimeImportRecord): Promise<void> {
+    if (this.port.readRestoreGeneration) assertBuyAnimeRecoveryCurrent(record, await this.port.readRestoreGeneration());
+  }
   private async store(record: BuyAnimeImportRecord, patch: Partial<BuyAnimeImportRecord>) {
+    await this.assertCurrent(record);
     const next = { ...record, ...patch };
     assertImportRecord(next);
     const saved = await this.port.save(next, record.version);
@@ -122,11 +131,13 @@ export class BuyAnimeImportPipeline {
     return saved;
   }
   async start(items: InventoryItem[], fileName: string): Promise<BuyAnimeImportRecord> {
+    const generation = await this.port.readRestoreGeneration?.();
     const batchIds = new Set(items.map(row => row.latest_catalog_import_id));
     const timestamps = new Set(items.map(row => row.catalog_last_seen_at));
     if (batchIds.size !== 1 || timestamps.size !== 1 || !items.length) throw new BuyAnimeResumeError('BUYANIME_BATCH_IDENTITY_INVALID');
     markBuyAnimeTrace('T10_INVENTORY_PLAN_START', { incomingRows: items.length });
     const plan = await this.port.prepareInventory(items);
+    if (generation) assertBuyAnimeGenerationUnchanged(generation, (await this.port.readRestoreGeneration!()));
     markBuyAnimeTrace('T11_INVENTORY_PLAN_DONE', {
       incomingRows: items.length, mutationRows: plan.operations.length,
       newRows: plan.stats.newCount, updatedRows: plan.stats.updatedCount, unchangedRows: plan.stats.unchangedCount,
@@ -137,6 +148,7 @@ export class BuyAnimeImportPipeline {
     let record: BuyAnimeImportRecord = {
       format: 'BUYANIME_IMPORT_RESUME_V1', batchId: items[0].latest_catalog_import_id!, fileName,
       observedAt: items[0].catalog_last_seen_at!, stage: 'INVENTORY_COMMITTING', version: 0,
+      ...(generation ? { restoreEpoch: generation.epoch } : {}),
       expected: await Promise.all(imported.map(inventoryProof)), stats: plan.stats,
     };
     assertImportRecord(record);
@@ -144,6 +156,7 @@ export class BuyAnimeImportPipeline {
     // proven no-op has no committed state to recover and reaches one durable
     // COMPLETE write after all downstream evidence is proven.
     if (plan.operations.length > 0) record = await this.port.save(record, 0);
+    await this.assertCurrent(record);
     try {
       markBuyAnimeTrace('T12_INVENTORY_COMMIT_START', { mutationRows: plan.operations.length });
       // Always hand the plan to the provider, even when it is a proven no-op.
@@ -168,6 +181,7 @@ export class BuyAnimeImportPipeline {
     // Intermediate acknowledgement labels need not rewrite the large journal.
     record = { ...record, stage: 'INVENTORY_READBACK_PENDING' };
     try {
+      await this.assertCurrent(record);
       const mutatedIds = new Set(plan.operations.map(operation => operation.id));
       const unchangedRows = plan.imported.filter(row => !mutatedIds.has(row.id));
       const changedExpected = record.expected.filter(proof => mutatedIds.has(proof.id));
@@ -190,16 +204,20 @@ export class BuyAnimeImportPipeline {
   }
   /** Pure reads. In-memory verification is not durable completion or a write permission. */
   async verify(record: BuyAnimeImportRecord): Promise<InventoryItem[]> {
+    await this.assertCurrent(record);
     assertImportRecord(record);
     const rows = await this.port.readInventory(record);
     await proveInventoryRows(record, rows);
+    await this.assertCurrent(record);
     return rows;
   }
   async resume(input: BuyAnimeImportRecord): Promise<BuyAnimeImportRecord> {
+    await this.assertCurrent(input);
     assertImportRecord(input);
     const proven = this.verified.get(input);
     let record = proven ? input : await this.port.load(input.batchId) ?? input;
     assertImportRecord(record);
+    await this.assertCurrent(record);
     if (record.stage === 'COMPLETE') return record;
     const legacyWacaPending = record.stage === 'WACA_EVIDENCE_PENDING';
     // No code path in resume calls prepareInventory or commitInventory.
@@ -246,11 +264,13 @@ export class BuyAnimeImportPipeline {
       }
     }
     if (record.stage === 'CATALOG_COMMITTING') {
+      await this.assertCurrent(record);
       try {
         const catalogOperations = record.catalog?.plan
           ? Object.values(record.catalog.plan.request.operations).reduce((sum, operations) => sum + operations.length, 0) : 0;
         markBuyAnimeTrace('T18_CATALOG_COMMIT_START', { catalogOperations });
         await this.port.commitCatalog(record.catalog!);
+        await this.assertCurrent(record);
         markBuyAnimeTrace('T19_CATALOG_COMMIT_RESPONSE', { catalogOperations });
       }
       catch (cause) {

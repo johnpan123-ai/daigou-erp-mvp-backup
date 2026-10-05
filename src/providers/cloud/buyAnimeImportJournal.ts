@@ -41,7 +41,7 @@ const fromRow = async (row: Record<string, unknown>): Promise<BuyAnimeImportReco
   const header = details?.buyAnimeImport as Partial<BuyAnimeImportRecord> | undefined;
   if (typeof details?.buyAnimeImportGzip === 'string'
     && (header?.format !== record.format || header.batchId !== record.batchId
-      || header.stage !== record.stage || header.version !== record.version)) {
+      || header.stage !== record.stage || header.version !== record.version || header.restoreEpoch !== record.restoreEpoch)) {
     throw new BuyAnimeResumeError('BUYANIME_JOURNAL_HEADER_MISMATCH');
   }
   if (row.id !== importJournalId(record.batchId) || row.platform !== BUYANIME_JOURNAL_PLATFORM
@@ -79,7 +79,8 @@ export async function saveBuyAnimeJournal(record: BuyAnimeImportRecord, expected
   const details = { newOrderItems: [], skippedDuplicateItems: [], createdGroups: [],
     completedGroupSkus: [], catalogMissingSkus: [],
     buyAnimeImport: compressed
-      ? { format: next.format, batchId: next.batchId, stage: next.stage, version: next.version }
+      ? { format: next.format, batchId: next.batchId, stage: next.stage, version: next.version,
+        ...(next.restoreEpoch !== undefined ? { restoreEpoch: next.restoreEpoch } : {}) }
       : next,
     ...(compressed ? { buyAnimeImportGzip: compressed } : {}),
   };

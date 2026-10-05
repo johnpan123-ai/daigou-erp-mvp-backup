@@ -230,7 +230,12 @@ export function assertReviewedProviderContract(file, before, after) {
     return;
   }
   if (file === 'src/providers/cloud/buyAnimeImportJournal.ts') {
-    if (before !== null) fail('journal subtype needs a new exact review');
+    if (before !== null) {
+      const restored = after
+        .replace(' || header.restoreEpoch !== record.restoreEpoch', '')
+        .replace(/,\s*\.\.\.\(next\.restoreEpoch !== undefined \? \{ restoreEpoch: next\.restoreEpoch \} : \{\}\)/u, '');
+      if (canonical(parse(file, before)) !== canonical(parse(file, restored))) fail('journal optional generation patch needs a new exact review');
+    }
     const tree=parse(file,after);
     for (const call of nodes(tree).filter(ts.isCallExpression)) {
       const name=call.expression.getText(tree);
@@ -238,6 +243,21 @@ export function assertReviewedProviderContract(file, before, after) {
         fail('optional journal contains another persistence contract');
       if (name==='supabase.from' && (call.arguments.length!==1 || !ts.isStringLiteral(call.arguments[0])
         || call.arguments[0].text!=='import_batches')) fail('journal resource changed');
+    }
+    return;
+  }
+  if (file === 'src/providers/cloud/buyAnimeRecoveryEpoch.ts') {
+    if (before !== null) fail('recovery epoch helper needs a new exact review');
+    const tree = parse(file, after);
+    for (const call of nodes(tree).filter(ts.isCallExpression)) {
+      const name = call.expression.getText(tree);
+      if (name === 'supabase.rpc' || /^(?:fetch|indexedDB\.|localStorage\.|sessionStorage\.|db\.)/u.test(name)
+        || /\.(?:insert|update|upsert|delete|put|add|clear|createObjectStore|deleteDatabase)$/u.test(name))
+        fail('recovery generation helper must be SELECT-only');
+      if (name === 'supabase.from' && (call.arguments.length !== 1 || !ts.isStringLiteral(call.arguments[0])
+        || call.arguments[0].text !== 'erp_cloud_restore_epoch')) fail('recovery generation resource changed');
+      if (name.endsWith('.select') && (call.arguments.length !== 1 || !ts.isStringLiteral(call.arguments[0])
+        || call.arguments[0].text !== 'epoch,restored_at')) fail('recovery generation read contract changed');
     }
     return;
   }
@@ -280,6 +300,7 @@ export function assertReviewedProviderContract(file, before, after) {
     }
     return;
   }
+  if (before === null) fail('unreviewed provider contract exception');
   const oldTree = parse(file, before); const newTree = parse(file, after);
   if (file === 'src/providers/cloud/cloudFieldCas.ts') {
     const statements = new Set(newTree.statements.map(node => canonical(newTree, node)));
@@ -343,7 +364,8 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   // Validate the full immutable review history, then classify only patches
   // after this adopted baseline. Earlier accepted patches are already part of
   // its tree, not a pre-patch gap in a later release. No path/hash exemption.
-  const reviews = reviewForCandidate(git, candidate.head, baseline).filter(review => {
+  const allReviews = reviewForCandidate(git, candidate.head, baseline);
+  const reviews = allReviews.filter(review => {
     try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, baseline]); }
     catch { return true; }
     return false;
@@ -407,7 +429,15 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   });
   if (!backupParity) fail('backup/restore resource contract changed');
   if (!providerParity) fail('provider persistence/schema contract changed');
-  const requiredRegressions = [...new Set(reviews.filter(review => usedReviews.has(review.id)).flatMap(review => review.requiredRegressions))];
+  const requiredRegressions = [...new Set([
+    ...reviews.filter(review => usedReviews.has(review.id)).flatMap(review => review.requiredRegressions),
+    // Permanent release contract: Restore cannot leave normal business flows
+    // blocked by a previous business generation. Actual private fixtures and
+    // disposable native execution are required, never synthetic PASS evidence.
+    ...(allReviews.some(review => review.id === 'buyanime-post-restore-recovery-epoch-v1')
+      && baseline !== candidate.head && classified.some(row => row.file.startsWith('src/'))
+      ? ['erp1-v1-exact-restore', 'post-restore-business-release'] : []),
+  ])];
   return {
     result: 'PASS', mode: baseline === candidate.head ? 'EXACT_BASELINE' : 'SAFE_DESCENDANT',
     baselineHead: baseline, baselineCheckpoint: baselineRecord.checkpoint,
