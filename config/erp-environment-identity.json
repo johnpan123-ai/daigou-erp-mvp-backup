@@ -19,14 +19,14 @@
     }
   },
   "schemaBaseline": {
-    "requiredBaselineId": "erp2-canonical-schema-v9-authoritative-json-transport",
+    "requiredBaselineId": "erp2-canonical-schema-v10-catalog-purchase-projection",
     "evidenceContractVersion": 2,
     "fingerprintContractVersion": 3,
     "canonicalContract": "ERP2_SEMANTIC_SCHEMA_V3",
     "canonicalAlgorithm": "POSTGRESQL_LEXICAL_V3",
     "preAdoptionMode": "READ_ONLY_RECONCILIATION",
     "postAdoptionLedger": "public.erp_schema_migration_ledger",
-    "canonicalFingerprint": "a7f079e6015ecdba0bd86d369293b4e771e698f90f5ab3e350cba0539146b8eb",
+    "canonicalFingerprint": "c68d12c37811c377ac5d56799b273d8e7c9b5385d22c693b66f3aa2411146122",
     "snapshotToolChecksum": "ea74a283f565adc2af090284b3dfd78ac83b8ff5c24e71707867839b1e424281",
     "snapshotMaxAgeMs": 86400000,
     "liveObservationMaxAgeMs": 7200000

@@ -8,6 +8,10 @@ import {isDeepStrictEqual} from 'node:util';
 import {createServer} from 'vite';
 import {chromium} from 'playwright';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
+// The Catalog planner is pure, but its shared db.ts module also exports browser
+// adapters. Keep those adapters unopened in this Node-side Restore gate.
+globalThis.indexedDB={open:()=>({})};
+globalThis.window={indexedDB:globalThis.indexedDB,location:{hostname:'127.0.0.1'},localStorage:{getItem:()=>null}};
 const root='scratch/buyanime-post-restore-recovery-20261005';
 const legacyRaw=await readFile(process.env.ERP1_V1_REAL_SNAPSHOT,'utf8');
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'0048b8b66542d09bbabaad6b7f7741c11f687449d1711cacd6e62e24ef5500e4');
@@ -43,6 +47,26 @@ try{
  const portable=await portability.prepareCrossEnvironmentCloudRestoreCandidate(legacy,'rhfdjsklfrgpoqsaqpkn');
  await restore(portable);
  result.legacyRestore='PASS';
+ const catalog=await vite.ssrLoadModule('/src/providers/cloud/catalogTransaction.ts');
+ const projectMaterialized=async(label)=>{
+  const inventoryId=randomUUID(),groupId=randomUUID(),variantId=randomUUID();
+  const code=`G-POST-RESTORE-${label}`,title=`Post Restore ${label}`,raw=`${label} Variant`;
+  await db.sql.query(`insert into inventory_items(id,inventory_key,myacg_item_code,product_title,raw_variant_name,myacg_sold_quantity,import_sort_index)
+    values($1,$2,$3,$4,$5,1,1)`,[inventoryId,`post-restore-${label}`,code,title,raw]);
+  await db.sql.query('insert into product_groups(id,title,show_in_purchase_list) values($1,$2,false)',[groupId,title]);
+  await db.sql.query(`insert into product_variants(id,product_group_id,myacg_item_code,product_title,variant_name,raw_variant_name,source,waca_auto_quantity)
+    values($1,$2,$3,$4,$5,$5,'inventory_import',7)`,[variantId,groupId,code,title,raw]);
+  const snapshot={};
+  for(const [key,table] of Object.entries({inventory:'inventory_items',groups:'product_groups',categories:'product_categories',variants:'product_variants'}))
+   snapshot[key]=(await db.sql.query(`select * from ${table} where deleted_at is null order by id`)).rows;
+  const plan=await catalog.planCatalogTransaction(snapshot,'create',[code]);
+  const committed=(await db.sql.query('select public.erp_apply_catalog_transaction($1,$2) result',[randomUUID(),plan.request])).rows[0].result;
+  assert.equal(committed.ok,true,JSON.stringify(committed));
+  const row=(await db.sql.query(`select g.show_in_purchase_list,v.source,v.waca_auto_quantity from product_variants v
+    join product_groups g on g.id=v.product_group_id where v.id=$1`,[variantId])).rows[0];
+  assert.deepEqual([row.show_in_purchase_list,row.source,Number(row.waca_auto_quantity)],[true,'myacg_order_import',7]);
+ };
+ await projectMaterialized('ERP1');result.erp1PurchaseProjection='PASS';
  await db.startPostgrest();await server.listen();
  browser=await chromium.launch({executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',headless:true});
  const connect=async()=>{
@@ -95,6 +119,7 @@ try{
  // the scanner must retire it by generation rather than delete or rewrite it.
  const currentWithJournal=await r.buildCloudRestoreManifest((await db.sql.query('select public.erp_cloud_restore_snapshot() data')).rows[0].data);
  await restore(currentWithJournal);await connect();
+ await projectMaterialized('ERP2');result.erp2PurchaseProjection='PASS';
  stage='stale retained journal';
  const stale=await page.evaluate(async()=>{
   const {readLatestBuyAnimeJournal}=await import('/src/providers/cloud/buyAnimeImportJournal.ts');
@@ -145,6 +170,6 @@ try{
  assert.ok(verified.snapshot.orders.length>0);result.erp1Waca='PASS';
  assert.equal(result.externalRequests,0);result.result='PASS';
  await mkdir(root,{recursive:true});await writeFile(root+'/post-restore-regression.json',JSON.stringify(result,null,2));
- console.log(JSON.stringify({result:'PASS',parsedRows:1551,legacyRestore:result.legacyRestore,erp1BuyAnime:result.erp1BuyAnime,erp2BuyAnime:result.erp2BuyAnime,oldAuditPreserved:result.oldAuditPreserved,sameFile5x:result.sameFile5x,erp1Waca:result.erp1Waca,externalRequests:0,liveMutation:0}));
+ console.log(JSON.stringify({result:'PASS',parsedRows:1551,legacyRestore:result.legacyRestore,erp1PurchaseProjection:result.erp1PurchaseProjection,erp2PurchaseProjection:result.erp2PurchaseProjection,erp1BuyAnime:result.erp1BuyAnime,erp2BuyAnime:result.erp2BuyAnime,oldAuditPreserved:result.oldAuditPreserved,sameFile5x:result.sameFile5x,erp1Waca:result.erp1Waca,externalRequests:0,liveMutation:0}));
 }catch(e){console.log(JSON.stringify({stage,errorCode:e.code,errorName:e.name,errorMessage:e.message}));throw new Error('POST_RESTORE_ISOLATED_GATE_FAILED: '+stage);}
 finally{if(browser)await browser.close();await server.close();await vite.close();await db.close();}

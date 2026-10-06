@@ -57,14 +57,22 @@ try{
     catch{return {rejected:true,rpcs:window.saveabilityFixture.calls().length-before};}
   });assert.deepEqual(invalid,{rejected:true,rpcs:0});
   // Catalog native provider readback; second action must remain stable.
-  await db.sql.query("insert into public.inventory_items(id,inventory_key,myacg_item_code,product_title,raw_variant_name,listing_type,final_price,myacg_sold_quantity) values($1,'SYN-UI','G-UI','Synthetic UI Catalog','帽子','代理版',0,3)",[uuid(70)]);
+  await db.sql.query("insert into public.inventory_items(id,inventory_key,myacg_item_code,product_title,raw_variant_name,listing_type,final_price,myacg_sold_quantity) values($1,'SYN-UI','G-UI','Synthetic UI Catalog','帽子','代理版',0,3),($2,'SYN-UI-MAT','G-UI-MAT','Materialized UI Catalog','玩偶','代理版',0,2)",[uuid(70),uuid(71)]);
+  await db.sql.query("insert into public.product_groups(id,title,show_in_purchase_list) values($1,'Materialized UI Catalog',false)",[uuid(72)]);
+  await db.sql.query("insert into public.product_variants(id,product_group_id,myacg_item_code,product_title,variant_name,raw_variant_name,source,waca_auto_quantity) values($1,$2,'G-UI-MAT','Materialized UI Catalog','玩偶','玩偶','inventory_import',7)",[uuid(73),uuid(72)]);
   await page.goto(entry+'?view=catalog');await page.getByText('Synthetic UI Catalog',{exact:true}).first().waitFor();
-  const action=page.getByRole('button',{name:/匯入訂購紀錄|建立訂購紀錄/}).first();await action.click();
+  const materializedRow=page.getByText('Materialized UI Catalog',{exact:true}).first().locator('xpath=ancestor::tr[1]');
+  const uiBegan=performance.now();await materializedRow.getByRole('button',{name:/匯入訂購紀錄|建立訂購紀錄/}).click();
   await page.waitForFunction(()=>window.saveabilityFixture.calls().some(c=>c.name==='erp_apply_catalog_transaction'));
+  await page.waitForTimeout(500);
+  const uiProjectionMs=performance.now()-uiBegan;
+  const materialized=(await db.sql.query("select g.show_in_purchase_list,v.source,v.waca_auto_quantity from product_variants v join product_groups g on g.id=v.product_group_id where v.myacg_item_code='G-UI-MAT'")).rows[0];
+  assert.deepEqual([materialized.show_in_purchase_list,materialized.source,Number(materialized.waca_auto_quantity)],[true,'myacg_order_import',7]);
+  const action=page.getByText('Synthetic UI Catalog',{exact:true}).first().locator('xpath=ancestor::tr[1]').getByRole('button',{name:/匯入訂購紀錄|建立訂購紀錄/});await action.click();
   await page.waitForTimeout(500);
   const catalog=(await db.sql.query("select id from public.product_groups where title='Synthetic UI Catalog' and deleted_at is null")).rows;
   assert.equal(catalog.length,1);assert.equal(Number((await db.sql.query('select myacg_auto_quantity from public.product_variants where myacg_item_code=$1 and deleted_at is null',['G-UI'])).rows[0].myacg_auto_quantity),3);
   assert.equal(liveRequests,0);assert.deepEqual(errors,[]);
   console.log('PASS actual Private form -> facade -> Cloud provider -> native PostgREST: response lost, frozen draft, same-key reload retry, second save, zero price, committed/readback-pending retry; invalid canonical ID blocked before RPC');
-  console.log('PASS actual Catalog UI -> atomic provider -> native PostgREST/readback; real Supabase requests=0');
+  console.log('PASS actual Catalog UI -> guarded materialized projection + new create -> atomic provider -> native PostgREST/readback; real Supabase requests=0; materialized UI ms='+uiProjectionMs.toFixed(2));
 }finally{await browser?.close();vite?.kill();await new Promise(r=>bridge.close(r));await db.close();}

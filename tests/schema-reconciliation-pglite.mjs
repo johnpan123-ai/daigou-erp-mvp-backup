@@ -17,11 +17,13 @@ const wacaDeltaFile = releaseFiles[3];
 const restoreCompatFile = releaseFiles[4];
 const backupPerformanceFile = releaseFiles[5];
 const backupTransportFile = releaseFiles[6];
+const catalogProjectionFile = releaseFiles[7];
 const v4Fingerprint = 'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317';
 const v6Fingerprint = '1d39f5fa7f116ac740a9b42fb7add07fb16c63eab968a8d735319acc38f31008';
 const v7Fingerprint = 'e8cbbbc041367e2f2a6b240f72932e53a8622cd2ba9dab8261f2b0b440caa16c';
 const v8Fingerprint = '14b941f5196f15e1ed53250b195a67f52e357ac0168d5aa30f7d61a270728a1e';
-const v9Fingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
+const v9Fingerprint = 'a7f079e6015ecdba0bd86d369293b4e771e698f90f5ab3e350cba0539146b8eb';
+const v10Fingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
 const partialPlans = [];
 
 async function createDatabase() {
@@ -82,8 +84,10 @@ try {
   await apply(fresh, [backupPerformanceFile], 'fresh-v8');
   assert.equal(fingerprintStructuralSnapshot(await capture(fresh)), v8Fingerprint);
   await apply(fresh, [backupTransportFile], 'fresh-v9');
+  assert.equal(fingerprintStructuralSnapshot(await capture(fresh)), v9Fingerprint);
+  await apply(fresh, [catalogProjectionFile], 'fresh-v10');
   const freshSnapshot = await capture(fresh);
-  assert.equal(fingerprintStructuralSnapshot(freshSnapshot), v9Fingerprint);
+  assert.equal(fingerprintStructuralSnapshot(freshSnapshot), v10Fingerprint);
   const bridgeIndex = CANONICAL_FRESH_INSTALL_V3.indexOf('026b_cloud_inventory_uuid_identity_bridge.sql');
   const wacaStart = CANONICAL_FRESH_INSTALL_V3.indexOf('044_waca_cloud_ledger.sql');
   await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(0, bridgeIndex), 'pre-bridge');
@@ -115,7 +119,7 @@ try {
 
   const registry = await buildMigrationEffectRegistry();
   const plan = planSchemaDelta(freshSnapshot, registry, { expectedSnapshot: upgradedSnapshot,
-    requiredBaselineId: 'erp2-canonical-schema-v9-authoritative-json-transport' });
+    requiredBaselineId: 'erp2-canonical-schema-v10-catalog-purchase-projection' });
   const failed = plan.migrations.filter(item => item.state !== 'SATISFIED');
   assert.deepEqual(failed.map(item => ({ id: item.migrationId, state: item.state,
     failed: item.postconditions.filter(check => check.result !== 'MATCH').map(check => check.condition.object) })), []);
@@ -152,7 +156,7 @@ try {
   const repairedPlan = planSchemaDelta(repairedSnapshot, registry, { expectedSnapshot: freshSnapshot });
   assert.ok(['046','046b','047','048'].every(id => repairedPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
   assert.equal(repairedPlan.readyForApply, true);
-  assert.deepEqual(repairedPlan.applyPlan.map(item => item.migrationId), ['049', '050', '051', '052', '053', '054', '055']);
+  assert.deepEqual(repairedPlan.applyPlan.map(item => item.migrationId), ['049', '050', '051', '052', '053', '054', '055', '056']);
   console.log('PASS fresh and repaired live-like 048 preserve the independent v4 baseline fingerprint');
 
   for (const [index, file] of releaseFiles.entries()) {
@@ -166,10 +170,10 @@ try {
     partialPlans.push({ applied: file.slice(0, 3), remaining });
   }
   const finalSnapshot = await capture(compatibility);
-  assert.equal(fingerprintStructuralSnapshot(finalSnapshot), v9Fingerprint);
+  assert.equal(fingerprintStructuralSnapshot(finalSnapshot), v10Fingerprint);
   assert.deepEqual(Object.keys(finalSnapshot.tables).sort(), Object.keys(repairedSnapshot.tables).sort());
   await apply(compatibility, releaseFiles, 'v7-replay');
-  assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), v9Fingerprint);
+  assert.equal(fingerprintStructuralSnapshot(await capture(compatibility)), v10Fingerprint);
 
   const partialV5 = structuredClone(finalSnapshot);
   delete partialV5.functions['public.erp_reconcile_private_order_transaction(uuid, jsonb)'];
@@ -185,7 +189,7 @@ try {
   const unknownV5Plan = planSchemaDelta(unknownV5, registry, { expectedSnapshot: freshSnapshot });
   assert.equal(unknownV5Plan.readyForApply, false);
   assert.ok(unknownV5Plan.migrations.some(item => item.state === 'UNKNOWN'));
-  console.log('PASS v4→049→050→051→052→053→054→055 partial planners, historical v7/v8 preserved, final v9, reapply, and UNKNOWN/PARTIAL fail-closed');
+  console.log('PASS v4→049→050→051→052→053→054→055→056 partial planners, historical v7/v8/v9 preserved, final v10, reapply, and UNKNOWN/PARTIAL fail-closed');
 
   const owner = '00000000-0000-4000-8000-000000000099';
   await fresh.exec(`insert into auth.users(id,email) values('${owner}','owner@example.com');

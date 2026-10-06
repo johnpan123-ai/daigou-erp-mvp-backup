@@ -201,7 +201,13 @@ import { readBuyAnimeJournal, readLatestBuyAnimeJournal, saveBuyAnimeJournal } f
 import { readBuyAnimeRestoreGeneration, classifyBuyAnimeRecoveryGeneration,
   assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent } from './buyAnimeRecoveryEpoch';
 import { coordinateBuyAnimeImport, finishBuyAnimeImport, refreshBuyAnimeReadback, publishBuyAnimeFlow, buyAnimeFlowLabel, type BuyAnimeFlowOptions } from './buyAnimeImportCoordinator';
-import { planCatalogTransaction,CATALOG_RPC,type CatalogMode } from './catalogTransaction';
+import {
+  catalogCanonicalResultError,
+  classifyCatalogRpcError,
+  planCatalogTransaction,
+  CATALOG_RPC,
+  type CatalogMode,
+} from './catalogTransaction';
 import { buildRelatedRequest,submitRelatedIntent,RELATED_RPC,type RelatedTransactionCommand } from './relatedTransaction';
 import type { 
   InventoryItem, 
@@ -2704,18 +2710,18 @@ export class SupabaseProvider implements IDataProvider {
     const clearEcho=()=>echoEntries.forEach(({table,ids})=>clearLocalCloudWrites(table,ids));
     let response;
     try { response=await supabase.rpc(CATALOG_RPC,{p_idempotency_key:idempotencyKey,p_request:plan.request}); }
-    catch(error){ clearEcho(); markCloudRequestFailed(error); throw new CloudMutationBoundaryError('result-unknown',error); }
+    catch(error){ clearEcho(); markCloudRequestFailed(error); throw classifyCatalogRpcError(error,idempotencyKey); }
     if(response.error) {
       clearEcho();
       markCloudRequestFailed(response.error);
-      if(!response.error.code || /^5/.test(response.error.code)) throw new CloudMutationBoundaryError('result-unknown',response.error);
-      clearFormIntent(scope);
-      throw new SaveabilityError('商品操作未儲存，請確認帳號與資料後再試。');
+      const classified=classifyCatalogRpcError(response.error,idempotencyKey);
+      if(classified.category!=='COMMIT_UNKNOWN') clearFormIntent(scope);
+      throw classified;
     }
     if(response.data?.ok!==true){
       clearEcho();
       clearFormIntent(scope);
-      throw new SaveabilityError(response.data?.code==='FIELD_CONFLICT' ? '商品資料已更新，本次完全未儲存；請重新整理後再試。' : '商品操作未儲存，舊資料未變更。');
+      throw catalogCanonicalResultError(response.data?.code,idempotencyKey);
     }
     markCloudReachable();
     try {
@@ -2724,7 +2730,7 @@ export class SupabaseProvider implements IDataProvider {
       })));
       if(changes.length) await this.mutationCache.refresh({reason:'realtime',resources:['products'],changes});
       clearFormIntent(scope);
-    } catch(error){ clearEcho(); throw new CloudMutationBoundaryError('committed-readback-pending',error); }
+    } catch(error){ clearEcho(); throw classifyCatalogRpcError(error,idempotencyKey,'readback'); }
     return plan.summary;
   }
   async applyRelatedTransaction(command:RelatedTransactionCommand):Promise<void> {

@@ -2,12 +2,88 @@ import type { InventoryItem,ProductGroup,ProductCategory,ProductVariant } from '
 import { calculateFinalMyacgDemand } from '../../lib/db';
 import { createPurchaseRecordFromInventory,ensureProductMasterFromInventory,reparseProductVariants,syncProductGroupsWithInventory,
   type CatalogAlgorithmContext } from '../../lib/catalogAlgorithms';
-import { buildCloudCollectionMutationPlan } from './cloudFieldCas';
+import { buildCloudCollectionMutationPlan, SaveabilityError } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
 
 export type CatalogMode='create'|'master'|'sync'|'reparse';
 export interface CatalogSnapshot {inventory:InventoryItem[];groups:ProductGroup[];categories:ProductCategory[];variants:ProductVariant[]}
 export const CATALOG_RPC='erp_apply_catalog_transaction';
+
+export type CatalogOperationErrorCategory =
+  | 'CATALOG_VALIDATION_ERROR'
+  | 'CATALOG_PROTECTED_METADATA_ERROR'
+  | 'STALE_CONFLICT'
+  | 'COMMIT_REJECTED'
+  | 'COMMIT_UNKNOWN'
+  | 'READBACK_FAILED'
+  | 'AUTH_PERMISSION_ERROR'
+  | 'NETWORK_ERROR';
+
+type CatalogErrorDiagnostic = {
+  code?: string;
+  sqlstate?: string;
+  serverMessage?: string;
+  requestId: string;
+  stage: 'commit'|'readback';
+};
+
+const catalogErrorText = (value: unknown): string|undefined =>
+  typeof value === 'string' && value.length > 0 ? value : undefined;
+
+const catalogTechnicalDetail = (category:CatalogOperationErrorCategory, diagnostic:CatalogErrorDiagnostic):string =>
+  [
+    `category=${category}`,
+    `code=${diagnostic.code ?? 'none'}`,
+    `SQLSTATE=${diagnostic.sqlstate ?? 'none'}`,
+    `message=${diagnostic.serverMessage ?? 'none'}`,
+    `requestId=${diagnostic.requestId}`,
+    `stage=${diagnostic.stage}`,
+  ].join('; ');
+
+export class CatalogOperationError extends SaveabilityError {
+  readonly category: CatalogOperationErrorCategory;
+  readonly diagnostic: Readonly<CatalogErrorDiagnostic>;
+  constructor(category:CatalogOperationErrorCategory,userMessage:string,diagnostic:CatalogErrorDiagnostic) {
+    super(`${userMessage}\n技術資訊：${catalogTechnicalDetail(category,diagnostic)}`);
+    this.name='CatalogOperationError';
+    this.category=category;
+    this.diagnostic=Object.freeze({...diagnostic});
+  }
+}
+
+export const classifyCatalogRpcError = (
+  value:unknown,requestId:string,stage:'commit'|'readback'='commit',
+):CatalogOperationError => {
+  const row=value && typeof value === 'object' ? value as Record<string,unknown> : {};
+  const code=catalogErrorText(row.code);
+  const serverMessage=catalogErrorText(row.message) ?? catalogErrorText(value);
+  const sqlstate=code && /^[0-9A-Z]{5}$/u.test(code) ? code : undefined;
+  const diagnostic={code,sqlstate,serverMessage,requestId,stage} as const;
+  if(stage==='readback') return new CatalogOperationError('READBACK_FAILED',
+    '商品操作已儲存，但雲端資料讀回尚未完成。請先同步確認，勿重複提交。',diagnostic);
+  if(code==='42501' || code==='401' || code==='403' || serverMessage==='CATALOG_FORBIDDEN') return new CatalogOperationError('AUTH_PERMISSION_ERROR',
+    '目前帳號沒有執行商品操作的權限，本次沒有寫入資料。',diagnostic);
+  if(serverMessage==='CATALOG_MANUAL_METADATA_FORBIDDEN'
+    || serverMessage==='CATALOG_PROVENANCE_TRANSITION_FORBIDDEN') return new CatalogOperationError(
+      'CATALOG_PROTECTED_METADATA_ERROR','商品資料狀態不符合建立訂購紀錄的條件，本次沒有寫入資料。',diagnostic);
+  if(code?.startsWith('22') || serverMessage?.startsWith('CATALOG_')) return new CatalogOperationError(
+    'CATALOG_VALIDATION_ERROR','商品資料未通過建立訂購紀錄的驗證，本次沒有寫入資料。',diagnostic);
+  if(code==='NETWORK_ERROR') return new CatalogOperationError('NETWORK_ERROR',
+    '網路連線在送出商品操作前失敗，本次沒有寫入資料。',diagnostic);
+  if(!code || /^5/u.test(code) || /fetch|network|timeout|abort/iu.test(serverMessage ?? ''))
+    return new CatalogOperationError('COMMIT_UNKNOWN',
+      '商品操作結果尚未確認。請先同步核對雲端資料，勿重複提交。',
+      {...diagnostic,code:code ?? 'NETWORK_ERROR'});
+  return new CatalogOperationError('COMMIT_REJECTED','商品操作已被雲端拒絕，本次沒有寫入資料。',diagnostic);
+};
+
+export const catalogCanonicalResultError = (
+  code:string|undefined,requestId:string,
+):CatalogOperationError => code==='FIELD_CONFLICT'
+  ? new CatalogOperationError('STALE_CONFLICT','商品資料已更新，本次沒有寫入資料；請重新整理後再試。',
+    {code,serverMessage:code,requestId,stage:'commit'})
+  : new CatalogOperationError('COMMIT_REJECTED','商品操作已被雲端拒絕，本次沒有寫入資料。',
+    {code:code ?? 'UNKNOWN_RESULT',serverMessage:code,requestId,stage:'commit'});
 
 /** No IndexedDB, network, or persistence. Plan from a cloned authoritative snapshot. */
 export async function planCatalogTransaction(base:CatalogSnapshot,mode:CatalogMode,itemCodes:string[]=[], options: { baselineVariantCount?: number } = {}) {

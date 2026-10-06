@@ -42,6 +42,18 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '056': {
+    sourceFile:'056_catalog_materialized_purchase_projection.sql',dependencies:['055'],
+    risk:'LOW_GUARDED_CATALOG_PROVENANCE_TRANSITION',idempotency:'CREATE_OR_REPLACE_WITH_EXACT_REPLAY',
+    preconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)'),table('inventory_items'),
+      table('product_groups'),table('product_variants'),table('erp_idempotency_keys')],
+    postconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)',{
+      owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
+      definitionIncludes:['CATALOG_PROVENANCE_TRANSITION_FORBIDDEN','inventory_import',
+        'myacg_order_import','show_in_purchase_list','exact_replay','erp_apply_field_mutations'],
+    })],
+  },
   '055': {
     sourceFile:'055_authoritative_backup_json_transport.sql',dependencies:['054'],
     risk:'LOW_ADDITIVE_READ_ONLY_JSON_TRANSPORT',idempotency:'CREATE_OR_REPLACE_EXACT_OUTPUT_PARITY',
