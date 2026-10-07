@@ -46,6 +46,7 @@ import {
   createCloudRestoreSafeSubmitError,
   formatCloudRestoreSubmitError,
   inspectCurrentCloudRestoreReadiness,
+  ensureCloudRestorePrepareReadiness,
   normalizeCloudRestoreSubmitError,
   persistCloudRestoreUnresolvedAttempt,
   readCloudRestoreUnresolvedAttempt,
@@ -121,6 +122,7 @@ export default function CloudAtomicRestorePanel({
   const [candidate, setCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [proofRecord, setProofRecord] = useState<CloudRestoreCandidateProofRecord | null>(null);
   const [proofMessage, setProofMessage] = useState('尚未完成安全檢查');
+  const [prepareTimings, setPrepareTimings] = useState<Record<string, number> | null>(null);
   const [status, setStatus] = useState<RestoreStatus>(initialUnresolvedAttempt ? 'unknown' : 'idle');
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<CloudRestoreResult | null>(null);
@@ -270,6 +272,7 @@ export default function CloudAtomicRestorePanel({
     proofRecordRef.current = null;
     setProofRecord(null);
     setProofMessage('正在完成安全檢查…');
+    setPrepareTimings(null);
     setStatus('preflighting');
     setMessage('正在解析備份並確認雲端最新狀態；尚未寫入任何資料。');
     setCandidate(null);
@@ -283,22 +286,29 @@ export default function CloudAtomicRestorePanel({
     pendingAttemptRef.current = null;
     setProgressStep('prepare');
     setScreenRefreshPending(false);
+    const selectionStarted = performance.now();
+    const timings: Record<string, number> = {};
+    let phaseStarted = selectionStarted;
+    const finishPhase = (name: string) => {
+      const now = performance.now();
+      timings[name] = Math.round(now - phaseStarted);
+      phaseStarted = now;
+    };
     try {
       const rawBytes = await file.arrayBuffer();
       const sourceFileSha256 = await sha256BytesHex(rawBytes);
+      finishPhase('fileReadAndHash');
       let source = await prepareCloudRestoreSnapshot(new TextDecoder().decode(rawBytes), {
         fileName: file.name,
         sourceEnvironment: window.location.origin,
         sourceFileSha256,
       });
+      finishPhase('clientParseAndValidation');
       if (candidateGenerationRef.current !== generation) return;
-      if (refreshAuthoritative) {
-        const refreshed = await refreshAuthoritative(CLOUD_RESTORE_READINESS_RESOURCES);
-        if (refreshed === false) throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_NOT_AUTHORITATIVE_FRESH' }, 'pre-dispatch');
-      }
-      const readiness = inspectCurrentCloudRestoreReadiness({
+      const readiness = await ensureCloudRestorePrepareReadiness({
         cloudMode: getProviderMode() === 'cloud', authenticated: Boolean(user), owner: role === 'owner',
-      });
+      }, refreshAuthoritative ? async () => (await refreshAuthoritative(CLOUD_RESTORE_READINESS_RESOURCES)) !== false : undefined);
+      finishPhase('authoritativeReadiness');
       if (!readiness.allowed) throw createCloudRestoreSafeSubmitError({ code: readiness.code }, 'pre-dispatch');
       if (source.legacyWacaBackup) {
         const targetImages = await dataProvider.getCloudDashboardCategoryImageRows();
@@ -311,7 +321,9 @@ export default function CloudAtomicRestorePanel({
       const portable = preserveAuditIdentity ? source
         : await prepareCrossEnvironmentCloudRestoreCandidate(source, supabaseEnvironment.projectRef);
       const prepared = portable.portability && portable.portability.totalTransformedRows > 0 ? portable : source;
+      finishPhase('targetCompatibility');
       const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(prepared);
+      finishPhase('uploadStageAndServerProof');
       if (candidateGenerationRef.current !== generation || proofRequestTokenRef.current !== proofToken) return;
       const currentUserId = user?.id ?? '';
       proofUserIdRef.current = currentUserId;
@@ -326,6 +338,7 @@ export default function CloudAtomicRestorePanel({
       setProofMessage('安全檢查已通過');
       setStatus('ready');
       setMessage('所有安全檢查已通過。');
+      setPrepareTimings({ ...timings, total: Math.round(performance.now() - selectionStarted) });
     } catch (error) {
       if (candidateGenerationRef.current !== generation) return;
       const safe = normalizeCloudRestoreSubmitError(error, 'readiness', { source: 'pre-dispatch' });
@@ -799,6 +812,9 @@ export default function CloudAtomicRestorePanel({
         <summary>查看技術資訊</summary>
         <div style={{ marginTop: 8, overflowWrap: 'anywhere', fontSize: 12 }}>
           <div>安全檢查：{proofMessage}</div>
+          {prepareTimings && <div data-testid="cloud-restore-prepare-timings">
+            Prepare timings (ms)：{Object.entries(prepareTimings).map(([phase, ms]) => `${phase}=${ms}`).join('；')}
+          </div>}
           {sourceCandidate && <div>來源 fingerprint：<code>{sourceCandidate.manifest.snapshotFingerprint}</code></div>}
           {candidate && <div>有效 fingerprint：<code>{candidate.executionFingerprint}</code></div>}
           {candidate?.portability && <div>跨環境轉換：{candidate.portability.totalTransformedRows}；policy：{candidate.portability.policyVersion}</div>}

@@ -42,6 +42,18 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '063': {
+    sourceFile:'063_restore_prepare_draft_proof_initialization.sql',dependencies:['062'],
+    risk:'LOW_PREPARE_DRAFT_INITIALIZATION',idempotency:'ONE_TIME_PRIVATE_OPS_TRIGGER',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[table('erp_restore_upload_resource_proofs'),fn('erp_stage_restore_upload_resource(uuid,text)')],
+    postconditions:[fn('erp_restore_initialize_upload_proof()',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions'],
+      definitionIncludes:['NEW.request_id','STAGING','candidate_valid'],
+    }),q('trigger','public.erp_restore_upload_requests.erp_restore_initialize_upload_proof',true,
+      {definitionIncludes:['AFTER INSERT','erp_restore_initialize_upload_proof']})],
+  },
   '062': {
     sourceFile:'062_restore_resource_stage_and_projected_proof.sql',dependencies:['061'],
     risk:'MEDIUM_PREPARE_RESOURCE_STAGING',idempotency:'ONE_TIME_OPS_TABLE_AND_FUNCTION_REPLACEMENT',

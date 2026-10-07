@@ -31,32 +31,42 @@ export async function uploadCloudRestoreCandidate(
   });
   let cursor = 0;
   let failed = false;
-  // Four bounded independent chunk uploads, never 24 MB in one PostgREST body.
-  await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, async () => {
-    while (!failed && cursor < chunks.length) {
-      const chunk = chunks[cursor++];
-      try { await call('erp_upload_restore_chunk', chunk); }
-      catch (error) { failed = true; throw error; }
-    }
-  }));
-  const uploadMs = performance.now() - started;
-  // Decode full rows into private typed stages per resource. The final RPC
-  // validates a small semantic projection, never reassembles the whole backup.
-  const stageStarted = performance.now();
   const resources = CLOUD_RESTORE_TABLES.map(([, resource]) => resource);
-  cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(4, resources.length) }, async () => {
-    while (!failed && cursor < resources.length) {
-      const resource = resources[cursor++];
-      try { await call('erp_stage_restore_upload_resource', { p_request_id: requestId, p_resource: resource }); }
-      catch (error) { failed = true; throw error; }
+  const remaining = new Map(resources.map(resource => [resource, Math.ceil(sourceData[resource].length / 512)]));
+  const stageQueue = resources.filter(resource => remaining.get(resource) === 0);
+  let firstStageAtMs: number | null = null;
+  let uploadCompletedAtMs = chunks.length === 0 ? performance.now() - started : 0;
+  let uploaded = 0;
+  const transferStarted = performance.now();
+  // One shared pool bounds TOTAL concurrent RPCs at four. A resource stages
+  // only after all of ITS immutable chunks succeed, while other uploads can
+  // continue. No full backup body, no Execute, no replay and no early finalize.
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (!failed && (stageQueue.length > 0 || cursor < chunks.length)) {
+      try {
+        const resource = stageQueue.shift();
+        if (resource !== undefined) {
+          firstStageAtMs ??= performance.now() - started;
+          await call('erp_stage_restore_upload_resource', { p_request_id: requestId, p_resource: resource });
+        } else {
+          const chunk = chunks[cursor++];
+          await call('erp_upload_restore_chunk', chunk);
+          const left = remaining.get(chunk.p_resource)! - 1;
+          remaining.set(chunk.p_resource, left);
+          if (left === 0) stageQueue.push(chunk.p_resource);
+          uploaded += 1;
+          if (uploaded === chunks.length) uploadCompletedAtMs = performance.now() - started;
+        }
+      } catch (error) { failed = true; throw error; }
     }
   }));
-  const stageMs = performance.now() - stageStarted;
+  const uploadAndStageMs = performance.now() - transferStarted;
   const finalizeStarted = performance.now();
   const result = await call('erp_finalize_restore_upload', { p_request_id: requestId });
   console.info('[Cloud Restore Prepare]', { requestId, chunkCount: chunks.length,
-    uploadMs: Math.round(uploadMs), stageMs: Math.round(stageMs), finalizeMs: Math.round(performance.now() - finalizeStarted),
+    uploadAndStageMs: Math.round(uploadAndStageMs), uploadCompletedAtMs: Math.round(uploadCompletedAtMs),
+    firstStageAtMs: firstStageAtMs === null ? null : Math.round(firstStageAtMs),
+    finalizeMs: Math.round(performance.now() - finalizeStarted),
     totalMs: Math.round(performance.now() - started) });
   return result;
 }

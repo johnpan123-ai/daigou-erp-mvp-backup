@@ -478,10 +478,27 @@ export const inspectCurrentCloudRestoreReadiness = (input: {
     return { allowed: false, code: 'BROWSER_OFFLINE', connectivity };
   }
   if (connectivity.status !== 'online') return { allowed: false, code: 'CLOUD_NOT_ONLINE', connectivity };
+  if (connectivity.authoritativeReadPending) return { allowed: false, code: 'CLOUD_NOT_AUTHORITATIVE_FRESH', connectivity };
   if (connectivity.readStatus !== 'fresh-online' && connectivity.readStatus !== 'fresh-empty') {
     return { allowed: false, code: 'CLOUD_NOT_AUTHORITATIVE_FRESH', connectivity };
   }
   return { allowed: true, code: 'READY', connectivity };
+};
+
+/** Prepare needs an authoritative readiness signal, not a redundant full ERP
+ * reread. Server upload/finalize/Execute independently capture and CAS the
+ * actual business generation + restore epoch; browser rows are never that CAS.
+ * Stale, pending or failed reads still require a successful fresh read first.
+ */
+export const ensureCloudRestorePrepareReadiness = async (
+  input: Parameters<typeof inspectCurrentCloudRestoreReadiness>[0],
+  refresh: (() => Promise<boolean | void>) | undefined,
+): Promise<CloudRestoreReadiness> => {
+  const before = inspectCurrentCloudRestoreReadiness(input);
+  if (before.allowed || !input.cloudMode || !input.authenticated || !input.owner) return before;
+  if (!refresh) return before;
+  if (await refresh() === false) return { ...inspectCurrentCloudRestoreReadiness(input), allowed: false, code: 'CLOUD_NOT_AUTHORITATIVE_FRESH' };
+  return inspectCurrentCloudRestoreReadiness(input);
 };
 
 export const normalizeCloudRestoreSubmitError = (
