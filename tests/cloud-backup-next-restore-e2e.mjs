@@ -105,7 +105,7 @@ try {
     purchase_batch_id: uuid(20), purchase_batch_item_id: uuid(21), product_title: 'Cloud → NEXT 商品',
     variant_name: '通常版', sku: 'SKU-CLOUD-1', quantity: 1, checked: false,
   }));
-  seed.outboundShipments.push(withAudit({ id: uuid(60), title: 'Cloud Shipment', status: 'draft', note: '' }));
+  seed.outboundShipments.push(withAudit({ id: uuid(60), title: 'Cloud Shipment', status: 'draft', note: '', status_changed_at: null }));
   seed.outboundShipmentItems.push(withAudit({
     id: uuid(61), outbound_shipment_id: uuid(60), japan_package_item_id: uuid(51),
     product_group_id: uuid(10), product_variant_id: uuid(12), product_title: 'Cloud → NEXT 商品',
@@ -213,7 +213,10 @@ try {
     realPreview = await bridge.prepareCloudBackupForNextRestore(realRaw, { fileName: 'real-cloud-backup.json' });
     assert.equal(realPreview.summary.targetResourceCount, 24);
     assert.equal(realPreview.summary.blockingOrphanCount, 0);
-    assert.equal(realPreview.summary.legacyWacaBackup, true);
+    const sourceResourceCount = JSON.parse(realRaw).manifest.resourceCount;
+    assert.ok([15, 24].includes(sourceResourceCount));
+    assert.equal(realPreview.summary.legacyWacaBackup, sourceResourceCount === 15,
+      'original 15-resource legacy and current 24-resource snapshots retain distinct classifications');
   }
 } finally {
   await moduleServer.close();
@@ -335,7 +338,7 @@ try {
     try { await window.dataProvider.importData(JSON.stringify(document)); return 'accepted'; }
     catch (error) { return error.code || error.message; }
   }, brokenRelation);
-  assert.equal(relationResult, 'ORPHAN_RELATION');
+  assert.equal(relationResult, 'WACA_ORDER_ITEM_ORPHAN');
 
   const forcedFailure = await page.evaluate(async document => {
     const originalPut = IDBObjectStore.prototype.put;
