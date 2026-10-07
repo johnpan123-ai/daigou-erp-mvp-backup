@@ -78,3 +78,24 @@ not only direct postgres calls to the nested proof. Live performance must
 still be measured; a larger allowed timeout is not a performance PASS.
 
 Reference: https://docs.postgrest.org/en/stable/references/transactions.html#hoisted-function-settings
+
+## First Live proof and remaining Prepare cost (061)
+
+The first normal Settings B-to-A Restore committed epoch 14-to-15 in 5,896 ms
+with beforeSnapshot=0. The exported 24-resource Backup was byte-identical to
+original A (D189EE578DAA6F71F6F99AF1B521AA62E44E0595A768237839BFE2DBE98AC3B8).
+Postmaster start time was unchanged. This is one Live success, not a completed
+Chaos Matrix or performance percentile.
+
+Prepare still took about 39 seconds: binary assembly 11,087 ms, semantic proof
+6,079 ms, decode/stage 6,682 ms. 061 keeps the same validation/hashed JSONB value
+but aggregates transport JSON text before one binary conversion. Column discovery
+is a single materialized union of keys across all rows, instead of expanding the
+whole resource once for each physical column. Fields supplied only in later rows
+remain included. No Execute, Backup, business table, timeout or ACL change.
+
+060's effect specification describes its retained bounded timeout, complete
+coverage and CAS contract rather than the superseded binary aggregate spelling;
+061 separately requires the new assembly and column-discovery implementation.
+Exact full canonical fingerprint comparison remains required. Executed 060 SQL
+is immutable. Live Prepare targets still need measurement, not extrapolation.

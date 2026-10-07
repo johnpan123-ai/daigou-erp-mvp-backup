@@ -42,6 +42,20 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '061': {
+    sourceFile:'061_restore_prepare_single_pass_json.sql',dependencies:['060'],
+    risk:'LOW_PREPARE_ONLY_SINGLE_PASS',idempotency:'FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[table('erp_restore_stage_inventory_items'),fn('erp_finalize_restore_upload(uuid)')],
+    postconditions:[fn('erp_finalize_restore_upload(uuid)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['statement_timeout=25s'],
+      definitionIncludes:['json_object_agg','json_agg','CLOUD_RESTORE_PREPARE_TIMEOUT','STALE_RESTORE_PREPARE'],
+    }),fn('erp_cloud_restore_stage_candidate(uuid,text,jsonb,timestamp with time zone)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,
+      definitionIncludes:['supplied_columns AS MATERIALIZED','jsonb_object_keys','DUPLICATE_CANONICAL_ID'],
+    })],
+  },
   '060': {
     sourceFile:'060_restore_prepare_bounded_finalize.sql',dependencies:['059'],
     risk:'LOW_PREPARE_ONLY_BOUNDED_ASSEMBLY',idempotency:'FUNCTION_REPLACEMENT',
@@ -50,7 +64,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
     postconditions:[fn('erp_finalize_restore_upload(uuid)',{
       owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
       requiredConfig:['statement_timeout=25s'],
-      definitionIncludes:['CLOUD_RESTORE_PREPARE_TIMEOUT','jsonb_object_agg','STALE_RESTORE_PREPARE'],
+      definitionIncludes:['CLOUD_RESTORE_PREPARE_TIMEOUT','STALE_RESTORE_PREPARE','CLOUD_RESTORE_UPLOAD_INCOMPLETE'],
     })],
   },
   '059': {

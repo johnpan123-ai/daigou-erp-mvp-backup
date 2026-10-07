@@ -17,7 +17,8 @@ assert.doesNotMatch(executeBody,/erp_cloud_restore_snapshot\(|jsonb_populate_rec
 assert.match(executeBody,/STALE_RESTORE_PREPARE/u);
 const compatibility='059_restore_typed_stage_dashboard_compatibility.sql';
 const finalizeMigration='060_restore_prepare_bounded_finalize.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration].includes(f))});
+const singlePassMigration='061_restore_prepare_single_pass_json.sql';
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration,singlePassMigration].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try {
  const r=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
@@ -35,8 +36,18 @@ try {
  await db.sql.query(sql);
  await db.sql.query(await readFile('supabase/sql/'+compatibility,'utf8'));
  await db.sql.query(await readFile('supabase/sql/'+finalizeMigration,'utf8'));
+ await db.sql.query(await readFile('supabase/sql/'+singlePassMigration,'utf8'));
  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
  const typedProof=(await db.sql.query('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) r',[candidate.data,candidate.manifest,'strict','isolated',randomUUID()])).rows[0].r;
+ assert.equal(typedProof.prepared_payload_hash,proof.prepared_payload_hash);
+ assert.deepEqual(typedProof.table_counts,proof.table_counts);
+ assert.deepEqual(typedProof.integrity,proof.integrity);
+ const suppliedKeys=(await db.sql.query(`with supplied_columns as materialized (
+   select distinct supplied.key from jsonb_array_elements($1::jsonb) row_value
+   cross join lateral jsonb_object_keys(row_value) supplied(key)
+ ) select array_agg(key order by key) keys from supplied_columns`,
+ [JSON.stringify([{id:'first'},{id:'second',late_nullable:null,late_value:'present'}])])).rows[0].keys;
+ assert.deepEqual(suppliedKeys,['id','late_nullable','late_value']);
  assert.equal((await db.sql.query('select public.erp_restore_staged_cloud_snapshot($1,$2,$3,$4,$5) r',[randomUUID(),typedProof.proof_id,candidate.manifest.snapshotFingerprint,candidate.manifest,'isolated'])).rows[0].r.ok,true);
  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
  const invalidGrants=(await db.sql.query("select count(*)::int n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') and (c.relname like 'erp_restore_stage_%' or c.relname in ('erp_restore_upload_requests','erp_restore_upload_chunks','erp_restore_business_generation')) and (not c.relrowsecurity or not c.relforcerowsecurity or has_table_privilege('anon',c.oid,'SELECT') or has_table_privilege('authenticated',c.oid,'SELECT'))")).rows[0].n;
@@ -98,5 +109,5 @@ try {
  assert.equal(r.classifyCloudRestoreCommitOutcome({outcome:r.assertCloudRestoreAttemptOutcome(failed)}),'DATABASE_INTERRUPTED_NOT_COMMITTED');
  assert.match(safe.normalizeCloudRestoreSubmitError({code:failed.failure.code},'rpc',{source:'server-response'}).message,/原資料保持不變/u);
  assert.match(safe.normalizeCloudRestoreSubmitError({code:'57014',message:'CLOUD_RESTORE_PREPARE_TIMEOUT'},'readiness',{source:'server-response'}).message,/尚未進入業務還原/u);
- console.log(JSON.stringify({trueLiveState057to058and059and060:'PASS',migrationBusinessMutation:0,stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',authenticatedTransport:'PASS',transportRuns,sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS',prepareTimeoutHumanMessage:'PASS'}));
+ console.log(JSON.stringify({trueLiveState057to061:'PASS',migrationBusinessMutation:0,preparedHashParity:'PASS',lateSuppliedColumns:'PASS',stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',authenticatedTransport:'PASS',transportRuns,sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS',prepareTimeoutHumanMessage:'PASS'}));
 }finally{await vite.close();await db.close();}
