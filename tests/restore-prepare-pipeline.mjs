@@ -6,7 +6,7 @@ import {createServer} from 'vite';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
 import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
 const migration='063_restore_prepare_draft_proof_initialization.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>f!==migration)});
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,'064_restore_bounded_chunk_batch_and_identity_profile.sql'].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 const a=new pg.Client({connectionString:db.url.toString()}),b=new pg.Client({connectionString:db.url.toString()});
 try {
@@ -42,18 +42,23 @@ try {
   calls.push({name,resource:args.p_resource});active++;maxActive=Math.max(maxActive,active);
   if(name==='erp_stage_restore_upload_resource')assert.equal(completed.get(args.p_resource)??0,Math.ceil(candidate.data[args.p_resource].length/512));
   await new Promise(r=>setTimeout(r,2));
-  if(name==='erp_upload_restore_chunk')completed.set(args.p_resource,(completed.get(args.p_resource)??0)+1);
+  for(const part of name==='erp_upload_restore_chunk'?[args]:name==='erp_upload_restore_chunk_batch'?args.p_chunks:[])
+   completed.set(part.p_resource,(completed.get(part.p_resource)??0)+1);
   active--;return {data:{ok:true},error:null};
  },candidate,candidate.data,'strict',randomUUID());
  assert.ok(maxActive<=4);
  const firstNonemptyStage=calls.findIndex(c=>c.name==='erp_stage_restore_upload_resource'&&candidate.data[c.resource].length>0);
- assert.ok(calls.slice(firstNonemptyStage+1).some(c=>c.name==='erp_upload_restore_chunk'));
+ assert.ok(calls.slice(firstNonemptyStage+1).some(c=>c.name.startsWith('erp_upload_restore_chunk')));
  assert.equal(calls.at(-1).name,'erp_finalize_restore_upload');
- for(const failure of ['erp_upload_restore_chunk','erp_stage_restore_upload_resource']){
+ for(const failure of ['erp_upload_restore_chunk_batch','erp_stage_restore_upload_resource']){
   let finalized=false;
   await assert.rejects(()=>upload.uploadCloudRestoreCandidate(async(name)=>{if(name==='erp_finalize_restore_upload')finalized=true;return {data:{},error:name===failure?{code:'42501'}:null};},candidate,candidate.data,'strict',randomUUID()),upload.CloudRestoreUploadServerError);
   assert.equal(finalized,false);
  }
+ const singletonData=Object.fromEntries(restore.CLOUD_RESTORE_TABLES.map(([,resource])=>[resource,resource==='inventory_items'?candidate.data.inventory_items.slice(0,1):[]]));
+ let singletonFinalized=false;
+ await assert.rejects(()=>upload.uploadCloudRestoreCandidate(async(name)=>{if(name==='erp_finalize_restore_upload')singletonFinalized=true;return {data:{},error:name==='erp_upload_restore_chunk'?{code:'42501'}:null};},candidate,singletonData,'strict',randomUUID()),upload.CloudRestoreUploadServerError);
+ assert.equal(singletonFinalized,false);
  const input={cloudMode:true,authenticated:true,owner:true};let refreshCalls=0;
  connectivity.markCloudReadFresh(1);
  assert.equal((await safe.ensureCloudRestorePrepareReadiness(input,async()=>{refreshCalls++;return true;})).allowed,true);assert.equal(refreshCalls,0);

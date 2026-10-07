@@ -41,6 +41,8 @@ export interface CloudRestoreCandidateProofResult {
   proofId: string;
   proofExpiresAt: string;
   requestId: string;
+  /** Local performance metadata only; never part of durable proof/identity. */
+  prepareTransportTimingsMs?: Record<string, number>;
 }
 
 export interface CloudRestoreCandidateProofBinding {

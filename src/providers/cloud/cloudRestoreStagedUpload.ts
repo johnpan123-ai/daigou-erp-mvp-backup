@@ -13,6 +13,7 @@ export async function uploadCloudRestoreCandidate(
   sourceData: CloudRestoreCandidate['data'],
   mode: 'strict' | 'cross-environment',
   requestId: string,
+  onTimings?: (timings: Record<string, number>) => void,
 ): Promise<unknown> {
   const started = performance.now();
   const call = async (name: string, args: Record<string, unknown>) => {
@@ -29,6 +30,37 @@ export async function uploadCloudRestoreCandidate(
       p_rows: rows.slice(ordinal * 512, (ordinal + 1) * 512),
     }));
   });
+  const beginMs = performance.now() - started;
+  const packingStarted = performance.now();
+  const batches: typeof chunks[] = [];
+  let batch: typeof chunks = [];
+  let batchBytes = 2;
+  const encoder = new TextEncoder();
+  for (const chunk of chunks) {
+    const bytes = encoder.encode(JSON.stringify({ p_resource: chunk.p_resource, p_ordinal: chunk.p_ordinal, p_rows: chunk.p_rows })).length + 1;
+    if (batch.length > 0 && (batch.length === 4 || batchBytes + bytes > 1024 * 1024)) {
+      batches.push(batch); batch = []; batchBytes = 2;
+    }
+    batch.push(chunk); batchBytes += bytes;
+  }
+  if (batch.length > 0) batches.push(batch);
+  const packingMs = performance.now() - packingStarted;
+  const sendBatch = async (parts: typeof chunks): Promise<void> => {
+    if (parts.length === 1) { await call('erp_upload_restore_chunk', parts[0]); return; }
+    try {
+      await call('erp_upload_restore_chunk_batch', { p_request_id: requestId,
+        p_chunks: parts.map(({ p_resource, p_ordinal, p_rows }) => ({ p_resource, p_ordinal, p_rows })) });
+    } catch (error) {
+      const response = error instanceof CloudRestoreUploadServerError ? error.response : null;
+      if (!response || typeof response !== 'object' || !('message' in response)
+        || response.message !== 'CLOUD_RESTORE_UPLOAD_BATCH_SIZE_LIMIT') throw error;
+      // A conclusively rejected, zero-insert oversized OPS batch only. Never
+      // retry an unknown response or Execute. Same immutable chunk identities.
+      const midpoint = Math.ceil(parts.length / 2);
+      await sendBatch(parts.slice(0, midpoint));
+      await sendBatch(parts.slice(midpoint));
+    }
+  };
   let cursor = 0;
   let failed = false;
   const resources = CLOUD_RESTORE_TABLES.map(([, resource]) => resource);
@@ -42,19 +74,21 @@ export async function uploadCloudRestoreCandidate(
   // only after all of ITS immutable chunks succeed, while other uploads can
   // continue. No full backup body, no Execute, no replay and no early finalize.
   await Promise.all(Array.from({ length: 4 }, async () => {
-    while (!failed && (stageQueue.length > 0 || cursor < chunks.length)) {
+    while (!failed && (stageQueue.length > 0 || cursor < batches.length)) {
       try {
         const resource = stageQueue.shift();
         if (resource !== undefined) {
           firstStageAtMs ??= performance.now() - started;
           await call('erp_stage_restore_upload_resource', { p_request_id: requestId, p_resource: resource });
         } else {
-          const chunk = chunks[cursor++];
-          await call('erp_upload_restore_chunk', chunk);
-          const left = remaining.get(chunk.p_resource)! - 1;
-          remaining.set(chunk.p_resource, left);
-          if (left === 0) stageQueue.push(chunk.p_resource);
-          uploaded += 1;
+          const parts = batches[cursor++];
+          await sendBatch(parts);
+          for (const chunk of parts) {
+            const left = remaining.get(chunk.p_resource)! - 1;
+            remaining.set(chunk.p_resource, left);
+            if (left === 0) stageQueue.push(chunk.p_resource);
+          }
+          uploaded += parts.length;
           if (uploaded === chunks.length) uploadCompletedAtMs = performance.now() - started;
         }
       } catch (error) { failed = true; throw error; }
@@ -63,10 +97,13 @@ export async function uploadCloudRestoreCandidate(
   const uploadAndStageMs = performance.now() - transferStarted;
   const finalizeStarted = performance.now();
   const result = await call('erp_finalize_restore_upload', { p_request_id: requestId });
+  const timings = { beginMs: Math.round(beginMs), packingMs: Math.round(packingMs),
+    uploadAndStageMs: Math.round(uploadAndStageMs), finalizeMs: Math.round(performance.now() - finalizeStarted),
+    totalMs: Math.round(performance.now() - started) };
+  onTimings?.(timings);
   console.info('[Cloud Restore Prepare]', { requestId, chunkCount: chunks.length,
-    uploadAndStageMs: Math.round(uploadAndStageMs), uploadCompletedAtMs: Math.round(uploadCompletedAtMs),
+    batchCount: batches.length, ...timings, uploadCompletedAtMs: Math.round(uploadCompletedAtMs),
     firstStageAtMs: firstStageAtMs === null ? null : Math.round(firstStageAtMs),
-    finalizeMs: Math.round(performance.now() - finalizeStarted),
-    totalMs: Math.round(performance.now() - started) });
+  });
   return result;
 }

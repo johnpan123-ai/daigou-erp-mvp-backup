@@ -324,6 +324,7 @@ export default function CloudAtomicRestorePanel({
       finishPhase('targetCompatibility');
       const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(prepared);
       finishPhase('uploadStageAndServerProof');
+      for (const [phase, ms] of Object.entries(proof.prepareTransportTimingsMs ?? {})) timings[`transport.${phase}`] = ms;
       if (candidateGenerationRef.current !== generation || proofRequestTokenRef.current !== proofToken) return;
       const currentUserId = user?.id ?? '';
       proofUserIdRef.current = currentUserId;

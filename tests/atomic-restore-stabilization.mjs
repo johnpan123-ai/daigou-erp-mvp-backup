@@ -39,6 +39,7 @@ try {
     const proof = await upload.uploadCloudRestoreCandidate(async (name,args) => {
       const specs={erp_begin_restore_upload:['p_request_id','p_manifest','p_restore_mode','p_source_environment'],
         erp_upload_restore_chunk:['p_request_id','p_resource','p_ordinal','p_rows'],
+        erp_upload_restore_chunk_batch:['p_request_id','p_chunks'],
         erp_stage_restore_upload_resource:['p_request_id','p_resource'],erp_finalize_restore_upload:['p_request_id']};
       assert.ok(specs[name]);
       const values=specs[name].map(k=>typeof args[k]==='object'?JSON.stringify(args[k]):args[k]);

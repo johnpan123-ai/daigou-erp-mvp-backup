@@ -20,7 +20,8 @@ const finalizeMigration='060_restore_prepare_bounded_finalize.sql';
 const singlePassMigration='061_restore_prepare_single_pass_json.sql';
 const resourceStageMigration='062_restore_resource_stage_and_projected_proof.sql';
 const draftProofMigration='063_restore_prepare_draft_proof_initialization.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration,singlePassMigration,resourceStageMigration,draftProofMigration].includes(f))});
+const batchMigration='064_restore_bounded_chunk_batch_and_identity_profile.sql';
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration,singlePassMigration,resourceStageMigration,draftProofMigration,batchMigration].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try {
  const r=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
@@ -41,6 +42,7 @@ try {
  await db.sql.query(await readFile('supabase/sql/'+singlePassMigration,'utf8'));
  await db.sql.query(await readFile('supabase/sql/'+resourceStageMigration,'utf8'));
  await db.sql.query(await readFile('supabase/sql/'+draftProofMigration,'utf8'));
+ await db.sql.query(await readFile('supabase/sql/'+batchMigration,'utf8'));
  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
  const typedProof=(await db.sql.query('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) r',[candidate.data,candidate.manifest,'strict','isolated',randomUUID()])).rows[0].r;
  assert.equal(typedProof.prepared_payload_hash,proof.prepared_payload_hash);
@@ -85,7 +87,7 @@ try {
  let finalized=false;
  await assert.rejects(()=>upload.uploadCloudRestoreCandidate(async(name)=>{
    if(name==='erp_finalize_restore_upload')finalized=true;
-   return {data:{},error:name==='erp_upload_restore_chunk'?{code:'42501'}:null};
+   return {data:{},error:name.startsWith('erp_upload_restore_chunk')?{code:'42501'}:null};
  },candidate,candidate.data,'strict',randomUUID()),upload.CloudRestoreUploadServerError);
  assert.equal(finalized,false);
  // Exercise the actual authenticated PostgREST entry point with the exact
@@ -114,7 +116,7 @@ try {
  assert.equal(r.classifyCloudRestoreCommitOutcome({outcome:r.assertCloudRestoreAttemptOutcome(failed)}),'DATABASE_INTERRUPTED_NOT_COMMITTED');
  assert.match(safe.normalizeCloudRestoreSubmitError({code:failed.failure.code},'rpc',{source:'server-response'}).message,/原資料保持不變/u);
  assert.match(safe.normalizeCloudRestoreSubmitError({code:'57014',message:'CLOUD_RESTORE_PREPARE_TIMEOUT'},'readiness',{source:'server-response'}).message,/尚未進入業務還原/u);
- const summary={trueLiveState057to063:'PASS',migrationBusinessMutation:0,preparedHashParity:'PASS',lateSuppliedColumns:'PASS',stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',authenticatedTransport:'PASS',transportRuns,sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS',prepareTimeoutHumanMessage:'PASS'};
+ const summary={trueLiveState057to064:'PASS',migrationBusinessMutation:0,preparedHashParity:'PASS',lateSuppliedColumns:'PASS',stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',authenticatedTransport:'PASS',transportRuns,sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS',prepareTimeoutHumanMessage:'PASS'};
  if(process.env.ERP2_RESTORE_TRANSPORT_TEST_OUTPUT){
   assert.match(process.env.ERP2_RESTORE_TRANSPORT_TEST_OUTPUT,/^scratch\//u);
   await writeFile(process.env.ERP2_RESTORE_TRANSPORT_TEST_OUTPUT,JSON.stringify(summary,null,2));

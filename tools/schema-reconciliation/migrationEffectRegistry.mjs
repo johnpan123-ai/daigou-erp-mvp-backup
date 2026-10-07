@@ -42,6 +42,19 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '064': {
+    sourceFile:'064_restore_bounded_chunk_batch_and_identity_profile.sql',dependencies:['063'],
+    risk:'LOW_PREPARE_BOUNDED_TRANSPORT_AND_PROFILE',idempotency:'FUNCTION_REPLACEMENT_AND_ADDITIVE_RPC',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[fn('erp_restore_initialize_upload_proof()')],
+    postconditions:[fn('erp_upload_restore_chunk_batch(uuid,jsonb)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['statement_timeout=25s'],definitionIncludes:['CLOUD_RESTORE_UPLOAD_BATCH_SIZE_LIMIT','BETWEEN 1 AND 4','erp_upload_restore_chunk'],
+    }),fn('erp_cloud_restore_prepared_profile(uuid,text)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,
+      definitionIncludes:['flattened AS MATERIALIZED','SELECT CASE WHEN btrim','identity_value','duplicateAuxiliaryIdentityCount'],
+    })],
+  },
   '063': {
     sourceFile:'063_restore_prepare_draft_proof_initialization.sql',dependencies:['062'],
     risk:'LOW_PREPARE_DRAFT_INITIALIZATION',idempotency:'ONE_TIME_PRIVATE_OPS_TRIGGER',

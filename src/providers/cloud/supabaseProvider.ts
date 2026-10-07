@@ -437,9 +437,10 @@ export class SupabaseProvider implements IDataProvider {
     const requestId = crypto.randomUUID();
     recordCloudRestoreRpcIntent({ requestId, rpcName: CLOUD_RESTORE_CANDIDATE_PROOF_RPC });
     let data: unknown;
+    let prepareTransportTimingsMs: Record<string, number> | undefined;
     try {
       data = await uploadCloudRestoreCandidate((name, args) => supabase.rpc(name, args),
-        candidate, effective.sourceData, effective.mode, requestId);
+        candidate, effective.sourceData, effective.mode, requestId, timings => { prepareTransportTimingsMs = timings; });
     } catch (caughtError) {
       if (caughtError instanceof CloudRestoreUploadServerError) {
         try { markCloudRequestFailed(caughtError.response); } catch { /* Preserve the server error. */ }
@@ -449,7 +450,7 @@ export class SupabaseProvider implements IDataProvider {
       throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
     }
     markCloudReachable();
-    return assertCloudRestoreCandidateProofResult(data, candidate);
+    return { ...assertCloudRestoreCandidateProofResult(data, candidate), prepareTransportTimingsMs };
   }
 
   private readonly mutationCache = new CloudTargetedCache();
