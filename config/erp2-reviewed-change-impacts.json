@@ -5360,6 +5360,214 @@
           "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 canonical v9 unchanged."
         }
       ]
+    },
+    {
+      "id": "restore-explicit-intent-and-pending-sync-v2",
+      "beforeHead": "a9351a7130ec46d9d443302f7ca8e06b61ddd7aa",
+      "reviewedHead": "d0805e9a5fb44ce41006eab28fa48210d7ad905d",
+      "patchSha256": "6458c91023866644d7b5507f1d5c482cafa40eee05641281446198c1e8f18450",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "execute-envelope",
+        "sync",
+        "registry",
+        "cloud-next"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "2ce737fcdf22f112bd03c8decebfef5aa496b756c84bd804ec7b76e5d6e68a99",
+          "afterHash": "95f97597afc6bea2d835ddef79acde109641819b2b8d96e73e64cf85f4c781a3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "assertReviewedRestoreOrchestrationContract",
+            "assertReviewedProviderContract",
+            "inspectSafeDescendant"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "src/components/CloudAtomicRestorePanel.tsx",
+          "beforeHash": "0617f1351e4c0d8f8537d0e431d6d3c89f2caf66cd13d0c8387156dc331ce5c0",
+          "afterHash": "ff3bbe48703cc68efda4ae1fa0705f307a27e317a39e2ccf16c03316b0d2e944",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "selectFile",
+            "resetPreparedRestore",
+            "confirmRestore",
+            "checkOutcome",
+            "submitRestore",
+            "finishVerifiedRestore",
+            "pending-recovery effect"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "src/contexts/CloudRealtimeSyncContext.tsx",
+          "beforeHash": "5b2575b4ae0680b7ff2b8ef3f31d7d14eb2851941b23ce1327b950de13cd9b26",
+          "afterHash": "54463834997c9238c4a9f13c4da784067abc2bd630f93843f1c1dd49f8849dfa",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "CloudRealtimeSyncBoundary matching-attempt pending/completion presentation"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "src/contexts/globalSyncPresentation.ts",
+          "beforeHash": "359283b13889378a18a4ce04d7c5a1ba6dec030de9acd285487ec72fb4ff4f6b",
+          "afterHash": "040d94d1ecb9022c76ff7f13d41e9652b72c196abb236066059e6c457ff5a62c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "resolveGlobalSyncPresentation"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "src/providers/cloud/cloudRestoreSubmit.ts",
+          "beforeHash": "1c1619bec584ef1b1a3f1780076b793e5ce0407dfe94e488302e90e65ca36531",
+          "afterHash": "d8429034e29e974f2360a6ab31443c20c2558a432d734130a0f8390c9d4b35fa",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "readOrCreateCloudRestoreIntentIdentity"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "Existing session identity value updated for an explicit new intent; no new durable format/resource.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "tests/cloud-restore-execute-dispatch-boundary.mjs",
+          "beforeHash": "34fbdcd7264af6f136d9a669b91bee1a1d948da2192ab5768f49eff4af6886e8",
+          "afterHash": "c4f80c2fa9bf0eed809ae1faa47655e87c87353bbc018603bffe6b29b657c58c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "explicit-selection and same-request retry matrix"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "1ddd3673cf74d03e6384f655a8fa3ef665f2e834f1236ae0b021c20f3f6270f3",
+          "afterHash": "e0e30ca750e7e6c21aaa2fafbfdb30c05fa1aa2f9d8bce5ff45ac4c89e2e5290",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Restore exact-review and negative payload matrix"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        },
+        {
+          "file": "tests/promotion-sync-state.mjs",
+          "beforeHash": "3fdcc36b88c1f2bf9e509ea1aaaba1f56fef9860bddbe6beb5cb1a8107552a35",
+          "afterHash": "7298ca5943e56b7315a3d3508e4f5698a6543e29cf08d8b1703706d09abb60b4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "pending Restore vs fresh unrelated read matrix"
+          ],
+          "changedInputs": "Explicit newly selected/proved file intent; existing fingerprint/retry identity; matching attempt completion evidence.",
+          "changedOutputs": "Fresh request for a new explicit Restore; same request for retry; pending Global Sync until matching authoritative completion.",
+          "changedDurableFields": "NONE. Existing attempt/trace receipt and transient session identity format unchanged.",
+          "changedRpcContract": "NONE. Existing 269-byte proof-backed Execute and owner/CAS RPC signatures unchanged.",
+          "changedProviderContract": "Same existing Restore ports/payloads and receipt reconciliation. Only local intent selection and presentation orchestration.",
+          "changedBackupContract": "NONE. Same 24 resources, parser, serializers, checksums, relationships and Deadline contract.",
+          "changedSchemaExpectations": "NONE. Adopted canonical v17 fingerprint 9f0ba9726b207314d3bf536b761632b6923b5015f1894acec74c8419ef00ef8e unchanged.",
+          "changedIdentitySemantics": "A newly selected/proved file receives a new attempt/trace even for an equal fingerprint. Unresolved retry/reload never creates another attempt; server execution identity remains existing per-request contract.",
+          "dataFlow": "User file selection -> existing proof -> explicit intent -> unchanged atomic Execute -> existing readback/integrity -> matching completion presentation.",
+          "persistenceBehavior": "No new persistence; existing business transaction/receipt contract unchanged.",
+          "writePath": "Unchanged server atomic Restore, owner authorization, epoch/generation CAS and exactly-once receipt.",
+          "providerPath": "Existing Restore provider; no new network/storage/business sink.",
+          "externalContract": "No schema/RPC/Backup/Restore resource or serialization contract change.",
+          "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
+        }
+      ]
     }
   ]
 }
