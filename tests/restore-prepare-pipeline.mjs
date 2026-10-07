@@ -46,7 +46,7 @@ try {
    completed.set(part.p_resource,(completed.get(part.p_resource)??0)+1);
   active--;return {data:{ok:true},error:null};
  },candidate,candidate.data,'strict',randomUUID());
- assert.ok(maxActive<=2);
+ assert.ok(maxActive<=4);
  const firstNonemptyStage=calls.findIndex(c=>c.name==='erp_stage_restore_upload_resource'&&candidate.data[c.resource].length>0);
  assert.ok(calls.slice(firstNonemptyStage+1).some(c=>c.name.startsWith('erp_upload_restore_chunk')));
  assert.equal(calls.at(-1).name,'erp_finalize_restore_upload');

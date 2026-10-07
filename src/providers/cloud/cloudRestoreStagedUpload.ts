@@ -38,7 +38,7 @@ export async function uploadCloudRestoreCandidate(
   const encoder = new TextEncoder();
   for (const chunk of chunks) {
     const bytes = encoder.encode(JSON.stringify({ p_resource: chunk.p_resource, p_ordinal: chunk.p_ordinal, p_rows: chunk.p_rows })).length + 1;
-    if (batch.length > 0 && (batch.length === 2 || batchBytes + bytes > 512 * 1024)) {
+    if (batch.length > 0 && (batch.length === 4 || batchBytes + bytes > 1024 * 1024)) {
       batches.push(batch); batch = []; batchBytes = 2;
     }
     batch.push(chunk); batchBytes += bytes;
@@ -70,11 +70,10 @@ export async function uploadCloudRestoreCandidate(
   let uploadCompletedAtMs = chunks.length === 0 ? performance.now() - started : 0;
   let uploaded = 0;
   const transferStarted = performance.now();
-  // One shared pool bounds TOTAL concurrent RPCs at two. Live's small compute
-  // must not stage four large JSON bodies at once. A resource stages
+  // One shared pool bounds TOTAL concurrent RPCs at four. A resource stages
   // only after all of ITS immutable chunks succeed, while other uploads can
   // continue. No full backup body, no Execute, no replay and no early finalize.
-  await Promise.all(Array.from({ length: 2 }, async () => {
+  await Promise.all(Array.from({ length: 4 }, async () => {
     while (!failed && (stageQueue.length > 0 || cursor < batches.length)) {
       try {
         const resource = stageQueue.shift();

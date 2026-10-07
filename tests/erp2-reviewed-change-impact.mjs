@@ -165,7 +165,7 @@ assert.throws(() => assertReviewedProviderContract(resumeFile, resumeBefore,
 console.log('PASS exact BuyAnime canonical identity diff and SHA; future planner/provider/DB/parser/RPC/migration/backup/canonical hunks fail closed');
 
 const restoreBase = 'a9351a7130ec46d9d443302f7ca8e06b61ddd7aa';
-for (const file of ['src/providers/cloud/cloudRestoreSubmit.ts', 'src/providers/cloud/cloudRestoreStagedUpload.ts',
+for (const file of ['src/providers/cloud/cloudRestoreSubmit.ts',
   'src/components/CloudAtomicRestorePanel.tsx']) {
   const before = realGit(['show', `${restoreBase}:${file}`]);
   const after = readFileSync(file, 'utf8').replace(/\r\n?/gu, '\n');

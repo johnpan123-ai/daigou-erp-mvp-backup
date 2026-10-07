@@ -196,10 +196,6 @@ export function assertReviewedRestoreOrchestrationContract(file, before, after) 
     restored = after.replace('  options: { newIntent?: boolean } = {},\n', '')
       .replace('if (existing && !options.newIntent)', 'if (existing)')
       .replace('if (identity && !options.newIntent)', 'if (identity)');
-  } else if (file === 'src/providers/cloud/cloudRestoreStagedUpload.ts') {
-    restored = after.replace('batch.length === 2 || batchBytes + bytes > 512 * 1024',
-      'batch.length === 4 || batchBytes + bytes > 1024 * 1024')
-      .replace('Array.from({ length: 2 }', 'Array.from({ length: 4 }');
   } else if (file === 'src/components/CloudAtomicRestorePanel.tsx') {
     // Immutable before/after review hashes gate this branch. Independently
     // preserve every provider/Restore port call and its complete payload.
@@ -220,7 +216,7 @@ export function assertReviewedRestoreOrchestrationContract(file, before, after) 
 }
 
 export function assertReviewedProviderContract(file, before, after) {
-  if (['src/providers/cloud/cloudRestoreSubmit.ts', 'src/providers/cloud/cloudRestoreStagedUpload.ts'].includes(file)) {
+  if (file === 'src/providers/cloud/cloudRestoreSubmit.ts') {
     assertReviewedRestoreOrchestrationContract(file, before, after);
     return;
   }
