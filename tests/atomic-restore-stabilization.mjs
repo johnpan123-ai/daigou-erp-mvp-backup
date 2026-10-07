@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'vite';
 import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
@@ -14,9 +14,11 @@ const vite = await createServer({ configFile: false, optimizeDeps: { noDiscovery
   server: { middlewareMode: true, hmr: false } });
 const db = await isolatedDatabase();
 const result = { fixtureBytes: Buffer.byteLength(raw), prepareRuns: [], executeRuns: [], restartCount: 0 };
+const postmasterBefore=(await db.sql.query('select pg_postmaster_start_time() t')).rows[0].t;
 
 try {
   const restore = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
+  const upload = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreStagedUpload.ts');
   const candidate = await restore.prepareCloudRestoreSnapshot(raw, { fileName: 'CHAOS_BASELINE_B_VALID.json' });
   const candidateA = await restore.prepareCloudRestoreSnapshot(rawA, { fileName: 'STABILITY_BASELINE_A.json' });
   assert.equal(candidate.manifest.resourceCount, 24);
@@ -34,10 +36,13 @@ try {
       host: 'rhfdjsklfrgpoqsaqpkn.supabase.co', 'x-restore-request-id': requestId,
     })]);
     const started = performance.now();
-    const proof = (await db.sql.query(
-      'select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) result',
-      [source.data, source.manifest, 'strict', 'isolated-chaos', requestId],
-    )).rows[0].result;
+    const proof = await upload.uploadCloudRestoreCandidate(async (name,args) => {
+      const specs={erp_begin_restore_upload:['p_request_id','p_manifest','p_restore_mode','p_source_environment'],
+        erp_upload_restore_chunk:['p_request_id','p_resource','p_ordinal','p_rows'],erp_finalize_restore_upload:['p_request_id']};
+      assert.ok(specs[name]);
+      const values=specs[name].map(k=>typeof args[k]==='object'?JSON.stringify(args[k]):args[k]);
+      return {data:(await db.sql.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) result`,values)).rows[0].result,error:null};
+    }, {...source,sourceEnvironment:'isolated-chaos'}, source.data,'strict',requestId);
     const elapsed = performance.now() - started;
     assert.equal(proof.ok, true);
     assert.equal(proof.prepared_row_count, source.manifest.totalRows);
@@ -65,7 +70,8 @@ try {
     )).rows[0].result;
     const executeMs = performance.now() - started;
     assert.equal(restored.ok, true, JSON.stringify(restored));
-    assert.equal(restored.executeModel, 'prepared-chunks-v1');
+    assert.equal(restored.executeModel, 'typed-staged-generation-v2');
+    assert.equal(restored.timingsMs.beforeSnapshot, 0);
     assert.equal(restored.restoreEpoch, beforeEpoch + 1);
     assert.equal((await db.sql.query('select count(*)::int n from public.erp_cloud_restore_prepared_chunks')).rows[0].n, 0);
     const audit = (await db.sql.query('select public.erp_read_cloud_restore_integrity_audit() result')).rows[0].result;
@@ -74,6 +80,9 @@ try {
   };
 
   const directWarmup = await prove();
+  const typedPlan=(await db.sql.query('explain (analyze,buffers,format json) select * from public.erp_restore_stage_inventory_items where restore_proof_id=$1',[directWarmup.proof.proof_id])).rows[0]['QUERY PLAN'][0];
+  const decodedPlan=(await db.sql.query('explain (analyze,buffers,format json) select r.* from public.erp_cloud_restore_prepared_chunks c cross join lateral jsonb_populate_recordset(null::public.inventory_items,c.rows) r where c.proof_id=$1 and c.resource=$2',[directWarmup.proof.proof_id,'inventory_items'])).rows[0]['QUERY PLAN'][0];
+  result.inventoryReadPlans={typedMs:typedPlan['Execution Time'],legacyDecodeMs:decodedPlan['Execution Time'],typedNode:typedPlan.Plan['Node Type'],legacyNode:decodedPlan.Plan['Node Type'],newIndexAdded:false};
   const directStarted = performance.now();
   const direct = (await db.sql.query(
     'select public.erp_restore_staged_cloud_snapshot($1,$2,$3,$4,$5) result',
@@ -221,8 +230,29 @@ try {
   await db.sql.query('drop trigger restore_057_failure_probe on public.waca_state; drop function public.restore_057_failure_probe()');
   await semanticDifferences(candidateA);
   result.processInterruptionRollback = 'PASS';
+  // A real business statement after Prepare invalidates the immutable source
+  // generation, even when it changes a field not present in the target proof.
+  const stalePrepared = await prepareEnvelope(candidate);
+  await db.sql.query("update public.product_groups set title=title||' CAS PROBE' where id=(select id from public.product_groups limit 1)");
+  const sourceBeforeStale = (await db.sql.query('select public.erp_cloud_restore_snapshot() data')).rows[0].data;
+  const staleResult = (await db.sql.query(
+    'select public.erp_restore_proven_cloud_snapshot_attempt($1,$2,$3,$4,$5) result', stalePrepared.values)).rows[0].result;
+  assert.equal(staleResult.status, 'not_committed');
+  assert.equal(staleResult.failure.category, 'STALE');
+  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() data')).rows[0].data,sourceBeforeStale);
+  assert.equal(Number((await db.sql.query('select epoch from public.erp_cloud_restore_epoch where singleton')).rows[0].epoch),stalePrepared.beforeEpoch);
+  result.sourceGenerationCAS = 'PASS';
+  for (let run=0;run<5;run+=1) {
+    await execute(candidate);
+    await execute(candidateA);
+    await semanticDifferences(candidateA);
+  }
+  result.exactBtoAFiveRuns = '5/5 COMMITTED + EXACT';
   result.partialWrite = 0;
+  assert.deepEqual((await db.sql.query('select pg_postmaster_start_time() t')).rows[0].t,postmasterBefore);
+  result.postmasterUnchanged='PASS';
   console.log(JSON.stringify(result));
+  if(process.env.ERP2_RESTORE_TEST_OUTPUT) await writeFile(process.env.ERP2_RESTORE_TEST_OUTPUT,JSON.stringify(result,null,2));
 } finally {
   await vite.close();
   await db.close();

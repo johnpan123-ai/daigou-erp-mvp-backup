@@ -42,6 +42,35 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '058': {
+    sourceFile:'058_restore_execute_generation_and_typed_stage.sql',dependencies:['057'],
+    risk:'MEDIUM_ATOMIC_RESTORE_EXECUTION_REPLACEMENT',idempotency:'ONE_TIME_SCHEMA_AND_FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[table('erp_cloud_restore_prepared_chunks'),fn('erp_restore_staged_cloud_snapshot(uuid,uuid,text,jsonb,text)')],
+    postconditions:[
+      table('erp_restore_business_generation',{rls:true,forceRls:true}),
+      table('erp_restore_upload_requests',{rls:true,forceRls:true}),
+      table('erp_restore_upload_chunks',{rls:true,forceRls:true}),
+      column('erp_cloud_restore_candidate_proofs','source_generation','bigint'),
+      column('erp_cloud_restore_candidate_proofs','source_restore_epoch','bigint'),
+      ...[...RESTORE_TABLES,'dashboard_category_images','import_batches',...WACA_TABLES].map(name=>
+        table(`erp_restore_stage_${name}`,{rls:true,forceRls:true})),
+      fn('erp_restore_track_business_generation()', {securityDefiner:true,authenticatedExecute:false,anonExecute:false}),
+      fn('erp_cloud_restore_validate_live_waca()', {securityDefiner:true,authenticatedExecute:false,anonExecute:false}),
+      fn('erp_begin_restore_upload(uuid,jsonb,text,text)', {securityDefiner:true,authenticatedExecute:true,anonExecute:false}),
+      fn('erp_upload_restore_chunk(uuid,text,integer,jsonb)', {securityDefiner:true,authenticatedExecute:true,anonExecute:false}),
+      fn('erp_finalize_restore_upload(uuid)', {securityDefiner:true,authenticatedExecute:true,anonExecute:false}),
+      fn('erp_restore_audit_identity_compatibility(uuid[])', {securityDefiner:true,authenticatedExecute:true,anonExecute:false}),
+      fn('erp_restore_staged_cloud_snapshot(uuid,uuid,text,jsonb,text)',{
+        securityDefiner:true,authenticatedExecute:false,anonExecute:false,
+        definitionIncludes:['STALE_RESTORE_PREPARE','SOURCE_GENERATION','typed-staged-generation-v2'],
+      }),
+      fn('erp_prove_cloud_restore_candidate_v2(jsonb,jsonb,text,text,uuid)',{
+        securityDefiner:true,authenticatedExecute:true,anonExecute:false,
+        definitionIncludes:['source_generation','source_restore_epoch','prepareTimingsMs'],
+      }),
+    ],
+  },
   '057': {
     sourceFile:'057_atomic_restore_staged_execution_and_validation.sql',dependencies:['056'],
     risk:'MEDIUM_ATOMIC_RESTORE_EXECUTION_REPLACEMENT',idempotency:'ONE_TIME_SCHEMA_AND_FUNCTION_REPLACEMENT',

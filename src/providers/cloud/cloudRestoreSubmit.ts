@@ -93,6 +93,8 @@ const definition = (
 ): SafeErrorDefinition => Object.freeze({ code, classification, message, outcome });
 
 const safeDefinitions = new Map<string, SafeErrorDefinition>();
+safeDefinitions.set('STALE_RESTORE_PREPARE', definition('STALE_RESTORE_PREPARE', 'server',
+  '安全檢查後來源資料已變更，本次未提交。請重新選取備份並完成安全檢查。', 'failed'));
 for (const [category, message] of Object.entries({
   TIMEOUT: '還原執行已取消（逾時或查詢取消），業務交易已回滾。',
   VALIDATION: '還原資料未通過伺服器驗證，業務交易已回滾。',
@@ -100,6 +102,7 @@ for (const [category, message] of Object.entries({
   CONSTRAINT: '還原資料不符合資料庫約束，業務交易已回滾。',
   AUTHORIZATION: '還原權限驗證失敗，業務交易已回滾。',
   STALE: '還原基準版本已變更，本次未提交。',
+  DATABASE_INTERRUPTED: '資料庫在還原執行期間中斷，本次還原未提交，原資料保持不變。',
   INTERNAL: '伺服器內部處理失敗，業務交易已回滾；請提供追蹤編號。',
   UNKNOWN: '伺服器已確認本次未提交；原始錯誤原因未取得，請提供追蹤編號。',
 })) {
@@ -166,6 +169,7 @@ addDefinitions([
 ], 'validation', VALIDATION_MESSAGE, 'failed');
 
 for (const [code, message] of Object.entries({
+  OUTBOUND_TIMESTAMP_EVIDENCE_MISSING: '出庫備份缺少狀態時間證據，本次還原尚未寫入任何資料。',
   WACA_PAYLOAD_KEY_MISSING: 'WACA 訂單資料格式不完整，本次還原尚未寫入任何資料。',
   WACA_PAYLOAD_KEY_MISMATCH: 'WACA 訂單識別資料不一致，本次還原尚未寫入任何資料。',
   WACA_ORDER_STATUS_INVALID: 'WACA 訂單狀態無效，本次還原尚未寫入任何資料。',
@@ -295,6 +299,7 @@ const validCorrelationId = (value: unknown): string | undefined => (
 );
 
 const RESTORE_VALIDATION_REASONS = new Set([
+  'OUTBOUND_TIMESTAMP_EVIDENCE_MISSING',
   'WACA_PAYLOAD_KEY_MISSING','WACA_PAYLOAD_KEY_MISMATCH','WACA_ORDER_STATUS_INVALID',
   'WACA_QUANTITY_INVALID','WACA_DUPLICATE_BUSINESS_KEY','WACA_MAPPING_MISMATCH',
   'WACA_BUSINESS_KEY_MISSING','WACA_CANONICAL_IDENTITY_MISSING','WACA_ORDER_ITEM_ORPHAN',
@@ -302,6 +307,7 @@ const RESTORE_VALIDATION_REASONS = new Set([
   'WACA_CUTOVER_STATE_INVALID','WACA_RESTORE_RESOURCE_MISSING','WACA_QUANTITY_RECONCILIATION_FAILED',
 ]);
 const RESTORE_VALIDATION_RESOURCES = new Set([
+  'outbound_shipments',
   'waca','waca_orders','waca_order_items','waca_mappings','waca_master_links',
   'waca_import_batches','waca_cutover_audit','waca_state','product_variants',
 ]);

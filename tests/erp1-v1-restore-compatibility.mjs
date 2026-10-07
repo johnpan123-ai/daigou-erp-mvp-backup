@@ -130,12 +130,9 @@ try{
  // A fully rehashed v2 without timestamps must still fail; only validated
  // v1 may represent absent history as NULL.
  const missing=structuredClone(current.data);for(const row of missing.outbound_shipments)delete row.status_changed_at;
- const missingBuilt=await r.buildCloudRestoreManifest(missing);
- const missingDoc={...currentDoc,data:Object.fromEntries(r.CLOUD_RESTORE_TABLES.map(([key,t])=>[key,missingBuilt.data[t]])),manifest:missingBuilt.manifest};
- const missingCandidate=await r.prepareCloudRestoreSnapshot(missingDoc);
- assert.ok(missingCandidate.data.outbound_shipments.every(row=>!('status_changed_at' in row)),'NO_V2_DOWNGRADE');
- const failedMissing=await execute(await prepare(missingCandidate));
- assert.equal(failedMissing.ok,false);assert.equal(failedMissing.failure.code,'CLOUD_RESTORE_FAILURE_VALIDATION');
+ await assert.rejects(()=>r.buildCloudRestoreManifest(missing),e=>e.code==='OUTBOUND_TIMESTAMP_EVIDENCE_MISSING');
+ await assert.rejects(()=>db.sql.query('select public.erp_cloud_restore_validate_waca_dataset($1)',[missing]),
+   e=>e.code==='22023'&&e.message.includes('OUTBOUND_TIMESTAMP_EVIDENCE_MISSING'));
  assert.equal(hash((await readback()).data),hash(after.data),'MALFORMED_V2_FULL_ROLLBACK');
  negatives['current-timestamp-required']='FAIL_CLOSED';
  summary.malformed=negatives;

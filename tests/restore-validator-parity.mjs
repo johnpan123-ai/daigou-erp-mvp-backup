@@ -37,6 +37,9 @@ try {
     deadlineSidecar: { deadlineVerifiedMappings: [], deadlineApplyBatches: [], deadlineApplyItems: [] } });
 
   const cases = [
+    ['missing outbound timestamp', 'OUTBOUND_TIMESTAMP_EVIDENCE_MISSING', value => {
+      value.outbound_shipments=[{id:uuid(77),status:'pending'}];
+    }],
     ['valid order + valid item', null, () => {}],
     ['missing payload.key', 'WACA_PAYLOAD_KEY_MISSING', value => { value.waca_orders[0].payload = {}; }],
     ['order payload.key mismatch', 'WACA_PAYLOAD_KEY_MISMATCH', value => { value.waca_orders[0].payload.key = 'wrong'; }],

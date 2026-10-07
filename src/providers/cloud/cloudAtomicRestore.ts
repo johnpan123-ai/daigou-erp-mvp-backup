@@ -185,7 +185,8 @@ export function classifyCloudRestoreCommitOutcome(input: {
   }
   if (outcome?.status === 'not_committed') {
     if (outcome.failure?.evidence === 'caught-subtransaction') return 'EXECUTE_ROLLED_BACK';
-    if (outcome.failure?.evidence === 'reconciled-noncommit' && input.databaseInterrupted) {
+    if (outcome.failure?.evidence === 'reconciled-noncommit'
+      && (input.databaseInterrupted || outcome.failure.category === 'DATABASE_INTERRUPTED')) {
       return 'DATABASE_INTERRUPTED_NOT_COMMITTED';
     }
     return input.phase === 'prepare' ? 'PREPARE_REJECTED' : 'EXECUTE_REJECTED';
@@ -430,6 +431,12 @@ const assertInventoryKeyUniqueness = (data: CloudRestoreSnapshotData): void => {
 
 export const assertCurrentCloudRestoreDataContract = (data: CloudRestoreSnapshotData): void => {
   assertInventoryKeyUniqueness(data);
+  const missingOutboundTimestamp = data.outbound_shipments.find(row => !('status_changed_at' in row));
+  if (missingOutboundTimestamp) {
+    throw new CloudRestoreValidationError('OUTBOUND_TIMESTAMP_EVIDENCE_MISSING',
+      '出庫備份缺少狀態時間證據，本次尚未寫入任何資料。',
+      {resource:'outbound_shipments',rowIdentity:String(missingOutboundTimestamp.id),reasonCode:'OUTBOUND_TIMESTAMP_EVIDENCE_MISSING'});
+  }
   for (const [, table] of CLOUD_RESTORE_TABLES) {
     if (table.startsWith('waca_') && data[table].some(row => !UUID_PATTERN.test(String(row.id ?? '').trim()))) {
       throw new CloudRestoreValidationError(

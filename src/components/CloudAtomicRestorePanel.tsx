@@ -306,7 +306,10 @@ export default function CloudAtomicRestorePanel({
         source = await preserveLegacyCloudDashboardImages(source, targetImages);
       }
       setSourceCandidate(source);
-      const portable = await prepareCrossEnvironmentCloudRestoreCandidate(source, supabaseEnvironment.projectRef);
+      const preserveAuditIdentity = !source.legacyWacaBackup
+        && await dataProvider.canPreserveCloudRestoreAuditIdentity(source);
+      const portable = preserveAuditIdentity ? source
+        : await prepareCrossEnvironmentCloudRestoreCandidate(source, supabaseEnvironment.projectRef);
       const prepared = portable.portability && portable.portability.totalTransformedRows > 0 ? portable : source;
       const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(prepared);
       if (candidateGenerationRef.current !== generation || proofRequestTokenRef.current !== proofToken) return;
@@ -822,7 +825,7 @@ export default function CloudAtomicRestorePanel({
           </>}
           {result && <>
             <div>epoch after：{result.restoreEpoch}</div>
-            <div>rollback snapshot：<code>{result.rollbackSnapshotId}</code></div>
+            <div>來源復原證據：<code>{result.rollbackSnapshotId}</code></div>
             <div>canonical result：PASS</div>
           </>}
           {integrityAudit && <>

@@ -56,6 +56,7 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '055_authoritative_backup_json_transport.sql',
   '056_catalog_materialized_purchase_projection.sql',
   '057_atomic_restore_staged_execution_and_validation.sql',
+  '058_restore_execute_generation_and_typed_stage.sql',
 ]);
 
 // Checksum-bearing source history. These artifacts remain reviewable and are
@@ -80,6 +81,7 @@ export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
   '055_authoritative_backup_json_transport.sql',
   '056_catalog_materialized_purchase_projection.sql',
   '057_atomic_restore_staged_execution_and_validation.sql',
+  '058_restore_execute_generation_and_typed_stage.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,

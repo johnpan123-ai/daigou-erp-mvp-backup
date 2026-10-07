@@ -83,6 +83,7 @@
 })();
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
+import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError } from './cloudRestoreStagedUpload';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
@@ -423,27 +424,29 @@ export class SupabaseProvider implements IDataProvider {
     return readCloudRestoreIntegrityAudit(supabase);
   }
 
+  async canPreserveCloudRestoreAuditIdentity(candidate: CloudRestoreCandidate): Promise<boolean> {
+    const identities = [...new Set(Object.values(candidate.data).flatMap(rows => rows
+      .map(row => row.updated_by).filter((id): id is string => typeof id === 'string')))];
+    const {data,error} = await supabase.rpc('erp_restore_audit_identity_compatibility', {p_actor_ids:identities});
+    if(error) throw createCloudRestoreSafeSubmitError(error,'server-response');
+    if(typeof data !== 'boolean') throw createCloudRestoreSafeSubmitError({code:'CLOUD_RESTORE_PROOF_INPUT_INVALID'},'server-response');
+    return data;
+  }
   async proveCloudRestoreCandidate(candidate: CloudRestoreCandidate): Promise<CloudRestoreCandidateProofResult> {
     const effective = await assertCloudRestoreEffectiveCandidate(candidate);
     const requestId = crypto.randomUUID();
     recordCloudRestoreRpcIntent({ requestId, rpcName: CLOUD_RESTORE_CANDIDATE_PROOF_RPC });
     let data: unknown;
-    let error: unknown;
     try {
-      ({ data, error } = await supabase.rpc(CLOUD_RESTORE_CANDIDATE_PROOF_RPC, {
-        p_request_id: requestId,
-        p_source_snapshot: effective.sourceData,
-        p_manifest: candidate.manifest,
-        p_restore_mode: effective.mode,
-        p_source_environment: candidate.sourceEnvironment,
-      }));
+      data = await uploadCloudRestoreCandidate((name, args) => supabase.rpc(name, args),
+        candidate, effective.sourceData, effective.mode, requestId);
     } catch (caughtError) {
+      if (caughtError instanceof CloudRestoreUploadServerError) {
+        try { markCloudRequestFailed(caughtError.response); } catch { /* Preserve the server error. */ }
+        throw createCloudRestoreSafeSubmitError(caughtError.response, 'server-response');
+      }
       try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe transport error authoritative. */ }
       throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
-    }
-    if (error) {
-      try { markCloudRequestFailed(error); } catch { /* Keep the safe server error authoritative. */ }
-      throw createCloudRestoreSafeSubmitError(error, 'server-response');
     }
     markCloudReachable();
     return assertCloudRestoreCandidateProofResult(data, candidate);

@@ -1,6 +1,6 @@
 /** 041 returns only these safe codes; raw database messages never reach the UI. */
 export const CLOUD_RESTORE_FAILURE_CATEGORIES = [
-  'TIMEOUT', 'VALIDATION', 'PORTABILITY', 'CONSTRAINT', 'AUTHORIZATION', 'STALE', 'INTERNAL', 'UNKNOWN',
+  'TIMEOUT', 'VALIDATION', 'PORTABILITY', 'CONSTRAINT', 'AUTHORIZATION', 'STALE', 'INTERNAL', 'UNKNOWN', 'DATABASE_INTERRUPTED',
 ] as const;
 export type CloudRestoreFailureCategory = typeof CLOUD_RESTORE_FAILURE_CATEGORIES[number];
 export interface CloudRestoreFailure {

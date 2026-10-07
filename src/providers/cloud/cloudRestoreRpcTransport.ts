@@ -1,4 +1,7 @@
 const RESTORE_RPC_NAMES = new Set([
+  'erp_begin_restore_upload',
+  'erp_upload_restore_chunk',
+  'erp_finalize_restore_upload',
   'erp_prove_cloud_restore_candidate_v2',
   'erp_prepare_cloud_restore_attempt',
   'erp_restore_proven_cloud_snapshot_attempt',
