@@ -40,10 +40,23 @@ export async function uploadCloudRestoreCandidate(
     }
   }));
   const uploadMs = performance.now() - started;
+  // Decode full rows into private typed stages per resource. The final RPC
+  // validates a small semantic projection, never reassembles the whole backup.
+  const stageStarted = performance.now();
+  const resources = CLOUD_RESTORE_TABLES.map(([, resource]) => resource);
+  cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, resources.length) }, async () => {
+    while (!failed && cursor < resources.length) {
+      const resource = resources[cursor++];
+      try { await call('erp_stage_restore_upload_resource', { p_request_id: requestId, p_resource: resource }); }
+      catch (error) { failed = true; throw error; }
+    }
+  }));
+  const stageMs = performance.now() - stageStarted;
   const finalizeStarted = performance.now();
   const result = await call('erp_finalize_restore_upload', { p_request_id: requestId });
   console.info('[Cloud Restore Prepare]', { requestId, chunkCount: chunks.length,
-    uploadMs: Math.round(uploadMs), finalizeMs: Math.round(performance.now() - finalizeStarted),
+    uploadMs: Math.round(uploadMs), stageMs: Math.round(stageMs), finalizeMs: Math.round(performance.now() - finalizeStarted),
     totalMs: Math.round(performance.now() - started) });
   return result;
 }

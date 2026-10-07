@@ -26,12 +26,19 @@ const summary={exactFileSha256:sha(raw),parse:'PASS',legacyValidation:'PENDING',
 try{
  const r=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
  const p=await vite.ssrLoadModule('/src/providers/cloud/cloudRestorePortability.ts');
+ const upload=await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreStagedUpload.ts');
  const readback=async()=>r.buildCloudRestoreManifest((await db.sql.query('select public.erp_cloud_restore_snapshot() data')).rows[0].data);
  const oldTables=r.CLOUD_RESTORE_TABLES.filter(([,t])=>t!=='import_batches'&&!['dashboard_category_images','waca_orders','waca_order_items','waca_mappings','waca_master_links','waca_import_batches','waca_cutover_audit','waca_state'].includes(t));
  const prepare=async(candidate)=>{
    const request=randomUUID(),attempt=randomUUID(),trace=randomUUID();
-   const proof=(await db.sql.query('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) result',
-     [candidate.sourceData??candidate.data,candidate.manifest,candidate.portability?'cross-environment':'strict','isolated',request])).rows[0].result;
+   const proof=await upload.uploadCloudRestoreCandidate(async(name,args)=>{
+     const keys={erp_begin_restore_upload:['p_request_id','p_manifest','p_restore_mode','p_source_environment'],
+       erp_upload_restore_chunk:['p_request_id','p_resource','p_ordinal','p_rows'],
+       erp_stage_restore_upload_resource:['p_request_id','p_resource'],erp_finalize_restore_upload:['p_request_id']};
+     const values=keys[name].map(key=>typeof args[key]==='object'?JSON.stringify(args[key]):args[key]);
+     return {data:(await db.sql.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) result`,values)).rows[0].result,error:null};
+   },{...candidate,sourceEnvironment:'isolated'},candidate.sourceData??candidate.data,
+     candidate.portability?'cross-environment':'strict',request);
    assert.equal(proof.ok,true);
    await db.sql.query('select public.erp_prepare_cloud_restore_attempt($1,$2,$3,$4,$5,$6,$7,$8)',
      [attempt,trace,candidate.portability?.sourceSnapshotFingerprint??candidate.manifest.snapshotFingerprint,

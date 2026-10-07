@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { isolatedDatabase, uuid } from './helpers/saveability-isolated.mjs';
+import { randomUUID } from 'node:crypto';
 
 const vite = await createServer({ configFile: false, optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true, hmr: false } });
@@ -14,6 +15,8 @@ const reasonFrom = error => {
 
 try {
   const restore = await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
+  const upload = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreStagedUpload.ts');
+  await db.sql.query("select set_config('request.headers',$1,false)", [JSON.stringify({host:'rhfdjsklfrgpoqsaqpkn.supabase.co'})]);
   const submit = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreSubmit.ts');
   const data = structuredClone((await db.sql.query('select public.erp_cloud_restore_snapshot() data')).rows[0].data);
   const now = '2026-10-07T00:00:00.000Z';
@@ -61,12 +64,27 @@ try {
       ['local', async () => restore.assertCurrentCloudRestoreDataContract(candidate)],
       ['client', async () => restore.prepareCloudRestoreSnapshot(documentFor(candidate))],
       ['server', async () => db.sql.query('select public.erp_cloud_restore_validate_waca_dataset($1)', [candidate])],
+      ['resource-stage-server', async () => {
+        // Exercise real staging/finalization, not just the standalone validator.
+        // Invalid input deliberately bypasses client validation in the fixture.
+        const manifest=structuredClone(valid.manifest);
+        manifest.counts=Object.fromEntries(Object.entries(candidate).map(([resource,rows])=>[resource,rows.length]));
+        manifest.totalRows=Object.values(candidate).reduce((n,rows)=>n+rows.length,0);
+        await upload.uploadCloudRestoreCandidate(async(name,args)=>{
+          const keys={erp_begin_restore_upload:['p_request_id','p_manifest','p_restore_mode','p_source_environment'],
+            erp_upload_restore_chunk:['p_request_id','p_resource','p_ordinal','p_rows'],
+            erp_stage_restore_upload_resource:['p_request_id','p_resource'],erp_finalize_restore_upload:['p_request_id']};
+          const values=keys[name].map(key=>typeof args[key]==='object'?JSON.stringify(args[key]):args[key]);
+          return {data:(await db.sql.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) r`,values)).rows[0].r,error:null};
+        },{manifest,sourceEnvironment:'isolated-validator-parity'},candidate,'strict',randomUUID());
+      }],
     ]) {
       try { await run(); results[layer] = 'PASS'; }
       catch (error) { results[layer] = reasonFrom(error); }
     }
     const expectedResult = expected ?? 'PASS';
-    assert.deepEqual(results, { local: expectedResult, client: expectedResult, server: expectedResult }, name);
+    assert.deepEqual(results, { local: expectedResult, client: expectedResult, server: expectedResult,
+      'resource-stage-server':expectedResult }, name);
     matrix.push({ name, ...results });
   }
   const visible = submit.normalizeCloudRestoreSubmitError({

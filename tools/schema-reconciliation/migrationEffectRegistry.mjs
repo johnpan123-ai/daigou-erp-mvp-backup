@@ -42,6 +42,22 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '062': {
+    sourceFile:'062_restore_resource_stage_and_projected_proof.sql',dependencies:['061'],
+    risk:'MEDIUM_PREPARE_RESOURCE_STAGING',idempotency:'ONE_TIME_OPS_TABLE_AND_FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[table('erp_restore_upload_chunks'),fn('erp_finalize_restore_upload(uuid)')],
+    postconditions:[table('erp_restore_upload_resource_proofs',{rls:true,forceRls:true}),
+      fn('erp_restore_validation_projection(jsonb)',{authenticatedExecute:false,anonExecute:false,publicExecute:false}),
+      fn('erp_stage_restore_upload_resource(uuid,text)',{
+        owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+        requiredConfig:['statement_timeout=25s'],definitionIncludes:['STALE_RESTORE_PREPARE','STAGING','prepared_payload_hash IS NULL'],
+      }),fn('erp_finalize_restore_upload(uuid)',{
+        owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+        requiredConfig:['statement_timeout=25s'],definitionIncludes:['projected-semantic-proof','erp_cloud_restore_validate_waca_dataset',
+          'erp_cloud_restore_audit_dataset','erp_cloud_restore_validate_portability','CLOUD_RESTORE_PREPARE_TIMEOUT'],
+      })],
+  },
   '061': {
     sourceFile:'061_restore_prepare_single_pass_json.sql',dependencies:['060'],
     risk:'LOW_PREPARE_ONLY_SINGLE_PASS',idempotency:'FUNCTION_REPLACEMENT',
@@ -50,7 +66,9 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
     postconditions:[fn('erp_finalize_restore_upload(uuid)',{
       owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
       requiredConfig:['statement_timeout=25s'],
-      definitionIncludes:['json_object_agg','json_agg','CLOUD_RESTORE_PREPARE_TIMEOUT','STALE_RESTORE_PREPARE'],
+      // 062 replaces full aggregation with resource stages; the retained safety
+      // effects remain required, and 062 independently checks its replacement.
+      definitionIncludes:['json_object_agg','CLOUD_RESTORE_PREPARE_TIMEOUT','STALE_RESTORE_PREPARE'],
     }),fn('erp_cloud_restore_stage_candidate(uuid,text,jsonb,timestamp with time zone)',{
       owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,
       definitionIncludes:['supplied_columns AS MATERIALIZED','jsonb_object_keys','DUPLICATE_CANONICAL_ID'],

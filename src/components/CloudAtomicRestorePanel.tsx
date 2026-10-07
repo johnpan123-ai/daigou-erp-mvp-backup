@@ -694,8 +694,9 @@ export default function CloudAtomicRestorePanel({
     if (status === 'restoring' || status === 'checking') return '正在安全還原資料…';
     if (status === 'success') return '還原完成';
     if (status === 'unknown') return '還原結果需要查證，資料不會自動再次還原。';
-    if (status === 'error' && failureEvidence) return '還原失敗\n資料沒有被部分寫入。';
     if (status === 'error' && result) return '還原已提交，但結果驗證尚未通過。';
+    if (status === 'error' && visibleError) return formatCloudRestoreSubmitError(visibleError);
+    if (status === 'error' && failureEvidence) return '還原失敗\n資料沒有被部分寫入。';
     if (status === 'error') return '此備份目前無法安全還原。';
     return message;
   })();

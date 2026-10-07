@@ -19,14 +19,14 @@
     }
   },
   "schemaBaseline": {
-    "requiredBaselineId": "erp2-canonical-schema-v14-single-pass-restore-prepare",
+    "requiredBaselineId": "erp2-canonical-schema-v15-resource-staged-restore-proof",
     "evidenceContractVersion": 2,
     "fingerprintContractVersion": 3,
     "canonicalContract": "ERP2_SEMANTIC_SCHEMA_V3",
     "canonicalAlgorithm": "POSTGRESQL_LEXICAL_V3",
     "preAdoptionMode": "READ_ONLY_RECONCILIATION",
     "postAdoptionLedger": "public.erp_schema_migration_ledger",
-    "canonicalFingerprint": "6562d08f4cc5d0f35b9aecbdeedcd2b3c86fc95d937ae155d115d5acc802ed44",
+    "canonicalFingerprint": "565ff031016d373bbd09213ea68a2d98400c107cfe40f6493cb88ae8c60a2ba2",
     "snapshotToolChecksum": "ea74a283f565adc2af090284b3dfd78ac83b8ff5c24e71707867839b1e424281",
     "snapshotMaxAgeMs": 86400000,
     "liveObservationMaxAgeMs": 7200000
