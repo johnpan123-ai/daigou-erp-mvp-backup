@@ -9,7 +9,7 @@ import {planSchemaDelta} from '../tools/schema-reconciliation/reconcile.mjs';
 import {fingerprintStructuralSnapshot,fingerprintStructuralSnapshotV2} from '../tools/schema-reconciliation/schemaContract.mjs';
 const releaseStart=CANONICAL_FRESH_INSTALL_V3.indexOf('049_private_order_atomic_transaction.sql');
 const files=CANONICAL_FRESH_INSTALL_V3.slice(releaseStart);
-assert.deepEqual(files,['049_private_order_atomic_transaction.sql','050_catalog_atomic_transaction.sql','051_related_saveability_atomic_transactions.sql','052_waca_master_link_delta_merge.sql','053_outbound_status_changed_at_restore_compatibility.sql','054_authoritative_backup_json_aggregation.sql','055_authoritative_backup_json_transport.sql','056_catalog_materialized_purchase_projection.sql']);
+assert.deepEqual(files,['049_private_order_atomic_transaction.sql','050_catalog_atomic_transaction.sql','051_related_saveability_atomic_transactions.sql','052_waca_master_link_delta_merge.sql','053_outbound_status_changed_at_restore_compatibility.sql','054_authoritative_backup_json_aggregation.sql','055_authoritative_backup_json_transport.sql','056_catalog_materialized_purchase_projection.sql','057_atomic_restore_staged_execution_and_validation.sql']);
 const base=CANONICAL_FRESH_INSTALL_V3.slice(0,releaseStart);
 const read=p=>readFileSync(p,'utf8');
 const capture=async db=>{
@@ -24,7 +24,7 @@ try{
   upgrade=await isolatedDatabase({migrations:base});
   const before=await capture(upgrade);const plan=planSchemaDelta(before,registry);
   assert.equal(fingerprintStructuralSnapshotV2(before),'bc0cb320bb57dce141b7ce9c24990097f35ce739e441c7835fbe20ca5b64d317');
-  assert.equal(plan.readyForApply,true);assert.deepEqual(plan.applyPlan.map(e=>e.migrationId),['049','050','051','052','053','054','055','056']);
+  assert.equal(plan.readyForApply,true);assert.deepEqual(plan.applyPlan.map(e=>e.migrationId),['049','050','051','052','053','054','055','056','057']);
   assert.equal(plan.blockers.length,0);
   const businessSnapshot=async db=>(await db.sql.query('select public.erp_cloud_restore_snapshot() result')).rows[0].result;
   const oldBusiness=await businessSnapshot(upgrade);
@@ -34,7 +34,10 @@ try{
     await upgrade.sql.query(read('supabase/sql/'+file));
     const stage=planSchemaDelta(await capture(upgrade),registry);
     const remaining=files.slice(index+1).map(entry=>entry.slice(0,3));
-    assert.equal(stage.readyForApply,true);assert.equal(stage.blockers.length,0);
+    assert.equal(stage.readyForApply,true,JSON.stringify({file,blockers:stage.blockers,
+      states:stage.migrations.filter(entry=>entry.state!=='SATISFIED').map(entry=>({id:entry.migrationId,state:entry.state,
+        failed:entry.postconditions.filter(check=>check.result!=='MATCH')}))}));
+    assert.equal(stage.blockers.length,0);
     assert.deepEqual(stage.applyPlan.map(entry=>entry.migrationId),remaining);
     assert.deepEqual(await businessSnapshot(upgrade),oldBusiness,'Migration changed durable business data:'+file);
     partialPlans.push({applied:file.slice(0,3),remaining});
@@ -42,12 +45,16 @@ try{
   const after=await capture(upgrade);const canonical=await capture(fresh);
   const contract=JSON.parse(read('config/erp-environment-identity.json'));
   assert.equal(contract.schemaBaseline.canonicalFingerprint,fingerprintStructuralSnapshot(canonical),'Candidate canonical source identity stale');
-  assert.equal(contract.schemaBaseline.requiredBaselineId,'erp2-canonical-schema-v10-catalog-purchase-projection');
+  assert.equal(contract.schemaBaseline.requiredBaselineId,'erp2-canonical-schema-v11-atomic-restore-staged-execution');
   assert.equal(fingerprintStructuralSnapshot(after),fingerprintStructuralSnapshot(canonical),'Fresh/048-upgrade schema drift');
-  assert.deepEqual(Object.keys(after.tables).sort(),Object.keys(before.tables).sort(),'Migration added business tables');
+  const newTables=Object.keys(after.tables).filter(name=>!Object.hasOwn(before.tables,name));
+  assert.deepEqual(newTables,['public.erp_cloud_restore_prepared_chunks'],'Migration added an unexpected table');
   assert.deepEqual(await businessSnapshot(upgrade),oldBusiness,'Additive source changed business rows');
   const finalPlan=planSchemaDelta(after,registry);assert.equal(finalPlan.blockers.length,0);assert.equal(finalPlan.applyPlan.length,0);
-  for(const file of files)await upgrade.sql.query(read('supabase/sql/'+file));
+  for(const file of files.filter(file=>!file.startsWith('057_')))await upgrade.sql.query(read('supabase/sql/'+file));
+  await assert.rejects(()=>upgrade.sql.query(read('supabase/sql/057_atomic_restore_staged_execution_and_validation.sql')),
+    /RESTORE_057_COLLISION/u,'057 must fail closed on replay');
+  await upgrade.sql.query('rollback');
   assert.equal(fingerprintStructuralSnapshot(await capture(upgrade)),fingerprintStructuralSnapshot(after),'Migration reapply drift');
   for(const signature of ['erp_apply_private_order_transaction(uuid,jsonb)','erp_reconcile_private_order_transaction(uuid,jsonb)','erp_apply_catalog_transaction(uuid,jsonb)','erp_apply_related_transaction(uuid,jsonb)']){
     const acl=(await upgrade.sql.query(`select has_function_privilege('anon',$1,'execute') anon,
@@ -65,5 +72,5 @@ try{
   }
   console.log(JSON.stringify({PASS:true,engine:'native PostgreSQL',isolated048Delta:plan.applyPlan.map(e=>e.migrationId),freshUpgradeParity:true,
     v4Fingerprint:fingerprintStructuralSnapshotV2(before),semanticFingerprint:fingerprintStructuralSnapshot(after),partialPlans,
-    reapply:true,existingMigrationChecksumsUnchanged:true,ACL:true,newTables:0,newDurableResources:0,businessFixtureMutation:0,liveApply:0}));
+    reapply:true,existingMigrationChecksumsUnchanged:true,ACL:true,newTables:newTables.length,newOpsTables:newTables,newDurableResources:0,businessFixtureMutation:0,liveApply:0}));
 }finally{await upgrade?.close();await fresh.close();}

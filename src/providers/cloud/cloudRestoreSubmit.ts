@@ -45,6 +45,11 @@ export interface CloudRestoreVisibleError {
   phase: CloudRestoreSubmitPhase;
   outcome: Extract<CloudRestoreSubmitOutcome, 'not-submitted' | 'failed' | 'unknown'>;
   attemptCorrelationId?: string;
+  resource?: string;
+  rowIdentity?: string;
+  reasonCode?: string;
+  sqlstate?: string;
+  requestId?: string;
 }
 
 export interface CloudRestoreReadiness {
@@ -160,6 +165,23 @@ addDefinitions([
   'CLOUD_RESTORE_PROOF_REQUIRED',
 ], 'validation', VALIDATION_MESSAGE, 'failed');
 
+for (const [code, message] of Object.entries({
+  WACA_PAYLOAD_KEY_MISSING: 'WACA 訂單資料格式不完整，本次還原尚未寫入任何資料。',
+  WACA_PAYLOAD_KEY_MISMATCH: 'WACA 訂單識別資料不一致，本次還原尚未寫入任何資料。',
+  WACA_ORDER_STATUS_INVALID: 'WACA 訂單狀態無效，本次還原尚未寫入任何資料。',
+  WACA_QUANTITY_INVALID: 'WACA 訂單數量無效，本次還原尚未寫入任何資料。',
+  WACA_DUPLICATE_BUSINESS_KEY: 'WACA 訂單含重複識別資料，本次還原尚未寫入任何資料。',
+  WACA_BUSINESS_KEY_MISSING: 'WACA 訂單缺少必要識別資料，本次還原尚未寫入任何資料。',
+  WACA_CANONICAL_IDENTITY_MISSING: 'WACA 資料缺少 canonical identity，本次還原尚未寫入任何資料。',
+  WACA_ORDER_ITEM_ORPHAN: 'WACA 訂單明細找不到來源訂單，本次還原尚未寫入任何資料。',
+  WACA_MAPPING_VARIANT_INVALID: 'WACA 商品對照指向不存在的商品規格，本次還原尚未寫入任何資料。',
+  WACA_MASTER_LINK_INVALID: 'WACA 主檔連結指向不存在的商品規格，本次還原尚未寫入任何資料。',
+  WACA_MAPPING_MISMATCH: 'WACA 商品對照不一致，本次還原尚未寫入任何資料。',
+  WACA_CUTOVER_STATE_INVALID: 'WACA 數量來源狀態無效，本次還原尚未寫入任何資料。',
+  WACA_RESTORE_RESOURCE_MISSING: 'WACA 還原資源不完整，本次還原尚未寫入任何資料。',
+  WACA_QUANTITY_RECONCILIATION_FAILED: 'WACA 訂單與商品數量不一致，本次還原尚未寫入任何資料。',
+})) safeDefinitions.set(code, definition(code, 'validation', message, 'failed'));
+
 safeDefinitions.set(
   'CLOUD_RESTORE_TARGET_COMPATIBILITY_BLOCKED',
   definition('CLOUD_RESTORE_TARGET_COMPATIBILITY_BLOCKED', 'validation', TARGET_COMPATIBILITY_MESSAGE, 'not-submitted'),
@@ -272,6 +294,43 @@ const validCorrelationId = (value: unknown): string | undefined => (
   typeof value === 'string' && UUID_PATTERN.test(value) ? value : undefined
 );
 
+const RESTORE_VALIDATION_REASONS = new Set([
+  'WACA_PAYLOAD_KEY_MISSING','WACA_PAYLOAD_KEY_MISMATCH','WACA_ORDER_STATUS_INVALID',
+  'WACA_QUANTITY_INVALID','WACA_DUPLICATE_BUSINESS_KEY','WACA_MAPPING_MISMATCH',
+  'WACA_BUSINESS_KEY_MISSING','WACA_CANONICAL_IDENTITY_MISSING','WACA_ORDER_ITEM_ORPHAN',
+  'WACA_MAPPING_VARIANT_INVALID','WACA_MASTER_LINK_INVALID',
+  'WACA_CUTOVER_STATE_INVALID','WACA_RESTORE_RESOURCE_MISSING','WACA_QUANTITY_RECONCILIATION_FAILED',
+]);
+const RESTORE_VALIDATION_RESOURCES = new Set([
+  'waca','waca_orders','waca_order_items','waca_mappings','waca_master_links',
+  'waca_import_batches','waca_cutover_audit','waca_state','product_variants',
+]);
+interface RestoreValidationDetail {
+  resource?: string; rowIdentity?: string; reasonCode?: string; sqlstate?: string; requestId?: string;
+}
+const validationDetailFor = (error: unknown): RestoreValidationDetail => {
+  const directReason = safeOwnScalar(error, 'reasonCode') ?? safeOwnScalar(error, 'code');
+  const directResource = safeOwnScalar(error, 'resource');
+  const directRow = safeOwnScalar(error, 'rowIdentity');
+  const sqlstate = safeOwnScalar(error, 'sqlstate') ?? safeOwnScalar(error, 'code');
+  const requestId = safeOwnScalar(error, 'requestId');
+  if (directReason && RESTORE_VALIDATION_REASONS.has(directReason)) return {
+    reasonCode: directReason,
+    ...(directResource && RESTORE_VALIDATION_RESOURCES.has(directResource) ? { resource: directResource } : {}),
+    ...(directRow ? { rowIdentity: directRow.slice(0, 256) } : {}),
+    ...(sqlstate && /^[0-9A-Z]{5}$/u.test(sqlstate) ? { sqlstate } : {}),
+    ...(requestId && UUID_PATTERN.test(requestId) ? { requestId } : {}),
+  };
+  const message = safeOwnScalar(error, 'message') ?? '';
+  const match = /^RESTORE_VALIDATION_ERROR\|prepare\|([^|]+)\|([^|]+)\|([A-Z0-9_]+)$/u.exec(message);
+  if (!match || !RESTORE_VALIDATION_RESOURCES.has(match[1]) || !RESTORE_VALIDATION_REASONS.has(match[3])) return {};
+  return {
+    resource: match[1], rowIdentity: match[2].slice(0, 256), reasonCode: match[3],
+    ...(sqlstate && /^[0-9A-Z]{5}$/u.test(sqlstate) ? { sqlstate } : {}),
+    ...(requestId && UUID_PATTERN.test(requestId) ? { requestId } : {}),
+  };
+};
+
 const definitionFor = (error: unknown, source: CloudRestoreErrorSource): SafeErrorDefinition => {
   if (safeInstanceOf(error, CloudRestoreSafeSubmitError)) {
     const safeCode = safeOwnScalar(error, 'safeCode');
@@ -305,6 +364,7 @@ const visibleFromDefinition = (
   resolved: SafeErrorDefinition,
   phase: CloudRestoreSubmitPhase,
   attemptCorrelationId?: string,
+  detail: RestoreValidationDetail = {},
 ): CloudRestoreVisibleError => Object.freeze({
   classification: resolved.classification,
   code: resolved.code,
@@ -312,17 +372,24 @@ const visibleFromDefinition = (
   phase: SAFE_PHASES.has(phase) ? phase : 'submit',
   outcome: resolved.outcome,
   ...(validCorrelationId(attemptCorrelationId) ? { attemptCorrelationId } : {}),
+  ...detail,
 });
 
 class CloudRestoreSafeSubmitError extends Error {
   readonly safeCode: string;
   readonly safeClassification: CloudRestoreErrorClassification;
+  readonly resource?: string;
+  readonly rowIdentity?: string;
+  readonly reasonCode?: string;
+  readonly sqlstate?: string;
+  readonly requestId?: string;
 
-  constructor(resolved: SafeErrorDefinition) {
+  constructor(resolved: SafeErrorDefinition, detail: RestoreValidationDetail = {}) {
     super(resolved.message);
     this.name = 'CloudRestoreSafeSubmitError';
     this.safeCode = resolved.code;
     this.safeClassification = resolved.classification;
+    Object.assign(this, detail);
   }
 }
 
@@ -349,8 +416,10 @@ export const createCloudRestoreSafeSubmitError = (
   error: unknown,
   source: CloudRestoreErrorSource,
 ): CloudRestoreSafeSubmitError => {
-  const resolved = definitionFor(error, source);
-  return new CloudRestoreSafeSubmitError(resolved);
+  const detail = validationDetailFor(error);
+  const resolved = (detail.reasonCode ? safeDefinitions.get(detail.reasonCode) : undefined)
+    ?? definitionFor(error, source);
+  return new CloudRestoreSafeSubmitError(resolved, detail);
 };
 
 export const recordCloudRestoreSubmitDiagnostic = (
@@ -408,10 +477,13 @@ export const normalizeCloudRestoreSubmitError = (
   phase: CloudRestoreSubmitPhase,
   context: { source?: CloudRestoreErrorSource; attemptCorrelationId?: string } = {},
 ): CloudRestoreVisibleError => {
+  const detail = validationDetailFor(error);
   return visibleFromDefinition(
-    definitionFor(error, context.source ?? 'local'),
+    (detail.reasonCode ? safeDefinitions.get(detail.reasonCode) : undefined)
+      ?? definitionFor(error, context.source ?? 'local'),
     phase,
     context.attemptCorrelationId,
+    detail,
   );
 };
 
@@ -421,7 +493,10 @@ export const formatCloudRestoreSubmitError = (error: CloudRestoreVisibleError): 
   const correlation = validCorrelationId(error.attemptCorrelationId);
   const trace = correlation ? `（階段：${phase}；追蹤：${correlation}）` : `（階段：${phase}）`;
   if (resolved.outcome === 'not-submitted') return `${resolved.message}${correlation ? ` 追蹤：${correlation}` : ''}`;
-  return `[${resolved.code}] ${resolved.message}${trace}`;
+  const detail = error.reasonCode
+    ? `（resource：${error.resource ?? 'unknown'}；row：${error.rowIdentity ?? 'unknown'}；reason：${error.reasonCode}）`
+    : '';
+  return `[${resolved.code}] ${resolved.message}${detail}${trace}`;
 };
 
 const validRestoreIntentIdentity = (

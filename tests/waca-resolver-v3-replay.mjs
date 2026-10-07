@@ -5,7 +5,12 @@ import {createServer} from 'vite';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
 const evidence=process.env.WACA_V3_EVIDENCE_DIR;
 assert.ok(evidence,'Fresh SELECT-only Catalog evidence required');
-const data=JSON.parse(readFileSync(process.env.WACA_BACKUP_SCALE_FIXTURE,'utf8'));
+const fixture=JSON.parse(readFileSync(process.env.WACA_BACKUP_SCALE_FIXTURE,'utf8'));
+const collectionToTable={inventory:'inventory_items',productGroups:'product_groups',productCategories:'product_categories',dashboardCategoryImages:'dashboard_category_images',productVariants:'product_variants',bundleComponents:'bundle_components',purchaseBatches:'purchase_batches',purchaseBatchItems:'purchase_batch_items',privateOrders:'private_orders',privateOrderItems:'private_order_items',salesOrders:'sales_orders',salesOrderItems:'sales_order_items',importBatches:'import_batches',japanPackages:'japan_packages',japanPackageItems:'japan_package_items',outboundShipments:'outbound_shipments',outboundShipmentItems:'outbound_shipment_items',wacaOrders:'waca_orders',wacaItems:'waca_order_items',wacaMappings:'waca_mappings',myacgMasterLinks:'waca_master_links',wacaImportBatches:'waca_import_batches',wacaCutoverAudit:'waca_cutover_audit',wacaCutoverState:'waca_state'};
+const data=fixture?.data&&typeof fixture.data==='object'
+  ?Object.fromEntries(Object.entries(fixture.data).map(([collection,rows])=>[collectionToTable[collection]??collection,rows]))
+  :fixture;
+assert.ok(Object.values(data).every(Array.isArray),'WACA backup fixture must contain resource arrays');
 const fresh=table=>JSON.parse(readFileSync(evidence+'/'+table+'.json','utf8'));
 const activeVariants=fresh('product_variants').filter(v=>!v.deleted_at);
 const inventory=fresh('inventory_items').filter(v=>!v.deleted_at);

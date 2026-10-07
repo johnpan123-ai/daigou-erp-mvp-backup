@@ -160,6 +160,39 @@ export interface CloudRestoreAttemptOutcome extends CloudRestoreAttemptCommand {
   failure?: CloudRestoreFailure;
 }
 
+export type CloudRestoreCommitOutcomeClassification =
+  | 'PREPARE_REJECTED'
+  | 'EXECUTE_REJECTED'
+  | 'EXECUTE_ROLLED_BACK'
+  | 'DATABASE_INTERRUPTED_NOT_COMMITTED'
+  | 'COMMITTED_RESPONSE_LOST'
+  | 'COMMITTED_VERIFIED'
+  | 'COMMIT_RESULT_UNKNOWN';
+
+/**
+ * Classify only from durable evidence. A lost response, transport failure, or
+ * reconnect by itself is never proof that the business transaction rolled back.
+ */
+export function classifyCloudRestoreCommitOutcome(input: {
+  outcome?: CloudRestoreAttemptOutcome;
+  phase?: 'prepare' | 'execute';
+  responseLost?: boolean;
+  databaseInterrupted?: boolean;
+}): CloudRestoreCommitOutcomeClassification {
+  const { outcome } = input;
+  if (outcome?.status === 'completed') {
+    return input.responseLost ? 'COMMITTED_RESPONSE_LOST' : 'COMMITTED_VERIFIED';
+  }
+  if (outcome?.status === 'not_committed') {
+    if (outcome.failure?.evidence === 'caught-subtransaction') return 'EXECUTE_ROLLED_BACK';
+    if (outcome.failure?.evidence === 'reconciled-noncommit' && input.databaseInterrupted) {
+      return 'DATABASE_INTERRUPTED_NOT_COMMITTED';
+    }
+    return input.phase === 'prepare' ? 'PREPARE_REJECTED' : 'EXECUTE_REJECTED';
+  }
+  return 'COMMIT_RESULT_UNKNOWN';
+}
+
 export interface CloudRestoreResult {
   ok: true;
   replayed: boolean;
@@ -178,10 +211,20 @@ export interface CloudRestoreResult {
 
 export class CloudRestoreValidationError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  readonly resource?: string;
+  readonly rowIdentity?: string;
+  readonly reasonCode?: string;
+  readonly phase?: 'prepare';
+  constructor(code: string, message: string, detail: {
+    resource?: string; rowIdentity?: string; reasonCode?: string; phase?: 'prepare';
+  } = {}) {
     super(message);
     this.name = 'CloudRestoreValidationError';
     this.code = code;
+    this.resource = detail.resource;
+    this.rowIdentity = detail.rowIdentity;
+    this.reasonCode = detail.reasonCode ?? code;
+    this.phase = detail.phase ?? 'prepare';
   }
 }
 
@@ -227,6 +270,13 @@ const canonicalId = (row: Record<string, unknown>, table: CloudRestoreTable): st
   const databaseId = String(row.database_id ?? '').trim();
   const id = UUID_PATTERN.test(databaseId) ? databaseId : String(row.id ?? '').trim();
   if (!UUID_PATTERN.test(id)) {
+    if (table.startsWith('waca_')) {
+      throw new CloudRestoreValidationError(
+        'WACA_CANONICAL_IDENTITY_MISSING',
+        `${table} 缺少 canonical UUID。`,
+        { resource: table, rowIdentity: id || 'unknown', reasonCode: 'WACA_CANONICAL_IDENTITY_MISSING' },
+      );
+    }
     throw new CloudRestoreValidationError('CANONICAL_UUID_REQUIRED', `${table} 必須保留 canonical database UUID。`);
   }
   return id.toLowerCase();
@@ -381,12 +431,15 @@ const assertInventoryKeyUniqueness = (data: CloudRestoreSnapshotData): void => {
 export const assertCurrentCloudRestoreDataContract = (data: CloudRestoreSnapshotData): void => {
   assertInventoryKeyUniqueness(data);
   for (const [, table] of CLOUD_RESTORE_TABLES) {
+    if (table.startsWith('waca_') && data[table].some(row => !UUID_PATTERN.test(String(row.id ?? '').trim()))) {
+      throw new CloudRestoreValidationError(
+        'WACA_CANONICAL_IDENTITY_MISSING',
+        `${table} 缺少 canonical UUID。`,
+        { resource: table, rowIdentity: 'unknown', reasonCode: 'WACA_CANONICAL_IDENTITY_MISSING' },
+      );
+    }
     const ids = data[table].map(row => canonicalId(row, table));
     if (duplicateCount(ids) > 0) throw new CloudRestoreValidationError('DUPLICATE_CANONICAL_ID', `${table} 含重複 identity。`);
-  }
-  const relationAudit = auditCloudRestoreRelations(data);
-  if (relationAudit.blockingOrphanCount > 0) {
-    throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
   }
   const duplicateVariantLocalIdCount = duplicateCount(data.product_variants
     .map(row => String(row.local_id ?? '').trim())
@@ -394,10 +447,48 @@ export const assertCurrentCloudRestoreDataContract = (data: CloudRestoreSnapshot
   if (duplicateVariantLocalIdCount > 0) {
     throw new CloudRestoreValidationError('DUPLICATE_VARIANT_LOCAL_ID', 'Variant local_id 不可重複。');
   }
+  const wacaOrderIds = new Set(data.waca_orders.map(row => String(row.id)));
+  const orphanWacaItem = data.waca_order_items.find(row => !wacaOrderIds.has(String(row.order_id ?? '')));
+  if (orphanWacaItem) {
+    throw new CloudRestoreValidationError(
+      'WACA_ORDER_ITEM_ORPHAN',
+      `waca_order_items ${String(orphanWacaItem.item_key ?? 'unknown')} 找不到來源訂單。`,
+      { resource: 'waca_order_items', rowIdentity: String(orphanWacaItem.item_key ?? ''), reasonCode: 'WACA_ORDER_ITEM_ORPHAN' },
+    );
+  }
+  const variantIds = new Set(data.product_variants.map(row => String(row.id)));
+  const invalidMapping = data.waca_mappings.find(row => !variantIds.has(String(row.product_variant_id ?? '')));
+  if (invalidMapping) {
+    throw new CloudRestoreValidationError(
+      'WACA_MAPPING_VARIANT_INVALID',
+      `waca_mappings ${String(invalidMapping.feature ?? 'unknown')} 找不到商品規格。`,
+      { resource: 'waca_mappings', rowIdentity: String(invalidMapping.feature ?? ''), reasonCode: 'WACA_MAPPING_VARIANT_INVALID' },
+    );
+  }
+  const invalidMasterLink = data.waca_master_links.find(row => {
+    const id = String(row.product_variant_id ?? '').trim();
+    return id && !variantIds.has(id);
+  });
+  if (invalidMasterLink) {
+    throw new CloudRestoreValidationError(
+      'WACA_MASTER_LINK_INVALID',
+      `waca_master_links ${String(invalidMasterLink.child_code ?? 'unknown')} 指向不存在的商品規格。`,
+      { resource: 'waca_master_links', rowIdentity: String(invalidMasterLink.child_code ?? ''), reasonCode: 'WACA_MASTER_LINK_INVALID' },
+    );
+  }
+  const relationAudit = auditCloudRestoreRelations(data);
+  if (relationAudit.blockingOrphanCount > 0) {
+    throw new CloudRestoreValidationError('ORPHAN_RELATION', `JSON 含 ${relationAudit.blockingOrphanCount} 筆無效關聯。`);
+  }
   const uniqueBusinessKey = (table: CloudRestoreTable, field: string) => {
     const values = data[table].map(row => String(row[field] ?? '').trim());
-    if (values.some(value => !value) || duplicateCount(values) > 0) {
-      throw new CloudRestoreValidationError('WACA_BUSINESS_KEY_INVALID', `${table}.${field} 不可缺少或重複。`);
+    if (values.some(value => !value)) {
+      throw new CloudRestoreValidationError('WACA_BUSINESS_KEY_MISSING', `${table}.${field} 不可缺少。`,
+        { resource: table, rowIdentity: field, reasonCode: 'WACA_BUSINESS_KEY_MISSING' });
+    }
+    if (duplicateCount(values) > 0) {
+      throw new CloudRestoreValidationError('WACA_DUPLICATE_BUSINESS_KEY', `${table}.${field} 不可重複。`,
+        { resource: table, rowIdentity: field, reasonCode: 'WACA_DUPLICATE_BUSINESS_KEY' });
     }
   };
   uniqueBusinessKey('waca_orders', 'order_key');
@@ -406,6 +497,41 @@ export const assertCurrentCloudRestoreDataContract = (data: CloudRestoreSnapshot
   uniqueBusinessKey('waca_master_links', 'child_code');
   uniqueBusinessKey('waca_import_batches', 'batch_key');
   uniqueBusinessKey('waca_cutover_audit', 'product_variant_id');
+  const requireWacaPayloadKey = (
+    table: 'waca_orders' | 'waca_order_items',
+    businessKey: 'order_key' | 'item_key',
+  ) => {
+    for (const row of data[table]) {
+      const rowIdentity = String(row[businessKey] ?? '').trim();
+      const payload = isRecord(row.payload) ? row.payload : null;
+      const payloadKey = payload && typeof payload.key === 'string' ? payload.key.trim() : '';
+      if (!payloadKey) {
+        throw new CloudRestoreValidationError(
+          'WACA_PAYLOAD_KEY_MISSING',
+          `${table} ${rowIdentity || '(unknown)'} 的 payload.key 缺失。`,
+          { resource: table, rowIdentity, reasonCode: 'WACA_PAYLOAD_KEY_MISSING' },
+        );
+      }
+      if (payloadKey !== rowIdentity) {
+        throw new CloudRestoreValidationError(
+          'WACA_PAYLOAD_KEY_MISMATCH',
+          `${table} ${rowIdentity || '(unknown)'} 的 payload.key 與 business key 不一致。`,
+          { resource: table, rowIdentity, reasonCode: 'WACA_PAYLOAD_KEY_MISMATCH' },
+        );
+      }
+    }
+  };
+  requireWacaPayloadKey('waca_orders', 'order_key');
+  requireWacaPayloadKey('waca_order_items', 'item_key');
+  for (const row of data.waca_orders) {
+    if (!['處理中', '完成付款', '取消', '失敗'].includes(String(row.status ?? ''))) {
+      throw new CloudRestoreValidationError(
+        'WACA_ORDER_STATUS_INVALID',
+        `waca_orders ${String(row.order_key ?? '(unknown)')} 的狀態無效。`,
+        { resource: 'waca_orders', rowIdentity: String(row.order_key ?? ''), reasonCode: 'WACA_ORDER_STATUS_INVALID' },
+      );
+    }
+  }
   if (data.waca_state.length !== 1 || data.waca_state[0].id !== '00000000-0000-4000-8000-000000000001') {
     throw new CloudRestoreValidationError('WACA_CUTOVER_STATE_INVALID', 'WACA 數量來源狀態缺少或不唯一。');
   }

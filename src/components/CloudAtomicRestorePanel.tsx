@@ -808,6 +808,11 @@ export default function CloudAtomicRestorePanel({
             <div>phase：{visibleError.phase}</div>
             <div>category：{visibleError.classification}</div>
             <div>safe code：{visibleError.code}</div>
+            {visibleError.resource && <div>resource：<code>{visibleError.resource}</code></div>}
+            {visibleError.rowIdentity && <div>row：<code>{visibleError.rowIdentity}</code></div>}
+            {visibleError.reasonCode && <div>reason：<code>{visibleError.reasonCode}</code></div>}
+            {visibleError.sqlstate && <div>SQLSTATE：<code>{visibleError.sqlstate}</code></div>}
+            {visibleError.requestId && <div>request：<code>{visibleError.requestId}</code></div>}
           </>}
           {failureEvidence && <>
             <div>durable phase：{failureEvidence.phase}</div>

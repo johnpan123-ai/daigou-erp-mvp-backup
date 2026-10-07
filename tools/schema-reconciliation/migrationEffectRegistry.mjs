@@ -42,6 +42,36 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '057': {
+    sourceFile:'057_atomic_restore_staged_execution_and_validation.sql',dependencies:['056'],
+    risk:'MEDIUM_ATOMIC_RESTORE_EXECUTION_REPLACEMENT',idempotency:'ONE_TIME_SCHEMA_AND_FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[
+      table('erp_cloud_restore_candidate_proofs',{rls:true,forceRls:true}),
+      fn('erp_prove_cloud_restore_candidate_v2(jsonb,jsonb,text,text,uuid)'),
+      fn('erp_restore_proven_cloud_snapshot_attempt(uuid,uuid,uuid,uuid,uuid)'),
+    ],
+    postconditions:[
+      table('erp_cloud_restore_prepared_chunks',{rls:true,forceRls:true}),
+      q('primaryKey','public.erp_cloud_restore_prepared_chunks',['proof_id','resource','chunk_ordinal']),
+      index('erp_cloud_restore_prepared_chunks_expiry_idx'),
+      fn('erp_cloud_restore_validate_waca_dataset(jsonb)',{
+        authenticatedExecute:false,anonExecute:false,
+        definitionIncludes:['WACA_PAYLOAD_KEY_MISSING','WACA_PAYLOAD_KEY_MISMATCH'],
+      }),
+      fn('erp_cloud_restore_stage_candidate(uuid,text,jsonb,timestamp with time zone)',{
+        securityDefiner:true,authenticatedExecute:false,anonExecute:false,
+      }),
+      fn('erp_restore_staged_cloud_snapshot(uuid,uuid,text,jsonb,text)',{
+        securityDefiner:true,authenticatedExecute:false,anonExecute:false,
+      }),
+      fn('erp_restore_proven_cloud_snapshot_attempt(uuid,uuid,uuid,uuid,uuid)',{
+        securityDefiner:true,authenticatedExecute:true,anonExecute:false,
+        requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=120s'],
+        definitionIncludes:['erp_restore_staged_cloud_snapshot'],
+      }),
+    ],
+  },
   '056': {
     sourceFile:'056_catalog_materialized_purchase_projection.sql',dependencies:['055'],
     risk:'LOW_GUARDED_CATALOG_PROVENANCE_TRANSITION',idempotency:'CREATE_OR_REPLACE_WITH_EXACT_REPLAY',

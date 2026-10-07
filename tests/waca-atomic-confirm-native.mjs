@@ -12,7 +12,18 @@ assert.deepEqual(await readUtf8Json((async function*(){for(const byte of probeBy
 const fixture=process.env.WACA_INCIDENT_FILE;
 assert.ok(fixture,'WACA_INCIDENT_FILE required');
 assert.equal(createHash('sha256').update(readFileSync(fixture)).digest('hex'),'310de252a5ac987f7a3c9dea09424a200a3b0d0a9f1f17f43308a45a1891a304');
-const data=JSON.parse(readFileSync(process.env.WACA_BACKUP_SCALE_FIXTURE,'utf8'));
+const fixtureDocument=JSON.parse(readFileSync(process.env.WACA_BACKUP_SCALE_FIXTURE,'utf8'));
+const fixtureData=fixtureDocument.data??fixtureDocument;
+const collectionTables={inventory:'inventory_items',productGroups:'product_groups',productCategories:'product_categories',
+ dashboardCategoryImages:'dashboard_category_images',productVariants:'product_variants',bundleComponents:'bundle_components',
+ purchaseBatches:'purchase_batches',purchaseBatchItems:'purchase_batch_items',privateOrders:'private_orders',
+ privateOrderItems:'private_order_items',salesOrders:'sales_orders',salesOrderItems:'sales_order_items',importBatches:'import_batches',
+ japanPackages:'japan_packages',japanPackageItems:'japan_package_items',outboundShipments:'outbound_shipments',
+ outboundShipmentItems:'outbound_shipment_items',wacaOrders:'waca_orders',wacaItems:'waca_order_items',
+ wacaMappings:'waca_mappings',myacgMasterLinks:'waca_master_links',wacaImportBatches:'waca_import_batches',
+ wacaCutoverAudit:'waca_cutover_audit',wacaCutoverState:'waca_state'};
+const data=Object.hasOwn(fixtureData,'inventory_items')?fixtureData:Object.fromEntries(
+ Object.entries(collectionTables).map(([collection,table])=>[table,fixtureData[collection]]));
 assert.equal(Object.keys(data).length,24);
 const db=await isolatedDatabase();let browser;
 const allowedTables=new Set(Object.keys(data));
@@ -88,17 +99,18 @@ try{
  const provider={getNextWacaSnapshot:()=>rpc('erp_read_waca_snapshot'),getAuthoritativeWacaVariants:variants,
  commitNextWacaSnapshot:async(s,r,u)=>{commits++;return (await rpc('erp_commit_waca_snapshot',{p_snapshot:s,p_expected_revision:r,p_update_auto_quantity:u})).revision;}};
  stage='rollback';const attempt=await make();
- assert.equal(attempt.current.revision,8);
+ assert.ok(Number.isSafeInteger(attempt.current.revision)&&attempt.current.revision>=0);
+ const baselineRevision=attempt.current.revision;
  const before=await rpc('erp_export_cloud_restore_snapshot_json');
  await db.sql.query("create function public.isolated_waca_fault() returns trigger language plpgsql as $$ begin raise exception 'ISOLATED_WACA_FAULT'; end $$; create trigger isolated_waca_fault before update on public.waca_state for each row execute function public.isolated_waca_fault()");
  await assert.rejects(()=>commitAndVerifyWaca({...attempt,provider}));
  await db.sql.query('drop trigger isolated_waca_fault on public.waca_state; drop function public.isolated_waca_fault()');
  assert.deepEqual(await rpc('erp_export_cloud_restore_snapshot_json'),before);summary.atomicRollback='PASS';
- stage='stale';await assert.rejects(()=>provider.commitNextWacaSnapshot(wacaAtomicDelta(attempt.current,attempt.candidate),7,true),e=>e.code==='40001');
+ stage='stale';await assert.rejects(()=>provider.commitNextWacaSnapshot(wacaAtomicDelta(attempt.current,attempt.candidate),Math.max(0,baselineRevision-1),true),e=>e.code==='40001');
  assert.deepEqual(await rpc('erp_export_cloud_restore_snapshot_json'),before);summary.cas='PASS';
  stage='response-lost';commits=0;
  const lost={...provider,commitNextWacaSnapshot:async(...args)=>{await provider.commitNextWacaSnapshot(...args);throw new Error('Failed to fetch');}};
- const verified=await commitAndVerifyWaca({...attempt,provider:lost});assert.equal(commits,1);assert.equal(verified.snapshot.revision,9);summary.responseLoss='PASS';
+ const verified=await commitAndVerifyWaca({...attempt,provider:lost});assert.equal(commits,1);assert.equal(verified.snapshot.revision,baselineRevision+1);summary.responseLoss='PASS';
  stage='idempotency';
  for(let n=0;n<5;n++){
   const result=await commitAndVerifyWaca({...await make(),provider});
@@ -154,5 +166,6 @@ try{
  mkdirSync('scratch/waca-no-full-backup',{recursive:true});writeFileSync('scratch/waca-no-full-backup/native-benchmark.json',JSON.stringify(summary,null,2));
  assert.ok(summary.medianMs<=4000,'CONFIRM_MEDIAN_4S');assert.ok(summary.p95Ms<=5500,'CONFIRM_P95_5_5S');
  console.log(JSON.stringify(summary));
-}catch(error){console.error(JSON.stringify({stage,result:'FAIL',code:error.code,message:error.code==='ERR_ASSERTION'?'ASSERTION_FAILED':String(error.message).slice(0,240)}));process.exitCode=1;}
+}catch(error){console.error(JSON.stringify({stage,result:'FAIL',code:error.code,
+ message:error.code==='ERR_ASSERTION'?String(error.message).slice(0,500):String(error.message).slice(0,240)}));process.exitCode=1;}
 finally{await browser?.close();await vite.close();await db.close();}
