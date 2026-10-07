@@ -53,12 +53,35 @@ class MemoryStorage {
   setItem(key, value) { this.#values.set(key, String(value)); }
   removeItem(key) { this.#values.delete(key); }
 }
-globalThis.window = { sessionStorage: new MemoryStorage(), location: { origin: 'https://erp.example.invalid' } };
+globalThis.window = { sessionStorage: new MemoryStorage(), location: { origin: 'https://erp.example.invalid' }, addEventListener() {} };
 
 const vite = await createServer({ configFile: false, cacheDir: join(tmpdir(), 'waca-v3-execute-vite'),
   optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true }, appType: 'custom' });
 try {
   const transport = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreRpcTransport.ts');
+  const submit = await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreSubmit.ts');
+  globalThis.sessionStorage = new MemoryStorage();
+  const fingerprints = ['a'.repeat(64), 'b'.repeat(64)];
+  const intents = new Map();
+  const oldA = submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[0], intents);
+  const oldB = submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[1], intents);
+  // A reload/response loss keeps the SAME request until the user explicitly
+  // selects a new proved file. Fingerprint equality is not lifetime identity.
+  assert.deepEqual(submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[0], new Map()), oldA);
+  const freshA = submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[0], intents, { newIntent: true });
+  assert.notEqual(freshA.attemptId, oldA.attemptId);
+  assert.notEqual(freshA.traceId, oldA.traceId);
+  assert.deepEqual(submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[0], intents), freshA);
+  assert.deepEqual(submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[1], intents), oldB);
+  for (let run = 0; run < 5; run += 1) {
+    const before = submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[1], intents);
+    const next = submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[1], intents, { newIntent: true });
+    assert.notEqual(next.attemptId, before.attemptId);
+    assert.deepEqual(submit.readOrCreateCloudRestoreIntentIdentity(fingerprints[1], new Map()), next);
+  }
+  assert.match(PANEL, /if \(!file \|\| unresolvedAttempt/u);
+  assert.match(PANEL, /newIntent: freshIntentRef\.current/u);
+  assert.match(PANEL, /freshIntentRef\.current = false;[\s\S]+pendingAttemptRef\.current = pending/u);
   const requestId = '00000000-0000-4000-8000-000000000001';
   const traceId = '00000000-0000-4000-8000-000000000002';
   const attemptId = '00000000-0000-4000-8000-000000000003';
@@ -193,6 +216,7 @@ try {
 } finally {
   await vite.close();
   delete globalThis.window;
+  delete globalThis.sessionStorage;
 }
 
 console.log('PASS Restore dispatch boundary: proof-backed sub-1KB EXECUTE, request correlation, and distinct not-dispatched/abort/http/no-response outcomes');

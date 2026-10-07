@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { inspectSafeDescendant, verifySafeDescendant, classifyDescendantFile, assertReviewedProviderContract } from '../scripts/post-adoption-descendant.mjs';
+import { inspectSafeDescendant, verifySafeDescendant, classifyDescendantFile, assertReviewedProviderContract, assertReviewedRestoreOrchestrationContract } from '../scripts/post-adoption-descendant.mjs';
 import { sourceHash, impactHash, reviewedImpacts, regressionScripts, sealImpactEvidence, classifyReviewedFile, reviewForCandidate } from '../scripts/reviewed-change-impact.mjs';
 const baseline = '5cbf5137cb7a2e6fd6244606692feca5ba42521a';
 const tag = 'checkpoint-20260930-erp2-post-migration-canonical-reconciliation-v1-guard-closure';
@@ -163,3 +163,18 @@ assert.doesNotThrow(() => assertReviewedProviderContract(resumeFile, resumeBefor
 assert.throws(() => assertReviewedProviderContract(resumeFile, resumeBefore,
   resumeAfter.replace('const reconciled =', "fetch('/unsafe'); const reconciled =")), /FAILED_CLOSED/u);
 console.log('PASS exact BuyAnime canonical identity diff and SHA; future planner/provider/DB/parser/RPC/migration/backup/canonical hunks fail closed');
+
+const restoreBase = 'a9351a7130ec46d9d443302f7ca8e06b61ddd7aa';
+for (const file of ['src/providers/cloud/cloudRestoreSubmit.ts', 'src/providers/cloud/cloudRestoreStagedUpload.ts',
+  'src/components/CloudAtomicRestorePanel.tsx']) {
+  const before = realGit(['show', `${restoreBase}:${file}`]);
+  const after = readFileSync(file, 'utf8').replace(/\r\n?/gu, '\n');
+  assertReviewedRestoreOrchestrationContract(file, before, after);
+  const bad = file.endsWith('Panel.tsx')
+    ? after.replace('dataProvider.restoreCloudSnapshot(command)', 'dataProvider.restoreCloudSnapshot({ ...command, bypass: true })')
+    : after + '\nexport const futureRequiredDurableField = 1;';
+  assert.notEqual(bad, after);
+  assert.throws(() => assertReviewedRestoreOrchestrationContract(file, before, bad), /FAILED_CLOSED/u);
+}
+assert.throws(() => assertReviewedRestoreOrchestrationContract('src/providers/cloud/futureRestore.ts', 'x', 'x'), /FAILED_CLOSED/u);
+console.log('PASS exact Restore intent/bounded transport orchestration; future durable/RPC payload changes and unknown files fail closed');

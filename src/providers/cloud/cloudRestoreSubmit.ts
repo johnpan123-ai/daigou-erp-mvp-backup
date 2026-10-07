@@ -547,16 +547,17 @@ const validRestoreIntentIdentity = (
 export const readOrCreateCloudRestoreIntentIdentity = (
   fingerprint: string,
   memory: Map<string, CloudRestoreIntentIdentity>,
+  options: { newIntent?: boolean } = {},
 ): CloudRestoreIntentIdentity => {
   const existing = memory.get(fingerprint);
-  if (existing) return existing;
+  if (existing && !options.newIntent) return existing;
   const storageKey = `${CLOUD_RESTORE_INTENT_STORAGE_PREFIX}${fingerprint}`;
   try {
     const persisted = sessionStorage.getItem(storageKey);
     const identity = persisted
       ? validRestoreIntentIdentity(JSON.parse(persisted), fingerprint)
       : null;
-    if (identity) {
+    if (identity && !options.newIntent) {
       memory.set(fingerprint, identity);
       return identity;
     }

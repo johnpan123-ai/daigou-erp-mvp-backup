@@ -109,6 +109,7 @@ export default function CloudAtomicRestorePanel({
   const { role } = useRole();
   const fileRef = useRef<HTMLInputElement>(null);
   const retryKeys = useRef(new Map<string, CloudRestoreIntentIdentity>());
+  const freshIntentRef = useRef(false);
   const pendingAttemptRef = useRef<PendingRestoreAttempt | null>(null);
   const inFlightRef = useRef(false);
   const proofRequestTokenRef = useRef(0);
@@ -180,6 +181,15 @@ export default function CloudAtomicRestorePanel({
   }, [invalidateProof, user?.id]);
 
   useEffect(() => {
+    if (!cloudMode || !unresolvedAttempt) return;
+    // Reload/recovery must keep the same pending identity until its own
+    // authoritative outcome is verified; a fresh unrelated read cannot close it.
+    window.dispatchEvent(new CustomEvent('cloud-restore-authoritative-pending', {
+      detail: { attemptId: unresolvedAttempt.attemptId },
+    }));
+  }, [cloudMode, unresolvedAttempt]);
+
+  useEffect(() => {
     if (!cloudMode || !owner || !user?.id || !browserOnline) return;
     let active = true;
     const userId = user.id;
@@ -236,6 +246,7 @@ export default function CloudAtomicRestorePanel({
   };
 
   const resetPreparedRestore = (nextMessage = '') => {
+    freshIntentRef.current = false;
     candidateGenerationRef.current += 1;
     setCandidateGeneration(candidateGenerationRef.current);
     invalidateProof();
@@ -336,6 +347,9 @@ export default function CloudAtomicRestorePanel({
       proofRecordRef.current = record;
       setProofRecord(record);
       setCandidate(prepared);
+      // A newly selected, proved file is a new explicit restore intent. A
+      // response-loss retry/reconcile never reaches this file-selection path.
+      freshIntentRef.current = true;
       setProofMessage('安全檢查已通過');
       setStatus('ready');
       setMessage('所有安全檢查已通過。');
@@ -431,7 +445,9 @@ export default function CloudAtomicRestorePanel({
       ? '還原已完成；畫面仍在同步最新資料，請勿再次還原。'
       : '還原完成，畫面已更新為最新資料。');
     if (!syncPending) {
-      window.dispatchEvent(new CustomEvent('cloud-restore-completed', { detail: { restoreEpoch: restored.restoreEpoch } }));
+      window.dispatchEvent(new CustomEvent('cloud-restore-completed', { detail: {
+        restoreEpoch: restored.restoreEpoch, attemptId: pending.idempotencyKey,
+      } }));
     }
     recordCloudRestoreSubmitDiagnostic({
       event: 'submit-finish', phase: 'submit', outcome: syncPending ? 'sync-pending' : 'success',
@@ -463,6 +479,7 @@ export default function CloudAtomicRestorePanel({
           expectedEpoch: outcome.expectedEpoch,
         });
       } else if (outcome.status === 'not_committed') {
+        window.dispatchEvent(new CustomEvent('cloud-restore-not-committed', { detail: { attemptId: outcome.attemptId } }));
         void clearCloudDeadlineRestoreStage(outcome.attemptId).catch(() => {});
         setFailureEvidence(outcome.failure ?? null);
         setUnresolvedAttempt(null);
@@ -612,6 +629,7 @@ export default function CloudAtomicRestorePanel({
         readStatus: readiness.connectivity.readStatus,
       });
       restoreDispatched = true;
+      window.dispatchEvent(new CustomEvent('cloud-restore-authoritative-pending', { detail: { attemptId: pending.idempotencyKey } }));
       const restored = await (executeRestore ?? (command => dataProvider.restoreCloudSnapshot(command)))({
         attemptCorrelationId: pending.correlationId,
         idempotencyKey: pending.idempotencyKey,
@@ -641,7 +659,10 @@ export default function CloudAtomicRestorePanel({
             attemptId: durableAttempt?.attemptId ?? pending.idempotencyKey,
             traceId: durableAttempt?.traceId ?? pending.correlationId,
           });
-          if (evidence.status === 'not_committed') setFailureEvidence(evidence.failure ?? null);
+          if (evidence.status === 'not_committed') {
+            setFailureEvidence(evidence.failure ?? null);
+            window.dispatchEvent(new CustomEvent('cloud-restore-not-committed', { detail: { attemptId: pending.idempotencyKey } }));
+          }
         } catch {
           // The approved safe code remains authoritative; no raw failure is rendered.
         }
@@ -683,7 +704,9 @@ export default function CloudAtomicRestorePanel({
 
   const confirmRestore = () => {
     if (!candidate || !allowed || !proofCurrent || inFlightRef.current || pendingAttemptRef.current || submissionLockedRef.current) return;
-    const identity = readOrCreateCloudRestoreIntentIdentity(candidate.executionFingerprint, retryKeys.current);
+    const identity = readOrCreateCloudRestoreIntentIdentity(candidate.executionFingerprint, retryKeys.current,
+      { newIntent: freshIntentRef.current });
+    freshIntentRef.current = false;
     const pending: PendingRestoreAttempt = {
       correlationId: identity.traceId,
       idempotencyKey: identity.attemptId,

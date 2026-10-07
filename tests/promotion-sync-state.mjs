@@ -19,6 +19,12 @@ try {
   connectivity.markCloudReadFresh(10);
   assert.equal(view().status, 'fresh', 'fast Cloud success');
   assert.equal(view().writeAllowed, true);
+  const restoring = { ...refresh, restorePending: true };
+  assert.equal(view('cloud', restoring).status, 'syncing', 'old fresh rows are not a completed Restore');
+  assert.equal(view('cloud', restoring).writeAllowed, false);
+  connectivity.markCloudReadFresh(11);
+  assert.equal(view('cloud', restoring).status, 'syncing', 'unrelated late success cannot close Restore integrity/UI verification');
+  assert.equal(view('next', restoring).status, 'local');
 
   connectivity.markCloudReadLoading('bootstrap');
   connectivity.markCloudReadDeferred(true);
@@ -58,6 +64,9 @@ try {
     readFile(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8'),
   ]);
   assert.match(contextSource, /resolveGlobalSyncPresentation/u);
+  assert.match(contextSource, /previous === attemptId \? null : previous/u, 'unrelated old completion cannot end a new Restore');
+  assert.match(contextSource, /cloud-restore-authoritative-pending/u);
+  assert.match(contextSource, /cloud-restore-not-committed/u);
   assert.match(controlSource, /presentation.*useGlobalSyncControl/u);
   assert.doesNotMatch(controlSource, /resolveGlobalSyncPresentation/u, 'global control must consume the provider presentation');
   assert.match(providerSource, /markCloudReadDeferred/u);

@@ -108,6 +108,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     mode: getProviderMode(), busy: false, errorAt: null, lastCompletedAt: null, message: '',
   });
   const globalRefreshInFlight = useRef<Promise<void> | null>(null);
+  const [restorePendingAttempt, setRestorePendingAttempt] = useState<string | null>(null);
   const connectivity = useSyncExternalStore(
     subscribeCloudConnectivity,
     getCloudConnectivitySnapshot,
@@ -128,7 +129,29 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     }
   })();
   const presentationMode = testBridge ? 'cloud' : getProviderMode();
-  const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, globalRefresh);
+  const presentationRefresh = restorePendingAttempt
+    ? { ...globalRefresh, busy: true, restorePending: true } : globalRefresh;
+  const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, presentationRefresh);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const started = (event: Event) => {
+      const attemptId = (event as CustomEvent<{ attemptId?: string }>).detail?.attemptId;
+      if (typeof attemptId === 'string') setRestorePendingAttempt(attemptId);
+    };
+    const finished = (event: Event) => {
+      const attemptId = (event as CustomEvent<{ attemptId?: string }>).detail?.attemptId;
+      setRestorePendingAttempt(previous => previous === attemptId ? null : previous);
+    };
+    window.addEventListener('cloud-restore-authoritative-pending', started);
+    window.addEventListener('cloud-restore-completed', finished);
+    window.addEventListener('cloud-restore-not-committed', finished);
+    return () => {
+      window.removeEventListener('cloud-restore-authoritative-pending', started);
+      window.removeEventListener('cloud-restore-completed', finished);
+      window.removeEventListener('cloud-restore-not-committed', finished);
+    };
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled || testBridge) return;

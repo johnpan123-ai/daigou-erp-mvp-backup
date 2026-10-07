@@ -8,6 +8,7 @@ export interface GlobalRefreshSnapshot {
   errorAt: number | null;
   lastCompletedAt: number | null;
   message: string;
+  restorePending?: boolean;
 }
 
 export interface GlobalSyncPresentation {
@@ -38,6 +39,15 @@ export function resolveGlobalSyncPresentation(
   const fresh = connectivity.readStatus === 'fresh-online' || connectivity.readStatus === 'fresh-empty';
   const cached = connectivity.readStatus === 'stale-cache' || connectivity.readStatus === 'offline';
   const refreshFailed = refresh.errorAt !== null && (connectivity.lastFreshReadAt ?? 0) <= refresh.errorAt;
+
+  if (refresh.restorePending) {
+    return {
+      status: cached ? 'syncing-cached' : 'syncing',
+      label: cached ? GLOBAL_SYNC_LABELS['syncing-cached'] : GLOBAL_SYNC_LABELS.syncing,
+      tone: 'warning', writeAllowed: false,
+      banner: '雲端還原進行中｜等待完整性與最新畫面驗證；寫入已暫停',
+    };
+  }
 
   if (refresh.busy || connectivity.authoritativeReadPending) {
     if (cached) {

@@ -189,7 +189,41 @@ export function assertReviewedRestoreAdapterContract(file, before, after) {
   }
 }
 
+export function assertReviewedRestoreOrchestrationContract(file, before, after) {
+  if (before === null || after === null) fail('Restore orchestration requires an existing exact reviewed source');
+  let restored = after;
+  if (file === 'src/providers/cloud/cloudRestoreSubmit.ts') {
+    restored = after.replace('  options: { newIntent?: boolean } = {},\n', '')
+      .replace('if (existing && !options.newIntent)', 'if (existing)')
+      .replace('if (identity && !options.newIntent)', 'if (identity)');
+  } else if (file === 'src/providers/cloud/cloudRestoreStagedUpload.ts') {
+    restored = after.replace('batch.length === 2 || batchBytes + bytes > 512 * 1024',
+      'batch.length === 4 || batchBytes + bytes > 1024 * 1024')
+      .replace('Array.from({ length: 2 }', 'Array.from({ length: 4 }');
+  } else if (file === 'src/components/CloudAtomicRestorePanel.tsx') {
+    // Immutable before/after review hashes gate this branch. Independently
+    // preserve every provider/Restore port call and its complete payload.
+    const ports = source => {
+      const tree = parse(file, source);
+      return nodes(tree).filter(ts.isCallExpression).filter(node =>
+        /dataProvider\.|executeRestore|checkRestoreOutcome|prepareCloudRestore|verifyCloudRestore|refreshAuthoritative|restoreCloudDeadline/u
+          .test(node.expression.getText(tree))).map(node => canonical(tree, node));
+    };
+    if (JSON.stringify(ports(before)) !== JSON.stringify(ports(after))) {
+      fail('Restore orchestration changed a provider/RPC/proof/readback payload');
+    }
+    return;
+  } else fail('unreviewed Restore orchestration file');
+  if (canonical(parse(file, before)) !== canonical(parse(file, restored))) {
+    fail('Restore transport/storage/RPC contract changed beyond exact orchestration');
+  }
+}
+
 export function assertReviewedProviderContract(file, before, after) {
+  if (['src/providers/cloud/cloudRestoreSubmit.ts', 'src/providers/cloud/cloudRestoreStagedUpload.ts'].includes(file)) {
+    assertReviewedRestoreOrchestrationContract(file, before, after);
+    return;
+  }
   if (file === 'src/providers/cloud/cloudAtomicRestore.ts') {
     assertReviewedRestoreAdapterContract(file, before, after);
     return;
@@ -452,6 +486,12 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
     const before = source(baseline, file, true), after = source(candidate.head, file, true);
     if (sourceHash(before) === sourceHash(after)) return true;
     const reviewed = classifyReviewedFile({ file, after, reviews });
+    if (file === 'src/components/CloudAtomicRestorePanel.tsx'
+      && reviewed?.review.id === 'restore-explicit-intent-and-pending-sync-v2'
+      && reviewed.row.classification === 'APPLICATION_DOMAIN_ONLY') {
+      assertReviewedRestoreOrchestrationContract(file, before, after);
+      return true;
+    }
     if (file !== 'src/providers/cloud/cloudAtomicRestore.ts'
       || reviewed?.review.id !== 'erp1-v1-outbound-timestamp-adapter-v1'
       || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;
