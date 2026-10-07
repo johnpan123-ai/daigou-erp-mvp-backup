@@ -3,6 +3,10 @@
 Migration 058 preserves 057 and the 24-resource business backup format. This is
 a schema-changing Restore infrastructure release, not a SAFE_DESCENDANT UI release.
 
+Migration 059 only makes the private dashboard staging shape deterministic when
+Live lacks its two legacy-compatible optional business columns. It does not add
+columns to the business dashboard table or change the public Backup format.
+
 ## Evidence and decision
 
 The previous live Execute measured 21.863 seconds, including 12.107 seconds

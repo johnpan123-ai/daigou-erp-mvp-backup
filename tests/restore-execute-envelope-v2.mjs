@@ -10,12 +10,16 @@ const sql=await readFile('supabase/sql/'+migration,'utf8');
 const executeBody=sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.erp_restore_staged_cloud_snapshot'),sql.indexOf('-- A server restart'));
 assert.doesNotMatch(executeBody,/erp_cloud_restore_snapshot\(|jsonb_populate_recordset|jsonb_to_recordset|jsonb_agg/u);
 assert.match(executeBody,/STALE_RESTORE_PREPARE/u);
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>f!==migration)});
+const compatibility='059_restore_typed_stage_dashboard_compatibility.sql';
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try {
  const r=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
  const upload=await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreStagedUpload.ts');
  const candidate=await r.prepareCloudRestoreSnapshot(await readFile(process.env.ERP2_CHAOS_BASELINE_B,'utf8'));
+ // Model the actual Live physical dashboard contract; its optional fields are
+ // excluded from canonical business parity, but typed staging must be explicit.
+ await db.sql.query('alter table public.dashboard_category_images drop column local_id,drop column version');
  const users=new Set(Object.values(candidate.data).flatMap(rows=>rows.map(x=>x.updated_by).filter(Boolean)));
  for(const id of users) await db.sql.query('insert into auth.users(id,email,raw_user_meta_data) values($1,$2,$3) on conflict do nothing',[id,'fixture@example.invalid',{}]);
  const req=randomUUID(); await db.sql.query("select set_config('request.headers',$1,false)",[JSON.stringify({host:'rhfdjsklfrgpoqsaqpkn.supabase.co'})]);
@@ -23,6 +27,10 @@ try {
  assert.equal((await db.sql.query('select public.erp_restore_staged_cloud_snapshot($1,$2,$3,$4,$5) r',[randomUUID(),proof.proof_id,candidate.manifest.snapshotFingerprint,candidate.manifest,'isolated'])).rows[0].r.ok,true);
  const before=(await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d;
  await db.sql.query(sql);
+ await db.sql.query(await readFile('supabase/sql/'+compatibility,'utf8'));
+ assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
+ const typedProof=(await db.sql.query('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) r',[candidate.data,candidate.manifest,'strict','isolated',randomUUID()])).rows[0].r;
+ assert.equal((await db.sql.query('select public.erp_restore_staged_cloud_snapshot($1,$2,$3,$4,$5) r',[randomUUID(),typedProof.proof_id,candidate.manifest.snapshotFingerprint,candidate.manifest,'isolated'])).rows[0].r.ok,true);
  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
  const invalidGrants=(await db.sql.query("select count(*)::int n from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('r','p') and (c.relname like 'erp_restore_stage_%' or c.relname in ('erp_restore_upload_requests','erp_restore_upload_chunks','erp_restore_business_generation')) and (not c.relrowsecurity or not c.relforcerowsecurity or has_table_privilege('anon',c.oid,'SELECT') or has_table_privilege('authenticated',c.oid,'SELECT'))")).rows[0].n;
  assert.equal(invalidGrants,0);
@@ -63,5 +71,5 @@ try {
   failure:{phase:'reconcile',category:'DATABASE_INTERRUPTED',code:'CLOUD_RESTORE_FAILURE_DATABASE_INTERRUPTED',sqlstate:null,timeoutClassification:'unobserved',evidence:'reconciled-noncommit',failedAt:new Date().toISOString()}};
  assert.equal(r.classifyCloudRestoreCommitOutcome({outcome:r.assertCloudRestoreAttemptOutcome(failed)}),'DATABASE_INTERRUPTED_NOT_COMMITTED');
  assert.match(safe.normalizeCloudRestoreSubmitError({code:failed.failure.code},'rpc',{source:'server-response'}).message,/原資料保持不變/u);
- console.log(JSON.stringify({trueLiveState057to058:'PASS',migrationBusinessMutation:0,stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS'}));
+ console.log(JSON.stringify({trueLiveState057to058and059:'PASS',migrationBusinessMutation:0,stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS'}));
 }finally{await vite.close();await db.close();}
