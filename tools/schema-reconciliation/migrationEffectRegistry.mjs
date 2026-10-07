@@ -44,7 +44,9 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
   '059': {
     sourceFile:'059_restore_typed_stage_dashboard_compatibility.sql',dependencies:['058'],
-    dataRisk:'LOW_OPS_ONLY_STAGING_COMPATIBILITY',executionMode:'APPLY_SOURCE_MIGRATION_TRANSACTION',
+    risk:'LOW_OPS_ONLY_STAGING_COMPATIBILITY',idempotency:'ADDITIVE_IF_NOT_EXISTS',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[table('erp_restore_stage_dashboard_category_images',{rls:true,forceRls:true})],
     postconditions:[column('erp_restore_stage_dashboard_category_images','local_id','text'),
       column('erp_restore_stage_dashboard_category_images','version','integer')],
   },

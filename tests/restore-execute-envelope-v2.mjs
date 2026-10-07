@@ -4,6 +4,11 @@ import {randomUUID} from 'node:crypto';
 import {createServer} from 'vite';
 import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
 import {isolatedDatabase,owner,viewer} from './helpers/saveability-isolated.mjs';
+import {buildMigrationEffectRegistry} from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
+
+for(const entry of Object.values(await buildMigrationEffectRegistry())) {
+ assert.ok(Array.isArray(entry.preconditions)&&Array.isArray(entry.postconditions)&&typeof entry.risk==='string');
+}
 
 const migration='058_restore_execute_generation_and_typed_stage.sql';
 const sql=await readFile('supabase/sql/'+migration,'utf8');
