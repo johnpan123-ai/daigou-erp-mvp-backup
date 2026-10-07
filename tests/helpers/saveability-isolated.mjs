@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createHmac, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { request as httpRequest } from 'node:http';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../../supabase/canonicalFreshInstallV3.mjs';
 
 export const uuid=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -50,6 +51,16 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3}={
     await sql.query("insert into public.product_variants(id,product_group_id,myacg_item_code,product_title,variant_name) values($1,$2,'G-SYNTHETIC','Synthetic group','A')",[uuid(2),uuid(1)]);
   } catch(error){ await close(); throw error; }
   const http=async(path,body,sub=owner,options={})=>{
+    // Undici overwrites Host. A native loopback request models the production
+    // target header without DNS/network access to the real project.
+    if(options.headers?.host) return new Promise((resolve,reject)=>{
+      const req=httpRequest({hostname:'127.0.0.1',port,path,method:options.method??(body===undefined?'GET':'POST'),headers:{
+        ...options.headers,...(sub?{authorization:'Bearer '+token(sub)}:{}),
+        ...(body===undefined?{}:{'content-type':'application/json'}),
+      }},response=>{let text='';response.setEncoding('utf8');response.on('data',chunk=>text+=chunk);
+        response.on('end',()=>{try{resolve({status:response.statusCode,data:text?JSON.parse(text):null});}catch(error){reject(error);}});
+      });req.on('error',reject);req.end(body===undefined?undefined:JSON.stringify(body));
+    });
     const response=await fetch(`http://127.0.0.1:${port}`+path,{method:options.method??(body===undefined?'GET':'POST'),headers:{
       ...options.headers,
       ...(sub?{authorization:'Bearer '+token(sub)}:{}),...(body===undefined?{}:{'content-type':'application/json'}),

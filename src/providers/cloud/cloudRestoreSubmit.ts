@@ -93,6 +93,8 @@ const definition = (
 ): SafeErrorDefinition => Object.freeze({ code, classification, message, outcome });
 
 const safeDefinitions = new Map<string, SafeErrorDefinition>();
+safeDefinitions.set('CLOUD_RESTORE_PREPARE_TIMEOUT', definition('CLOUD_RESTORE_PREPARE_TIMEOUT', 'server',
+  '還原安全準備逾時，本次尚未進入業務還原，原資料保持不變。請提供追蹤編號查證。', 'failed'));
 safeDefinitions.set('STALE_RESTORE_PREPARE', definition('STALE_RESTORE_PREPARE', 'server',
   '安全檢查後來源資料已變更，本次未提交。請重新選取備份並完成安全檢查。', 'failed'));
 for (const [category, message] of Object.entries({
@@ -357,6 +359,10 @@ const definitionFor = (error: unknown, source: CloudRestoreErrorSource): SafeErr
     return approved.classification === safeClassification ? approved : UNKNOWN_LOCAL_DEFINITION;
   }
   const rawCode = safeOwnScalar(error, 'code');
+  if (source === 'server-response' && rawCode === '57014'
+      && safeOwnScalar(error, 'message') === 'CLOUD_RESTORE_PREPARE_TIMEOUT') {
+    return safeDefinitions.get('CLOUD_RESTORE_PREPARE_TIMEOUT')!;
+  }
   const exactKnown = rawCode ? safeDefinitions.get(rawCode) : undefined;
   if (exactKnown) return contextualizeKnownDefinition(exactKnown, source);
   if (source === 'transport' || source === 'post-dispatch' || safeInstanceOf(error, TypeError)) {

@@ -63,3 +63,18 @@ response loss, double Execute, raw ERP1 v1 compatibility, 37 outbound timestamps
 Local/Client/Server validator parity, 041/042/043 and the short Execute boundary.
 Live acceptance and final Baseline A parity must be recorded separately; isolated
 timings must never be presented as live production timings.
+# Authenticated Prepare entry point follow-up (060)
+
+The first deployed B→A Prepare uploaded all 65 chunks, but Finalize was
+canceled with SQLSTATE 57014 after exactly 8 seconds. Postgres log context
+showed entry to the nested proof; the top-level Finalize RPC lacked a
+PostgREST-hoisted timeout. No Execute or business mutation occurred.
+
+060 replaces cumulative per-resource JSONB concatenation with one object
+aggregation, checks chunk counts before assembly, and bounds this Prepare-only
+RPC to 25 seconds. Role/global timeout settings and Execute remain unchanged.
+Authenticated loopback PostgREST tests now exercise the exact full dataset,
+not only direct postgres calls to the nested proof. Live performance must
+still be measured; a larger allowed timeout is not a performance PASS.
+
+Reference: https://docs.postgrest.org/en/stable/references/transactions.html#hoisted-function-settings

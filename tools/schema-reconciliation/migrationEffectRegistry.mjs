@@ -42,6 +42,17 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '060': {
+    sourceFile:'060_restore_prepare_bounded_finalize.sql',dependencies:['059'],
+    risk:'LOW_PREPARE_ONLY_BOUNDED_ASSEMBLY',idempotency:'FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[table('erp_restore_upload_chunks'),fn('erp_finalize_restore_upload(uuid)')],
+    postconditions:[fn('erp_finalize_restore_upload(uuid)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['statement_timeout=25s'],
+      definitionIncludes:['CLOUD_RESTORE_PREPARE_TIMEOUT','jsonb_object_agg','STALE_RESTORE_PREPARE'],
+    })],
+  },
   '059': {
     sourceFile:'059_restore_typed_stage_dashboard_compatibility.sql',dependencies:['058'],
     risk:'LOW_OPS_ONLY_STAGING_COMPATIBILITY',idempotency:'ADDITIVE_IF_NOT_EXISTS',

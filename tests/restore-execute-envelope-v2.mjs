@@ -16,7 +16,8 @@ const executeBody=sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.erp_r
 assert.doesNotMatch(executeBody,/erp_cloud_restore_snapshot\(|jsonb_populate_recordset|jsonb_to_recordset|jsonb_agg/u);
 assert.match(executeBody,/STALE_RESTORE_PREPARE/u);
 const compatibility='059_restore_typed_stage_dashboard_compatibility.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility].includes(f))});
+const finalizeMigration='060_restore_prepare_bounded_finalize.sql';
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try {
  const r=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
@@ -33,6 +34,7 @@ try {
  const before=(await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d;
  await db.sql.query(sql);
  await db.sql.query(await readFile('supabase/sql/'+compatibility,'utf8'));
+ await db.sql.query(await readFile('supabase/sql/'+finalizeMigration,'utf8'));
  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
  const typedProof=(await db.sql.query('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) r',[candidate.data,candidate.manifest,'strict','isolated',randomUUID()])).rows[0].r;
  assert.equal((await db.sql.query('select public.erp_restore_staged_cloud_snapshot($1,$2,$3,$4,$5) r',[randomUUID(),typedProof.proof_id,candidate.manifest.snapshotFingerprint,candidate.manifest,'isolated'])).rows[0].r.ok,true);
@@ -71,10 +73,30 @@ try {
    return {data:{},error:name==='erp_upload_restore_chunk'?{code:'42501'}:null};
  },candidate,candidate.data,'strict',randomUUID()),upload.CloudRestoreUploadServerError);
  assert.equal(finalized,false);
+ // Exercise the actual authenticated PostgREST entry point with the exact
+ // dataset, not only a postgres/direct call to the nested proof function.
+ const timeoutConfig=(await db.sql.query("select proconfig from pg_proc where oid='public.erp_finalize_restore_upload(uuid)'::regprocedure")).rows[0].proconfig;
+ assert.ok(timeoutConfig.includes('statement_timeout=25s'));
+ await db.sql.query(`alter role authenticated in database ${new URL(db.url).pathname.slice(1)} set statement_timeout='8s'`);
+ await db.startPostgrest();
+ const transportRuns=[];
+ for(let run=0;run<5;run++){
+  const transportStarted=performance.now();
+  const completed=await upload.uploadCloudRestoreCandidate(async(name,args)=>{
+   const response=await db.http('/rpc/'+name,args,owner,{headers:{host:'rhfdjsklfrgpoqsaqpkn.supabase.co'}});
+   return {data:response.data,error:response.status>=400?response.data:null};
+  },candidate,candidate.data,'strict',randomUUID());
+  assert.equal(completed.ok,true);
+  assert.equal(completed.prepared_row_count,candidate.manifest.totalRows);
+  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
+  transportRuns.push({totalMs:performance.now()-transportStarted,assemblyMs:completed.uploadAssemblyMs,
+   serverMs:completed.finalizeServerMs,proof:completed.prepareTimingsMs});
+ }
  const safe=await vite.ssrLoadModule('/src/providers/cloud/cloudRestoreSubmit.ts');
  const failed={status:'not_committed',attemptId:randomUUID(),traceId:randomUUID(),expectedEpoch:1,effectiveFingerprint:'a'.repeat(64),
   failure:{phase:'reconcile',category:'DATABASE_INTERRUPTED',code:'CLOUD_RESTORE_FAILURE_DATABASE_INTERRUPTED',sqlstate:null,timeoutClassification:'unobserved',evidence:'reconciled-noncommit',failedAt:new Date().toISOString()}};
  assert.equal(r.classifyCloudRestoreCommitOutcome({outcome:r.assertCloudRestoreAttemptOutcome(failed)}),'DATABASE_INTERRUPTED_NOT_COMMITTED');
  assert.match(safe.normalizeCloudRestoreSubmitError({code:failed.failure.code},'rpc',{source:'server-response'}).message,/原資料保持不變/u);
- console.log(JSON.stringify({trueLiveState057to058and059:'PASS',migrationBusinessMutation:0,stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS'}));
+ assert.match(safe.normalizeCloudRestoreSubmitError({code:'57014',message:'CLOUD_RESTORE_PREPARE_TIMEOUT'},'readiness',{source:'server-response'}).message,/尚未進入業務還原/u);
+ console.log(JSON.stringify({trueLiveState057to058and059and060:'PASS',migrationBusinessMutation:0,stageACL:'PASS',viewerDenied:'PASS',auditIdentityProof:'PASS',chunkIdempotency:'PASS',changedChunkRejected:'PASS',missingChunkRejected:'PASS',expiredUploadRejected:'PASS',boundedUpload:'PASS',noFinalizeOnUploadFailure:'PASS',authenticatedTransport:'PASS',transportRuns,sourceCAS:'REQUIRED',databaseInterruptedClassification:'PASS',prepareTimeoutHumanMessage:'PASS'}));
 }finally{await vite.close();await db.close();}
