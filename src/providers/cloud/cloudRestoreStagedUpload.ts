@@ -15,7 +15,12 @@ export interface RestorePrepareCallTiming {
 }
 export class CloudRestoreUploadServerError extends Error {
   readonly response: unknown;
-  constructor(response: unknown) { super('CLOUD_RESTORE_PREPARE_SERVER_REJECTED'); this.response = response; }
+  readonly rpc: string;
+  readonly requestId: string;
+  constructor(response: unknown, rpc = '', requestId = '') {
+    super('CLOUD_RESTORE_PREPARE_SERVER_REJECTED'); this.response = response;
+    this.rpc = rpc; this.requestId = requestId;
+  }
 }
 
 /** Bounded OPS staging only. No business mutation and no retry/replay of Execute. */
@@ -34,7 +39,12 @@ export async function uploadCloudRestoreCandidate(
     const at = performance.now();
     const encoder = new TextEncoder();
     const requestBytes = encoder.encode(JSON.stringify(args)).length;
-    const result = await rpc(name, args);
+    let result: Awaited<ReturnType<Rpc>>;
+    try { result = await rpc(name, args); }
+    catch (error) {
+      if (name === 'erp_begin_restore_upload') throw new CloudRestoreUploadServerError(error, name, requestId);
+      throw error;
+    }
     const ended = performance.now();
     const response = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const parts = Array.isArray(args.p_chunks) ? args.p_chunks as Array<{ p_resource: string }> : [];
@@ -50,7 +60,7 @@ export async function uploadCloudRestoreCandidate(
       startMs: Math.round(at - started), endMs: Math.round(ended - started), wallMs: Math.round(ended - at),
       httpStatus: typeof result.status === 'number' ? result.status : null,
       serverMs: typeof serverMs === 'number' && Number.isFinite(serverMs) ? serverMs : null, phaseTimingsMs: phases });
-    if (result.error) throw new CloudRestoreUploadServerError(result.error);
+    if (result.error) throw new CloudRestoreUploadServerError(result.error, name, requestId);
     return result.data;
   };
   await call('erp_begin_restore_upload', { p_request_id: requestId, p_manifest: candidate.manifest,

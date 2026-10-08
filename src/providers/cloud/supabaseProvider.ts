@@ -85,6 +85,7 @@
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackupDiagnostic } from './cloudBackupDiagnostics';
 import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError, type RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
+import { cleanupExpiredRestoreOps } from './cloudRestoreOpsMaintenance';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
@@ -447,13 +448,21 @@ export class SupabaseProvider implements IDataProvider {
     } catch (caughtError) {
       if (caughtError instanceof CloudRestoreUploadServerError) {
         try { markCloudRequestFailed(caughtError.response); } catch { /* Preserve the server error. */ }
+        if (caughtError.rpc === 'erp_begin_restore_upload') {
+          const sqlstate = caughtError.response && typeof caughtError.response === 'object' && 'code' in caughtError.response
+            ? String(caughtError.response.code) : undefined;
+          const code = sqlstate === '57014' ? 'RESTORE_PREPARE_BEGIN_TIMEOUT' : 'RESTORE_PREPARE_BEGIN_FAILED';
+          throw createCloudRestoreSafeSubmitError({ code, reasonCode: code, requestId, sqlstate }, 'server-response');
+        }
         throw createCloudRestoreSafeSubmitError(caughtError.response, 'server-response');
       }
       try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe transport error authoritative. */ }
       throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
     }
     markCloudReachable();
-    return { ...assertCloudRestoreCandidateProofResult(data, candidate), prepareTransportTimingsMs, prepareCallTimings };
+    const proof = { ...assertCloudRestoreCandidateProofResult(data, candidate), prepareTransportTimingsMs, prepareCallTimings };
+    void cleanupExpiredRestoreOps((name, args) => supabase.rpc(name, args), requestId);
+    return proof;
   }
 
   private readonly mutationCache = new CloudTargetedCache();

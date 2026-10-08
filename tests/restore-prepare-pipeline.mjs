@@ -6,7 +6,7 @@ import {createServer} from 'vite';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
 import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
 const migration='063_restore_prepare_draft_proof_initialization.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,'064_restore_bounded_chunk_batch_and_identity_profile.sql','066_restore_prepare_set_based_resource_staging.sql'].includes(f))});
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,'064_restore_bounded_chunk_batch_and_identity_profile.sql','066_restore_prepare_set_based_resource_staging.sql','067_restore_begin_independent_bounded_ops_cleanup.sql'].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 const a=new pg.Client({connectionString:db.url.toString()}),b=new pg.Client({connectionString:db.url.toString()});
 try {

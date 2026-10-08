@@ -20,7 +20,7 @@ export type CloudRestoreSubmitEvent =
   | 'authoritative-refresh'
   | 'submit-finish';
 
-export type CloudRestoreSubmitPhase = 'confirmation' | 'readiness' | 'rpc' | 'authoritative-refresh' | 'submit';
+export type CloudRestoreSubmitPhase = 'confirmation' | 'readiness' | 'prepare-begin' | 'rpc' | 'authoritative-refresh' | 'submit';
 export type CloudRestoreSubmitOutcome = 'not-submitted' | 'failed' | 'unknown' | 'success' | 'sync-pending' | 'cancelled';
 export type CloudRestoreErrorClassification = 'readiness' | 'validation' | 'server' | 'transport' | 'unknown';
 export type CloudRestoreErrorSource = 'local' | 'pre-dispatch' | 'server-response' | 'transport' | 'post-dispatch';
@@ -61,7 +61,7 @@ export interface CloudRestoreReadiness {
 const MAX_DIAGNOSTICS = 100;
 const diagnostics: CloudRestoreSubmitDiagnostic[] = [];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const SAFE_PHASES = new Set<CloudRestoreSubmitPhase>(['confirmation', 'readiness', 'rpc', 'authoritative-refresh', 'submit']);
+const SAFE_PHASES = new Set<CloudRestoreSubmitPhase>(['confirmation', 'readiness', 'prepare-begin', 'rpc', 'authoritative-refresh', 'submit']);
 const CLOUD_RESTORE_INTENT_STORAGE_PREFIX = 'erp_cloud_restore_intent:';
 const CLOUD_RESTORE_UNRESOLVED_STORAGE_KEY = 'erp_cloud_restore_unresolved_attempt';
 
@@ -93,6 +93,10 @@ const definition = (
 ): SafeErrorDefinition => Object.freeze({ code, classification, message, outcome });
 
 const safeDefinitions = new Map<string, SafeErrorDefinition>();
+safeDefinitions.set('RESTORE_PREPARE_BEGIN_FAILED', definition('RESTORE_PREPARE_BEGIN_FAILED', 'server',
+  '建立還原準備工作失敗，本次尚未開始上傳，也沒有修改任何資料。', 'failed'));
+safeDefinitions.set('RESTORE_PREPARE_BEGIN_TIMEOUT', definition('RESTORE_PREPARE_BEGIN_TIMEOUT', 'server',
+  '建立還原準備工作逾時，本次尚未修改任何資料。', 'failed'));
 safeDefinitions.set('CLOUD_RESTORE_PREPARE_TIMEOUT', definition('CLOUD_RESTORE_PREPARE_TIMEOUT', 'server',
   '還原安全準備逾時，本次尚未進入業務還原，原資料保持不變。請提供追蹤編號查證。', 'failed'));
 safeDefinitions.set('STALE_RESTORE_PREPARE', definition('STALE_RESTORE_PREPARE', 'server',
@@ -301,6 +305,7 @@ const validCorrelationId = (value: unknown): string | undefined => (
 );
 
 const RESTORE_VALIDATION_REASONS = new Set([
+  'RESTORE_PREPARE_BEGIN_FAILED','RESTORE_PREPARE_BEGIN_TIMEOUT',
   'OUTBOUND_TIMESTAMP_EVIDENCE_MISSING',
   'WACA_PAYLOAD_KEY_MISSING','WACA_PAYLOAD_KEY_MISMATCH','WACA_ORDER_STATUS_INVALID',
   'WACA_QUANTITY_INVALID','WACA_DUPLICATE_BUSINESS_KEY','WACA_MAPPING_MISMATCH',
@@ -510,7 +515,7 @@ export const normalizeCloudRestoreSubmitError = (
   return visibleFromDefinition(
     (detail.reasonCode ? safeDefinitions.get(detail.reasonCode) : undefined)
       ?? definitionFor(error, context.source ?? 'local'),
-    phase,
+    detail.reasonCode?.startsWith('RESTORE_PREPARE_BEGIN_') ? 'prepare-begin' : phase,
     context.attemptCorrelationId,
     detail,
   );

@@ -42,6 +42,21 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '067': {
+    sourceFile:'067_restore_begin_independent_bounded_ops_cleanup.sql',dependencies:['066'],
+    risk:'LOW_PREPARE_OPS_BOUNDED_MAINTENANCE',idempotency:'NEW_OWNER_SCOPED_RPC',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[fn('erp_begin_restore_upload(uuid,jsonb,text,text)'),fn('erp_restore_cleanup_expired_upload()')],
+    postconditions:[fn('erp_begin_restore_upload(uuid,jsonb,text,text)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions'],
+      definitionIncludes:['ON CONFLICT DO NOTHING','RESTORE_PREPARE_BEGIN_TIMEOUT','serverMs'],
+    }),fn('erp_cleanup_expired_restore_ops(uuid)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=4s','lock_timeout=200ms'],
+      definitionIncludes:['LIMIT 16','4096','FOR UPDATE OF u NOWAIT','p_exclude_request_id',"NOT IN('completed','not_committed')"],
+    })],
+  },
   '066': {
     sourceFile:'066_restore_prepare_set_based_resource_staging.sql',dependencies:['064','065'],
     risk:'LOW_PREPARE_SET_BASED_STAGING',idempotency:'EXACT_FUNCTION_REPLACEMENT',
