@@ -78,6 +78,7 @@ export interface BuyAnimeProductionTrace {
   reactCommitMaxMs: number;
   missingRequiredPoints: BuyAnimeTracePoint[];
   errorCode?: string;
+  catalogEvidence?: Array<{ offsetMs:number; event:string; details:SafeMeta }>;
 }
 
 const STORAGE_KEY = '__hippo_erp2_buyanime_production_trace_v1__';
@@ -116,6 +117,12 @@ const publish = (trace: BuyAnimeProductionTrace): void => {
 const safeMeta = (meta?: SafeMeta): SafeMeta | undefined => meta && Object.fromEntries(
   Object.entries(meta).filter(([, value]) => ['string','number','boolean'].includes(typeof value) || value === null),
 );
+
+/** Counts, phase timings and static caller labels only; never request payloads. */
+export function recordBuyAnimeCatalogEvidence(event:string, details:SafeMeta):void {
+  if(!active || active.outcome!=='RUNNING') return;
+  (active.catalogEvidence ??= []).push({offsetMs:rounded(now()-active.startedAtPerformance),event,details:safeMeta(details)!});
+}
 
 export function beginBuyAnimeProductionTrace(file: Pick<File, 'name' | 'size'>): BuyAnimeProductionTrace {
   const startedAtPerformance = now();

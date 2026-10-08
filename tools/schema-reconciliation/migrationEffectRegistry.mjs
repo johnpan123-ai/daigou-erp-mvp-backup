@@ -42,6 +42,23 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '070': {
+    sourceFile:'070_catalog_set_based_commit_and_reconciliation.sql',dependencies:['056','069'],
+    risk:'CATALOG_ATOMIC_EXECUTION_OPTIMIZATION',idempotency:'EXACT_FUNCTION_REPLACEMENT',
+    classification:'NO_NEW_DURABLE_RESOURCE',
+    preconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)'),fn('erp_apply_field_mutations(text,jsonb)')],
+    postconditions:[fn('erp_apply_catalog_fields_set_based(text,jsonb)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=""'],definitionIncludes:['jsonb_populate_recordset','CATALOG_WRITE_COUNT_MISMATCH','CLOUD_FIELD_CAS_EXPECTED_KEYS_MISMATCH'],
+    }),fn('erp_apply_catalog_transaction(uuid,jsonb)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=""'],definitionIncludes:['erp_apply_catalog_fields_set_based','CATALOG_PROVENANCE_TRANSITION_FORBIDDEN','serverPhases'],
+    }),fn('erp_reconcile_catalog_transaction(uuid,jsonb)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=""','statement_timeout=3s','lock_timeout=100ms'],
+      definitionIncludes:['actor_id=actor','request_payload IS DISTINCT FROM p_request','SHARE MODE NOWAIT','CATALOG_RECONCILED_COMMITTED'],
+    })],
+  },
   '069': {
     sourceFile:'069_restore_finalize_server_resource_semantic_proof.sql',dependencies:['066','068'],
     risk:'LOW_PREPARE_FINALIZE_SEMANTIC_PROOF',idempotency:'EXACT_FUNCTION_REPLACEMENT',

@@ -1,10 +1,10 @@
 import type { InventoryItem, ImportStats } from '../../lib/db';
 import type { planCloudInventoryImport } from './inventoryImportPlan';
-import type { planCatalogTransaction } from './catalogTransaction';
+import type { planCatalogTransaction, CatalogCommitOutcome } from './catalogTransaction';
 import { deterministicCloudUuid, toCloudFieldRow } from './cloudEntityPayload';
 import { CloudMutationBoundaryError } from './cloudFieldCas';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/myacgImportErrors';
-import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
+import { markBuyAnimeTrace, recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
 import type { MyAcgMasterLink } from '../../waca/masterReference';
 import { assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent, type BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
 
@@ -110,6 +110,7 @@ export interface BuyAnimeImportPort {
   commitInventory(plan: ReturnType<typeof planCloudInventoryImport>): Promise<void>;
   planCatalog(imported: InventoryItem[], inventory?: InventoryItem[], fresh?: boolean): Promise<CatalogImportPlan | null>;
   commitCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
+  reconcileCatalog?: (catalog:NonNullable<BuyAnimeImportRecord['catalog']>) => Promise<CatalogCommitOutcome>;
   verifyCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
 }
 
@@ -243,6 +244,7 @@ export class BuyAnimeImportPipeline {
     if (['INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED'].includes(record.stage)) {
       record = { ...record, stage: 'CATALOG_PENDING' };
     }
+    let freshCatalogIntent=false;
     if (record.stage === 'CATALOG_PENDING') {
       markBuyAnimeTrace('T16_CATALOG_PLAN_START', { inventoryRows: rows.length });
       const plan = await this.port.planCatalog(rows, reusable ? proven.inventory : undefined);
@@ -261,23 +263,43 @@ export class BuyAnimeImportPipeline {
       } else {
         // Persist the EXACT request and stable key before RPC; close/relogin cannot regenerate it.
         record = await this.store(record, { stage: 'CATALOG_COMMITTING', catalog: { key: importCatalogKey(record.batchId), plan } });
+        freshCatalogIntent=true;
       }
     }
     if (record.stage === 'CATALOG_COMMITTING') {
       await this.assertCurrent(record);
+      // F5/recovery first classifies the EXACT saved request. A completed
+      // receipt advances to readback without redispatching Catalog operations.
+      const reconcile=async():Promise<CatalogCommitOutcome> => {
+        if(!this.port.reconcileCatalog) return 'UNKNOWN';
+        const started=performance.now();
+        let outcome:CatalogCommitOutcome='UNKNOWN';
+        try { outcome=await this.port.reconcileCatalog(record.catalog!); }
+        catch { /* A failed classification is UNKNOWN, never permission to replay. */ }
+        recordBuyAnimeCatalogEvidence('reconcile',{outcome,elapsedMs:performance.now()-started});
+        return outcome;
+      };
+      let outcome:CatalogCommitOutcome=freshCatalogIntent || !this.port.reconcileCatalog ? 'NOT_COMMITTED' : await reconcile();
+      if(outcome==='UNKNOWN') throw new BuyAnimeResumeError('BUYANIME_CATALOG_COMMIT_UNKNOWN',record);
       try {
         const catalogOperations = record.catalog?.plan
           ? Object.values(record.catalog.plan.request.operations).reduce((sum, operations) => sum + operations.length, 0) : 0;
         markBuyAnimeTrace('T18_CATALOG_COMMIT_START', { catalogOperations });
-        await this.port.commitCatalog(record.catalog!);
+        if(outcome!=='COMMITTED') await this.port.commitCatalog(record.catalog!);
         await this.assertCurrent(record);
         markBuyAnimeTrace('T19_CATALOG_COMMIT_RESPONSE', { catalogOperations });
       }
       catch (cause) {
+        outcome=await reconcile();
+        if(outcome==='COMMITTED') {
+          recordBuyAnimeCatalogEvidence('commit-outcome',{outcome:'CATALOG_COMMITTED_RESPONSE_LOST',replay:0});
+          markBuyAnimeTrace('T19_CATALOG_COMMIT_RESPONSE',{reconciled:true});
+        } else {
         // A proven rollback may replan; an uncertain result MUST retain the exact request.
-        if (cause instanceof BuyAnimeResumeError && cause.code === 'BUYANIME_CATALOG_ROLLED_BACK')
+        if (outcome==='NOT_COMMITTED' || (!this.port.reconcileCatalog && cause instanceof BuyAnimeResumeError && cause.code === 'BUYANIME_CATALOG_ROLLED_BACK'))
           record = await this.store(record, { stage: 'CATALOG_PENDING', catalog: undefined });
         throw new BuyAnimeResumeError('BUYANIME_CATALOG_PENDING', record, cause);
+        }
       }
       record = { ...record, stage: 'CATALOG_COMMITTED' };
     }
@@ -306,6 +328,18 @@ export function buyAnimeRecoveryMessage(record: BuyAnimeImportRecord, verified =
   if (record.stage === 'INVENTORY_COMMIT_UNKNOWN' || record.stage === 'INVENTORY_COMMITTING')
     return '主檔儲存結果尚待雲端核對，請勿重複匯入。';
   return '主檔已儲存，但雲端核對或後續同步尚未完成；請勿重複匯入。';
+}
+
+export function buyAnimeRecoveryUserMessage(error:unknown):string {
+  let current=error;
+  for(let depth=0;depth<6;depth++) {
+    const value=current as {category?:string;code?:string;cause?:unknown}|null;
+    if(value?.category==='CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED'
+      || value?.code==='BUYANIME_CATALOG_COMMIT_UNKNOWN') return classifyMyAcgImportError(current,'commit').message;
+    if(!value?.cause) break;
+    current=value.cause;
+  }
+  return '匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。';
 }
 
 /** Safe codes/stacks only; never raw rows, SQL DETAIL, journal payloads or secrets. */

@@ -2,7 +2,8 @@ import { CloudMutationBoundaryError, isCloudFieldMutationError } from '../provid
 
 export type MyAcgImportErrorCode = 'FILE_READ_ERROR' | 'PARSER_ERROR' | 'REQUIRED_FIELD_MISSING'
   | 'VALIDATION_ERROR' | 'CLOUD_STAGING_ERROR' | 'CLOUD_COMMIT_ERROR' | 'PERMISSION_ERROR'
-  | 'NETWORK_ERROR' | 'COMMIT_RESULT_UNKNOWN' | 'COMMITTED_READBACK_PENDING' | 'RECOVERY_STATE_ERROR';
+  | 'NETWORK_ERROR' | 'COMMIT_RESULT_UNKNOWN' | 'COMMITTED_READBACK_PENDING' | 'RECOVERY_STATE_ERROR'
+  | 'CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED' | 'CATALOG_COMMIT_ROLLED_BACK' | 'CATALOG_COMMIT_UNKNOWN';
 export type MyAcgImportPhase = 'file-read' | 'parse' | 'validation' | 'staging' | 'recovery' | 'commit' | 'readback';
 
 const messages: Record<MyAcgImportErrorCode, string> = {
@@ -17,6 +18,9 @@ const messages: Record<MyAcgImportErrorCode, string> = {
   COMMIT_RESULT_UNKNOWN: '雲端儲存結果尚未確認。請先同步並核對資料，勿重複匯入。',
   COMMITTED_READBACK_PENDING: '已儲存至雲端，但資料讀回尚未完成。請同步後確認，勿重複匯入。',
   RECOVERY_STATE_ERROR: '資料還原世代或匯入復原狀態無法核對。請同步後查看技術資訊，勿重複匯入。',
+  CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED: '商品目錄寫入逾時，本次商品目錄變更未提交；系統會核對安全進度，不需重新匯入檔案。',
+  CATALOG_COMMIT_ROLLED_BACK: '商品目錄交易已取消，已儲存的主檔不會重送；請從安全進度繼續。',
+  CATALOG_COMMIT_UNKNOWN: '商品目錄結果尚待雲端 receipt 核對，請勿重複匯入。',
 };
 
 export class MyAcgImportError extends Error {
@@ -34,7 +38,10 @@ export function classifyMyAcgImportError(error: unknown, phase: MyAcgImportPhase
   if (error instanceof MyAcgImportError) return error;
   if (error instanceof CloudMutationBoundaryError) return new MyAcgImportError(
     error.state === 'result-unknown' ? 'COMMIT_RESULT_UNKNOWN' : 'COMMITTED_READBACK_PENDING', phase, error);
-  const value = error as { code?: unknown; message?: unknown; status?: unknown } | null;
+  const value = error as { code?: unknown; message?: unknown; status?: unknown; category?: unknown } | null;
+  if(value?.category==='CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED') return new MyAcgImportError('CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED',phase,error);
+  if(value?.code==='BUYANIME_CATALOG_ROLLED_BACK') return new MyAcgImportError('CATALOG_COMMIT_ROLLED_BACK',phase,error);
+  if(value?.code==='BUYANIME_CATALOG_COMMIT_UNKNOWN') return new MyAcgImportError('CATALOG_COMMIT_UNKNOWN',phase,error);
   const code = String(value?.code ?? '');
   const message = String(value?.message ?? '');
   if (['42501', 'PGRST301', 'PGRST302'].includes(code) || [401, 403].includes(Number(value?.status))
@@ -56,10 +63,10 @@ export function classifyMyAcgImportError(error: unknown, phase: MyAcgImportPhase
 
 /** Diagnostics deliberately omit raw rows, Postgres DETAIL, request payloads and credentials. */
 export function myAcgImportDiagnostic(error: MyAcgImportError, requestId: string) {
-  const cause = error.cause as { code?: unknown; message?: unknown; stack?: unknown; detail?: unknown } | null;
+  const cause = error.cause as { code?: unknown; message?: unknown; stack?: unknown; detail?: unknown; diagnostic?: {code?:string} } | null;
   const inner = cause?.detail as { code?: unknown; message?: unknown } | null;
   const message = String(cause?.message ?? inner?.message ?? '');
-  const code = String(cause?.code ?? inner?.code ?? '');
+  const code = String(cause?.diagnostic?.code ?? cause?.code ?? inner?.code ?? '');
   return { category: error.code, phase: error.phase, requestId,
     postgresCode: /^[0-9A-Z]{5}$/u.test(code) ? code : undefined,
     reason: /^(?:CLOUD_|REQUIRED_|VALIDATION_|BUYANIME_)[A-Z_]+$/u.test(message) ? message : undefined,

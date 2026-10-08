@@ -126,6 +126,7 @@ try{
     expected:{waca_manual_adjustment:0},changes:{waca_manual_adjustment:5}}];
   await assert.rejects(call(inject),/CATALOG_MANUAL_METADATA_FORBIDDEN/);
   await sql.query(readFileSync('supabase/sql/056_catalog_materialized_purchase_projection.sql','utf8'));
+  await sql.query(readFileSync('supabase/sql/070_catalog_set_based_commit_and_reconciliation.sql','utf8'));
   await db.startPostgrest();
   const postgrestTimings=[];
   for(let run=1;run<=5;run++){
@@ -142,6 +143,10 @@ try{
   const payload={p_idempotency_key:crypto.randomUUID(),p_request:httpPlan.request};
   assert.equal((await db.http('/rpc/erp_apply_catalog_transaction',payload)).data.ok,true);
   assert.equal((await db.http('/rpc/erp_apply_catalog_transaction',payload)).data.replayed,true);
+  const reconciliation=await db.http('/rpc/erp_reconcile_catalog_transaction',payload);
+  assert.equal(reconciliation.status,200);assert.equal(reconciliation.data.outcome,'COMMITTED');
+  for(const actor of [viewer,null]) assert.ok([401,403,404].includes((await db.http('/rpc/erp_reconcile_catalog_transaction',payload,actor)).status));
+  assert.ok([401,403,404].includes((await db.http('/rpc/erp_apply_catalog_fields_set_based',{p_entity:'product_groups',p_operations:[]})).status));
   for(const actor of [viewer,null])assert.ok([401,403,404].includes((await db.http('/rpc/erp_apply_catalog_transaction',payload,actor)).status));
   assert.equal((await db.http('/product_groups')).status,200);
   const backup=(await sql.query('select public.erp_export_cloud_restore_snapshot() result')).rows[0].result;

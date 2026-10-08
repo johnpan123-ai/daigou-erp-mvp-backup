@@ -23,7 +23,7 @@ import {
   isCloudRestoreDisabledMode,
 } from '../providers/cloudRestorePolicy';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
-import { BuyAnimeResumeError, buyAnimeRecoveryDiagnostic } from '../providers/cloud/buyAnimeImportResume';
+import { BuyAnimeResumeError, buyAnimeRecoveryDiagnostic, buyAnimeRecoveryUserMessage } from '../providers/cloud/buyAnimeImportResume';
 import { buyAnimeFlowLabel } from '../providers/cloud/buyAnimeImportCoordinator';
 import {
   beginBuyAnimeProductionTrace,
@@ -297,7 +297,7 @@ export default function Inventory() {
       if (currentMode === 'cloud' || currentMode === 'fallback') {
         if (err instanceof BuyAnimeResumeError && err.record) {
           setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, err.record));
-          setImportStatus('匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。');
+          setImportStatus(buyAnimeRecoveryUserMessage(err));
           const trace = finishBuyAnimeProductionTrace('ERROR', err.code);
           if (trace) setPerformanceTrace(trace);
           return;
@@ -306,7 +306,7 @@ export default function Inventory() {
           const pending = await dataProvider.getBuyAnimeImportRecovery();
           if (pending) {
             setImportDiagnostic(buyAnimeRecoveryDiagnostic(err, pending));
-            setImportStatus('匯入尚未完成；系統會在重新整理後核對既有進度，請勿重複選擇同一檔案。');
+            setImportStatus(buyAnimeRecoveryUserMessage(err));
             const trace = finishBuyAnimeProductionTrace('ERROR', err instanceof BuyAnimeResumeError ? err.code : 'BUYANIME_PENDING_RECOVERY');
             if (trace) setPerformanceTrace(trace);
             return;

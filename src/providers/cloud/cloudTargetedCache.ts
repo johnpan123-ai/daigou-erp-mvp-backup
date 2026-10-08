@@ -15,6 +15,8 @@ import type { CloudChange, CloudRefreshRequest, CloudRefreshResult, CloudResourc
 import { cloudBusinessRowsEqual } from './cloudRealtimeComparison';
 import { assertExpectedCloudFields, readCloudRowsByIds } from './cloudBulkRead';
 import { CLOUD_TABLE_RESOURCE, resolveCloudRowIdentity } from './cloudSyncDomain';
+import { awaitCatalogCommitReadFence } from './catalogCommitReadFence';
+import { recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
 import {
   getCloudConnectivitySnapshot,
   markCloudReadFailed,
@@ -183,6 +185,7 @@ export class CloudTargetedCache {
   private readonly queryOverride?: CloudTargetedQuery;
   private cursors = new Map<string, string>();
   private singleFlight = new Map<string, Promise<number>>();
+  private readCaller='unassigned';
   private targetedQueries = 0;
   private rowsFetched = 0;
   private requestsByTable = new Map<string, number>();
@@ -255,6 +258,7 @@ export class CloudTargetedCache {
   }
 
   private async performRefresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
+    this.readCaller='targeted-cache:'+request.reason;
     const conflicts: CloudChange[] = [];
     const comparison = { changed: false };
     const byTable = new Map<string, CloudChange[]>();
@@ -322,6 +326,12 @@ export class CloudTargetedCache {
 
   private async query(request: CloudTargetedQueryRequest): Promise<Row[]> {
     request.signal?.throwIfAborted();
+    if(request.table==='inventory_items') {
+      await awaitCatalogCommitReadFence(this.readCaller,request.signal);
+      recordBuyAnimeCatalogEvidence('inventory-read',{caller:this.readCaller,
+        mode:request.databaseIds?'ids':request.updatedAfter?'incremental':'page',
+        count:request.databaseIds?.length ?? 0,from:request.from ?? -1,to:request.to ?? -1});
+    }
     this.targetedQueries += 1;
     this.requestsByTable.set(request.table, (this.requestsByTable.get(request.table) || 0) + 1);
     if (this.queryOverride) {

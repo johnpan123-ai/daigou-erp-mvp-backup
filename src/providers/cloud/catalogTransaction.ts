@@ -8,6 +8,8 @@ import { toCloudFieldRow } from './cloudEntityPayload';
 export type CatalogMode='create'|'master'|'sync'|'reparse';
 export interface CatalogSnapshot {inventory:InventoryItem[];groups:ProductGroup[];categories:ProductCategory[];variants:ProductVariant[]}
 export const CATALOG_RPC='erp_apply_catalog_transaction';
+export const CATALOG_RECONCILE_RPC='erp_reconcile_catalog_transaction';
+export type CatalogCommitOutcome='COMMITTED'|'NOT_COMMITTED'|'UNKNOWN';
 
 export type CatalogOperationErrorCategory =
   | 'CATALOG_VALIDATION_ERROR'
@@ -15,6 +17,7 @@ export type CatalogOperationErrorCategory =
   | 'STALE_CONFLICT'
   | 'COMMIT_REJECTED'
   | 'COMMIT_UNKNOWN'
+  | 'CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED'
   | 'READBACK_FAILED'
   | 'AUTH_PERMISSION_ERROR'
   | 'NETWORK_ERROR';
@@ -70,6 +73,8 @@ export const classifyCatalogRpcError = (
     'CATALOG_VALIDATION_ERROR','商品資料未通過建立訂購紀錄的驗證，本次沒有寫入資料。',diagnostic);
   if(code==='NETWORK_ERROR') return new CatalogOperationError('NETWORK_ERROR',
     '網路連線在送出商品操作前失敗，本次沒有寫入資料。',diagnostic);
+  if(code==='57014') return new CatalogOperationError('CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED',
+    '商品目錄寫入逾時，本次商品目錄交易已取消；系統會核對安全進度，不需重新匯入檔案。',diagnostic);
   if(!code || /^5/u.test(code) || /fetch|network|timeout|abort/iu.test(serverMessage ?? ''))
     return new CatalogOperationError('COMMIT_UNKNOWN',
       '商品操作結果尚未確認。請先同步核對雲端資料，勿重複提交。',

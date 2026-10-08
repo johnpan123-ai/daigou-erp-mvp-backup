@@ -83,6 +83,9 @@
 })();
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
+import { beginCatalogCommitReadFence, awaitCatalogCommitReadFence } from './catalogCommitReadFence';
+import { recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
+import { CATALOG_RECONCILE_RPC } from './catalogTransaction';
 import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackupDiagnostic } from './cloudBackupDiagnostics';
 import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError, type RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
@@ -1006,7 +1009,7 @@ export class SupabaseProvider implements IDataProvider {
 
     if (shouldForce) {
       this.isPulled = false;
-      this.pullPromise = null;
+      // Force must not fork a second full pull while the first is still active.
     }
     if (this.isPulled) return;
     if (this.pullPromise) return this.pullPromise;
@@ -1054,7 +1057,11 @@ export class SupabaseProvider implements IDataProvider {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             fetchAll<any>(async (from, to) => supabase.from('sales_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => supabase.from('inventory_items').select('*').is('deleted_at', null).order('inventory_key').range(from, to)),
+            fetchAll<any>(async (from, to) => {
+              await awaitCatalogCommitReadFence('provider-bootstrap');
+              recordBuyAnimeCatalogEvidence('inventory-read',{caller:'provider-bootstrap',mode:'page',from,to});
+              return supabase.from('inventory_items').select('*').is('deleted_at', null).order('inventory_key').range(from, to);
+            }),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             fetchAll<any>(async (from, to) => supabase.from('dashboard_category_images').select('category_key, image_url, storage_path').is('deleted_at', null).order('category_key').range(from, to)),
           ]);
@@ -1598,10 +1605,14 @@ export class SupabaseProvider implements IDataProvider {
       await this.requireCloudWritePermission();
       assertCloudWriteAllowed();
       let response;
+      const releaseReads=beginCatalogCommitReadFence();
       try { response = await supabase.rpc(CATALOG_RPC, { p_idempotency_key: catalog.key, p_request: catalog.plan.request }); }
       catch (cause) { markCloudRequestFailed(cause); throw new CloudMutationBoundaryError('result-unknown', cause); }
+      finally { releaseReads(); }
       if (response.error) {
         markCloudRequestFailed(response.error);
+        if(response.error.code==='57014') throw new BuyAnimeResumeError('BUYANIME_CATALOG_ROLLED_BACK',undefined,
+          classifyCatalogRpcError(response.error,catalog.key));
         if (!response.error.code || response.status >= 500 || /^5/u.test(response.error.code))
           throw new CloudMutationBoundaryError('result-unknown', response.error);
         throw new BuyAnimeResumeError('BUYANIME_CATALOG_ROLLED_BACK', undefined, response.error);
@@ -1616,6 +1627,19 @@ export class SupabaseProvider implements IDataProvider {
       if (response.data.idempotencyKey !== catalog.key)
         throw new CloudMutationBoundaryError('result-unknown', new Error('BUYANIME_CATALOG_RESPONSE_IDENTITY_MISMATCH'));
       markCloudReachable();
+      if(response.data.serverPhases && typeof response.data.serverPhases==='object') {
+        const timings=Object.fromEntries(Object.entries(response.data.serverPhases)
+          .filter(([key,value])=>/Ms$/u.test(key) && typeof value==='number' && Number.isFinite(value)));
+        recordBuyAnimeCatalogEvidence('server-phases',timings as Record<string,number>);
+      }
+    },
+    reconcileCatalog: async catalog => {
+      if(!catalog.plan) return 'UNKNOWN';
+      const response=await supabase.rpc(CATALOG_RECONCILE_RPC,{p_idempotency_key:catalog.key,p_request:catalog.plan.request});
+      if(response.error) return 'UNKNOWN';
+      const outcome=response.data?.outcome;
+      if(outcome==='COMMITTED' && (response.data.result?.ok!==true || response.data.result.idempotencyKey!==catalog.key)) return 'UNKNOWN';
+      return ['COMMITTED','NOT_COMMITTED','UNKNOWN'].includes(outcome) ? outcome : 'UNKNOWN';
     },
     verifyCatalog: async catalog => {
       if (!catalog.plan) return;
