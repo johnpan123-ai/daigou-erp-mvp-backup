@@ -19,7 +19,7 @@
     }
   },
   "schemaBaseline": {
-    "requiredBaselineId": "erp2-canonical-schema-v19-restore-prepare-resource-staging",
+    "requiredBaselineId": "erp2-canonical-schema-v20-restore-prepare-resource-staging",
     "evidenceContractVersion": 2,
     "fingerprintContractVersion": 3,
     "canonicalContract": "ERP2_SEMANTIC_SCHEMA_V3",
