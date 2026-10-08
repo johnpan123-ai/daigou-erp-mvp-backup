@@ -45,6 +45,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   '070': {
     sourceFile:'070_catalog_set_based_commit_and_reconciliation.sql',dependencies:['056','069'],
     risk:'CATALOG_ATOMIC_EXECUTION_OPTIMIZATION',idempotency:'EXACT_FUNCTION_REPLACEMENT',
+    repairs:['050','056'],
     classification:'NO_NEW_DURABLE_RESOURCE',
     preconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)'),fn('erp_apply_field_mutations(text,jsonb)')],
     postconditions:[fn('erp_apply_catalog_fields_set_based(text,jsonb)',{
@@ -279,6 +280,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   '056': {
     sourceFile:'056_catalog_materialized_purchase_projection.sql',dependencies:['055'],
     risk:'LOW_GUARDED_CATALOG_PROVENANCE_TRANSITION',idempotency:'CREATE_OR_REPLACE_WITH_EXACT_REPLAY',
+    repairClosure:'070',
     preconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)'),table('inventory_items'),
       table('product_groups'),table('product_variants'),table('erp_idempotency_keys')],
     postconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)',{
@@ -359,6 +361,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   '050': {
     sourceFile:'050_catalog_atomic_transaction.sql',dependencies:['049'],
     risk:'LOW_ADDITIVE',idempotency:'RERUN_SAFE_WITH_CANONICAL_SHAPE_ONLY',
+    repairClosure:'070',
     preconditions:[fn('erp_apply_field_mutations(text,jsonb)'),table('erp_idempotency_keys')],
     postconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)',{
       owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
