@@ -5,6 +5,7 @@ import {
   type CloudRestoreManifest,
   type CloudRestoreTable,
 } from './cloudAtomicRestore';
+import type { RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
 
 export const CLOUD_RESTORE_CANDIDATE_PROOF_RPC = 'erp_prove_cloud_restore_candidate_v2' as const;
 export const CLOUD_RESTORE_CANDIDATE_PROOF_SCHEMA = 'cloud-restore-candidate-proof-v1' as const;
@@ -43,6 +44,7 @@ export interface CloudRestoreCandidateProofResult {
   requestId: string;
   /** Local performance metadata only; never part of durable proof/identity. */
   prepareTransportTimingsMs?: Record<string, number>;
+  prepareCallTimings?: RestorePrepareCallTiming[];
 }
 
 export interface CloudRestoreCandidateProofBinding {

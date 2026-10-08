@@ -1,6 +1,18 @@
 import { CLOUD_RESTORE_TABLES, type CloudRestoreCandidate } from './cloudAtomicRestore';
 
-type Rpc = (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
+type Rpc = (name: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown; status?: number }>;
+export interface RestorePrepareCallTiming {
+  rpc: string;
+  resources: string[];
+  chunkCount: number;
+  requestBytes: number;
+  startMs: number;
+  endMs: number;
+  wallMs: number;
+  httpStatus: number | null;
+  serverMs: number | null;
+  phaseTimingsMs: Record<string, number>;
+}
 export class CloudRestoreUploadServerError extends Error {
   readonly response: unknown;
   constructor(response: unknown) { super('CLOUD_RESTORE_PREPARE_SERVER_REJECTED'); this.response = response; }
@@ -14,10 +26,30 @@ export async function uploadCloudRestoreCandidate(
   mode: 'strict' | 'cross-environment',
   requestId: string,
   onTimings?: (timings: Record<string, number>) => void,
+  onCallTimings?: (calls: RestorePrepareCallTiming[]) => void,
 ): Promise<unknown> {
   const started = performance.now();
+  const calls: RestorePrepareCallTiming[] = [];
   const call = async (name: string, args: Record<string, unknown>) => {
+    const at = performance.now();
+    const encoder = new TextEncoder();
+    const requestBytes = encoder.encode(JSON.stringify(args)).length;
     const result = await rpc(name, args);
+    const ended = performance.now();
+    const response = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+    const parts = Array.isArray(args.p_chunks) ? args.p_chunks as Array<{ p_resource: string }> : [];
+    const serverMs = response.serverMs ?? response.finalizeServerMs;
+    const phases = response.phaseTimingsMs && typeof response.phaseTimingsMs === 'object'
+      ? Object.fromEntries(Object.entries(response.phaseTimingsMs).filter(([key, value]) =>
+        ['columns', 'immutableChunks', 'validationProjection', 'identityProof', 'typedStage'].includes(key)
+        && typeof value === 'number' && Number.isFinite(value) && value >= 0)) as Record<string, number> : {};
+    // Transient scalar timings only. Never include payloads, row values, tokens
+    // or raw errors; diagnostics do not affect proof, identity or persistence.
+    calls.push({ rpc: name, resources: typeof args.p_resource === 'string' ? [args.p_resource] : parts.map(p => p.p_resource),
+      chunkCount: parts.length || (Array.isArray(args.p_rows) ? 1 : 0), requestBytes,
+      startMs: Math.round(at - started), endMs: Math.round(ended - started), wallMs: Math.round(ended - at),
+      httpStatus: typeof result.status === 'number' ? result.status : null,
+      serverMs: typeof serverMs === 'number' && Number.isFinite(serverMs) ? serverMs : null, phaseTimingsMs: phases });
     if (result.error) throw new CloudRestoreUploadServerError(result.error);
     return result.data;
   };
@@ -101,6 +133,7 @@ export async function uploadCloudRestoreCandidate(
     uploadAndStageMs: Math.round(uploadAndStageMs), finalizeMs: Math.round(performance.now() - finalizeStarted),
     totalMs: Math.round(performance.now() - started) };
   onTimings?.(timings);
+  onCallTimings?.(calls);
   console.info('[Cloud Restore Prepare]', { requestId, chunkCount: chunks.length,
     batchCount: batches.length, ...timings, uploadCompletedAtMs: Math.round(uploadCompletedAtMs),
     firstStageAtMs: firstStageAtMs === null ? null : Math.round(firstStageAtMs),

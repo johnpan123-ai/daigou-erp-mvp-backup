@@ -42,6 +42,22 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '066': {
+    sourceFile:'066_restore_prepare_set_based_resource_staging.sql',dependencies:['064','065'],
+    risk:'LOW_PREPARE_SET_BASED_STAGING',idempotency:'EXACT_FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[fn('erp_restore_initialize_upload_proof()'),fn('erp_cloud_restore_prepared_profile(uuid,text)')],
+    postconditions:[fn('erp_stage_restore_upload_resource(uuid,text)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=25s'],
+      definitionIncludes:['ch.proof_id=$1 and ch.resource=$2','phaseTimingsMs','STALE_RESTORE_PREPARE','prepared_payload_hash IS NULL'],
+    }),fn('erp_finalize_restore_upload(uuid)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=25s','work_mem=16MB'],
+      definitionIncludes:['erp_cloud_restore_audit_dataset','erp_cloud_restore_relationship_hash',
+        'erp_cloud_restore_validate_waca_dataset','erp_cloud_restore_validate_portability','STALE_RESTORE_PREPARE'],
+    })],
+  },
   '065': {
     sourceFile:'065_cloud_backup_stable_readonly_execution.sql',dependencies:['055'],
     risk:'LOW_BACKUP_READ_ONLY_EXECUTION_MARKER',idempotency:'EXACT_FUNCTION_VOLATILITY_REPLACEMENT',

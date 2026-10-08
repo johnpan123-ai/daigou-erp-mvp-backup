@@ -84,7 +84,7 @@
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackupDiagnostic } from './cloudBackupDiagnostics';
-import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError } from './cloudRestoreStagedUpload';
+import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError, type RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
@@ -439,9 +439,11 @@ export class SupabaseProvider implements IDataProvider {
     recordCloudRestoreRpcIntent({ requestId, rpcName: CLOUD_RESTORE_CANDIDATE_PROOF_RPC });
     let data: unknown;
     let prepareTransportTimingsMs: Record<string, number> | undefined;
+    let prepareCallTimings: RestorePrepareCallTiming[] | undefined;
     try {
       data = await uploadCloudRestoreCandidate((name, args) => supabase.rpc(name, args),
-        candidate, effective.sourceData, effective.mode, requestId, timings => { prepareTransportTimingsMs = timings; });
+        candidate, effective.sourceData, effective.mode, requestId, timings => { prepareTransportTimingsMs = timings; },
+        calls => { prepareCallTimings = calls; });
     } catch (caughtError) {
       if (caughtError instanceof CloudRestoreUploadServerError) {
         try { markCloudRequestFailed(caughtError.response); } catch { /* Preserve the server error. */ }
@@ -451,7 +453,7 @@ export class SupabaseProvider implements IDataProvider {
       throw createCloudRestoreSafeSubmitError(caughtError, 'transport');
     }
     markCloudReachable();
-    return { ...assertCloudRestoreCandidateProofResult(data, candidate), prepareTransportTimingsMs };
+    return { ...assertCloudRestoreCandidateProofResult(data, candidate), prepareTransportTimingsMs, prepareCallTimings };
   }
 
   private readonly mutationCache = new CloudTargetedCache();

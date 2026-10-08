@@ -6,6 +6,7 @@ import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { dataProvider } from '../providers/dataProvider';
 import {
   prepareCloudRestoreSnapshot,
+  CloudRestoreValidationError,
   preserveLegacyCloudDashboardImages,
   sha256BytesHex, sha256Hex, stableCloudRestoreJson,
   type CloudRestoreAttemptCommand,
@@ -285,7 +286,7 @@ export default function CloudAtomicRestorePanel({
     setProofMessage('正在完成安全檢查…');
     setPrepareTimings(null);
     setStatus('preflighting');
-    setMessage('正在解析備份並確認雲端最新狀態；尚未寫入任何資料。');
+    setMessage('正在讀取備份檔案；尚未寫入任何資料。');
     setCandidate(null);
     setSourceCandidate(null);
     setResult(null);
@@ -309,12 +310,18 @@ export default function CloudAtomicRestorePanel({
       const rawBytes = await file.arrayBuffer();
       const sourceFileSha256 = await sha256BytesHex(rawBytes);
       finishPhase('fileReadAndHash');
-      let source = await prepareCloudRestoreSnapshot(new TextDecoder().decode(rawBytes), {
+      setMessage('正在驗證備份資料…');
+      // Keep original byte SHA; object input follows the same canonical parser.
+      let parsed: unknown;
+      try { parsed = JSON.parse(new TextDecoder().decode(rawBytes)); }
+      catch (error) { throw new CloudRestoreValidationError('MALFORMED_JSON', `JSON 解析失敗：${error instanceof Error ? error.message : String(error)}`); }
+      finishPhase('clientJsonParse');
+      let source = await prepareCloudRestoreSnapshot(parsed, {
         fileName: file.name,
         sourceEnvironment: window.location.origin,
         sourceFileSha256,
       });
-      finishPhase('clientParseAndValidation');
+      finishPhase('clientNormalizationAndValidation');
       if (candidateGenerationRef.current !== generation) return;
       const readiness = await ensureCloudRestorePrepareReadiness({
         cloudMode: getProviderMode() === 'cloud', authenticated: Boolean(user), owner: role === 'owner',
@@ -333,6 +340,7 @@ export default function CloudAtomicRestorePanel({
         : await prepareCrossEnvironmentCloudRestoreCandidate(source, supabaseEnvironment.projectRef);
       const prepared = portable.portability && portable.portability.totalTransformedRows > 0 ? portable : source;
       finishPhase('targetCompatibility');
+      setMessage('正在上傳資料並驗證關聯…');
       const proof = await (proveRestoreCandidate ?? (value => dataProvider.proveCloudRestoreCandidate(value)))(prepared);
       finishPhase('uploadStageAndServerProof');
       for (const [phase, ms] of Object.entries(proof.prepareTransportTimingsMs ?? {})) timings[`transport.${phase}`] = ms;
@@ -839,6 +847,9 @@ export default function CloudAtomicRestorePanel({
           {prepareTimings && <div data-testid="cloud-restore-prepare-timings">
             Prepare timings (ms)：{Object.entries(prepareTimings).map(([phase, ms]) => `${phase}=${ms}`).join('；')}
           </div>}
+          {proofRecord?.result.prepareCallTimings && <pre data-testid="cloud-restore-prepare-waterfall" style={{ whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify({ requestId: proofRecord.result.requestId, calls: proofRecord.result.prepareCallTimings })}
+          </pre>}
           {sourceCandidate && <div>來源 fingerprint：<code>{sourceCandidate.manifest.snapshotFingerprint}</code></div>}
           {candidate && <div>有效 fingerprint：<code>{candidate.executionFingerprint}</code></div>}
           {candidate?.portability && <div>跨環境轉換：{candidate.portability.totalTransformedRows}；policy：{candidate.portability.policyVersion}</div>}

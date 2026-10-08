@@ -21,7 +21,7 @@ const singlePassMigration='061_restore_prepare_single_pass_json.sql';
 const resourceStageMigration='062_restore_resource_stage_and_projected_proof.sql';
 const draftProofMigration='063_restore_prepare_draft_proof_initialization.sql';
 const batchMigration='064_restore_bounded_chunk_batch_and_identity_profile.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration,singlePassMigration,resourceStageMigration,draftProofMigration,batchMigration].includes(f))});
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,compatibility,finalizeMigration,singlePassMigration,resourceStageMigration,draftProofMigration,batchMigration,'066_restore_prepare_set_based_resource_staging.sql'].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try {
  const r=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');
@@ -43,6 +43,7 @@ try {
  await db.sql.query(await readFile('supabase/sql/'+resourceStageMigration,'utf8'));
  await db.sql.query(await readFile('supabase/sql/'+draftProofMigration,'utf8'));
  await db.sql.query(await readFile('supabase/sql/'+batchMigration,'utf8'));
+ await db.sql.query(await readFile('supabase/sql/066_restore_prepare_set_based_resource_staging.sql','utf8'));
  assert.deepEqual((await db.sql.query('select public.erp_cloud_restore_snapshot() d')).rows[0].d,before);
  const typedProof=(await db.sql.query('select public.erp_prove_cloud_restore_candidate_v2($1,$2,$3,$4,$5) r',[candidate.data,candidate.manifest,'strict','isolated',randomUUID()])).rows[0].r;
  assert.equal(typedProof.prepared_payload_hash,proof.prepared_payload_hash);
