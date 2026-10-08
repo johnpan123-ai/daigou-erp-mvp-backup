@@ -287,7 +287,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
       authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
       definitionIncludes:['CATALOG_PROVENANCE_TRANSITION_FORBIDDEN','inventory_import',
-        'myacg_order_import','show_in_purchase_list','exact_replay','erp_apply_field_mutations'],
+        'myacg_order_import','show_in_purchase_list','exact_replay','CATALOG_ROLLBACK','erp_idempotency_keys'],
     })],
   },
   '055': {
@@ -366,7 +366,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
     postconditions:[fn('erp_apply_catalog_transaction(uuid,jsonb)',{
       owner:'postgres',returnType:'jsonb',securityDefiner:true,publicExecute:false,
       authenticatedExecute:true,anonExecute:false,requiredConfig:['search_path=""'],
-      definitionIncludes:['dependencies','SHARE ROW EXCLUSIVE','erp_apply_field_mutations'],
+      definitionIncludes:['dependencies','SHARE ROW EXCLUSIVE','FIELD_CONFLICT','CATALOG_ROLLBACK','erp_idempotency_keys'],
     })],
   },
   '049': {

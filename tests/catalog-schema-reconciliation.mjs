@@ -14,7 +14,7 @@ try {
   assert.equal(plan.readyForApply, true);
   assert.deepEqual(plan.applyPlan, []);
   for (const id of ['050','056']) {
-    assert.equal(plan.migrations.find(m=>m.migrationId===id).coveredByRepair, '070');
+    assert.equal(plan.migrations.find(m=>m.migrationId===id).state, 'SATISFIED');
   }
   assert.equal(plan.migrations.find(m=>m.migrationId==='070').state, 'SATISFIED');
   // A supersession never accepts incomplete helpers, exposed ACL, removed

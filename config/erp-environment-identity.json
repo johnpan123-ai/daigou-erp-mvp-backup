@@ -19,7 +19,7 @@
     }
   },
   "schemaBaseline": {
-    "requiredBaselineId": "erp2-canonical-schema-v24-catalog-set-based-commit",
+    "requiredBaselineId": "erp2-canonical-schema-v25-catalog-set-based-verified-effects",
     "evidenceContractVersion": 2,
     "fingerprintContractVersion": 3,
     "canonicalContract": "ERP2_SEMANTIC_SCHEMA_V3",
