@@ -42,6 +42,18 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '071': {
+    sourceFile: '071_restore_postcommit_readonly_verification.sql', dependencies: ['058', '070'],
+    risk: 'READ_ONLY_RESTORE_POSTCOMMIT_VERIFICATION', idempotency: 'ADDITIVE_FUNCTION',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [table('erp_restore_business_generation'), fn('erp_cloud_restore_live_relationship_hash()')],
+    postconditions: [fn('erp_verify_committed_cloud_restore(uuid,uuid,uuid)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
+      publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=15s'],
+      definitionIncludes: ['actor_key=encode', 'generationCertified', 'RESTORE_COMMITTED_STATE_MISMATCH', 't.tgtype=28'],
+    })],
+  },
   '070': {
     sourceFile:'070_catalog_set_based_commit_and_reconciliation.sql',dependencies:['056','069'],
     risk:'CATALOG_ATOMIC_EXECUTION_OPTIMIZATION',idempotency:'EXACT_FUNCTION_REPLACEMENT',

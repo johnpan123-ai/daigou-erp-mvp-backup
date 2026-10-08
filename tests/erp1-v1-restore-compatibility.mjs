@@ -50,7 +50,19 @@ try{
  const execute=async(q)=>{
    const body={p_attempt_id:q.attempt,p_trace_id:q.trace,p_execution_id:randomUUID(),p_proof_id:q.proof.proof_id,p_request_id:q.request};
    assert.equal(Buffer.byteLength(JSON.stringify(body)),269);
-   return (await db.sql.query('select public.erp_restore_proven_cloud_snapshot_attempt($1,$2,$3,$4,$5) result',Object.values(body))).rows[0].result;
+   const result=(await db.sql.query('select public.erp_restore_proven_cloud_snapshot_attempt($1,$2,$3,$4,$5) result',Object.values(body))).rows[0].result;
+   if (!result.ok) {
+     await assert.rejects(db.sql.query('select public.erp_verify_committed_cloud_restore($1,$2,$3)',
+       [body.p_attempt_id,body.p_trace_id,body.p_execution_id]), e=>e.code==='22023');
+     return result;
+   }
+   const verified=(await db.sql.query('select public.erp_verify_committed_cloud_restore($1,$2,$3) result',
+     [body.p_attempt_id,body.p_trace_id,body.p_execution_id])).rows[0].result;
+   assert.equal(verified.status,'RESTORE_COMMITTED_VERIFIED','ERP1/CURRENT_POSTCOMMIT_VERIFIED');
+   assert.equal(verified.restoreEpoch,result.restoreEpoch);
+   assert.equal(verified.generationCertified,true);
+   summary.postCommitVerification='PASS';
+   return result;
  };
  const restore=async(c)=>{const q=await prepare(c);const result=await execute(q);assert.equal(result.ok,true);return result;};
  await db.sql.query("select set_config('request.headers',$1,false)",[JSON.stringify({host:'rhfdjsklfrgpoqsaqpkn.supabase.co'})]);

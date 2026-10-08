@@ -30,10 +30,7 @@ import {
   subscribeCloudConnectivity,
 } from '../providers/cloud/cloudConnectivity';
 import { isCloudRestoreFailureCode, type CloudRestoreFailure } from '../providers/cloud/cloudRestoreFailure';
-import {
-  cloudRestoreAuditVerdict,
-  type CloudRestoreIntegrityAudit,
-} from '../providers/cloud/cloudRestoreIntegrityAudit';
+import type { CloudRestoreIntegrityAudit } from '../providers/cloud/cloudRestoreIntegrityAudit';
 import {
   assertCloudRestoreEffectiveCandidate,
   prepareCrossEnvironmentCloudRestoreCandidate,
@@ -61,6 +58,8 @@ import type { CloudResource } from '../providers/cloud/cloudSyncDomain';
 import { getProviderMode } from '../providers/providerMode';
 import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import CloudRestoreIntegrityAuditTool from './CloudRestoreIntegrityAudit';
+import { verifyCommittedRestore, RestoreReadbackError, classifyRestoreReadbackError,
+  type RestoreVerificationSummary, type RestoreVerificationIdentity } from '../providers/cloud/cloudRestorePostCommit';
 
 const CONFIRMATION_TEXT = 'OVERWRITE CLOUD DATA';
 const CLOUD_RESTORE_READINESS_RESOURCES: CloudResource[] = [
@@ -79,6 +78,7 @@ interface CloudAtomicRestorePanelProps {
   executeRestore?: (command: CloudRestoreExecutionCommand) => Promise<CloudRestoreResult>;
   validateRestoreTarget?: (command: Parameters<typeof dataProvider.validateCloudRestoreTarget>[0]) => Promise<CloudRestoreTargetCompatibilityResult>;
   readRestoreIntegrityAudit?: () => Promise<CloudRestoreIntegrityAudit>;
+  readPostCommitVerification?: (identity: RestoreVerificationIdentity) => Promise<RestoreVerificationSummary>;
   onAuthoritativeRefreshComplete?: (restoreEpoch: number) => void | Promise<void>;
 }
 
@@ -103,7 +103,7 @@ export default function CloudAtomicRestorePanel({
   prepareRestoreAttempt,
   checkRestoreOutcome,
   executeRestore,
-  readRestoreIntegrityAudit,
+  readPostCommitVerification,
   onAuthoritativeRefreshComplete,
 }: CloudAtomicRestorePanelProps = {}) {
   const { user } = useAuth();
@@ -128,7 +128,10 @@ export default function CloudAtomicRestorePanel({
   const [status, setStatus] = useState<RestoreStatus>(initialUnresolvedAttempt ? 'unknown' : 'idle');
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<CloudRestoreResult | null>(null);
-  const [integrityAudit, setIntegrityAudit] = useState<CloudRestoreIntegrityAudit | null>(null);
+  const [verificationSummary, setVerificationSummary] = useState<RestoreVerificationSummary | null>(null);
+  const [verificationError, setVerificationError] = useState<RestoreReadbackError | null>(null);
+  const [latestCompletedAttempt, setLatestCompletedAttempt] = useState<RestoreVerificationIdentity | null>(null);
+  const activeVerificationRef = useRef<string | null>(initialUnresolvedAttempt?.attemptId ?? null);
   const [visibleError, setVisibleError] = useState<CloudRestoreVisibleError | null>(null);
   const [failureEvidence, setFailureEvidence] = useState<CloudRestoreFailure | null>(null);
   const [lastAttempt, setLastAttempt] = useState<PendingRestoreAttempt | null>(null);
@@ -178,11 +181,13 @@ export default function CloudAtomicRestorePanel({
     const currentUserId = user?.id ?? '';
     if (proofUserIdRef.current === currentUserId) return;
     proofUserIdRef.current = currentUserId;
+    activeVerificationRef.current = null;
     invalidateProof('登入身分已變更，請重新選擇備份。');
   }, [invalidateProof, user?.id]);
 
   useEffect(() => {
     if (!cloudMode || !unresolvedAttempt) return;
+    activeVerificationRef.current = unresolvedAttempt.attemptId;
     // Reload/recovery must keep the same pending identity until its own
     // authoritative outcome is verified; a fresh unrelated read cannot close it.
     window.dispatchEvent(new CustomEvent('cloud-restore-authoritative-pending', {
@@ -194,7 +199,7 @@ export default function CloudAtomicRestorePanel({
     if (!cloudMode || !owner || !user?.id || !browserOnline) return;
     let active = true;
     const userId = user.id;
-    void dataProvider.getPendingCloudRestoreAttempts().then(attempts => {
+    void dataProvider.getPendingCloudRestoreAttempts().then(async attempts => {
       if (!active) return;
       const pending = attempts[0];
       if (pending) {
@@ -214,6 +219,10 @@ export default function CloudAtomicRestorePanel({
         });
         setStatus('unknown');
         setMessage('找到未完成的還原；系統只會查證既有結果，不會再次執行。');
+      } else {
+        const completed = await dataProvider.getLatestCompletedCloudRestoreAttempt();
+        if (!active) return;
+        setLatestCompletedAttempt(completed);
       }
       setRecovery({ userId, ready: true, error: false });
     }).catch(() => {
@@ -256,7 +265,9 @@ export default function CloudAtomicRestorePanel({
     setCandidate(null);
     setSourceCandidate(null);
     setResult(null);
-    setIntegrityAudit(null);
+    setVerificationSummary(null);
+    setVerificationError(null);
+    activeVerificationRef.current = null;
     setVisibleError(null);
     setFailureEvidence(null);
     setLastAttempt(null);
@@ -290,7 +301,8 @@ export default function CloudAtomicRestorePanel({
     setCandidate(null);
     setSourceCandidate(null);
     setResult(null);
-    setIntegrityAudit(null);
+    setVerificationSummary(null);
+    setVerificationError(null);
     setVisibleError(null);
     setFailureEvidence(null);
     setAttemptClosed(false);
@@ -379,34 +391,39 @@ export default function CloudAtomicRestorePanel({
     resetPreparedRestore('已取消；沒有建立還原 attempt，也沒有修改資料。');
   };
 
-  const completeRestore = async (restored: CloudRestoreResult, pending: PendingRestoreAttempt) => {
+  const completeRestore = async (restored: CloudRestoreResult, pending: PendingRestoreAttempt, readOnly = false) => {
+    if (activeVerificationRef.current && activeVerificationRef.current !== pending.idempotencyKey) return;
+    activeVerificationRef.current = pending.idempotencyKey;
+    const verifyingUserId = user?.id;
+    const matching = () => activeVerificationRef.current === pending.idempotencyKey
+      && Boolean(verifyingUserId) && proofUserIdRef.current === verifyingUserId;
+    // Keep recovery durable until BOTH verification and authoritative refresh pass.
+    const command = { attemptId: pending.idempotencyKey, traceId: pending.correlationId };
+    setUnresolvedAttempt(command);
+    persistCloudRestoreUnresolvedAttempt(command);
     setResult(restored);
     setProgressStep('validate');
     setMessage('資料已提交，正在驗證完整性。');
     setRecoveredAttempt(null);
-    setUnresolvedAttempt(null);
-    clearCloudRestoreUnresolvedAttempt();
     refreshRecovery();
     submissionLockedRef.current = true;
-    let audit: CloudRestoreIntegrityAudit;
+    let verifiedGeneration: number;
     try {
-      audit = await (readRestoreIntegrityAudit ?? (() => dataProvider.readCloudRestoreIntegrityAudit()))();
-      setIntegrityAudit(audit);
-      if (cloudRestoreAuditVerdict(audit) !== 'PASS' || audit.epoch !== restored.restoreEpoch) {
-        throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_INTEGRITY_AUDIT_FAILED' }, 'server-response');
-      }
+      if (!pending.executionId) throw new RestoreReadbackError('RESTORE_READBACK_SERVER_ERROR');
+      const identity = { ...command, executionId: pending.executionId };
+      const summary = await verifyCommittedRestore(() =>
+        (readPostCommitVerification ?? (id => dataProvider.verifyCommittedCloudRestore(id)))(identity), restored);
+      if (!matching()) return;
+      setVerificationSummary(summary);
+      verifiedGeneration = summary.businessGeneration;
+      setVerificationError(null);
+      setVisibleError(null);
     } catch (error) {
-      const safe = normalizeCloudRestoreSubmitError(error, 'rpc', {
-        source: 'server-response', attemptCorrelationId: pending.correlationId,
-      });
-      setVisibleError(safe);
+      if (!matching()) return;
+      setVerificationError(classifyRestoreReadbackError(error));
       setAttemptClosed(true);
       setStatus('error');
-      setMessage('還原已提交，但結果驗證尚未通過；請勿再次還原。');
-      recordCloudRestoreSubmitDiagnostic({
-        event: 'submit-finish', phase: 'submit', outcome: 'failed',
-        attemptCorrelationId: pending.correlationId, idempotencyKey: pending.idempotencyKey, error: safe,
-      });
+      setMessage('還原已成功提交，但系統暫時無法完成結果驗證。請重新驗證結果，請勿再次執行還原。');
       return;
     }
     let deadlineStage;
@@ -417,26 +434,34 @@ export default function CloudAtomicRestorePanel({
     }
     if (deadlineStage?.deadlineSidecar) {
       try {
-        await restoreDeadlineDurableBackup('cloud', deadlineStage.deadlineSidecar);
+        // Reconciliation is READ ONLY: never repair Deadline or replay Restore.
+        if (!readOnly) await restoreDeadlineDurableBackup('cloud', deadlineStage.deadlineSidecar);
         const readBack = await readDeadlineDurableBackup('cloud');
         if (await sha256Hex(stableCloudRestoreJson(readBack)) !== deadlineStage.deadlineSidecarSha256) {
           throw new Error('DEADLINE_SIDECAR_READBACK_MISMATCH');
         }
       } catch {
+        if (!matching()) return;
         setAttemptClosed(true);
         setStatus('error');
         setMessage('雲端 ERP 資料已還原，但期限對照資料尚未通過還原驗證。請勿再次執行雲端還原；請保留原備份檔並聯繫維護者完成期限對照修復。');
         return;
       }
     } else if (!deadlineStage?.legacyBackup) {
+      if (!matching()) return;
       setAttemptClosed(true);
       setStatus('error');
       setMessage('雲端 ERP 資料已還原，但期限對照還原暫存無法讀取。請勿再次執行雲端還原；請保留原備份檔並聯繫維護者。');
       return;
     }
-    void clearCloudDeadlineRestoreStage(pending.idempotencyKey).catch(() => {});
+    if (!matching()) return;
     setProgressStep('refresh');
-    let syncPending = restored.authoritativeRefresh?.status === 'pending';
+    let syncPending = false;
+    try {
+      if (!refreshAuthoritative || (await refreshAuthoritative(CLOUD_RESTORE_READINESS_RESOURCES)) === false) {
+        throw new Error('RESTORE_AUTHORITATIVE_REFRESH_PENDING');
+      }
+    } catch { syncPending = true; }
     if (onAuthoritativeRefreshComplete) {
       try {
         await onAuthoritativeRefreshComplete(restored.restoreEpoch);
@@ -444,6 +469,32 @@ export default function CloudAtomicRestorePanel({
         syncPending = true;
       }
     }
+    if (!matching()) return;
+    if (!syncPending && pending.executionId) {
+      try {
+        const identity = { ...command, executionId: pending.executionId };
+        const afterRefresh = await verifyCommittedRestore(() =>
+          (readPostCommitVerification ?? (id => dataProvider.verifyCommittedCloudRestore(id)))(identity), restored);
+        if (!matching()) return;
+        if (afterRefresh.businessGeneration !== verifiedGeneration) {
+          throw new RestoreReadbackError('RESTORE_COMMITTED_STATE_MISMATCH');
+        }
+        setVerificationSummary(afterRefresh);
+      } catch (error) {
+        if (!matching()) return;
+        setVerificationError(classifyRestoreReadbackError(error));
+        syncPending = true;
+      }
+    }
+    if (syncPending) {
+      setStatus('error');
+      setMessage('還原結果已驗證，但畫面尚未完成雲端同步；寫入仍暫停，請重新驗證結果。');
+      return;
+    }
+    // Keep the Deadline evidence available for later read-only re-verification.
+    // It is environment-local hand-off state, not part of the Business Backup.
+    setUnresolvedAttempt(null);
+    clearCloudRestoreUnresolvedAttempt();
     setAttemptClosed(true);
     setScreenRefreshPending(syncPending);
     setStatus('success');
@@ -471,6 +522,7 @@ export default function CloudAtomicRestorePanel({
     setMessage('正在安全查證既有還原結果；不會再次執行。');
     try {
       const outcome = await (checkRestoreOutcome ?? (command => dataProvider.reconcileCloudRestoreAttempt(command)))(unresolvedAttempt);
+      if (activeVerificationRef.current !== unresolvedAttempt.attemptId) return;
       setLastAttempt(previous => ({
         correlationId: outcome.traceId,
         idempotencyKey: outcome.attemptId,
@@ -485,7 +537,7 @@ export default function CloudAtomicRestorePanel({
           fingerprint: outcome.effectiveFingerprint,
           ...(outcome.executionId ? { executionId: outcome.executionId } : {}),
           expectedEpoch: outcome.expectedEpoch,
-        });
+        }, true);
       } else if (outcome.status === 'not_committed') {
         window.dispatchEvent(new CustomEvent('cloud-restore-not-committed', { detail: { attemptId: outcome.attemptId } }));
         void clearCloudDeadlineRestoreStage(outcome.attemptId).catch(() => {});
@@ -531,13 +583,14 @@ export default function CloudAtomicRestorePanel({
   });
   useEffect(() => {
     if (!unresolvedAttempt || !cloudMode || !owner || !user?.id || !browserOnline || !recoveryReady
+      || (result && status === 'error')
       || status === 'restoring' || status === 'checking') return;
     const delay = reconcileSchedule.current.delay(unresolvedAttempt.traceId, reconcileAfter, Date.now());
     if (delay === null) return;
     const timer = window.setTimeout(runScheduledReconcile, delay);
     return () => window.clearTimeout(timer);
   }, [unresolvedAttempt, cloudMode, owner, user?.id, browserOnline, recoveryReady, status, reconcileAfter,
-    reconcileWakeVersion, connectivity.lastFreshReadAt]);
+    reconcileWakeVersion, connectivity.lastFreshReadAt, result]);
 
   const execute = async (pending: PendingRestoreAttempt) => {
     const activeCandidate = candidate;
@@ -739,7 +792,7 @@ export default function CloudAtomicRestorePanel({
     if (status === 'restoring' || status === 'checking') return '正在安全還原資料…';
     if (status === 'success') return '還原完成';
     if (status === 'unknown') return '還原結果需要查證，資料不會自動再次還原。';
-    if (status === 'error' && result) return '還原已提交，但結果驗證尚未通過。';
+    if (status === 'error' && result) return verificationError?.message ?? message;
     if (status === 'error' && visibleError) return formatCloudRestoreSubmitError(visibleError);
     if (status === 'error' && failureEvidence) return '還原失敗\n資料沒有被部分寫入。';
     if (status === 'error') return '此備份目前無法安全還原。';
@@ -838,6 +891,18 @@ export default function CloudAtomicRestorePanel({
       {(attemptClosed || status === 'success' || status === 'error' || (status === 'ready' && !proofCurrent)) && !unresolvedAttempt && (
         <button type="button" className="btn btn-outline" data-testid="cloud-restore-new-intent" disabled={!canChooseFile} onClick={startNewIntent} style={{ marginTop: 12 }}>選擇其他備份</button>
       )}
+      {unresolvedAttempt && <button type="button" className="btn btn-outline" data-testid="cloud-restore-reverify"
+        disabled={status === 'checking' || status === 'restoring'} onClick={() => void checkOutcome()}
+        style={{ marginTop: 12 }}>重新驗證結果（不會重新還原）</button>}
+      {!unresolvedAttempt && latestCompletedAttempt && status === 'idle' && <button type="button"
+        className="btn btn-outline" data-testid="cloud-restore-reverify-latest" disabled={!recoveryReady || !browserOnline}
+        onClick={() => {
+          activeVerificationRef.current = latestCompletedAttempt.attemptId;
+          setUnresolvedAttempt(latestCompletedAttempt);
+          persistCloudRestoreUnresolvedAttempt(latestCompletedAttempt);
+          setStatus('unknown');
+          setMessage('正在查證最近一次已提交還原；不會再次執行。');
+        }} style={{ marginTop: 12 }}>重新驗證最近一次還原結果</button>}
       </div>
 
       <details data-testid="cloud-restore-technical-details" style={{ marginTop: 14 }}>
@@ -880,9 +945,20 @@ export default function CloudAtomicRestorePanel({
             <div>來源復原證據：<code>{result.rollbackSnapshotId}</code></div>
             <div>canonical result：PASS</div>
           </>}
-          {integrityAudit && <>
-            <div>integrity audit：{cloudRestoreAuditVerdict(integrityAudit)}</div>
-            <div>audit epoch：{integrityAudit.epoch}</div>
+          {verificationSummary && <>
+            <div>post-commit verification：{verificationSummary.status}</div>
+            <div>audit epoch：{verificationSummary.restoreEpoch}</div>
+            <div>business generation：{verificationSummary.businessGeneration}</div>
+            <div>generation certified：{String(verificationSummary.generationCertified)}</div>
+            <div>verification rows：{verificationSummary.totalRows}</div>
+            <div>verification server ms：{verificationSummary.elapsedMs}</div>
+          </>}
+          {verificationError && <>
+            <div>phase：{verificationError.phase}</div>
+            <div>category：{verificationError.code}</div>
+            <div>RPC：{verificationError.rpc}</div>
+            {verificationError.sqlstate && <div>SQLSTATE：{verificationError.sqlstate}</div>}
+            {verificationError.httpStatus !== undefined && <div>HTTP：{verificationError.httpStatus}</div>}
           </>}
           {recoveredAttempt && <div>Recovered status：{recoveredAttempt.status}</div>}
           {unresolvedAttempt && <button type="button" className="btn btn-outline" data-testid="cloud-restore-check-outcome" disabled={status === 'checking'} onClick={() => void checkOutcome()}>再次查證結果（不會重新還原）</button>}

@@ -505,6 +505,14 @@ class DynamicDataProvider implements IDataProvider {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
     return this.supabaseProvider.readCloudRestoreIntegrityAudit();
   }
+  async verifyCommittedCloudRestore(identity: Parameters<typeof supabaseProvider.verifyCommittedCloudRestore>[0]) {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.supabaseProvider.verifyCommittedCloudRestore(identity);
+  }
+  async getLatestCompletedCloudRestoreAttempt() {
+    if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
+    return this.supabaseProvider.getLatestCompletedCloudRestoreAttempt();
+  }
   async getPendingCloudRestoreAttempts() {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');
     return this.supabaseProvider.getPendingCloudRestoreAttempts();

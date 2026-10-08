@@ -41,6 +41,7 @@ import {
 } from '../lib/stagingRealtimeFaultControl';
 import { assertP04HarnessBoundary } from '../lib/stagingP04AuthenticatedHarness';
 import { markBuyAnimeTrace } from '../diagnostics/buyAnimeProductionTrace';
+import { readCloudRestoreUnresolvedAttempt } from '../providers/cloud/cloudRestoreSubmit';
 
 interface CloudRealtimeContextValue {
   conflictedResources: ReadonlySet<CloudResource>;
@@ -108,7 +109,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     mode: getProviderMode(), busy: false, errorAt: null, lastCompletedAt: null, message: '',
   });
   const globalRefreshInFlight = useRef<Promise<void> | null>(null);
-  const [restorePendingAttempt, setRestorePendingAttempt] = useState<string | null>(null);
+  const [restorePendingAttempt, setRestorePendingAttempt] = useState<string | null>(() =>
+    getProviderMode() === 'cloud' ? readCloudRestoreUnresolvedAttempt()?.attemptId ?? null : null);
   const connectivity = useSyncExternalStore(
     subscribeCloudConnectivity,
     getCloudConnectivitySnapshot,

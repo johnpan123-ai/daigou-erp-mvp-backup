@@ -93,6 +93,7 @@ import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
 import { isCloudRestoreFailureCode } from './cloudRestoreFailure';
 import { readCloudRestoreIntegrityAudit } from './cloudRestoreIntegrityAudit';
+import { readRestoreVerificationSummary, type RestoreVerificationIdentity } from './cloudRestorePostCommit';
 import {
   CLOUD_RESTORE_CANDIDATE_PROOF_RPC,
   assertCloudRestoreCandidateProofResult,
@@ -426,6 +427,26 @@ export class SupabaseProvider implements IDataProvider {
   }
   async readCloudRestoreIntegrityAudit() {
     return readCloudRestoreIntegrityAudit(supabase);
+  }
+
+  async verifyCommittedCloudRestore(identity: RestoreVerificationIdentity) {
+    return readRestoreVerificationSummary(supabase, identity);
+  }
+
+  async getLatestCompletedCloudRestoreAttempt() {
+    const response = await supabase.from('erp_cloud_restore_attempts')
+      .select('attempt_id,trace_id,execution_id,status,target_environment')
+      .eq('target_environment', supabaseEnvironment.projectRef).eq('status', 'completed')
+      .order('result_epoch', { ascending: false }).limit(1);
+    if (response.error) throw createCloudRestoreSafeSubmitError(response.error, 'server-response');
+    const row = response.data?.[0];
+    if (!row) return null;
+    const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu;
+    if (row.status !== 'completed' || row.target_environment !== supabaseEnvironment.projectRef
+      || ![row.attempt_id, row.trace_id, row.execution_id].every(v => typeof v === 'string' && uuid.test(v))) {
+      throw createCloudRestoreSafeSubmitError({ code: 'CLOUD_RESTORE_ATTEMPT_RESULT_INVALID' }, 'server-response');
+    }
+    return { attemptId: row.attempt_id, traceId: row.trace_id, executionId: row.execution_id };
   }
 
   async canPreserveCloudRestoreAuditIdentity(candidate: CloudRestoreCandidate): Promise<boolean> {
