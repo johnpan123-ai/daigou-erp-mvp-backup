@@ -109,7 +109,11 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       fn('erp_restore_validation_projection(jsonb)',{authenticatedExecute:false,anonExecute:false,publicExecute:false}),
       fn('erp_stage_restore_upload_resource(uuid,text)',{
         owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
-        requiredConfig:['statement_timeout=25s'],definitionIncludes:['STALE_RESTORE_PREPARE','STAGING','prepared_payload_hash IS NULL'],
+        // 063 initializes the unexecutable STAGING draft in its owner-scoped
+        // trigger; 066 no longer repeats that INSERT in each resource stage.
+        // Keep stage CAS/hash-null enforcement, and 063 independently requires
+        // the trigger plus its STAGING/candidate_valid initialization contract.
+        requiredConfig:['statement_timeout=25s'],definitionIncludes:['STALE_RESTORE_PREPARE','prepared_payload_hash IS NULL'],
       }),fn('erp_finalize_restore_upload(uuid)',{
         owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
         requiredConfig:['statement_timeout=25s'],definitionIncludes:['projected-semantic-proof','erp_cloud_restore_validate_waca_dataset',
