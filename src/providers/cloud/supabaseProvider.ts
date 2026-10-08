@@ -453,6 +453,22 @@ export class SupabaseProvider implements IDataProvider {
           const code = sqlstate === '57014' ? 'RESTORE_PREPARE_BEGIN_TIMEOUT' : 'RESTORE_PREPARE_BEGIN_FAILED';
           throw createCloudRestoreSafeSubmitError({ code, reasonCode: code, requestId, sqlstate }, 'server-response');
         }
+        if (caughtError.rpc === 'erp_finalize_restore_upload') {
+          const response = caughtError.response && typeof caughtError.response === 'object'
+            ? caughtError.response as Record<string, unknown> : {};
+          let subphase = '';
+          if (typeof response.details === 'string' && response.details.length <= 2048) {
+            try { const details: unknown = JSON.parse(response.details);
+              if (details && typeof details === 'object' && 'phase' in details && typeof details.phase === 'string') subphase = details.phase;
+            } catch { /* Non-JSON server detail is not rendered. */ }
+          }
+          const preparePhase = subphase ? `finalize/${subphase}` : 'finalize';
+          if (response.code === '57014') {
+            throw createCloudRestoreSafeSubmitError({ code: 'RESTORE_PREPARE_FINALIZE_TIMEOUT',
+              reasonCode: 'RESTORE_PREPARE_FINALIZE_TIMEOUT', requestId, sqlstate: '57014', preparePhase }, 'server-response');
+          }
+          throw createCloudRestoreSafeSubmitError({ ...response, requestId, preparePhase }, 'server-response');
+        }
         throw createCloudRestoreSafeSubmitError(caughtError.response, 'server-response');
       }
       try { markCloudRequestFailed(caughtError); } catch { /* Keep the safe transport error authoritative. */ }

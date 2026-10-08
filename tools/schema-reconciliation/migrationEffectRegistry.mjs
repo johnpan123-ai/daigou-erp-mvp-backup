@@ -42,6 +42,22 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '069': {
+    sourceFile:'069_restore_finalize_server_resource_semantic_proof.sql',dependencies:['066','068'],
+    risk:'LOW_PREPARE_FINALIZE_SEMANTIC_PROOF',idempotency:'EXACT_FUNCTION_REPLACEMENT',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[fn('erp_finalize_restore_upload(uuid)'),table('erp_restore_upload_resource_proofs')],
+    postconditions:[fn('erp_restore_upload_semantic_audit(uuid)',{
+      owner:'postgres',securityDefiner:false,authenticatedExecute:false,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions'],
+      definitionIncludes:['rows as materialized','rp.request_id=p_request_id','execute_relationship_hash','optional_metadata_missing_reference_count'],
+    }),fn('erp_finalize_restore_upload(uuid)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=25s','work_mem=16MB'],
+      definitionIncludes:['erp_restore_upload_semantic_audit','erp_cloud_restore_validate_waca_dataset',
+        'erp_cloud_restore_validate_portability','STALE_RESTORE_PREPARE','request-cleanup','phaseTimingsMs'],
+    })],
+  },
   '068': {
     sourceFile:'068_restore_ops_conservative_batch_envelope.sql',dependencies:['067'],
     risk:'LOW_PREPARE_OPS_BOUNDED_MAINTENANCE',idempotency:'EXACT_SOURCE_GUARDED_FUNCTION_PATCH',

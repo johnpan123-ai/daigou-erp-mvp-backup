@@ -20,7 +20,10 @@ export type CloudRestoreSubmitEvent =
   | 'authoritative-refresh'
   | 'submit-finish';
 
-export type CloudRestoreSubmitPhase = 'confirmation' | 'readiness' | 'prepare-begin' | 'rpc' | 'authoritative-refresh' | 'submit';
+export type CloudRestoreSubmitPhase = 'confirmation' | 'readiness' | 'prepare-begin' | 'rpc' | 'authoritative-refresh' | 'submit'
+  | 'finalize' | 'finalize/authorization' | 'finalize/resource-stage' | 'finalize/validation-input'
+  | 'finalize/portability' | 'finalize/waca-validation' | 'finalize/projected-semantic-proof'
+  | 'finalize/manifest-validation' | 'finalize/prepared-chunk-proof' | 'finalize/proof-write' | 'finalize/request-cleanup';
 export type CloudRestoreSubmitOutcome = 'not-submitted' | 'failed' | 'unknown' | 'success' | 'sync-pending' | 'cancelled';
 export type CloudRestoreErrorClassification = 'readiness' | 'validation' | 'server' | 'transport' | 'unknown';
 export type CloudRestoreErrorSource = 'local' | 'pre-dispatch' | 'server-response' | 'transport' | 'post-dispatch';
@@ -61,7 +64,10 @@ export interface CloudRestoreReadiness {
 const MAX_DIAGNOSTICS = 100;
 const diagnostics: CloudRestoreSubmitDiagnostic[] = [];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const SAFE_PHASES = new Set<CloudRestoreSubmitPhase>(['confirmation', 'readiness', 'prepare-begin', 'rpc', 'authoritative-refresh', 'submit']);
+const SAFE_PHASES = new Set<CloudRestoreSubmitPhase>(['confirmation', 'readiness', 'prepare-begin', 'rpc', 'authoritative-refresh', 'submit',
+  'finalize', 'finalize/authorization', 'finalize/resource-stage', 'finalize/validation-input',
+  'finalize/portability', 'finalize/waca-validation', 'finalize/projected-semantic-proof',
+  'finalize/manifest-validation', 'finalize/prepared-chunk-proof', 'finalize/proof-write', 'finalize/request-cleanup']);
 const CLOUD_RESTORE_INTENT_STORAGE_PREFIX = 'erp_cloud_restore_intent:';
 const CLOUD_RESTORE_UNRESOLVED_STORAGE_KEY = 'erp_cloud_restore_unresolved_attempt';
 
@@ -97,6 +103,8 @@ safeDefinitions.set('RESTORE_PREPARE_BEGIN_FAILED', definition('RESTORE_PREPARE_
   '建立還原準備工作失敗，本次尚未開始上傳，也沒有修改任何資料。', 'failed'));
 safeDefinitions.set('RESTORE_PREPARE_BEGIN_TIMEOUT', definition('RESTORE_PREPARE_BEGIN_TIMEOUT', 'server',
   '建立還原準備工作逾時，本次尚未修改任何資料。', 'failed'));
+safeDefinitions.set('RESTORE_PREPARE_FINALIZE_TIMEOUT', definition('RESTORE_PREPARE_FINALIZE_TIMEOUT', 'server',
+  '備份資料已上傳完成，但在最後驗證階段逾時；本次尚未執行還原，也沒有修改任何資料。', 'failed'));
 safeDefinitions.set('CLOUD_RESTORE_PREPARE_TIMEOUT', definition('CLOUD_RESTORE_PREPARE_TIMEOUT', 'server',
   '還原安全準備逾時，本次尚未進入業務還原，原資料保持不變。請提供追蹤編號查證。', 'failed'));
 safeDefinitions.set('STALE_RESTORE_PREPARE', definition('STALE_RESTORE_PREPARE', 'server',
@@ -305,7 +313,7 @@ const validCorrelationId = (value: unknown): string | undefined => (
 );
 
 const RESTORE_VALIDATION_REASONS = new Set([
-  'RESTORE_PREPARE_BEGIN_FAILED','RESTORE_PREPARE_BEGIN_TIMEOUT',
+  'RESTORE_PREPARE_BEGIN_FAILED','RESTORE_PREPARE_BEGIN_TIMEOUT','RESTORE_PREPARE_FINALIZE_TIMEOUT',
   'OUTBOUND_TIMESTAMP_EVIDENCE_MISSING',
   'WACA_PAYLOAD_KEY_MISSING','WACA_PAYLOAD_KEY_MISMATCH','WACA_ORDER_STATUS_INVALID',
   'WACA_QUANTITY_INVALID','WACA_DUPLICATE_BUSINESS_KEY','WACA_MAPPING_MISMATCH',
@@ -320,14 +328,19 @@ const RESTORE_VALIDATION_RESOURCES = new Set([
 ]);
 interface RestoreValidationDetail {
   resource?: string; rowIdentity?: string; reasonCode?: string; sqlstate?: string; requestId?: string;
+  preparePhase?: CloudRestoreSubmitPhase;
 }
 const validationDetailFor = (error: unknown): RestoreValidationDetail => {
+  const rawPhase = safeOwnScalar(error, 'preparePhase') as CloudRestoreSubmitPhase | undefined;
+  const phaseDetail = rawPhase && rawPhase.startsWith('finalize') && SAFE_PHASES.has(rawPhase)
+    ? { preparePhase: rawPhase } : {};
   const directReason = safeOwnScalar(error, 'reasonCode') ?? safeOwnScalar(error, 'code');
   const directResource = safeOwnScalar(error, 'resource');
   const directRow = safeOwnScalar(error, 'rowIdentity');
   const sqlstate = safeOwnScalar(error, 'sqlstate') ?? safeOwnScalar(error, 'code');
   const requestId = safeOwnScalar(error, 'requestId');
   if (directReason && RESTORE_VALIDATION_REASONS.has(directReason)) return {
+    ...phaseDetail,
     reasonCode: directReason,
     ...(directResource && RESTORE_VALIDATION_RESOURCES.has(directResource) ? { resource: directResource } : {}),
     ...(directRow ? { rowIdentity: directRow.slice(0, 256) } : {}),
@@ -336,8 +349,9 @@ const validationDetailFor = (error: unknown): RestoreValidationDetail => {
   };
   const message = safeOwnScalar(error, 'message') ?? '';
   const match = /^RESTORE_VALIDATION_ERROR\|prepare\|([^|]+)\|([^|]+)\|([A-Z0-9_]+)$/u.exec(message);
-  if (!match || !RESTORE_VALIDATION_RESOURCES.has(match[1]) || !RESTORE_VALIDATION_REASONS.has(match[3])) return {};
+  if (!match || !RESTORE_VALIDATION_RESOURCES.has(match[1]) || !RESTORE_VALIDATION_REASONS.has(match[3])) return phaseDetail;
   return {
+    ...phaseDetail,
     resource: match[1], rowIdentity: match[2].slice(0, 256), reasonCode: match[3],
     ...(sqlstate && /^[0-9A-Z]{5}$/u.test(sqlstate) ? { sqlstate } : {}),
     ...(requestId && UUID_PATTERN.test(requestId) ? { requestId } : {}),
@@ -400,6 +414,7 @@ class CloudRestoreSafeSubmitError extends Error {
   readonly reasonCode?: string;
   readonly sqlstate?: string;
   readonly requestId?: string;
+  readonly preparePhase?: CloudRestoreSubmitPhase;
 
   constructor(resolved: SafeErrorDefinition, detail: RestoreValidationDetail = {}) {
     super(resolved.message);
@@ -515,7 +530,7 @@ export const normalizeCloudRestoreSubmitError = (
   return visibleFromDefinition(
     (detail.reasonCode ? safeDefinitions.get(detail.reasonCode) : undefined)
       ?? definitionFor(error, context.source ?? 'local'),
-    detail.reasonCode?.startsWith('RESTORE_PREPARE_BEGIN_') ? 'prepare-begin' : phase,
+    detail.preparePhase ?? (detail.reasonCode?.startsWith('RESTORE_PREPARE_BEGIN_') ? 'prepare-begin' : phase),
     context.attemptCorrelationId,
     detail,
   );

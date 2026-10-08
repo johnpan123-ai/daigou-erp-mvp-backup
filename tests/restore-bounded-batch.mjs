@@ -5,7 +5,7 @@ import {createServer} from 'vite';
 import {isolatedDatabase,owner,viewer} from './helpers/saveability-isolated.mjs';
 import {CANONICAL_FRESH_INSTALL_V3} from '../supabase/canonicalFreshInstallV3.mjs';
 const migration='064_restore_bounded_chunk_batch_and_identity_profile.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,'066_restore_prepare_set_based_resource_staging.sql','067_restore_begin_independent_bounded_ops_cleanup.sql','068_restore_ops_conservative_batch_envelope.sql'].includes(f))});
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,'066_restore_prepare_set_based_resource_staging.sql','067_restore_begin_independent_bounded_ops_cleanup.sql','068_restore_ops_conservative_batch_envelope.sql','069_restore_finalize_server_resource_semantic_proof.sql'].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 try{
  const restore=await vite.ssrLoadModule('/src/providers/cloud/cloudAtomicRestore.ts');

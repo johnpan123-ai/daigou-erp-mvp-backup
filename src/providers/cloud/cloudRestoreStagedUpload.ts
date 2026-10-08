@@ -51,7 +51,9 @@ export async function uploadCloudRestoreCandidate(
     const serverMs = response.serverMs ?? response.finalizeServerMs;
     const phases = response.phaseTimingsMs && typeof response.phaseTimingsMs === 'object'
       ? Object.fromEntries(Object.entries(response.phaseTimingsMs).filter(([key, value]) =>
-        ['columns', 'immutableChunks', 'validationProjection', 'identityProof', 'typedStage'].includes(key)
+        ['columns', 'immutableChunks', 'validationProjection', 'identityProof', 'typedStage',
+          'authorization', 'resourceCoverage', 'validationInput', 'portability', 'wacaValidation',
+          'projectedSemanticProof', 'manifestValidation', 'preparedChunkProof', 'proofWriteAndCleanup'].includes(key)
         && typeof value === 'number' && Number.isFinite(value) && value >= 0)) as Record<string, number> : {};
     // Transient scalar timings only. Never include payloads, row values, tokens
     // or raw errors; diagnostics do not affect proof, identity or persistence.
