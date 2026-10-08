@@ -85,7 +85,6 @@
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackupDiagnostic } from './cloudBackupDiagnostics';
 import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError, type RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
-import { cleanupExpiredRestoreOps } from './cloudRestoreOpsMaintenance';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
@@ -461,7 +460,6 @@ export class SupabaseProvider implements IDataProvider {
     }
     markCloudReachable();
     const proof = { ...assertCloudRestoreCandidateProofResult(data, candidate), prepareTransportTimingsMs, prepareCallTimings };
-    void cleanupExpiredRestoreOps((name, args) => supabase.rpc(name, args), requestId);
     return proof;
   }
 

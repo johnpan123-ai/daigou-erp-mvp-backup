@@ -42,6 +42,18 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '068': {
+    sourceFile:'068_restore_ops_conservative_batch_envelope.sql',dependencies:['067'],
+    risk:'LOW_PREPARE_OPS_BOUNDED_MAINTENANCE',idempotency:'EXACT_SOURCE_GUARDED_FUNCTION_PATCH',
+    classification:'OPS_EPHEMERAL_PREPARED_RESTORE_STATE',
+    preconditions:[fn('erp_cleanup_expired_restore_ops(uuid)')],
+    postconditions:[fn('erp_cleanup_expired_restore_ops(uuid)',{
+      owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=4s','lock_timeout=200ms'],
+      definitionIncludes:['LIMIT 4','row_budget integer:=1024','2097152',
+        'clock_timestamp()-started)*1000<1000','FOR UPDATE OF u NOWAIT','p_exclude_request_id',"NOT IN('completed','not_committed')"],
+    })],
+  },
   '067': {
     sourceFile:'067_restore_begin_independent_bounded_ops_cleanup.sql',dependencies:['066'],
     risk:'LOW_PREPARE_OPS_BOUNDED_MAINTENANCE',idempotency:'NEW_OWNER_SCOPED_RPC',
@@ -54,7 +66,9 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
     }),fn('erp_cleanup_expired_restore_ops(uuid)',{
       owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,
       requiredConfig:['search_path=pg_catalog, public, extensions','statement_timeout=4s','lock_timeout=200ms'],
-      definitionIncludes:['LIMIT 16','4096','FOR UPDATE OF u NOWAIT','p_exclude_request_id',"NOT IN('completed','not_committed')"],
+      // 068 decreases the row/chunk bounds; its exact reduced limits are checked
+      // independently. Retain 067 owner, identity, expiry and concurrency gates.
+      definitionIncludes:['row_budget','FOR UPDATE OF u NOWAIT','p_exclude_request_id',"NOT IN('completed','not_committed')"],
     })],
   },
   '066': {

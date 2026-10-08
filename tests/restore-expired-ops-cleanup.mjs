@@ -12,7 +12,8 @@ const prior=await readFile('scratch/restore-execute-envelope-v2/run-correctness-
 const localUrl=prior.match(/WACA_ISOLATED_PG_URL:\s*'([^']+)'/u)?.[1];
 assert.equal(new URL(localUrl).hostname,'127.0.0.1');assert.equal(new URL(localUrl).port,'55492');
 process.env.WACA_ISOLATED_PG_URL=localUrl;
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>f!==migration)});
+const followup='068_restore_ops_conservative_batch_envelope.sql';
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>![migration,followup].includes(f))});
 const vite=await createServer({configFile:false,optimizeDeps:{noDiscovery:true,include:[]},server:{middlewareMode:true,hmr:false}});
 const report={scope:'ISOLATED_FULL_A_EXPIRED_OPS',prepareRuns:[],cleanupBatches:[],beginScale:[]};
 const stats=values=>{const s=[...values].sort((a,b)=>a-b);return {median:(s[Math.floor((s.length-1)/2)]+s[Math.floor(s.length/2)])/2,p95:s[Math.ceil(s.length*.95)-1],max:s.at(-1)};};
@@ -33,6 +34,9 @@ try {
  const names=['erp_restore_staged_cloud_snapshot','erp_restore_proven_cloud_snapshot_attempt','erp_prepare_cloud_restore_attempt','erp_export_cloud_restore_snapshot_json','erp_cloud_restore_validate_waca_dataset','erp_stage_restore_upload_resource','erp_finalize_restore_upload'];
  const defs=async()=>(await db.sql.query("select proname,md5(prosrc) hash,proconfig from pg_proc where pronamespace='public'::regnamespace and proname=any($1) order by proname",[names])).rows;
  const priorDefs=await defs();await db.sql.query(await readFile('supabase/sql/'+migration,'utf8'));
+ await db.sql.query(await readFile('supabase/sql/'+followup,'utf8'));
+ assert.doesNotMatch(await readFile('src/providers/cloud/supabaseProvider.ts','utf8'),/cleanupExpiredRestoreOps/u,
+  'Prepare must not launch maintenance that can compete with the next Prepare');
  assert.deepEqual(await defs(),priorDefs);assert.deepEqual(await epoch(),beforeGeneration);assert.deepEqual(await snapshot(),before);
  await db.startPostgrest();
  const rpc=async(name,args)=>{const x=await db.http('/rpc/'+name,args,undefined,{headers:{host:'rhfdjsklfrgpoqsaqpkn.supabase.co'}});return {data:x.status===200?x.data:null,error:x.status===200?null:x.data,status:x.status};};

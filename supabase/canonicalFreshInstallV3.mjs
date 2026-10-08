@@ -66,6 +66,7 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '065_cloud_backup_stable_readonly_execution.sql',
   '066_restore_prepare_set_based_resource_staging.sql',
   '067_restore_begin_independent_bounded_ops_cleanup.sql',
+  '068_restore_ops_conservative_batch_envelope.sql',
 ]);
 
 // Checksum-bearing source history. These artifacts remain reviewable and are
@@ -100,6 +101,7 @@ export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
   '065_cloud_backup_stable_readonly_execution.sql',
   '066_restore_prepare_set_based_resource_staging.sql',
   '067_restore_begin_independent_bounded_ops_cleanup.sql',
+  '068_restore_ops_conservative_batch_envelope.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,
