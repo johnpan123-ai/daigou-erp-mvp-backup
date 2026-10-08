@@ -42,6 +42,23 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '065': {
+    sourceFile:'065_cloud_backup_stable_readonly_execution.sql',dependencies:['055'],
+    risk:'LOW_BACKUP_READ_ONLY_EXECUTION_MARKER',idempotency:'EXACT_FUNCTION_VOLATILITY_REPLACEMENT',
+    preconditions:[fn('erp_export_cloud_restore_snapshot_json()',{
+      owner:'postgres',returnType:'json',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions'],
+      definitionIncludes:['json_build_object','CLOUD_RESTORE_OWNER_REQUIRED'],
+    })],
+    postconditions:[fn('erp_export_cloud_restore_snapshot_json()',{
+      owner:'postgres',returnType:'json',securityDefiner:true,publicExecute:false,
+      authenticatedExecute:true,anonExecute:false,
+      requiredConfig:['search_path=pg_catalog, public, extensions'],
+      definitionIncludes:['STABLE','json_build_object','json_agg(t order by t.inventory_key)',
+        'json_agg(t order by t.id)','waca_state','import_batches','CLOUD_RESTORE_OWNER_REQUIRED'],
+    })],
+  },
   '064': {
     sourceFile:'064_restore_bounded_chunk_batch_and_identity_profile.sql',dependencies:['063'],
     risk:'LOW_PREPARE_BOUNDED_TRANSPORT_AND_PROFILE',idempotency:'FUNCTION_REPLACEMENT_AND_ADDITIVE_RPC',

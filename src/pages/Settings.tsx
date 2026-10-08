@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from '
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import { dataProvider } from '../providers/dataProvider';
 import { formatStructuredError } from '../utils/structuredError';
+import { CloudBackupError, getCloudBackupDiagnostic, type CloudBackupDiagnostic } from '../providers/cloud/cloudBackupDiagnostics';
 import { getProviderMode, markManualLocalEntry, setProviderMode } from '../providers/providerMode';
 import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
@@ -61,6 +62,7 @@ const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: 
 export default function Settings() {
   const [backupExport, setBackupExport] = useState<{
     state: 'idle' | 'running' | 'complete' | 'error'; elapsedMs: number; code?: string;
+    message?: string; diagnostic?: CloudBackupDiagnostic | null;
   }>({ state: 'idle', elapsedMs: 0 });
   const { isMobile } = useViewport();
   const { user, signOut } = useAuth();
@@ -213,12 +215,15 @@ export default function Settings() {
     setBackupExport({ state: 'running', elapsedMs: 0 });
     try {
       await dataProvider.exportData();
-      setBackupExport({ state: 'complete', elapsedMs: performance.now() - started });
+      setBackupExport({ state: 'complete', elapsedMs: performance.now() - started,
+        diagnostic: cloudMode ? getCloudBackupDiagnostic() : null });
     } catch (error) {
       const diagnostic = formatStructuredError(error);
       const code = diagnostic.code && /^[A-Z0-9_]{1,64}$/.test(diagnostic.code)
         ? diagnostic.code : 'BACKUP_EXPORT_FAILED';
-      setBackupExport({ state: 'error', elapsedMs: performance.now() - started, code });
+      setBackupExport({ state: 'error', elapsedMs: performance.now() - started, code,
+        message: error instanceof CloudBackupError ? error.message : undefined,
+        diagnostic: error instanceof CloudBackupError ? error.diagnostic : null });
     }
   };
 
@@ -486,7 +491,12 @@ export default function Settings() {
                 {backupExport.state === 'running' ? '正在讀取雲端資料並驗證備份…'
                   : backupExport.state === 'complete'
                     ? `備份準備完成，已開始下載（${(backupExport.elapsedMs / 1000).toFixed(2)} 秒）。`
-                    : `備份失敗（${backupExport.code}），請檢查雲端連線與權限。`}
+                    : backupExport.message ?? `備份失敗（${backupExport.code}），請查看技術資訊。`}
+                {backupExport.diagnostic && (
+                  <details><summary>備份技術資訊</summary>
+                    <pre data-testid="cloud-backup-diagnostics">{JSON.stringify(backupExport.diagnostic, null, 2)}</pre>
+                  </details>
+                )}
               </div>
             )}
 

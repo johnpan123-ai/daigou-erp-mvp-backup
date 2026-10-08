@@ -22,16 +22,17 @@ try{
  const expression=/select (json_build_object\([\s\S]+?)\)\s*(?:::jsonb)? into v_snapshot;/i;
  assert.equal(migration.match(expression)[1],legacy.match(expression)[1]);
  const {formatStructuredError}=await vite.ssrLoadModule('/src/utils/structuredError.ts');
+ const diagnostics=await vite.ssrLoadModule('/src/providers/cloud/cloudBackupDiagnostics.ts');
  const source=readFileSync('src/pages/Settings.tsx','utf8');
  const handler=(await transform(source.slice(source.indexOf('  const handleExport = async () => {'),source.indexOf('\n  const handleExportExcel')),{loader:'tsx',target:'esnext'})).code+'\nreturn handleExport;';
  for(const failure of [null,{code:'57014',message:'timeout'},{code:'unsafe secret value',message:'private data'}]){
   const events=[];let calls=0;
-  const exported=new Function('dataProvider','setBackupExport','formatStructuredError',handler)(
-   {exportData:async()=>{calls++;if(failure)throw failure;}},value=>events.push(value),formatStructuredError);
+  const exported=new Function('dataProvider','setBackupExport','formatStructuredError','cloudMode','getCloudBackupDiagnostic','CloudBackupError',handler)(
+   {exportData:async()=>{calls++;if(failure)throw diagnostics.classifyCloudBackupError(failure,{requestId:'isolated',rpc:contract.CLOUD_RESTORE_SNAPSHOT_RPC,startedAt:'isolated',phase:'RPC_REQUEST',elapsedMs:1,httpStatus:null,sqlstate:null,timingsMs:{}});}},value=>events.push(value),formatStructuredError,true,diagnostics.getCloudBackupDiagnostic,diagnostics.CloudBackupError);
   await exported();assert.equal(calls,1);assert.equal(events[0].state,'running');
   assert.equal(events.at(-1).state,failure?'error':'complete');
   assert.ok(events.at(-1).elapsedMs>=0);assert.ok(!JSON.stringify(events).includes('private data'));
-  if(failure?.code==='57014')assert.equal(events.at(-1).code,'57014');
+  if(failure?.code==='57014'){assert.equal(events.at(-1).code,'BACKUP_STATEMENT_TIMEOUT');assert.equal(events.at(-1).diagnostic.sqlstate,'57014');}
  }
  console.log('PASS exact 24-resource aggregation, unchanged legacy source/format, strict owner ACL, schema cache notice, safe visible read-only export timing/error states');
 }finally{await vite.close();}

@@ -83,6 +83,7 @@
 })();
 
 import { supabase, supabaseEnvironment } from './supabaseClient';
+import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackupDiagnostic } from './cloudBackupDiagnostics';
 import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError } from './cloudRestoreStagedUpload';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
@@ -2647,42 +2648,66 @@ export class SupabaseProvider implements IDataProvider {
 
   // === 資料庫管理與輔助方法 (完全委託本地 db) ===
   async exportData(): Promise<void> {
-    let rawData: unknown;
-    let error: unknown;
-    try {
-      ({ data: rawData, error } = await supabase.rpc(CLOUD_RESTORE_SNAPSHOT_RPC));
-    } catch (caughtError) {
-      markCloudRequestFailed(caughtError);
-      throw caughtError;
-    }
-    if (error) {
-      markCloudRequestFailed(error);
-      throw error;
-    }
-    if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
-      const invalid = new Error('CLOUD_RESTORE_SNAPSHOT_INVALID');
-      markCloudRequestFailed(invalid);
-      throw invalid;
-    }
-    markCloudReachable();
-    const prepared = await buildCloudRestoreManifest(rawData as Record<string, unknown>, rawData as Record<string, unknown>);
-    const fileData = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([collection, table]) => [collection, prepared.data[table]]));
-    const snapshot = {
-      schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
-      sourceEnvironment: 'cloud-authoritative',
-      manifest: prepared.manifest,
-      data: fileData,
-      deadlineSidecar: await readDeadlineDurableBackup('cloud'),
+    const started = performance.now();
+    let phaseStarted = started;
+    const diagnostic: CloudBackupDiagnostic = {
+      requestId: crypto.randomUUID(), rpc: CLOUD_RESTORE_SNAPSHOT_RPC,
+      startedAt: new Date().toISOString(), phase: 'RPC_REQUEST', elapsedMs: 0,
+      httpStatus: null, sqlstate: null, timingsMs: {},
     };
-    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `cloud-authoritative-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    const finishPhase = () => {
+      diagnostic.timingsMs[diagnostic.phase] = performance.now() - phaseStarted;
+      diagnostic.elapsedMs = performance.now() - started;
+    };
+    const nextPhase = (phase: CloudBackupDiagnostic['phase']) => {
+      finishPhase(); diagnostic.phase = phase; phaseStarted = performance.now();
+    };
+    recordCloudBackupDiagnostic(diagnostic);
+    try {
+      let response;
+      try { response = await supabase.rpc(CLOUD_RESTORE_SNAPSHOT_RPC); }
+      catch (error) { markCloudRequestFailed(error); throw error; }
+      diagnostic.httpStatus = response.status;
+      if (response.error) { markCloudRequestFailed(response.error); throw response.error; }
+      const rawData: unknown = response.data;
+      if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) {
+        const invalid = new Error('CLOUD_RESTORE_SNAPSHOT_INVALID');
+        markCloudRequestFailed(invalid); throw invalid;
+      }
+      markCloudReachable();
+      nextPhase('MANIFEST_AND_CHECKSUMS');
+      const prepared = await buildCloudRestoreManifest(rawData as Record<string, unknown>, rawData as Record<string, unknown>);
+      diagnostic.resourceCount = prepared.manifest.resourceCount;
+      diagnostic.totalRows = prepared.manifest.totalRows;
+      diagnostic.snapshotFingerprint = prepared.manifest.snapshotFingerprint;
+      diagnostic.relationshipHash = prepared.manifest.relationshipHash;
+      const fileData = Object.fromEntries(CLOUD_RESTORE_TABLES.map(([collection, table]) => [collection, prepared.data[table]]));
+      nextPhase('DEADLINE_SIDECAR');
+      const deadlineSidecar = await readDeadlineDurableBackup('cloud');
+      nextPhase('DOWNLOAD_PREPARATION');
+      const snapshot = {
+        schemaVersion: CLOUD_RESTORE_SCHEMA_VERSION,
+        sourceEnvironment: 'cloud-authoritative',
+        manifest: prepared.manifest,
+        data: fileData,
+        deadlineSidecar,
+      };
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+      diagnostic.downloadBytes = blob.size;
+      const url = URL.createObjectURL(blob);
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `cloud-authoritative-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(anchor);
+        try { anchor.click(); } finally { anchor.remove(); }
+      } finally { URL.revokeObjectURL(url); }
+      nextPhase('COMPLETE');
+      recordCloudBackupDiagnostic(diagnostic);
+    } catch (caughtError) {
+      finishPhase();
+      throw classifyCloudBackupError(caughtError, diagnostic);
+    }
   }
 
   async importData(jsonString: string): Promise<boolean> {
