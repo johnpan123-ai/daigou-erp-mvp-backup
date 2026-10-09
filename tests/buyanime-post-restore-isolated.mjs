@@ -121,16 +121,18 @@ try{
  await restore(currentWithJournal);await connect();
  await projectMaterialized('ERP2');result.erp2PurchaseProjection='PASS';
  stage='stale retained journal';
- const stale=await page.evaluate(async()=>{
-  const {readLatestBuyAnimeJournal}=await import('/src/providers/cloud/buyAnimeImportJournal.ts');
+ const stale=await page.evaluate(async(oldRecord)=>{
+  const {readEligibleBuyAnimeJournals}=await import('/src/providers/cloud/buyAnimeImportJournal.ts');
   const epoch=await import('/src/providers/cloud/buyAnimeRecoveryEpoch.ts');
-  const journal=await readLatestBuyAnimeJournal();const current=await epoch.readBuyAnimeRestoreGeneration();
+  const journal=oldRecord;const current=await epoch.readBuyAnimeRestoreGeneration();
+  const scanned=await readEligibleBuyAnimeJournals(current);
+  if(scanned.active || !scanned.completedBatchIds.has(journal.batchId)) throw new Error('STALE_JOURNAL_NOT_RETIRED');
   const provider=window.__BUYANIME_RESUME_PROVIDER__.provider();
   const validity=epoch.classifyBuyAnimeRecoveryGeneration(journal,current);
   const pending=await provider.getBuyAnimeImportRecovery();
   let directResumeBlocked=false;try{await provider.resumeBuyAnimeImport(journal);}catch(e){directResumeBlocked=e.code==='RECOVERY_STATE_ERROR';}
   return {validity,oldStage:journal.stage,pending:pending===null,directResumeBlocked,metrics:window.__BUYANIME_RESUME_PROVIDER__.metrics()};
- });
+ },{...oldRecord,stage:'INVENTORY_COMMIT_UNKNOWN'});
  assert.equal(stale.validity,'STALE_AFTER_RESTORE');assert.equal(stale.pending,true);assert.equal(stale.directResumeBlocked,true);
  assert.equal(stale.oldStage,'INVENTORY_COMMIT_UNKNOWN');
  assert.equal(stale.metrics.inventoryCommits,0);assert.equal(stale.metrics.catalogRequests,0);

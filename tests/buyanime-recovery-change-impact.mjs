@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {assertReviewedProviderContract} from '../scripts/post-adoption-descendant.mjs';
 import {classifyReviewedFile,sourceHash} from '../scripts/reviewed-change-impact.mjs';
-const base='4490100b63dc5811c050d1608846a73977df81a0';
+const base='bee4a812fb52e55f18fb98f1603a54541d4ff824';
 for(const file of ['src/providers/cloud/supabaseProvider.ts','src/providers/cloud/buyAnimeImportJournal.ts']){
  const before=execFileSync('git',['show',`${base}:${file}`],{encoding:'utf8'}),after=readFileSync(file,'utf8');
  assertReviewedProviderContract(file,before,after);

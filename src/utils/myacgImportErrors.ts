@@ -27,7 +27,11 @@ export class MyAcgImportError extends Error {
   readonly code: MyAcgImportErrorCode;
   readonly phase: MyAcgImportPhase;
   constructor(code: MyAcgImportErrorCode, phase: MyAcgImportPhase, cause?: unknown) {
-    super(messages[code], { cause });
+    const recoveryIdentityMismatch = code === 'RECOVERY_STATE_ERROR'
+      && (cause as { code?: unknown } | null)?.code === 'BUYANIME_JOURNAL_IDENTITY_MISMATCH';
+    super(recoveryIdentityMismatch
+      ? '偵測到匯入復原紀錄身分不一致，已停止該筆恢復；新匯入不會在未確認安全前覆寫資料。'
+      : messages[code], { cause });
     this.name = 'MyAcgImportError';
     this.code = code;
     this.phase = phase;
@@ -63,11 +67,15 @@ export function classifyMyAcgImportError(error: unknown, phase: MyAcgImportPhase
 
 /** Diagnostics deliberately omit raw rows, Postgres DETAIL, request payloads and credentials. */
 export function myAcgImportDiagnostic(error: MyAcgImportError, requestId: string) {
-  const cause = error.cause as { code?: unknown; message?: unknown; stack?: unknown; detail?: unknown; diagnostic?: {code?:string} } | null;
+  const cause = error.cause as { code?: unknown; message?: unknown; stack?: unknown; detail?: unknown; diagnostic?: {code?:string}; recoveryDiagnostic?: {
+    classification: string; recoveryAction: string; journalRequestId: string; journalRestoreEpoch?: number;
+    currentRestoreEpoch: number; mismatchField: string[]; journalVersion: number; rowVersion: number;
+  } } | null;
   const inner = cause?.detail as { code?: unknown; message?: unknown } | null;
   const message = String(cause?.message ?? inner?.message ?? '');
   const code = String(cause?.diagnostic?.code ?? cause?.code ?? inner?.code ?? '');
   return { category: error.code, phase: error.phase, requestId,
+    ...(cause?.recoveryDiagnostic ? { ...cause.recoveryDiagnostic, currentRequestId: requestId } : {}),
     postgresCode: /^[0-9A-Z]{5}$/u.test(code) ? code : undefined,
     reason: /^(?:CLOUD_|REQUIRED_|VALIDATION_|BUYANIME_)[A-Z_]+$/u.test(message) ? message : undefined,
     constraint: message.match(/constraint "([a-z0-9_]+)"/iu)?.[1],

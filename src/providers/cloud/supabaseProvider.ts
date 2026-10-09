@@ -203,7 +203,7 @@ import {
   BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord, importCatalogKey,
   type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
-import { readBuyAnimeJournal, readLatestBuyAnimeJournal, saveBuyAnimeJournal } from './buyAnimeImportJournal';
+import { readBuyAnimeJournal, readEligibleBuyAnimeJournals, saveBuyAnimeJournal } from './buyAnimeImportJournal';
 import { readBuyAnimeRestoreGeneration, classifyBuyAnimeRecoveryGeneration,
   assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent } from './buyAnimeRecoveryEpoch';
 import { coordinateBuyAnimeImport, finishBuyAnimeImport, refreshBuyAnimeReadback, publishBuyAnimeFlow, buyAnimeFlowLabel, type BuyAnimeFlowOptions } from './buyAnimeImportCoordinator';
@@ -1720,21 +1720,18 @@ export class SupabaseProvider implements IDataProvider {
     }
     // Pre-journal runtimes already persisted the import identity on Inventory.
     // Unknown downstream completion is shown explicitly, never inferred from global sync.
-    const [latest, journal] = await Promise.all([supabase.from('inventory_items').select('latest_catalog_import_id,catalog_last_seen_at')
+    const [latest, journals] = await Promise.all([supabase.from('inventory_items').select('latest_catalog_import_id,catalog_last_seen_at')
       .is('deleted_at', null).not('latest_catalog_import_id', 'is', null)
-      .order('catalog_last_seen_at', { ascending: false, nullsFirst: false }).limit(1), readLatestBuyAnimeJournal()]);
+      .order('catalog_last_seen_at', { ascending: false, nullsFirst: false }).limit(1), readEligibleBuyAnimeJournals(generation)]);
     if (latest.error) throw latest.error;
     assertBuyAnimeGenerationUnchanged(generation, await readBuyAnimeRestoreGeneration());
-    const latestJournal = journal && classifyBuyAnimeRecoveryGeneration(journal, generation) === 'CURRENT' ? journal : null;
+    const latestJournal = journals.active;
     const candidate = latest.data?.[0];
     const currentCandidate = candidate && classifyBuyAnimeRecoveryGeneration({ observedAt: candidate.catalog_last_seen_at }, generation) === 'CURRENT'
       ? candidate : null;
     const batchId = currentCandidate?.latest_catalog_import_id;
-    const observedAt = currentCandidate?.catalog_last_seen_at;
-    if (latestJournal && (!batchId || latestJournal.batchId === batchId
-      || new Date(latestJournal.observedAt).getTime() >= new Date(observedAt || 0).getTime())) {
-      return latestJournal.stage === 'COMPLETE' ? null : latestJournal;
-    }
+    if (latestJournal) return latestJournal;
+    if (batchId && journals.completedBatchIds.has(batchId)) return null;
     if (!batchId) return null;
     const rows = await fetchAll<InventoryItem>(async (from, to) => supabase.from('inventory_items').select('*')
       .eq('latest_catalog_import_id', batchId).order('id').range(from, to));

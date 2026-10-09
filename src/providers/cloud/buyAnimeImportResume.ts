@@ -6,7 +6,7 @@ import { CloudMutationBoundaryError } from './cloudFieldCas';
 import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/myacgImportErrors';
 import { markBuyAnimeTrace, recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
 import type { MyAcgMasterLink } from '../../waca/masterReference';
-import { assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent, type BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
+import { assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent, classifyBuyAnimeRecoveryGeneration, type BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
 
 export const BUYANIME_JOURNAL_PLATFORM = 'buyanime-catalog-resume-v1';
 export const BUYANIME_COMPLETION_CONTRACT = 'INVENTORY_CATALOG_AUTHORITATIVE';
@@ -42,8 +42,10 @@ export interface BuyAnimeImportRecord {
 export class BuyAnimeResumeError extends Error {
   readonly code: string;
   readonly record?: BuyAnimeImportRecord;
-  constructor(code: string, record?: BuyAnimeImportRecord, cause?: unknown) {
+  readonly recoveryDiagnostic?: BuyAnimeJournalDecision;
+  constructor(code: string, record?: BuyAnimeImportRecord, cause?: unknown, recoveryDiagnostic?: BuyAnimeJournalDecision) {
     super(code, { cause }); this.code = code; this.record = record; this.name = 'BuyAnimeResumeError';
+    this.recoveryDiagnostic = recoveryDiagnostic;
   }
 }
 export const importJournalId = (batchId: string) => deterministicCloudUuid('buyanime-import-journal:' + batchId);
@@ -100,6 +102,52 @@ export function assertImportRecord(value: unknown): asserts value is BuyAnimeImp
       || !Array.isArray(r.waca.links) || r.waca.links.some(link => !link.childCode || !link.mainCode)))) {
     throw new BuyAnimeResumeError('BUYANIME_JOURNAL_INVALID');
   }
+}
+
+export interface BuyAnimeJournalDecision {
+  classification: 'STALE_AFTER_RESTORE' | 'COMPLETED_OLD_IMPORT' | 'INCOMPLETE_CURRENT_IMPORT' | 'CORRUPT_IDENTITY';
+  recoveryAction: 'RETIRE_AS_STALE' | 'RETIRE_AS_COMPLETE' | 'RESUME' | 'RECONCILE' | 'FAIL_CLOSED_CORRUPT';
+  blockNewImport: boolean;
+  journalRequestId: string;
+  journalRestoreEpoch?: number;
+  currentRestoreEpoch: number;
+  mismatchField: string[];
+  journalVersion: number;
+  rowVersion: number;
+}
+
+/** Restore intentionally resets row CAS versions. A retained old-epoch journal
+ * is audit, NOT a resumable write intent. Never relax current-request checks. */
+export function classifyBuyAnimeJournalIdentity(
+  row: Record<string, unknown>, record: BuyAnimeImportRecord, generation: BuyAnimeRestoreGeneration,
+): BuyAnimeJournalDecision {
+  assertImportRecord(record);
+  const details = row.details as { buyAnimeImport?: Partial<BuyAnimeImportRecord>; buyAnimeImportGzip?: string } | null;
+  const header = details?.buyAnimeImport;
+  const mismatchField: string[] = [];
+  if (details?.buyAnimeImportGzip) {
+    for (const key of ['format', 'batchId', 'stage', 'version', 'restoreEpoch'] as const)
+      if (header?.[key] !== record[key]) mismatchField.push('header.' + key);
+  }
+  if (row.id !== importJournalId(record.batchId)) mismatchField.push('id');
+  if (row.platform !== BUYANIME_JOURNAL_PLATFORM) mismatchField.push('platform');
+  if (row.deleted_at) mismatchField.push('deleted_at');
+  if (row.file_name !== record.fileName) mismatchField.push('file_name');
+  if (Number(row.total_rows) !== record.expected.length) mismatchField.push('total_rows');
+  const stale = classifyBuyAnimeRecoveryGeneration(record, generation) === 'STALE_AFTER_RESTORE';
+  if (Number(row.version) !== record.version) mismatchField.push('row.version');
+  const corrupt = mismatchField.some(field => field !== 'row.version') || (!stale && mismatchField.length > 0);
+  const complete = ['COMPLETE', 'FAILED_PRE_COMMIT'].includes(record.stage);
+  return {
+    classification: corrupt ? 'CORRUPT_IDENTITY' : stale ? 'STALE_AFTER_RESTORE'
+      : complete ? 'COMPLETED_OLD_IMPORT' : 'INCOMPLETE_CURRENT_IMPORT',
+    recoveryAction: corrupt ? 'FAIL_CLOSED_CORRUPT' : stale ? 'RETIRE_AS_STALE'
+      : complete ? 'RETIRE_AS_COMPLETE' : ['INVENTORY_COMMITTING', 'INVENTORY_COMMIT_UNKNOWN', 'CATALOG_COMMITTING', 'CATALOG_COMMITTED'].includes(record.stage)
+        ? 'RECONCILE' : 'RESUME',
+    blockNewImport: corrupt || (!stale && !complete),
+    journalRequestId: record.batchId, journalRestoreEpoch: record.restoreEpoch,
+    currentRestoreEpoch: generation.epoch, mismatchField, journalVersion: record.version, rowVersion: Number(row.version),
+  };
 }
 export interface BuyAnimeImportPort {
   readRestoreGeneration?: () => Promise<BuyAnimeRestoreGeneration>;

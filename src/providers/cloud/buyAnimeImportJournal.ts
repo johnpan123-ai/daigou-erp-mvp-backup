@@ -1,8 +1,9 @@
 import { supabase } from './supabaseClient';
 import {
   assertImportRecord, BUYANIME_JOURNAL_PLATFORM, BuyAnimeResumeError, importJournalId,
-  type BuyAnimeImportRecord,
+  classifyBuyAnimeJournalIdentity, type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
+import type { BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
 
 /** Optional operational subtype in the EXISTING import_batches/details contract.
  * Legacy business import rows and Backup/Restore serialization remain untouched.
@@ -67,6 +68,36 @@ export async function readLatestBuyAnimeJournal(): Promise<BuyAnimeImportRecord 
     .is('deleted_at', null).order('imported_at', { ascending: false }).limit(1);
   if (result.error) throw result.error;
   return result.data?.length ? fromRow(result.data[0]) : null;
+}
+/** SELECT-only scan. Immutable stale/completed audit is never the active pointer.
+ * Decode/bind the envelope before generation classification; current intent
+ * still uses the exact unchanged fromRow/CAS validation and never replays here. */
+export async function readEligibleBuyAnimeJournals(generation: BuyAnimeRestoreGeneration): Promise<{
+  active: BuyAnimeImportRecord | null; completedBatchIds: Set<string>;
+}> {
+  let active: BuyAnimeImportRecord | null = null;
+  const completedBatchIds = new Set<string>();
+  for (let offset = 0; ; offset += 50) {
+    const result = await supabase.from('import_batches').select('*').eq('platform', BUYANIME_JOURNAL_PLATFORM)
+      .is('deleted_at', null).order('imported_at', { ascending: false }).order('id').range(offset, offset + 49);
+    if (result.error) throw result.error;
+    for (const row of result.data || []) {
+      const details = row.details as { buyAnimeImport?: unknown; buyAnimeImportGzip?: string } | null;
+      const value = details?.buyAnimeImportGzip ? await decompressRecord(details.buyAnimeImportGzip) : details?.buyAnimeImport;
+      assertImportRecord(value);
+      const decision = classifyBuyAnimeJournalIdentity(row, value, generation);
+      if (decision.classification === 'CORRUPT_IDENTITY')
+        throw new BuyAnimeResumeError('BUYANIME_JOURNAL_IDENTITY_MISMATCH', undefined, undefined, decision);
+      if (decision.recoveryAction === 'RETIRE_AS_STALE' || decision.recoveryAction === 'RETIRE_AS_COMPLETE') {
+        console.info('[BuyAnime Recovery]', decision);
+        completedBatchIds.add(value.batchId);
+        continue;
+      }
+      if (active) throw new BuyAnimeResumeError('BUYANIME_MULTIPLE_ACTIVE_REQUESTS');
+      active = await fromRow(row);
+    }
+    if ((result.data?.length || 0) < 50) return { active, completedBatchIds };
+  }
 }
 export async function saveBuyAnimeJournal(record: BuyAnimeImportRecord, expectedVersion: number): Promise<BuyAnimeImportRecord> {
   assertImportRecord(record);

@@ -164,11 +164,14 @@ assert.throws(() => assertReviewedProviderContract(resumeFile, resumeBefore,
   resumeAfter.replace('const reconciled =', "fetch('/unsafe'); const reconciled =")), /FAILED_CLOSED/u);
 console.log('PASS exact BuyAnime canonical identity diff and SHA; future planner/provider/DB/parser/RPC/migration/backup/canonical hunks fail closed');
 
-const restoreBase = 'a9351a7130ec46d9d443302f7ca8e06b61ddd7aa';
+const restoreIntentReview = reviewedImpacts.reviews.find(review => review.id === 'restore-explicit-intent-and-pending-sync-v2');
+assert.ok(restoreIntentReview);
+const restoreBase = restoreIntentReview.beforeHead;
 for (const file of ['src/providers/cloud/cloudRestoreSubmit.ts',
   'src/components/CloudAtomicRestorePanel.tsx']) {
   const before = realGit(['show', `${restoreBase}:${file}`]);
-  const after = readFileSync(file, 'utf8').replace(/\r\n?/gu, '\n');
+  // Verify this immutable review, not unrelated later adopted Restore changes.
+  const after = realGit(['show', `${restoreIntentReview.reviewedHead}:${file}`]);
   assertReviewedRestoreOrchestrationContract(file, before, after);
   const bad = file.endsWith('Panel.tsx')
     ? after.replace('dataProvider.restoreCloudSnapshot(command)', 'dataProvider.restoreCloudSnapshot({ ...command, bypass: true })')

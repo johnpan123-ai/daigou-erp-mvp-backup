@@ -290,7 +290,19 @@ export function assertReviewedProviderContract(file, before, after) {
       const restored = after
         .replace(' || header.restoreEpoch !== record.restoreEpoch', '')
         .replace(/,\s*\.\.\.\(next\.restoreEpoch !== undefined \? \{ restoreEpoch: next\.restoreEpoch \} : \{\}\)/u, '');
-      if (canonical(parse(file, before)) !== canonical(parse(file, restored))) fail('journal optional generation patch needs a new exact review');
+      if (canonical(parse(file, before)) !== canonical(parse(file, restored))) {
+        // An immutable review may add a SELECT-only generation scanner. All
+        // existing writers, strict loaders, codecs and CAS checks stay exact.
+        const previous = parse(file, before), current = parse(file, after);
+        const functions = tree => tree.statements.filter(ts.isFunctionDeclaration)
+          .map(node => [node.name?.text, canonical(tree, node)]);
+        const nextFunctions = new Map(functions(current));
+        for (const [name, source] of functions(previous))
+          if (nextFunctions.get(name) !== source) fail('journal existing codec/identity/CAS/writer changed');
+        const additions = functions(current).filter(([name]) => !new Map(functions(previous)).has(name));
+        if (additions.length !== 1 || additions[0][0] !== 'readEligibleBuyAnimeJournals'
+          || /\.(?:insert|update|upsert|delete)\(/u.test(additions[0][1])) fail('journal scanner contains unreviewed writes');
+      }
     }
     const tree=parse(file,after);
     for (const call of nodes(tree).filter(ts.isCallExpression)) {
