@@ -5568,6 +5568,282 @@
           "schemaExpectation": "ERP2_SEMANTIC_SCHEMA_V3 adopted v17 unchanged."
         }
       ]
+    },
+    {
+      "id": "buyanime-recovery-journal-generation-classification-v1",
+      "beforeHead": "bee4a812fb52e55f18fb98f1603a54541d4ff824",
+      "reviewedHead": "08e7d6a13140d180862bce9542ab038294f13ca5",
+      "patchSha256": "f216538653f44dde5233d13c509299bdab74bca034ec2c4229133e864be938ae",
+      "requiredRegressions": [
+        "buyanime-journal-identity",
+        "buyanime-journal-scanner",
+        "buyanime-recovery-epoch",
+        "buyanime-recovery-review",
+        "buyanime-resume",
+        "erp1-v1-exact-restore",
+        "post-restore-business-release",
+        "execute-envelope",
+        "sync",
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "95f97597afc6bea2d835ddef79acde109641819b2b8d96e73e64cf85f4c781a3",
+          "afterHash": "d4e4fd63a02f0cbd36702b074e7c56ee9e376a9141c76ce3a2efbd6dd7d20da1",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "f7ff4208784c0e1ed10228613eb2babd4fdfb9ce2b89c38d0174f227c40c8599",
+          "afterHash": "e249633df72c421b0b97624a3b865d69c90b65ce73879f6c03ec7e4a22789855",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportJournal.ts",
+          "beforeHash": "c612fc23b2ea5212efe8deb354f3524e3d491772792331dde42f3f0a1e0a990a",
+          "afterHash": "7d8e649ca788e2f289ec3d763a4c875e00aa2ecd7eeb914d5d7a094fb771f2fd",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "readEligibleBuyAnimeJournals"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportResume.ts",
+          "beforeHash": "9a93e6ae1f7e42cbf2d0c17b5978bb42fb7f28209c1e958024650a98cc9de3cd",
+          "afterHash": "ecd99ec7797c650a52cb2371f4bffaf0a98a7abaaf1cfe94247c059bb1748b93",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "classifyBuyAnimeJournalIdentity",
+            "BuyAnimeResumeError"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "307adf12902ba485de90b28fd54133b269a22eb0ba06adc1756fa3f66aad1285",
+          "afterHash": "3ed67da74c4d38f02c7b1f0ceea4c590b1bd28be6ed0423c6e5492d0627b7062",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "getBuyAnimeImportRecovery"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/utils/myacgImportErrors.ts",
+          "beforeHash": "f813c032253b88036b8d668a59360911699d9188717b2fcb70a9cfac4e7c9862",
+          "afterHash": "f983fae12dc7dcb970b5e753d34e2a6b8b443a3315dbad37f0d929a9b04552f7",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "MyAcgImportError",
+            "myAcgImportDiagnostic"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-journal-identity.mjs",
+          "beforeHash": null,
+          "afterHash": "b76e960fb15159c2dc28a792322756aa9d8e49dcf19a46527347e77b664b251d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-journal-scanner.mjs",
+          "beforeHash": null,
+          "afterHash": "d219b1054ce32616efcbc99f69a3398d0fd99a6c86d905a2a0e197bb0b57eb4e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-post-restore-isolated.mjs",
+          "beforeHash": "045a87a61de033ed932d2a90cc9b2d876d2e5c4a3e56fe321f6b95bc8368aaa5",
+          "afterHash": "4d57f36bbcad50a9a5d4c1e63980a4da2ac5bc5d699d89a038dfacd02d70c24b",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-recovery-change-impact.mjs",
+          "beforeHash": "4682d6eafd19f3edcc11ca019ee2d479a5c786efcaabafdb77e1267b56ff72cb",
+          "afterHash": "5bb2269d16574425a79c670fbf2b8d815a26d9a45b4f22649adf1568c1106edf",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "e0e30ca750e7e6c21aaa2fafbfdb30c05fa1aa2f9d8bce5ff45ac4c89e2e5290",
+          "afterHash": "6a296f631c2fa0eec611ec036a9698592f941d45260eabdd41e40109a3346b54",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact regression/release review"
+          ],
+          "changedInputs": "Existing immutable Journal envelope, row CAS version, authoritative Restore epoch; no new input format.",
+          "changedOutputs": "Stale/completed audit excluded from active recovery; current unfinished request remains blocked/resumable, corrupt current identity remains fail-closed.",
+          "changedDurableFields": "NONE. Existing Journal details/gzip, Inventory, Catalog receipt and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. All business RPC calls/payloads unchanged; new Journal scanner only SELECTs existing import_batches.",
+          "changedProviderContract": "Generation-aware active selection; existing strict loaders, journal writers, row proofs, CAS, stable keys, atomic Inventory/Catalog paths unchanged.",
+          "changedBackupContract": "NONE. 24-resource registry and serializers, ERP1 adaptation, Restore Execute and Deadline sidecars unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v26 d06a5f60e138f4e26836a92a9b85b081c775f7b6a46c82bb8389ad17e8ec96b4 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "Only superseded audit row CAS version may differ after Restore. Authoritative epoch is checked before active CAS; current request identity is never relaxed.",
+          "dataFlow": "Authoritative Restore generation -> SELECT/decode/bind Journal -> stale/current classification -> strict active identity/reconcile; no replay during scan.",
+          "persistenceBehavior": "Read-only recovery selection and safe diagnostics; no Journal deletion/rewrite or new persistence.",
+          "writePath": "Existing Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
