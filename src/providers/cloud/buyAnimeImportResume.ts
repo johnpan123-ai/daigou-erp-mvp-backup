@@ -7,10 +7,11 @@ import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/mya
 import { markBuyAnimeTrace, recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
 import type { MyAcgMasterLink } from '../../waca/masterReference';
 import { assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent, classifyBuyAnimeRecoveryGeneration, type BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
+import { inventoryImportIntent, validInventoryIntent, type InventoryImportIntent, type InventoryCommitOutcome } from './inventoryImportTransaction';
 
 export const BUYANIME_JOURNAL_PLATFORM = 'buyanime-catalog-resume-v1';
 export const BUYANIME_COMPLETION_CONTRACT = 'INVENTORY_CATALOG_AUTHORITATIVE';
-export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN'
+export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN' | 'INVENTORY_NOT_COMMITTED'
   | 'INVENTORY_COMMITTED' | 'INVENTORY_READBACK_PENDING' | 'INVENTORY_VERIFIED'
   | 'CATALOG_PENDING' | 'CATALOG_COMMITTING' | 'CATALOG_COMMITTED' | 'CATALOG_VERIFIED'
   | 'WACA_EVIDENCE_PENDING' | 'COMPLETE' | 'FAILED_PRE_COMMIT';
@@ -35,9 +36,32 @@ export interface BuyAnimeImportRecord {
   version: number;
   expected: InventoryProof[];
   stats: ImportStats;
+  inventory?: InventoryImportIntent;
   catalog?: { key: string; plan: CatalogImportPlan | null };
   waca?: WacaMasterLinkDeltaPlan;
   legacy?: boolean;
+  retirement?: BuyAnimeLegacyRetirement;
+}
+/** Terminal audit for a pre-intent (legacy) journal whose Inventory transaction
+ * is PROVEN not committed. It retires the request without any Business write or
+ * replay; the original journal row/proofs stay as immutable audit evidence. */
+export interface BuyAnimeLegacyRetirement {
+  kind: 'LEGACY_NOT_COMMITTED_VERIFIED';
+  verifiedAt: string;
+  previousStage: 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN';
+  restoreEpoch: number;
+  expectedRows: number;
+  absentPredictedCreates: number;
+  presentRows: number;
+  targetMatches: number;
+  businessMutation: 0;
+  inventoryReplay: 0;
+}
+export interface BuyAnimeLegacyInventoryEvidence {
+  /** Rows read by the journal's exact expected UUIDs (missing ids omitted). */
+  rows: InventoryItem[];
+  /** Rows, INCLUDING tombstones, holding any absent proof's business key. */
+  keyRows: Array<{ id: string; inventory_key: string | null; deleted_at: string | null }>;
 }
 export class BuyAnimeResumeError extends Error {
   readonly code: string;
@@ -79,7 +103,7 @@ export async function proveInventoryRows(record: BuyAnimeImportRecord, rows: Inv
     if (offset + 150 < record.expected.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
 }
-const STAGES = new Set<BuyAnimeStage>(['PLANNED','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN',
+const STAGES = new Set<BuyAnimeStage>(['PLANNED','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_NOT_COMMITTED',
   'INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED','CATALOG_PENDING',
   'CATALOG_COMMITTING','CATALOG_COMMITTED','CATALOG_VERIFIED','WACA_EVIDENCE_PENDING','COMPLETE','FAILED_PRE_COMMIT']);
 export function assertImportRecord(value: unknown): asserts value is BuyAnimeImportRecord {
@@ -93,13 +117,24 @@ export function assertImportRecord(value: unknown): asserts value is BuyAnimeImp
     || new Set(r.expected.map(p => p.key)).size !== r.expected.length
     || r.expected.some(p => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(p.id)
       || !p.key || !/^[0-9a-f]{64}$/u.test(p.hash))
+    || (r.inventory && !validInventoryIntent(r.inventory, r.batchId, r.restoreEpoch))) {
+    throw new BuyAnimeResumeError('BUYANIME_JOURNAL_INVALID');
+  }
+  const expectedIds = new Set(r.expected.map(proof => proof.id));
+  if ((r.inventory && r.inventory.request.operations.some(op => !expectedIds.has(op.id)))
     || (['CATALOG_COMMITTING','CATALOG_COMMITTED'].includes(r.stage) && !r.catalog)
     || (r.catalog && (r.catalog.key !== importCatalogKey(r.batchId)
       || (r.catalog.plan && (r.catalog.plan.request.family !== 'catalog' || r.catalog.plan.request.mode !== 'sync'))))
     || (r.stage === 'WACA_EVIDENCE_PENDING' && !r.waca)
     || (r.waca && (r.waca.key !== importWacaDeltaKey(r.batchId)
       || !Number.isSafeInteger(r.waca.expectedRevision) || r.waca.expectedRevision < 0
-      || !Array.isArray(r.waca.links) || r.waca.links.some(link => !link.childCode || !link.mainCode)))) {
+      || !Array.isArray(r.waca.links) || r.waca.links.some(link => !link.childCode || !link.mainCode)))
+    || (r.retirement && (r.stage !== 'FAILED_PRE_COMMIT' || r.inventory || r.catalog
+      || r.retirement.kind !== 'LEGACY_NOT_COMMITTED_VERIFIED' || r.retirement.restoreEpoch !== r.restoreEpoch
+      || r.retirement.businessMutation !== 0 || r.retirement.inventoryReplay !== 0
+      || r.retirement.expectedRows !== r.expected.length
+      || ![r.retirement.absentPredictedCreates, r.retirement.presentRows, r.retirement.targetMatches]
+        .every(value => Number.isSafeInteger(value) && value >= 0)))) {
     throw new BuyAnimeResumeError('BUYANIME_JOURNAL_INVALID');
   }
 }
@@ -155,11 +190,20 @@ export interface BuyAnimeImportPort {
   save(record: BuyAnimeImportRecord, expectedVersion: number): Promise<BuyAnimeImportRecord>;
   readInventory(record: BuyAnimeImportRecord): Promise<InventoryItem[]>;
   prepareInventory(items: InventoryItem[]): Promise<ReturnType<typeof planCloudInventoryImport>>;
-  commitInventory(plan: ReturnType<typeof planCloudInventoryImport>): Promise<void>;
+  commitInventory(plan: ReturnType<typeof planCloudInventoryImport>, record?: BuyAnimeImportRecord): Promise<void>;
+  reconcileInventory?: (record: BuyAnimeImportRecord) => Promise<InventoryCommitOutcome>;
+  resumeInventory?: (record: BuyAnimeImportRecord) => Promise<void>;
   planCatalog(imported: InventoryItem[], inventory?: InventoryItem[], fresh?: boolean): Promise<CatalogImportPlan | null>;
   commitCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
   reconcileCatalog?: (catalog:NonNullable<BuyAnimeImportRecord['catalog']>) => Promise<CatalogCommitOutcome>;
   verifyCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
+  readLegacyInventoryEvidence?: (record: BuyAnimeImportRecord) => Promise<BuyAnimeLegacyInventoryEvidence>;
+}
+/** A journal written before exact Inventory intent existed, still awaiting an
+ * outcome. It can never be replayed; it can only be proven and retired. */
+export function isUnresolvedLegacyInventoryJournal(record: BuyAnimeImportRecord): boolean {
+  return !record.inventory && !record.legacy && !record.catalog && !record.retirement && record.version > 0
+    && (record.stage === 'INVENTORY_COMMITTING' || record.stage === 'INVENTORY_COMMIT_UNKNOWN');
 }
 
 /** Durable progress lives in the existing import_batches.details JSON. No memory/session authority. */
@@ -178,6 +222,52 @@ export class BuyAnimeImportPipeline {
     const saved = await this.port.save(next, record.version);
     this.onStage?.(saved.stage);
     return saved;
+  }
+  /** Fail-closed legacy reconciliation. The old writer was one atomic
+   * transaction and Inventory rows are only soft-deleted within a Restore
+   * epoch, so a predicted create UUID and its business key both absent at the
+   * SAME epoch prove the transaction did not commit. Any other shape (no
+   * creates, present key/tombstone, soft-deleted row, surplus target matches,
+   * epoch change) stays blocked. Only the journal row changes, through CAS. */
+  async retireLegacyNotCommitted(input: BuyAnimeImportRecord): Promise<BuyAnimeImportRecord | null> {
+    assertImportRecord(input);
+    if (!isUnresolvedLegacyInventoryJournal(input)) throw new BuyAnimeResumeError('BUYANIME_LEGACY_RETIREMENT_NOT_APPLICABLE', input);
+    if (!this.port.readLegacyInventoryEvidence) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_RECONCILIATION_UNAVAILABLE', input);
+    const generation = await this.port.readRestoreGeneration?.();
+    if (!generation || input.restoreEpoch !== generation.epoch) throw new BuyAnimeResumeError('BUYANIME_LEGACY_COMMIT_OUTCOME_UNPROVEN', input);
+    await this.assertCurrent(input);
+    const evidence = await this.port.readLegacyInventoryEvidence(input);
+    const after = await this.port.readRestoreGeneration!();
+    assertBuyAnimeGenerationUnchanged(generation, after);
+    const expectedIds = new Set(input.expected.map(proof => proof.id));
+    const byId = new Map(evidence.rows.map(row => [String(row.id), row]));
+    if (byId.size !== evidence.rows.length || evidence.rows.some(row => !expectedIds.has(String(row.id))))
+      throw new BuyAnimeResumeError('BUYANIME_INVENTORY_READBACK_IDENTITY_ERROR', input);
+    if (evidence.rows.some(row => (row as { deleted_at?: string | null }).deleted_at)) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_SOFT_DELETED_ROW', input);
+    const absent = input.expected.filter(proof => !byId.has(proof.id));
+    let targetMatches = 0;
+    for (let offset = 0; offset < input.expected.length; offset += 150) {
+      for (const proof of input.expected.slice(offset, offset + 150)) {
+        const row = byId.get(proof.id);
+        if (row && stable(await inventoryProof(row)) === stable(proof)) targetMatches++;
+      }
+      if (offset + 150 < input.expected.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+    const creates = input.stats.newCount;
+    // Fully committed shape (every expected row present at target): the
+    // existing proof-based readback path owns it. Return without writing.
+    if (absent.length === 0 && targetMatches === input.expected.length) return null;
+    if (!Number.isSafeInteger(creates) || creates <= 0 || absent.length !== creates || evidence.keyRows.length !== 0
+      || targetMatches > input.stats.unchangedCount)
+      throw new BuyAnimeResumeError('BUYANIME_LEGACY_COMMIT_OUTCOME_UNPROVEN', input);
+    const retirement: BuyAnimeLegacyRetirement = {
+      kind: 'LEGACY_NOT_COMMITTED_VERIFIED', verifiedAt: new Date().toISOString(),
+      previousStage: input.stage as BuyAnimeLegacyRetirement['previousStage'], restoreEpoch: generation.epoch,
+      expectedRows: input.expected.length, absentPredictedCreates: absent.length,
+      presentRows: evidence.rows.length, targetMatches, businessMutation: 0, inventoryReplay: 0,
+    };
+    console.info('[BuyAnime Recovery] legacy request retired as NOT_COMMITTED', { batchId: input.batchId, ...retirement });
+    return this.store(input, { stage: 'FAILED_PRE_COMMIT', retirement });
   }
   async start(items: InventoryItem[], fileName: string): Promise<BuyAnimeImportRecord> {
     const generation = await this.port.readRestoreGeneration?.();
@@ -199,6 +289,9 @@ export class BuyAnimeImportPipeline {
       observedAt: items[0].catalog_last_seen_at!, stage: 'INVENTORY_COMMITTING', version: 0,
       ...(generation ? { restoreEpoch: generation.epoch } : {}),
       expected: await Promise.all(imported.map(inventoryProof)), stats: plan.stats,
+      ...(generation && this.port.reconcileInventory ? {
+        inventory: inventoryImportIntent(items[0].latest_catalog_import_id!, generation.epoch, plan.operations),
+      } : {}),
     };
     assertImportRecord(record);
     // Persist intent only when an Inventory transaction can change rows. A
@@ -213,14 +306,16 @@ export class BuyAnimeImportPipeline {
       // an RPC, which lets the final targeted refresh prove that no Inventory
       // rows need to be fetched. Skipping the port call loses that evidence and
       // incorrectly turns a successful no-op import into read-back pending.
-      await this.port.commitInventory(plan);
+      await this.port.commitInventory(plan, record);
       markBuyAnimeTrace('T13_INVENTORY_COMMIT_RESPONSE', { mutationRows: plan.operations.length });
     } catch (cause) {
-      const unknown = classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
+      // An HTTP/error response is not rollback evidence. Receipt-aware imports
+      // stay unknown until the read-only server classifier proves the outcome.
+      const unknown = Boolean(record.inventory) || classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
       const committed = cause instanceof CloudMutationBoundaryError && cause.state === 'committed-readback-pending';
       if (record.version > 0) try {
         record = await this.store(record, { stage: unknown ? 'INVENTORY_COMMIT_UNKNOWN'
-          : committed ? 'INVENTORY_READBACK_PENDING' : 'FAILED_PRE_COMMIT' });
+          : committed ? 'INVENTORY_READBACK_PENDING' : record.inventory ? 'INVENTORY_NOT_COMMITTED' : 'FAILED_PRE_COMMIT' });
       } catch { /* Durable COMMITTING intent remains. Never bypass offline/CAS protection to save progress. */ }
       throw new BuyAnimeResumeError(unknown ? 'BUYANIME_COMMIT_OUTCOME_UNKNOWN'
         : committed ? 'BUYANIME_COMMITTED_READBACK_PENDING' : 'BUYANIME_COMMIT_FAILED', record, cause);
@@ -269,8 +364,33 @@ export class BuyAnimeImportPipeline {
     await this.assertCurrent(record);
     if (record.stage === 'COMPLETE') return record;
     const legacyWacaPending = record.stage === 'WACA_EVIDENCE_PENDING';
-    // No code path in resume calls prepareInventory or commitInventory.
+    // Pre-intent journals NEVER replay. Prove-and-retire, or stay blocked.
+    if (!proven && this.port.readLegacyInventoryEvidence && isUnresolvedLegacyInventoryJournal(record)) {
+      const retired = await this.retireLegacyNotCommitted(record);
+      if (retired) return retired;
+    }
+    // Legacy journals contain only target hashes: they NEVER authorize a replay.
+    // New journals retain exact CAS intent, and require server reconciliation
+    // before a NOT_COMMITTED retry. Completed receipts skip dispatch entirely.
     if (['PLANNED', 'FAILED_PRE_COMMIT'].includes(record.stage)) throw new BuyAnimeResumeError('BUYANIME_NOT_COMMITTED', record);
+    if (!proven && record.inventory && record.stage.startsWith('INVENTORY_')) {
+      if (!this.port.reconcileInventory || !this.port.resumeInventory)
+        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_RECONCILIATION_UNAVAILABLE', record);
+      let outcome = await this.port.reconcileInventory(record);
+      if (outcome === 'UNKNOWN') throw new BuyAnimeResumeError('BUYANIME_COMMIT_OUTCOME_UNKNOWN', record);
+      if (outcome === 'NOT_COMMITTED') {
+        record = await this.store(record, { stage: 'INVENTORY_COMMITTING' });
+        await this.assertCurrent(record);
+        try { await this.port.resumeInventory(record); }
+        catch (cause) {
+          outcome = await this.port.reconcileInventory(record);
+          if (outcome !== 'COMMITTED') throw new BuyAnimeResumeError(
+            outcome === 'NOT_COMMITTED' ? 'BUYANIME_NOT_COMMITTED' : 'BUYANIME_COMMIT_OUTCOME_UNKNOWN', record, cause);
+        }
+      }
+      await this.assertCurrent(record);
+      record = { ...record, stage: 'INVENTORY_READBACK_PENDING' };
+    }
     this.verified.delete(input);
     const reusable = proven && record.version === input.version
       && (record.stage === input.stage || (record.stage === 'INVENTORY_COMMITTING' && input.stage === 'INVENTORY_VERIFIED'))
@@ -370,6 +490,8 @@ export class BuyAnimeImportPipeline {
 
 export function buyAnimeRecoveryMessage(record: BuyAnimeImportRecord, verified = false): string {
   if (record.stage === 'COMPLETE') return '買動漫主檔及商品／規格同步已完成。WACA 訂單／數量由 WACA 匯入獨立處理。';
+  if (record.stage === 'FAILED_PRE_COMMIT' && record.retirement)
+    return '舊的匯入已確認沒有寫入任何主檔資料，已保留紀錄並結案；可以正常匯入新檔案。';
   if (record.stage === 'FAILED_PRE_COMMIT') return '主檔沒有提交，本次匯入已停止。請查看錯誤資訊。';
   if (record.stage === 'PLANNED') return '匯入計畫已保存，但尚無主檔提交證據；不會自動重送。';
   if (verified) return '主檔已確認，後續同步尚未完成。可繼續商品／規格同步，請勿重複匯入。';
@@ -384,6 +506,8 @@ export function buyAnimeRecoveryUserMessage(error:unknown):string {
     const value=current as {category?:string;code?:string;cause?:unknown}|null;
     if(value?.category==='CATALOG_COMMIT_TIMEOUT_NOT_COMMITTED'
       || value?.code==='BUYANIME_CATALOG_COMMIT_UNKNOWN') return classifyMyAcgImportError(current,'commit').message;
+    if(value?.code==='BUYANIME_LEGACY_COMMIT_OUTCOME_UNPROVEN')
+      return '舊的匯入紀錄無法自動確認是否已寫入，系統已暫停，不會自動重送。請聯絡管理員核對。';
     if(!value?.cause) break;
     current=value.cause;
   }

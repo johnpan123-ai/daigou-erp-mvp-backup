@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { dataProvider } from '../providers/dataProvider';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import {
@@ -112,9 +113,11 @@ export default function Inventory() {
     let snapshot = await dataProvider.getInventoryCatalogSnapshot();
     let nextVariants = await dataProvider.getProductVariants({ raw: true });
     if (generation !== loadGenerationRef.current) return;
-    setProductGroups(snapshot.productGroups);
-    setProductVariants(nextVariants);
-    setItems(snapshot.inventory);
+    flushSync(() => {
+      setProductGroups(snapshot.productGroups);
+      setProductVariants(nextVariants);
+      setItems(snapshot.inventory);
+    });
 
     // The four-second freshness boundary may intentionally expose the previous
     // cache while the same Cloud pull continues. Once that pull atomically
@@ -123,9 +126,11 @@ export default function Inventory() {
       snapshot = await dataProvider.getInventoryCatalogSnapshot();
       nextVariants = await dataProvider.getProductVariants({ raw: true });
       if (generation !== loadGenerationRef.current) return;
-      setProductGroups(snapshot.productGroups);
-      setProductVariants(nextVariants);
-      setItems(snapshot.inventory);
+      flushSync(() => {
+        setProductGroups(snapshot.productGroups);
+        setProductVariants(nextVariants);
+        setItems(snapshot.inventory);
+      });
     }
     
     try {
@@ -151,7 +156,9 @@ export default function Inventory() {
   useCloudResourceSync(
     'inventory-catalog',
     ['inventory', 'products'],
-    isImporting || isRollbackPending,
+    // Import/rollback are operations, not editable row drafts. Registering them
+    // as editing also protects the OLD provider cache from verified ACK rows.
+    false,
     loadItems,
   );
 

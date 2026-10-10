@@ -120,6 +120,7 @@ import {
 } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
 import { planCloudInventoryImport } from './inventoryImportPlan';
+import type { InventoryCommitOutcome } from './inventoryImportTransaction';
 import { classifyMyAcgImportError } from '../../utils/myacgImportErrors';
 import {
   assertCloudWriteAllowed,
@@ -1564,12 +1565,17 @@ export class SupabaseProvider implements IDataProvider {
       ]);
       return planCloudInventoryImport([...active, ...tombstones], items);
     },
-    commitInventory: plan => {
+    commitInventory: (plan, record) => {
       const batch = plan.batchId;
       if (batch) this.buyAnimeTouchedInventory.set(batch, plan.operations);
-      return this.applyCloudFieldMutations('inventory_items', plan.operations, { readback: false });
+      if (!plan.operations.length) return Promise.resolve();
+      if (!record?.inventory) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_INTENT_REQUIRED', record);
+      return this.commitBuyAnimeInventoryIntent(record);
     },
+    reconcileInventory: record => this.reconcileBuyAnimeInventoryIntent(record),
+    resumeInventory: record => this.commitBuyAnimeInventoryIntent(record),
     readInventory: record => this.readBuyAnimeCommittedRows(record),
+    readLegacyInventoryEvidence: record => this.readBuyAnimeLegacyEvidence(record),
     planCatalog: async (imported, verifiedInventory, fresh = false) => {
       const [allGroups, allCategories, allVariants] = await Promise.all([
         fresh ? fetchAll<ProductGroup>(async (from, to) => supabase.from('product_groups')
@@ -1692,16 +1698,91 @@ export class SupabaseProvider implements IDataProvider {
       return rows;
     } catch (cause) { markCloudRequestFailed(cause); throw cause; }
   }
+  private async commitBuyAnimeInventoryIntent(record: BuyAnimeImportRecord): Promise<void> {
+    if (!record.inventory) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_INTENT_REQUIRED', record);
+    await this.requireCloudWritePermission();
+    assertCloudWriteAllowed();
+    assertBuyAnimeRecoveryCurrent(record, await readBuyAnimeRestoreGeneration());
+    this.buyAnimeTouchedInventory.set(record.batchId, record.inventory.request.operations);
+    const ids = record.inventory.request.operations.map(op => op.id);
+    markLocalCloudWrite('inventory_items', ids);
+    const releaseReads = beginCatalogCommitReadFence();
+    try {
+      const result = await supabase.rpc('erp_apply_inventory_import', {
+        p_idempotency_key: record.inventory.key, p_request: record.inventory.request,
+      });
+      if (result.error) throw { ...result.error, status: result.status };
+      if (result.data?.ok !== true || result.data?.outcome !== 'COMMITTED')
+        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_COMMIT_REJECTED', record, { code: result.data?.code });
+      const expected = new Set(record.inventory.request.operations.map(op => op.id));
+      const rows = result.data.rows as Array<{ id: string; version: number }> | undefined;
+      if (!Array.isArray(rows) || rows.length !== expected.size || new Set(rows.map(row => row.id)).size !== expected.size
+        || rows.some(row => !expected.has(row.id) || !Number.isSafeInteger(row.version)))
+        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_RECEIPT_INVALID', record);
+    } catch (cause) {
+      clearLocalCloudWrites('inventory_items', ids);
+      throw cause;
+    } finally { releaseReads(); }
+  }
+  private async reconcileBuyAnimeInventoryIntent(record: BuyAnimeImportRecord): Promise<InventoryCommitOutcome> {
+    if (!record.inventory) return 'UNKNOWN';
+    assertBuyAnimeRecoveryCurrent(record, await readBuyAnimeRestoreGeneration());
+    const result = await supabase.rpc('erp_reconcile_inventory_import', {
+      p_idempotency_key: record.inventory.key, p_request: record.inventory.request,
+    });
+    if (result.error) return 'UNKNOWN';
+    if (result.data?.ok !== true) {
+      if (result.data?.code === 'INVENTORY_COMMIT_UNKNOWN') return 'UNKNOWN';
+      throw new BuyAnimeResumeError('BUYANIME_INVENTORY_READBACK_IDENTITY_ERROR', record, { code: result.data?.code });
+    }
+    return ['COMMITTED', 'NOT_COMMITTED'].includes(result.data.outcome) ? result.data.outcome : 'UNKNOWN';
+  }
+  /** SELECT-only. Exact expected UUIDs plus absent proofs' keys INCLUDING tombstones. */
+  private async readBuyAnimeLegacyEvidence(record: BuyAnimeImportRecord) {
+    const ids = record.expected.map(proof => proof.id);
+    const rows = await readCloudRowsByIds({ table: 'inventory_items', ids, allowMissing: new Set(ids),
+      load: async (chunk, signal) => {
+        const response = await supabase.from('inventory_items').select('*').in('id', chunk).abortSignal(signal!);
+        if (response.error) throw { ...response.error, status: response.status };
+        return response.data || [];
+      } });
+    const present = new Set(rows.map(row => String(row.id)));
+    const keys = record.expected.filter(proof => !present.has(proof.id)).map(proof => proof.key);
+    const keyRows: Array<{ id: string; inventory_key: string | null; deleted_at: string | null }> = [];
+    for (let offset = 0; offset < keys.length; offset += 150) {
+      const response = await supabase.from('inventory_items').select('id,inventory_key,deleted_at')
+        .in('inventory_key', keys.slice(offset, offset + 150));
+      if (response.error) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_READBACK_UNAVAILABLE', record, response.error);
+      keyRows.push(...(response.data || []));
+    }
+    return { rows: rows as unknown as InventoryItem[], keyRows };
+  }
   private async readBuyAnimeCommittedRows(record: BuyAnimeImportRecord): Promise<InventoryItem[]> {
     // A localized readback failure does not invalidate every unrelated editor's
     // last authoritative snapshot. It still blocks THIS batch from advancing.
     const rows = await readCloudRowsByIds({ table: 'inventory_items', ids: record.expected.map(proof => proof.id),
+      allowMissing: new Set(record.expected.map(proof => proof.id)),
       load: async (ids, signal) => {
         const response = await supabase.from('inventory_items').select('*').in('id', ids).abortSignal(signal!);
         if (response.error) throw { ...response.error, status: response.status };
         return response.data || [];
       } });
-    if (rows.some(row => row.deleted_at)) throw new BuyAnimeResumeError('BUYANIME_COMMITTED_ROW_DELETED', record);
+    if (rows.some(row => row.deleted_at)) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_SOFT_DELETED_ROW', record);
+    const present = new Set(rows.map(row => String(row.id)));
+    const missing = record.expected.filter(proof => !present.has(proof.id));
+    if (missing.length) {
+      // Diagnose key/UUID alias separately. Never replace identities or treat
+      // a missing predicted create as evidence that an entire transaction failed.
+      for (let offset = 0; offset < missing.length; offset += 150) {
+        const response = await supabase.from('inventory_items').select('id,inventory_key,deleted_at')
+          .in('inventory_key', missing.slice(offset, offset + 150).map(proof => proof.key));
+        if (response.error) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_READBACK_UNAVAILABLE', record, response.error);
+        if (response.data?.some(row => row.deleted_at))
+          throw new BuyAnimeResumeError('BUYANIME_INVENTORY_SOFT_DELETED_ROW', record);
+        if (response.data?.length) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_LOCAL_CLOUD_IDENTITY_MISMATCH', record);
+      }
+      throw new BuyAnimeResumeError('BUYANIME_INVENTORY_TRUE_MISSING_ROW', record);
+    }
     const existing = this.buyAnimeInventoryRows.get(record.batchId) || [];
     this.buyAnimeInventoryRows.set(record.batchId,
       [...new Map([...existing, ...rows].map(row => [String(row.id), row as Record<string, unknown>])).values()]);
@@ -1793,6 +1874,13 @@ export class SupabaseProvider implements IDataProvider {
     this.buyAnimePipeline.onStage = stage => { publishBuyAnimeFlow(buyAnimeFlowLabel(stage)); options.onStage?.(stage); };
     const completed = await finishBuyAnimeImport(record,
       value => this.buyAnimePipeline.resume(value), () => this.prepareBuyAnimeRecovery());
+    if (completed.stage === 'FAILED_PRE_COMMIT' && completed.retirement) {
+      // Retired legacy request: zero Business rows changed, nothing to refresh.
+      this.buyAnimeRefreshPending = undefined;
+      this.buyAnimeTouchedInventory.delete(completed.batchId);
+      this.buyAnimeInventoryRows.delete(completed.batchId);
+      return completed;
+    }
     // Targeted row acknowledgement, not a full products/inventory refresh.
     // No full background pull is needed on the normal successful path.
     const catalogKey = importCatalogKey(completed.batchId);
@@ -1843,7 +1931,8 @@ export class SupabaseProvider implements IDataProvider {
     return coordinateBuyAnimeImport(async () => {
       const pending = await this.getBuyAnimeImportRecovery() ?? this.buyAnimeRefreshPending;
       if (!pending) return null;
-      return this.finishBuyAnime(pending, options);
+      const finished = await this.finishBuyAnime(pending, options);
+      return finished.retirement ? null : finished;
     });
   }
   async completeBuyAnimeImport(items: InventoryItem[], fileName: string, options: BuyAnimeFlowOptions = {}): Promise<BuyAnimeImportRecord> {

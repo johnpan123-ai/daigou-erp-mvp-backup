@@ -14,7 +14,7 @@ import {
   type CloudRefreshResult,
 } from '../providers/cloud/cloudSyncDomain';
 import { CloudTargetedCache } from '../providers/cloud/cloudTargetedCache';
-import { registerBuyAnimeTargetedRefresh } from '../providers/cloud/buyAnimeImportCoordinator';
+import { registerBuyAnimeTargetedRefresh, subscribeBuyAnimeFlow, getBuyAnimeFlowPresentation } from '../providers/cloud/buyAnimeImportCoordinator';
 import { cloudDraftScopeForOwner, cloudRowAffectsDraft, readCloudDraftRelations, type CloudDraftScope } from '../providers/cloud/cloudDraftScope';
 import { consumeLocalCloudEcho } from '../providers/cloud/cloudRealtimeEchoRegistry';
 import {
@@ -131,8 +131,10 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     }
   })();
   const presentationMode = testBridge ? 'cloud' : getProviderMode();
+  const buyAnimeFlow = useSyncExternalStore(subscribeBuyAnimeFlow, getBuyAnimeFlowPresentation, getBuyAnimeFlowPresentation);
   const presentationRefresh = restorePendingAttempt
-    ? { ...globalRefresh, busy: true, restorePending: true } : globalRefresh;
+    ? { ...globalRefresh, busy: true, restorePending: true }
+    : buyAnimeFlow.active || buyAnimeFlow.error ? { ...globalRefresh, busy: true } : globalRefresh;
   const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, presentationRefresh);
 
   useEffect(() => {
