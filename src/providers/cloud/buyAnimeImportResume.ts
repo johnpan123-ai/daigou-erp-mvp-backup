@@ -7,10 +7,11 @@ import { classifyMyAcgImportError, myAcgImportDiagnostic } from '../../utils/mya
 import { markBuyAnimeTrace, recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
 import type { MyAcgMasterLink } from '../../waca/masterReference';
 import { assertBuyAnimeGenerationUnchanged, assertBuyAnimeRecoveryCurrent, classifyBuyAnimeRecoveryGeneration, type BuyAnimeRestoreGeneration } from './buyAnimeRecoveryEpoch';
+import { inventoryImportIntent, validInventoryIntent, type InventoryImportIntent, type InventoryCommitOutcome } from './inventoryImportTransaction';
 
 export const BUYANIME_JOURNAL_PLATFORM = 'buyanime-catalog-resume-v1';
 export const BUYANIME_COMPLETION_CONTRACT = 'INVENTORY_CATALOG_AUTHORITATIVE';
-export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN'
+export type BuyAnimeStage = 'PLANNED' | 'INVENTORY_COMMITTING' | 'INVENTORY_COMMIT_UNKNOWN' | 'INVENTORY_NOT_COMMITTED'
   | 'INVENTORY_COMMITTED' | 'INVENTORY_READBACK_PENDING' | 'INVENTORY_VERIFIED'
   | 'CATALOG_PENDING' | 'CATALOG_COMMITTING' | 'CATALOG_COMMITTED' | 'CATALOG_VERIFIED'
   | 'WACA_EVIDENCE_PENDING' | 'COMPLETE' | 'FAILED_PRE_COMMIT';
@@ -35,6 +36,7 @@ export interface BuyAnimeImportRecord {
   version: number;
   expected: InventoryProof[];
   stats: ImportStats;
+  inventory?: InventoryImportIntent;
   catalog?: { key: string; plan: CatalogImportPlan | null };
   waca?: WacaMasterLinkDeltaPlan;
   legacy?: boolean;
@@ -79,7 +81,7 @@ export async function proveInventoryRows(record: BuyAnimeImportRecord, rows: Inv
     if (offset + 150 < record.expected.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
 }
-const STAGES = new Set<BuyAnimeStage>(['PLANNED','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN',
+const STAGES = new Set<BuyAnimeStage>(['PLANNED','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_NOT_COMMITTED',
   'INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED','CATALOG_PENDING',
   'CATALOG_COMMITTING','CATALOG_COMMITTED','CATALOG_VERIFIED','WACA_EVIDENCE_PENDING','COMPLETE','FAILED_PRE_COMMIT']);
 export function assertImportRecord(value: unknown): asserts value is BuyAnimeImportRecord {
@@ -93,6 +95,11 @@ export function assertImportRecord(value: unknown): asserts value is BuyAnimeImp
     || new Set(r.expected.map(p => p.key)).size !== r.expected.length
     || r.expected.some(p => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(p.id)
       || !p.key || !/^[0-9a-f]{64}$/u.test(p.hash))
+    || (r.inventory && !validInventoryIntent(r.inventory, r.batchId, r.restoreEpoch))) {
+    throw new BuyAnimeResumeError('BUYANIME_JOURNAL_INVALID');
+  }
+  const expectedIds = new Set(r.expected.map(proof => proof.id));
+  if ((r.inventory && r.inventory.request.operations.some(op => !expectedIds.has(op.id)))
     || (['CATALOG_COMMITTING','CATALOG_COMMITTED'].includes(r.stage) && !r.catalog)
     || (r.catalog && (r.catalog.key !== importCatalogKey(r.batchId)
       || (r.catalog.plan && (r.catalog.plan.request.family !== 'catalog' || r.catalog.plan.request.mode !== 'sync'))))
@@ -155,7 +162,9 @@ export interface BuyAnimeImportPort {
   save(record: BuyAnimeImportRecord, expectedVersion: number): Promise<BuyAnimeImportRecord>;
   readInventory(record: BuyAnimeImportRecord): Promise<InventoryItem[]>;
   prepareInventory(items: InventoryItem[]): Promise<ReturnType<typeof planCloudInventoryImport>>;
-  commitInventory(plan: ReturnType<typeof planCloudInventoryImport>): Promise<void>;
+  commitInventory(plan: ReturnType<typeof planCloudInventoryImport>, record?: BuyAnimeImportRecord): Promise<void>;
+  reconcileInventory?: (record: BuyAnimeImportRecord) => Promise<InventoryCommitOutcome>;
+  resumeInventory?: (record: BuyAnimeImportRecord) => Promise<void>;
   planCatalog(imported: InventoryItem[], inventory?: InventoryItem[], fresh?: boolean): Promise<CatalogImportPlan | null>;
   commitCatalog(catalog: NonNullable<BuyAnimeImportRecord['catalog']>): Promise<void>;
   reconcileCatalog?: (catalog:NonNullable<BuyAnimeImportRecord['catalog']>) => Promise<CatalogCommitOutcome>;
@@ -199,6 +208,9 @@ export class BuyAnimeImportPipeline {
       observedAt: items[0].catalog_last_seen_at!, stage: 'INVENTORY_COMMITTING', version: 0,
       ...(generation ? { restoreEpoch: generation.epoch } : {}),
       expected: await Promise.all(imported.map(inventoryProof)), stats: plan.stats,
+      ...(generation && this.port.reconcileInventory ? {
+        inventory: inventoryImportIntent(items[0].latest_catalog_import_id!, generation.epoch, plan.operations),
+      } : {}),
     };
     assertImportRecord(record);
     // Persist intent only when an Inventory transaction can change rows. A
@@ -213,14 +225,16 @@ export class BuyAnimeImportPipeline {
       // an RPC, which lets the final targeted refresh prove that no Inventory
       // rows need to be fetched. Skipping the port call loses that evidence and
       // incorrectly turns a successful no-op import into read-back pending.
-      await this.port.commitInventory(plan);
+      await this.port.commitInventory(plan, record);
       markBuyAnimeTrace('T13_INVENTORY_COMMIT_RESPONSE', { mutationRows: plan.operations.length });
     } catch (cause) {
-      const unknown = classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
+      // An HTTP/error response is not rollback evidence. Receipt-aware imports
+      // stay unknown until the read-only server classifier proves the outcome.
+      const unknown = Boolean(record.inventory) || classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
       const committed = cause instanceof CloudMutationBoundaryError && cause.state === 'committed-readback-pending';
       if (record.version > 0) try {
         record = await this.store(record, { stage: unknown ? 'INVENTORY_COMMIT_UNKNOWN'
-          : committed ? 'INVENTORY_READBACK_PENDING' : 'FAILED_PRE_COMMIT' });
+          : committed ? 'INVENTORY_READBACK_PENDING' : record.inventory ? 'INVENTORY_NOT_COMMITTED' : 'FAILED_PRE_COMMIT' });
       } catch { /* Durable COMMITTING intent remains. Never bypass offline/CAS protection to save progress. */ }
       throw new BuyAnimeResumeError(unknown ? 'BUYANIME_COMMIT_OUTCOME_UNKNOWN'
         : committed ? 'BUYANIME_COMMITTED_READBACK_PENDING' : 'BUYANIME_COMMIT_FAILED', record, cause);
@@ -269,8 +283,28 @@ export class BuyAnimeImportPipeline {
     await this.assertCurrent(record);
     if (record.stage === 'COMPLETE') return record;
     const legacyWacaPending = record.stage === 'WACA_EVIDENCE_PENDING';
-    // No code path in resume calls prepareInventory or commitInventory.
+    // Legacy journals contain only target hashes: they NEVER authorize a replay.
+    // New journals retain exact CAS intent, and require server reconciliation
+    // before a NOT_COMMITTED retry. Completed receipts skip dispatch entirely.
     if (['PLANNED', 'FAILED_PRE_COMMIT'].includes(record.stage)) throw new BuyAnimeResumeError('BUYANIME_NOT_COMMITTED', record);
+    if (!proven && record.inventory && record.stage.startsWith('INVENTORY_')) {
+      if (!this.port.reconcileInventory || !this.port.resumeInventory)
+        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_RECONCILIATION_UNAVAILABLE', record);
+      let outcome = await this.port.reconcileInventory(record);
+      if (outcome === 'UNKNOWN') throw new BuyAnimeResumeError('BUYANIME_COMMIT_OUTCOME_UNKNOWN', record);
+      if (outcome === 'NOT_COMMITTED') {
+        record = await this.store(record, { stage: 'INVENTORY_COMMITTING' });
+        await this.assertCurrent(record);
+        try { await this.port.resumeInventory(record); }
+        catch (cause) {
+          outcome = await this.port.reconcileInventory(record);
+          if (outcome !== 'COMMITTED') throw new BuyAnimeResumeError(
+            outcome === 'NOT_COMMITTED' ? 'BUYANIME_NOT_COMMITTED' : 'BUYANIME_COMMIT_OUTCOME_UNKNOWN', record, cause);
+        }
+      }
+      await this.assertCurrent(record);
+      record = { ...record, stage: 'INVENTORY_READBACK_PENDING' };
+    }
     this.verified.delete(input);
     const reusable = proven && record.version === input.version
       && (record.stage === input.stage || (record.stage === 'INVENTORY_COMMITTING' && input.stage === 'INVENTORY_VERIFIED'))

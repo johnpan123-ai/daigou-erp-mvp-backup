@@ -42,6 +42,22 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '072': {
+    sourceFile: '072_inventory_import_set_based_receipt.sql', dependencies: ['058', '071'],
+    risk: 'INVENTORY_ATOMIC_EXECUTION_OPTIMIZATION', idempotency: 'ADDITIVE_FUNCTION',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [table('erp_idempotency_keys'), table('inventory_items'), table('erp_cloud_restore_epoch')],
+    postconditions: [fn('erp_inventory_import_core(uuid,jsonb,boolean)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
+      publicExecute: false, anonExecute: false, authenticatedExecute: false,
+      requiredConfig: ['search_path=""', 'TimeZone=UTC'],
+      definitionIncludes: ['STALE_AFTER_RESTORE', 'jsonb_populate_recordset', 'INVENTORY_WRITE_COUNT_MISMATCH', 'actor_id=actor'],
+    }), ...['erp_apply_inventory_import', 'erp_reconcile_inventory_import'].map(name => fn(name + '(uuid,jsonb)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
+      publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=""'], definitionIncludes: ['erp_inventory_import_core'],
+    }))],
+  },
   '071': {
     sourceFile: '071_restore_postcommit_readonly_verification.sql', dependencies: ['058', '070'],
     risk: 'READ_ONLY_RESTORE_POSTCOMMIT_VERIFICATION', idempotency: 'ADDITIVE_FUNCTION',

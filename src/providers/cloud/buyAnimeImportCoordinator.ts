@@ -12,14 +12,14 @@ export interface BuyAnimeFlowOptions {
 }
 
 let tail: Promise<unknown> = Promise.resolve();
-let presentation = { label: '', error: '' };
+let presentation = { label: '', error: '', active: false };
 const listeners = new Set<() => void>();
 export const getBuyAnimeFlowPresentation = () => presentation;
 export function subscribeBuyAnimeFlow(listener: () => void): () => void {
   listeners.add(listener); return () => { listeners.delete(listener); };
 }
 export function publishBuyAnimeFlow(label: string, error = ''): void {
-  presentation = { label, error }; listeners.forEach(listener => listener());
+  presentation = { ...presentation, label, error }; listeners.forEach(listener => listener());
 }
 let targetedRefresh: ((evidence: BuyAnimeAuthoritativeEvidence) => Promise<void>) | undefined;
 export function registerBuyAnimeTargetedRefresh(refresh: NonNullable<typeof targetedRefresh>): () => void {
@@ -33,6 +33,8 @@ export function refreshBuyAnimeReadback(evidence: BuyAnimeAuthoritativeEvidence,
  * still the authority across devices; this lock never replaces it. */
 export function coordinateBuyAnimeImport<T>(run: () => Promise<T>): Promise<T> {
   const guarded = async () => {
+    presentation = { label: '正在匯入並同步資料…', error: '', active: true };
+    listeners.forEach(listener => listener());
     try { const result = await run(); publishBuyAnimeFlow(result ? '匯入完成' : ''); return result; }
     catch (error) {
       // Pre-dispatch/backup/permission failures have no committed batch to resume.
@@ -40,6 +42,9 @@ export function coordinateBuyAnimeImport<T>(run: () => Promise<T>): Promise<T> {
       publishBuyAnimeFlow('', error instanceof BuyAnimeResumeError && error.record
         ? '同步暫時未完成，請稍後重試。已儲存的主檔不會重送。' : '');
       throw error;
+    } finally {
+      presentation = { ...presentation, active: false };
+      listeners.forEach(listener => listener());
     }
   };
   const operation = tail.catch(() => undefined).then(() =>
