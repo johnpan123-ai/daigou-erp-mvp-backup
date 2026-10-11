@@ -10,6 +10,7 @@ import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
 import { ERP_SYSTEM_SHORT_NAME, ERP_SYSTEM_VERSION } from './erpSystemIdentity';
 import { GlobalSyncControl } from './GlobalSyncControl';
 import { supportsWacaProvider } from '../../waca/providerSupport';
+import { useRestoreOpsMaintenance } from '../../hooks/useRestoreOpsMaintenance';
 import '../../styles/layout.css'; // Ensure layout classes are applied
 import '../../styles/workspace.css';
 
@@ -75,6 +76,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   });
   const location = useLocation();
   const navigate = useNavigate();
+  // P0-1 G-1: owner-only idle-time Restore OPS maintenance (independent of Restore/Prepare paths).
+  useRestoreOpsMaintenance();
 
   const toggleSidebar = () => {
     setIsCollapsed(prev => {

@@ -40,6 +40,28 @@ import {
   type CloudBackupToNextCandidate,
 } from '../providers/cloud/cloudBackupToNext';
 import './Settings.css';
+import { getRestoreOpsScheduler } from '../hooks/useRestoreOpsMaintenance';
+
+const OPS_OUTCOME_LABELS: Record<string, string> = {
+  idle: '已無待清理資料', progress: '已清理部分資料', busy: '資料庫忙碌，稍後再試', error: '失敗',
+  unknown: '結果未知（連線中斷或逾時）', stopped: '已暫停（頁面隱藏或有其他作業）', 'skipped-no-web-locks': '瀏覽器不支援跨分頁鎖，已跳過',
+};
+
+/** Read-only status of the owner-only Restore OPS maintenance (P0-1 G-1). */
+function RestoreOpsMaintenanceStatus() {
+  const scheduler = getRestoreOpsScheduler();
+  const snapshot = useSyncExternalStore(scheduler.subscribe, scheduler.getSnapshot);
+  const last = snapshot.log[snapshot.log.length - 1];
+  const color = snapshot.health.level === 'ATTENTION' ? '#9c4221' : undefined;
+  return (
+    <li data-testid="restore-ops-maintenance-status" style={color ? { color } : undefined}>
+      Restore 暫存清理：{snapshot.mounted ? snapshot.health.reason : '排程器未在此分頁啟動'}
+      {last ? `；上次 ${new Date(last.at).toLocaleString()}（${OPS_OUTCOME_LABELS[last.outcome] ?? last.outcome}）` : ''}
+      {snapshot.state.consecutiveFailures > 0 ? `；連續失敗 ${snapshot.state.consecutiveFailures} 次` : ''}
+      <div className="text-muted text-sm">（{snapshot.health.scope}）</div>
+    </li>
+  );
+}
 
 const TEST_SNAPSHOT_SUMMARY_FIELDS: { field: TestSnapshotCollectionName; label: string }[] = [
   { field: 'productGroups', label: '商品群組' },
@@ -902,6 +924,9 @@ export default function Settings() {
                 ))}
               </ul>
             </>
+          )}
+          {role === 'owner' && getProviderMode() === 'cloud' && (
+            <ul style={{ marginBottom: 0 }}><RestoreOpsMaintenanceStatus /></ul>
           )}
         </section>
 
