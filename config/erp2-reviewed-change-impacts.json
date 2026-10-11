@@ -5958,6 +5958,191 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "restore-ops-g1-idle-scheduler-v1",
+      "beforeHead": "5142c5243b03163e98f9ebc09eff56150e372431",
+      "reviewedHead": "293f487ddc53bb2884cbf7007ccba7bac67ea71b",
+      "patchSha256": "03edf0702c5d12552adeb2f122ae018acba6aaab4c86f896ab8bf0151c609fe2",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "realtime",
+        "registry",
+        "execute-envelope",
+        "cloud-next",
+        "buyanime-ui",
+        "buyanime-provider",
+        "buyanime-data-size",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "src/components/layout/AppLayout.tsx",
+          "beforeHash": "198bbe1dc48d1db023476c7f582b46164cac887d0218011ec33755a193f15703",
+          "afterHash": "98e75f05528c6f6adfe988a9ff5953d2a0862ba39f3ef88c1f2207e46de6984f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "AppLayout (mount useRestoreOpsMaintenance)"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/hooks/useRestoreOpsMaintenance.ts",
+          "beforeHash": null,
+          "afterHash": "3af314f8f2dc208816050199ec045fc2c3a22e00d38da1dd9b966068411664cc",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "getRestoreOpsScheduler",
+            "useRestoreOpsMaintenance"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/pages/Settings.tsx",
+          "beforeHash": "f9d2d3a48bd287e96875c79bdd8ddcc89a40992adfeb27b01f787291b5ad53b5",
+          "afterHash": "78440ace11eacf33bb0591562eacc75c1aa16ed5de2e4e4c70a7fc284fd96211",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "RestoreOpsMaintenanceStatus (read-only health line)"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudRestoreOpsMaintenance.ts",
+          "beforeHash": "f3c53a67296caa96464969794eb4543af11bad3067d98a69b1d164a88fde62b6",
+          "afterHash": "19a96535a0053bd3478a4adc11a6026a2a0319b9b9df411eb43986cc55bc99a6",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "cleanupExpiredRestoreOps (options, summary, UNKNOWN classification)"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudRestoreOpsScheduler.ts",
+          "beforeHash": null,
+          "afterHash": "b1a227f6df8296df47c5852ffbc63378cf091df68065fea820b5de557f4ce532",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "createRestoreOpsScheduler",
+            "classifyOpsHealth",
+            "OPS_SCHEDULER"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/restore-ops-scheduler-isolated.mjs",
+          "beforeHash": null,
+          "afterHash": "83b4e9ec7a061f34038e9be6a33a31a6eddc999305409dcd0a3b06702c279241",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "ISOLATED_G1_OPS_SCHEDULER integration"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/restore-ops-scheduler.mjs",
+          "beforeHash": null,
+          "afterHash": "46af49247123d22f6e5f91e1386b3cd602b17f409845824dd4c341ba6ed368cd",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "RESTORE_OPS_SCHEDULER_G1 unit/contract"
+          ],
+          "changedInputs": "NONE for business flows. New owner-only idle-time trigger reads auth role, route, global-sync freshness, BuyAnime presentation and the existing per-tab Restore unresolved-attempt key (read-only).",
+          "changedOutputs": "Per-browser/per-origin diagnostics in localStorage (erp_restore_ops_maint:v1:*) and one read-only Settings health line. Diagnostics are explicitly not an authoritative system-wide record.",
+          "changedDurableFields": "NONE in business tables. PRODUCTION OPS DATA IS DELETED: the existing RPC erp_cleanup_expired_restore_ops (067/068, unchanged) now runs automatically and removes ONLY expired, non-in-flight Restore OPS rows (erp_restore_upload_requests, erp_cloud_restore_candidate_proofs, erp_cloud_restore_prepared_chunks, erp_restore_upload_chunks, erp_restore_upload_resource_proofs, erp_restore_stage_*), including expired consumed upload requests (owner-approved G2-A).",
+          "changedRpcContract": "NONE. Same RPC, same argument (p_exclude_request_id = NULL), no new RPC, no SQL/migration/ACL/RLS change.",
+          "changedProviderContract": "NONE in supabaseProvider/Prepare/Execute/Global Sync (restore-expired-ops-cleanup.mjs:38 independence preserved; static guards added).",
+          "changedBackupContract": "NONE. Backup/Restore serializers, 24-resource registry, Snapshots, Receipts, Journal, Idempotency unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "AppLayout -> useRestoreOpsMaintenance (owner+cloud, startup +120 s idle, 10 min tick, visible) -> gates (visible, online, sync fresh, no BuyAnime, no /settings in this origin, no unresolved Restore) -> Web Lock erp-restore-ops-maintenance (ifAvailable; fail-closed without Web Locks) -> cleanupExpiredRestoreOps (<=12 batches, 8 s wall budget, 12 s client call cap, 250 ms abortable pause) -> RPC.",
+          "persistenceBehavior": "Server-side safety unchanged: expired-only selection, in-flight attempt exclusion, FOR UPDATE OF u NOWAIT + advisory xact lock, Execute FOR UPDATE on proofs, bounded batches, statement_timeout. Client outcomes: idle 12 h, progress 10 min, busy 30 min, UNKNOWN 30 min (never retried immediately), error 1/6/24 h.",
+          "writePath": "Only the existing cleanup RPC (definer, owner-only, host-bound). No business writer.",
+          "providerPath": "Existing authenticated Supabase client; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes. Rollback = redeploy previous runtime (stops further automatic OPS deletion); deleted expired OPS are non-executable and unreferenced (pre-deploy evidence retained).",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
