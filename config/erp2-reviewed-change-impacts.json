@@ -6143,6 +6143,65 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "restore-ops-g1-provider-guard-closure-v1",
+      "beforeHead": "24e3ed640c9d413dd5ef96f2eddb561a19ce53dd",
+      "reviewedHead": "394108ca49577574026a1b57522be738e7efde7d",
+      "patchSha256": "40eb26ab5e5b2779a06f101465eb9be61ccbbbf322cf3b7bdf3324d088b55a64",
+      "requiredRegressions": [
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "d4e4fd63a02f0cbd36702b074e7c56ee9e376a9141c76ce3a2efbd6dd7d20da1",
+          "afterHash": "96d3d58b8dd2c9c18b2a75a9367a9efaf5f29a5b0372b352de1e6b2de68ced25",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "assertRestoreOpsMaintenanceContract",
+            "assertReviewedProviderContract restore-ops-g1 exact dispatch"
+          ],
+          "changedInputs": "Exact immutable diff of src/providers/cloud/cloudRestoreOpsScheduler.ts and cloudRestoreOpsMaintenance.ts (review restore-ops-g1-idle-scheduler-v1) and the adopted baseline source.",
+          "changedOutputs": "Fail-closed AST proof that the two exact Restore OPS provider files reach the database only through erp_cleanup_expired_restore_ops({ p_exclude_request_id: currentRequestId }) and have no other dependency, I/O, export or RPC.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: erp_cleanup_expired_restore_ops (067/068) and its argument remain the adopted contract.",
+          "changedProviderContract": "No provider runtime change; release-control proof only. Two exact paths, no wildcard, no directory allowlist; scheduler requires before === null (any later edit needs a new exact review). All pre-existing provider rules unchanged (stripping the two marked blocks restores the previous guard byte-for-byte).",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Immutable source diff -> structural AST proof -> fail-closed SAFE_DESCENDANT providerParity classification.",
+          "persistenceBehavior": "NONE: no runtime persistence behavior.",
+          "writePath": "NONE.",
+          "providerPath": "Release-control verification only.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/restore-ops-provider-guard.mjs",
+          "beforeHash": null,
+          "afterHash": "201c9e4277503e91ab0494135605c1cfd3e278b8c4612cf2cfdebb847a75c16d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "RESTORE_OPS_PROVIDER_GUARD positive/negative + additive-only regression"
+          ],
+          "changedInputs": "Exact immutable diff of src/providers/cloud/cloudRestoreOpsScheduler.ts and cloudRestoreOpsMaintenance.ts (review restore-ops-g1-idle-scheduler-v1) and the adopted baseline source.",
+          "changedOutputs": "Fail-closed AST proof that the two exact Restore OPS provider files reach the database only through erp_cleanup_expired_restore_ops({ p_exclude_request_id: currentRequestId }) and have no other dependency, I/O, export or RPC.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: erp_cleanup_expired_restore_ops (067/068) and its argument remain the adopted contract.",
+          "changedProviderContract": "No provider runtime change; release-control proof only. Two exact paths, no wildcard, no directory allowlist; scheduler requires before === null (any later edit needs a new exact review). All pre-existing provider rules unchanged (stripping the two marked blocks restores the previous guard byte-for-byte).",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Immutable source diff -> structural AST proof -> fail-closed SAFE_DESCENDANT providerParity classification.",
+          "persistenceBehavior": "NONE: no runtime persistence behavior.",
+          "writePath": "NONE.",
+          "providerPath": "Release-control verification only.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
