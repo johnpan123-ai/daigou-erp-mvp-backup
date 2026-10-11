@@ -215,6 +215,88 @@ export function assertReviewedRestoreOrchestrationContract(file, before, after) 
   }
 }
 
+// ---- BEGIN restore-ops-g1 provider contract function (exact review restore-ops-g1-idle-scheduler-v1) ----
+// P0-1 Phase 2 (G-1): the idle-time Restore OPS maintenance may only reach the
+// database through the already-adopted bounded RPC erp_cleanup_expired_restore_ops
+// with its exact argument. This is not a directory allowlist: only these two exact
+// files are accepted, the immutable before/after review hashes remain mandatory,
+// and any later edit of the new scheduler needs a new exact guard review.
+const RESTORE_OPS_RPC = 'erp_cleanup_expired_restore_ops';
+const RESTORE_OPS_FORBIDDEN_IDENTIFIERS = new Set(['supabase', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
+  'indexedDB', 'localStorage', 'sessionStorage', 'caches', 'importScripts', 'require', 'navigator', 'window',
+  'document', 'globalThis', 'self', 'eval', 'Function', 'postMessage', 'BroadcastChannel']);
+const RESTORE_OPS_SCHEDULER_STRINGS = new Set(['erp_restore_ops_maint:v1:state', 'erp_restore_ops_maint:v1:log',
+  'erp_restore_ops_maint:v1:opportunity', 'erp_restore_ops_maint:v1:settings_seen_at']);
+export function assertRestoreOpsMaintenanceContract(file, before, after) {
+  const scheduler = file === 'src/providers/cloud/cloudRestoreOpsScheduler.ts';
+  const maintenance = file === 'src/providers/cloud/cloudRestoreOpsMaintenance.ts';
+  if ((!scheduler && !maintenance) || after === null) fail('unreviewed restore OPS contract exception');
+  if (scheduler && before !== null) fail('restore OPS scheduler needs a new exact review');
+  if (maintenance && before === null) fail('restore OPS maintenance baseline missing');
+  const tree = parse(file, after);
+  const all = nodes(tree);
+  // No unreviewed dependency, re-export, dynamic import or global persistence/network API.
+  const imports = tree.statements.filter(ts.isImportDeclaration);
+  if (tree.statements.some(node => ts.isExportDeclaration(node) && node.moduleSpecifier)) fail('restore OPS re-export');
+  if (all.some(node => ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)) fail('restore OPS dynamic import');
+  if (all.some(node => ts.isIdentifier(node) && RESTORE_OPS_FORBIDDEN_IDENTIFIERS.has(node.text))) fail('restore OPS direct persistence/network I/O');
+  if (maintenance && imports.length) fail('restore OPS maintenance dependency changed');
+  if (scheduler) {
+    if (imports.length !== 1 || imports[0].moduleSpecifier.text !== './cloudRestoreOpsMaintenance') fail('restore OPS scheduler dependency changed');
+    const bound = imports[0].importClause?.namedBindings;
+    const names = bound && ts.isNamedImports(bound) ? bound.elements.map(element => element.name.text) : [];
+    if (imports[0].importClause?.name || !bound || !ts.isNamedImports(bound)
+      || names.some(name => !['cleanupExpiredRestoreOps', 'MaintenanceOptions', 'MaintenanceSummary'].includes(name))) {
+      fail('restore OPS scheduler import contract changed');
+    }
+  }
+  // RPC-shaped literals: maintenance holds only the adopted RPC; scheduler only its own storage keys.
+  for (const node of all) {
+    const text = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text
+      : ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) ? node.text : null;
+    if (text === null || !/erp_/u.test(text)) continue;
+    if (maintenance ? text !== RESTORE_OPS_RPC : !RESTORE_OPS_SCHEDULER_STRINGS.has(text)) fail('restore OPS RPC/resource contract changed');
+  }
+  const calls = all.filter(ts.isCallExpression);
+  if (maintenance) {
+    const rpcCalls = calls.filter(call => call.expression.getText(tree) === 'rpc');
+    const arg = rpcCalls[0]?.arguments[1];
+    const property = arg && ts.isObjectLiteralExpression(arg) && arg.properties.length === 1 ? arg.properties[0] : null;
+    if (rpcCalls.length !== 1 || rpcCalls[0].arguments.length < 2 || rpcCalls[0].arguments.length > 3
+      || !ts.isStringLiteral(rpcCalls[0].arguments[0]) || rpcCalls[0].arguments[0].text !== RESTORE_OPS_RPC
+      || !property || !ts.isPropertyAssignment(property) || property.name.getText(tree) !== 'p_exclude_request_id'
+      || property.initializer.getText(tree) !== 'currentRequestId'
+      || (rpcCalls[0].arguments.length === 3 && rpcCalls[0].arguments[2].getText(tree) !== 'controller?.signal')) {
+      fail('restore OPS RPC name/argument contract changed');
+    }
+    if (all.filter(node => ts.isIdentifier(node) && node.text === 'rpc').length !== 2) fail('restore OPS RPC handle escaped');
+    const exported = tree.statements.filter(node => node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword));
+    const exportedNames = exported.map(node => node.name?.text);
+    if (exportedNames.some(name => !['cleanupExpiredRestoreOps', 'MaintenanceOutcome', 'MaintenanceOptions', 'MaintenanceSummary'].includes(name))) {
+      fail('restore OPS maintenance export contract changed');
+    }
+    const entry = (source, name) => parse(file, source).statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name
+      && node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword));
+    const current = entry(after, 'cleanupExpiredRestoreOps'), previous = entry(before, 'cleanupExpiredRestoreOps');
+    const params = node => node.parameters.map(p => p.name.getText());
+    if (!current || !previous || !current.modifiers.some(m => m.kind === ts.SyntaxKind.AsyncKeyword)
+      || JSON.stringify(params(previous)) !== JSON.stringify(['rpc', 'currentRequestId'])
+      || JSON.stringify(params(current)) !== JSON.stringify(['rpc', 'currentRequestId', 'options'])
+      || !current.parameters[2].questionToken
+      || !current.body.statements.some(ts.isTryStatement) || !current.body.statements.find(ts.isTryStatement).catchClause
+      || !current.body.statements.some(node => ts.isIfStatement(node) && node.expression.getText() === 'running')) {
+      fail('restore OPS maintenance function contract changed');
+    }
+  } else {
+    const run = calls.filter(call => call.expression.getText(tree) === 'cleanupExpiredRestoreOps');
+    if (run.length !== 1 || run[0].arguments.length !== 3 || run[0].arguments[0].getText(tree) !== 'env.rpc'
+      || run[0].arguments[1].kind !== ts.SyntaxKind.NullKeyword) fail('restore OPS scheduler RPC path changed');
+    if (all.filter(node => ts.isPropertyAccessExpression(node) && node.getText(tree) === 'env.rpc').length !== 1) {
+      fail('restore OPS scheduler calls the RPC handle directly');
+    }
+  }
+}
+// ---- END restore-ops-g1 provider contract function ----
 export function assertReviewedProviderContract(file, before, after) {
   if (file === 'src/providers/cloud/cloudRestoreSubmit.ts') {
     assertReviewedRestoreOrchestrationContract(file, before, after);
@@ -383,6 +465,12 @@ export function assertReviewedProviderContract(file, before, after) {
     }
     return;
   }
+  // ---- BEGIN restore-ops-g1 provider contract dispatch ----
+  if (file === 'src/providers/cloud/cloudRestoreOpsScheduler.ts' || file === 'src/providers/cloud/cloudRestoreOpsMaintenance.ts') {
+    assertRestoreOpsMaintenanceContract(file, before, after);
+    return;
+  }
+  // ---- END restore-ops-g1 provider contract dispatch ----
   if (before === null) fail('unreviewed provider contract exception');
   const oldTree = parse(file, before); const newTree = parse(file, after);
   if (file === 'src/providers/cloud/cloudFieldCas.ts') {
