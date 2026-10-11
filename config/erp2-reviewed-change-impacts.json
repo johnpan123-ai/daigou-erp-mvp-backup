@@ -5844,6 +5844,120 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "buyanime-background-tab-cooperative-yield-v1",
+      "beforeHead": "5f73b2b02d9008dc863cf92978e6ea8e40a850ec",
+      "reviewedHead": "7b4ce91d24d04c5386a01e886a2b079348dc13d7",
+      "patchSha256": "2c057d86fd0e1de4b6a481c8ae9ede087b5b1d0e610f21f3b2de3809460f5b1a",
+      "requiredRegressions": [
+        "buyanime-resume",
+        "buyanime-production-trace",
+        "buyanime-simple-flow",
+        "buyanime-journal-identity",
+        "buyanime-recovery-epoch",
+        "buyanime-provider",
+        "buyanime-ui",
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "src/pages/Inventory.tsx",
+          "beforeHash": "4ab8d82ea055fc4c5b385b88d9366b8340073a0d57a420bc14869f4f5dbe9e7f",
+          "afterHash": "9ba9d5c327da790df8e7e37697bcbbf72d0f38358dbf01b8c9d06b40a154d7af",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "T30/T31 success trace effect"
+          ],
+          "changedInputs": "NONE. Same verified Inventory read-back rows and immutable journal proofs; no new input format.",
+          "changedOutputs": "Same PASS/fail-closed proof outcome and error codes; adds INVENTORY_PROOF_SCHEDULE diagnostic (yields, max sync slice) and records T31 without waiting for rAF in a hidden document.",
+          "changedDurableFields": "NONE. Inventory, Catalog, Journal details/gzip, receipts and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. No RPC call, payload, timeout or ordering change.",
+          "changedProviderContract": "Scheduling only: proveInventoryRows and legacy-retirement loops yield via work-budgeted (12 ms) MessageChannel macrotasks instead of fixed setTimeout(0); same 150-row chunks, exact ids, full-row hashes.",
+          "changedBackupContract": "NONE. 24-resource registry, serializers and Restore paths unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "NONE. Product/Inventory identity, CAS versions, stable keys and journal identity unchanged.",
+          "dataFlow": "Inventory commit response -> exact read-back -> proveInventoryRows (budgeted cooperative yield) -> Catalog plan; Success modal commit -> T30/T31 trace.",
+          "persistenceBehavior": "No new persistence. Diagnostics stay in the existing local production trace.",
+          "writePath": "Existing atomic Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportResume.ts",
+          "beforeHash": "5e3d853a83de863e101cd24772db15156cbc15ebd54fe9ca35f1e4513e195b88",
+          "afterHash": "85d24ed91ea106928bfba3f9a8d1752ba494839179915baeab34960cdf5813c8",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "proveInventoryRows",
+            "retireLegacyNotCommitted",
+            "yieldToEventLoop",
+            "createCooperativeBudget"
+          ],
+          "changedInputs": "NONE. Same verified Inventory read-back rows and immutable journal proofs; no new input format.",
+          "changedOutputs": "Same PASS/fail-closed proof outcome and error codes; adds INVENTORY_PROOF_SCHEDULE diagnostic (yields, max sync slice) and records T31 without waiting for rAF in a hidden document.",
+          "changedDurableFields": "NONE. Inventory, Catalog, Journal details/gzip, receipts and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. No RPC call, payload, timeout or ordering change.",
+          "changedProviderContract": "Scheduling only: proveInventoryRows and legacy-retirement loops yield via work-budgeted (12 ms) MessageChannel macrotasks instead of fixed setTimeout(0); same 150-row chunks, exact ids, full-row hashes.",
+          "changedBackupContract": "NONE. 24-resource registry, serializers and Restore paths unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "NONE. Product/Inventory identity, CAS versions, stable keys and journal identity unchanged.",
+          "dataFlow": "Inventory commit response -> exact read-back -> proveInventoryRows (budgeted cooperative yield) -> Catalog plan; Success modal commit -> T30/T31 trace.",
+          "persistenceBehavior": "No new persistence. Diagnostics stay in the existing local production trace.",
+          "writePath": "Existing atomic Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-background-tab-throttle.mjs",
+          "beforeHash": null,
+          "afterHash": "b22abeb5bebb4d7ac52a036d9a085e552ca11c43f74d2fa4dde129487325b5da",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "BACKGROUND_TAB_TIMER_THROTTLE regression"
+          ],
+          "changedInputs": "NONE. Same verified Inventory read-back rows and immutable journal proofs; no new input format.",
+          "changedOutputs": "Same PASS/fail-closed proof outcome and error codes; adds INVENTORY_PROOF_SCHEDULE diagnostic (yields, max sync slice) and records T31 without waiting for rAF in a hidden document.",
+          "changedDurableFields": "NONE. Inventory, Catalog, Journal details/gzip, receipts and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. No RPC call, payload, timeout or ordering change.",
+          "changedProviderContract": "Scheduling only: proveInventoryRows and legacy-retirement loops yield via work-budgeted (12 ms) MessageChannel macrotasks instead of fixed setTimeout(0); same 150-row chunks, exact ids, full-row hashes.",
+          "changedBackupContract": "NONE. 24-resource registry, serializers and Restore paths unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "NONE. Product/Inventory identity, CAS versions, stable keys and journal identity unchanged.",
+          "dataFlow": "Inventory commit response -> exact read-back -> proveInventoryRows (budgeted cooperative yield) -> Catalog plan; Success modal commit -> T30/T31 trace.",
+          "persistenceBehavior": "No new persistence. Diagnostics stay in the existing local production trace.",
+          "writePath": "Existing atomic Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-proof-schedule-benchmark.mjs",
+          "beforeHash": null,
+          "afterHash": "192e925ff7edcb1781e131d4279fbde8fefaf5f7cf636917210cb7a8e516045c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "proof scheduling benchmark"
+          ],
+          "changedInputs": "NONE. Same verified Inventory read-back rows and immutable journal proofs; no new input format.",
+          "changedOutputs": "Same PASS/fail-closed proof outcome and error codes; adds INVENTORY_PROOF_SCHEDULE diagnostic (yields, max sync slice) and records T31 without waiting for rAF in a hidden document.",
+          "changedDurableFields": "NONE. Inventory, Catalog, Journal details/gzip, receipts and import_batches serialization unchanged.",
+          "changedRpcContract": "NONE. No RPC call, payload, timeout or ordering change.",
+          "changedProviderContract": "Scheduling only: proveInventoryRows and legacy-retirement loops yield via work-budgeted (12 ms) MessageChannel macrotasks instead of fixed setTimeout(0); same 150-row chunks, exact ids, full-row hashes.",
+          "changedBackupContract": "NONE. 24-resource registry, serializers and Restore paths unchanged.",
+          "changedSchemaExpectations": "NONE. ERP2_SEMANTIC_SCHEMA_V3 / v27 9c12efd280edb31ac284b7371012215a14d710894536a352143aab8966cfb5c5 unchanged; SQL/checksums parity.",
+          "changedIdentitySemantics": "NONE. Product/Inventory identity, CAS versions, stable keys and journal identity unchanged.",
+          "dataFlow": "Inventory commit response -> exact read-back -> proveInventoryRows (budgeted cooperative yield) -> Catalog plan; Success modal commit -> T30/T31 trace.",
+          "persistenceBehavior": "No new persistence. Diagnostics stay in the existing local production trace.",
+          "writePath": "Existing atomic Inventory/Catalog transactional writes only; no new writer or payload.",
+          "providerPath": "Existing authorized Supabase provider; no credential/auth change.",
+          "externalContract": "No table/column/RPC/ACL/RLS/Backup/provider serialization changes.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
