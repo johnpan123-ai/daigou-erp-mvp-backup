@@ -195,12 +195,32 @@ export default function Inventory() {
   useLayoutEffect(() => {
     if (!successStats) return;
     markBuyAnimeTrace('T30_REACT_FINAL_COMMIT');
-    const frame = window.requestAnimationFrame(() => {
-      markBuyAnimeTrace('T31_SUCCESS_MODAL_VISIBLE');
+    let finished = false;
+    const finish = (documentHidden: boolean) => {
+      if (finished) return;
+      finished = true;
+      markBuyAnimeTrace('T31_SUCCESS_MODAL_VISIBLE', documentHidden ? { documentHidden: true } : undefined);
       const trace = finishBuyAnimeProductionTrace('SUCCESS');
       if (trace) setPerformanceTrace(trace);
-    });
-    return () => window.cancelAnimationFrame(frame);
+    };
+    // A hidden document runs no animation frames until it is shown again, so
+    // waiting for rAF would charge "time until the user came back" to the
+    // import. The modal is already committed here; record it immediately.
+    if (document.visibilityState === 'hidden') {
+      finish(true);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => finish(false));
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') return;
+      window.cancelAnimationFrame(frame);
+      finish(true);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [successStats]);
 
   const handleManualExportBackup = async () => {

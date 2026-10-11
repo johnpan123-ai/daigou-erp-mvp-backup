@@ -81,6 +81,80 @@ const stable = (value: unknown): string => {
     .filter(([, v]) => v !== undefined).map(([k, v]) => JSON.stringify(k) + ':' + stable(v)).join(',') + '}';
   return JSON.stringify(value);
 };
+/**
+ * Cooperative scheduling for long client-side proof loops.
+ *
+ * Why not setTimeout(0): browsers clamp and batch timers in hidden/background
+ * documents (1 s alignment, then 1 min "intensive" wake-ups in Chromium), so a
+ * timer-based yield chain that costs ~0 ms in a visible tab can cost minutes
+ * when the tab is in the background. MessageChannel tasks are ordinary
+ * macrotasks: they still let rendering, input and other tasks run between
+ * slices, but they are not subject to timer throttling.
+ *
+ * Why not Promise.resolve(): a microtask chain never returns to the event loop,
+ * so it would starve React/rendering. Never use it as a yield.
+ */
+export type YieldFn = () => Promise<void>;
+
+const clockNow = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function'
+  ? performance.now() : Date.now());
+
+/** One real macrotask turn, independent of hidden-tab timer throttling. */
+export function yieldToEventLoop(): Promise<void> {
+  const Channel = (globalThis as { MessageChannel?: typeof MessageChannel }).MessageChannel;
+  if (typeof Channel !== 'function') return new Promise<void>(resolve => setTimeout(resolve, 0));
+  return new Promise<void>(resolve => {
+    const channel = new Channel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      channel.port2.close();
+      resolve();
+    };
+    channel.port2.postMessage(0);
+  });
+}
+
+/** Preferred frame-sized slice; a slice never intentionally exceeds this before yielding. */
+export const COOPERATIVE_SLICE_BUDGET_MS = 12;
+
+export interface CooperativeBudgetOptions {
+  budgetMs?: number;
+  yieldFn?: YieldFn;
+  clock?: () => number;
+}
+
+export interface CooperativeBudget {
+  /** Yields only when the current slice has used its budget (work-based, not count-based). */
+  checkpoint(): Promise<void>;
+  /** Marks the start of a synchronous section, for max-slice evidence. */
+  syncStart(): void;
+  /** Marks the end of a synchronous section. */
+  syncEnd(): void;
+  readonly yields: number;
+  readonly maxSyncMs: number;
+}
+
+export function createCooperativeBudget(options: CooperativeBudgetOptions = {}): CooperativeBudget {
+  const budgetMs = options.budgetMs ?? COOPERATIVE_SLICE_BUDGET_MS;
+  const yieldFn = options.yieldFn ?? yieldToEventLoop;
+  const clock = options.clock ?? clockNow;
+  let sliceStart = clock();
+  let syncStartedAt = 0;
+  let yields = 0;
+  let maxSyncMs = 0;
+  return {
+    async checkpoint() {
+      if (clock() - sliceStart < budgetMs) return;
+      await yieldFn();
+      yields += 1;
+      sliceStart = clock();
+    },
+    syncStart() { syncStartedAt = clock(); },
+    syncEnd() { maxSyncMs = Math.max(maxSyncMs, clock() - syncStartedAt); },
+    get yields() { return yields; },
+    get maxSyncMs() { return Math.round(maxSyncMs * 10) / 10; },
+  };
+}
 export async function inventoryProof(row: InventoryItem): Promise<InventoryProof> {
   const fields = toCloudFieldRow('inventory_items', row);
   delete fields.version;
@@ -89,19 +163,31 @@ export async function inventoryProof(row: InventoryItem): Promise<InventoryProof
   return { id: String(fields.id), key: String(fields.inventory_key),
     hash: Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('') };
 }
-export async function proveInventoryRows(record: BuyAnimeImportRecord, rows: InventoryItem[]): Promise<void> {
+export interface InventoryProofSchedule { yields: number; maxSyncMs: number; chunks: number }
+/** Proof semantics are unchanged (exact ids, full-row hash, 150-row parallel
+ * chunks). Only scheduling changed: work-budgeted MessageChannel yields instead
+ * of fixed setTimeout(0), which hidden tabs throttle to seconds or minutes. */
+export async function proveInventoryRows(record: BuyAnimeImportRecord, rows: InventoryItem[],
+  options: CooperativeBudgetOptions = {}): Promise<InventoryProofSchedule> {
   if (!record.expected.length || rows.length !== record.expected.length) throw new BuyAnimeResumeError('BUYANIME_READBACK_COUNT_MISMATCH', record);
   const byId = new Map(rows.map(row => [row.database_id || row.id, row]));
   if (byId.size !== rows.length) throw new BuyAnimeResumeError('BUYANIME_READBACK_DUPLICATE_ID', record);
+  const budget = createCooperativeBudget(options);
+  let chunks = 0;
   for (let offset = 0; offset < record.expected.length; offset += 150) {
-    await Promise.all(record.expected.slice(offset, offset + 150).map(async expected => {
+    budget.syncStart();
+    const pending = Promise.all(record.expected.slice(offset, offset + 150).map(async expected => {
     const row = byId.get(expected.id);
     if (!row || row.id !== expected.id || (row.database_id && row.database_id !== expected.id)
       || stable(await inventoryProof(row)) !== stable(expected))
       throw new BuyAnimeResumeError('BUYANIME_READBACK_IDENTITY_OR_FIELDS_MISMATCH', record);
     }));
-    if (offset + 150 < record.expected.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
+    budget.syncEnd();
+    await pending;
+    chunks += 1;
+    if (offset + 150 < record.expected.length) await budget.checkpoint();
   }
+  return { yields: budget.yields, maxSyncMs: budget.maxSyncMs, chunks };
 }
 const STAGES = new Set<BuyAnimeStage>(['PLANNED','INVENTORY_COMMITTING','INVENTORY_COMMIT_UNKNOWN','INVENTORY_NOT_COMMITTED',
   'INVENTORY_COMMITTED','INVENTORY_READBACK_PENDING','INVENTORY_VERIFIED','CATALOG_PENDING',
@@ -246,12 +332,13 @@ export class BuyAnimeImportPipeline {
     if (evidence.rows.some(row => (row as { deleted_at?: string | null }).deleted_at)) throw new BuyAnimeResumeError('BUYANIME_INVENTORY_SOFT_DELETED_ROW', input);
     const absent = input.expected.filter(proof => !byId.has(proof.id));
     let targetMatches = 0;
+    const budget = createCooperativeBudget();
     for (let offset = 0; offset < input.expected.length; offset += 150) {
       for (const proof of input.expected.slice(offset, offset + 150)) {
         const row = byId.get(proof.id);
         if (row && stable(await inventoryProof(row)) === stable(proof)) targetMatches++;
       }
-      if (offset + 150 < input.expected.length) await new Promise<void>(resolve => setTimeout(resolve, 0));
+      if (offset + 150 < input.expected.length) await budget.checkpoint();
     }
     const creates = input.stats.newCount;
     // Fully committed shape (every expected row present at target): the
@@ -335,7 +422,9 @@ export class BuyAnimeImportPipeline {
         : [];
       markBuyAnimeTrace('T15_INVENTORY_ACK_READ_DONE', { ids: changedExpected.length, chunks: Math.ceil(changedExpected.length / 150) });
       const rows = [...unchangedRows, ...changedRows];
-      await proveInventoryRows(record, rows);
+      const schedule = await proveInventoryRows(record, rows);
+      recordBuyAnimeCatalogEvidence('INVENTORY_PROOF_SCHEDULE', { rows: rows.length, ...schedule,
+        documentHidden: typeof document !== 'undefined' && document.visibilityState === 'hidden' });
       const saved = { ...record, stage: 'INVENTORY_VERIFIED' as const };
       // Reuse only the same attempt's proven rows, never an F5 cache. Versions
       // remain dependencies of the subsequent atomic Catalog transaction.
