@@ -6544,6 +6544,102 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "buyanime-f1b-incremental-import-v1",
+      "beforeHead": "be05d4dc6ff8d506357469a38aa6e36b19e8ceb4",
+      "reviewedHead": "181470c8337e6974ed6de55961e08d4b72a6b6c0",
+      "patchSha256": "6220b7f68e17496a8e870eb92b5f07502890f4147711417616ae5c7767193933",
+      "requiredRegressions": [
+        "buyanime-resume",
+        "buyanime-simple-flow",
+        "buyanime-provider",
+        "buyanime-ui",
+        "buyanime-journal-identity",
+        "buyanime-recovery-epoch",
+        "buyanime-production-trace",
+        "buyanime-cache-authority",
+        "buyanime-lint-delta",
+        "buyanime-data-size",
+        "cas",
+        "guard",
+        "promotion",
+        "sync",
+        "registry",
+        "execute-envelope",
+        "cloud-next"
+      ],
+      "files": [
+        {
+          "file": "src/providers/cloud/inventoryImportPlan.ts",
+          "beforeHash": "09b463db19e53975af9563531f365fb80f391ac6a76a2622d060baff5ac1febe",
+          "afterHash": "8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "BuyAnime F1-b incremental import exact patch (F1B_r2)"
+          ],
+          "changedInputs": "Exact immutable diff C6 be05d4d -> C7 (= F1B_r2 90de46f7). BuyAnime Excel import (an export of currently-on-sale items only) is an incremental source: create new keys, patch existing keys present in the file, retain every active row absent from the file. Independent exact review 2026-10-14: PASS-with-notes (no Blocker/Major).",
+          "changedOutputs": "Inventory import plan never emits delete; omitted family variants keep id, inventory_key, quantities, product_id, version and catalog_last_seen_at. A new key reusing a non-empty myacg_item_code already held by an active row or another new key fails before any write (BUYANIME_INVENTORY_SKU_REKEY_CONFLICT, VALIDATION_ERROR). Existing duplicate codes are neither repaired nor blocked.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change; erp_apply_inventory_import intent stays create/patch only.",
+          "changedProviderContract": "Inventory import plan only: no delete of omitted variants; pre-write SKU rekey refusal. Journal, CAS, idempotency and catalog contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE: existing inventory UUID/key preserved; new-key UUID derivation unchanged.",
+          "dataFlow": "Parsed BuyAnime rows -> prepareInventoryUpsert projection + retained absent rows -> create/patch plan -> unchanged journal/RPC.",
+          "persistenceBehavior": "Schema-neutral; fewer writes (no delete).",
+          "writePath": "Unchanged RPCs; additional client-side pre-write refusal.",
+          "providerPath": "src/providers/cloud/inventoryImportPlan.ts; src/utils/myacgImportErrors.ts (pre-write classification only).",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/utils/myacgImportErrors.ts",
+          "beforeHash": "f983fae12dc7dcb970b5e753d34e2a6b8b443a3315dbad37f0d929a9b04552f7",
+          "afterHash": "1138ebf0846dd71309cef242c9f03dba68c4bf9ed20f4790c264eb767bf23d07",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "BuyAnime F1-b incremental import exact patch (F1B_r2)"
+          ],
+          "changedInputs": "Exact immutable diff C6 be05d4d -> C7 (= F1B_r2 90de46f7). BuyAnime Excel import (an export of currently-on-sale items only) is an incremental source: create new keys, patch existing keys present in the file, retain every active row absent from the file. Independent exact review 2026-10-14: PASS-with-notes (no Blocker/Major).",
+          "changedOutputs": "Inventory import plan never emits delete; omitted family variants keep id, inventory_key, quantities, product_id, version and catalog_last_seen_at. A new key reusing a non-empty myacg_item_code already held by an active row or another new key fails before any write (BUYANIME_INVENTORY_SKU_REKEY_CONFLICT, VALIDATION_ERROR). Existing duplicate codes are neither repaired nor blocked.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change; erp_apply_inventory_import intent stays create/patch only.",
+          "changedProviderContract": "Inventory import plan only: no delete of omitted variants; pre-write SKU rekey refusal. Journal, CAS, idempotency and catalog contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE: existing inventory UUID/key preserved; new-key UUID derivation unchanged.",
+          "dataFlow": "Parsed BuyAnime rows -> prepareInventoryUpsert projection + retained absent rows -> create/patch plan -> unchanged journal/RPC.",
+          "persistenceBehavior": "Schema-neutral; fewer writes (no delete).",
+          "writePath": "Unchanged RPCs; additional client-side pre-write refusal.",
+          "providerPath": "src/providers/cloud/inventoryImportPlan.ts; src/utils/myacgImportErrors.ts (pre-write classification only).",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-family-shrink-import.mjs",
+          "beforeHash": null,
+          "afterHash": "3822683f2bb89e9164ba489a93b9cb15617a886293f4d75fbde13177bcef06d4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "BuyAnime F1-b incremental import exact patch (F1B_r2)"
+          ],
+          "changedInputs": "Exact immutable diff C6 be05d4d -> C7 (= F1B_r2 90de46f7). BuyAnime Excel import (an export of currently-on-sale items only) is an incremental source: create new keys, patch existing keys present in the file, retain every active row absent from the file. Independent exact review 2026-10-14: PASS-with-notes (no Blocker/Major).",
+          "changedOutputs": "Inventory import plan never emits delete; omitted family variants keep id, inventory_key, quantities, product_id, version and catalog_last_seen_at. A new key reusing a non-empty myacg_item_code already held by an active row or another new key fails before any write (BUYANIME_INVENTORY_SKU_REKEY_CONFLICT, VALIDATION_ERROR). Existing duplicate codes are neither repaired nor blocked.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change; erp_apply_inventory_import intent stays create/patch only.",
+          "changedProviderContract": "Inventory import plan only: no delete of omitted variants; pre-write SKU rekey refusal. Journal, CAS, idempotency and catalog contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE: existing inventory UUID/key preserved; new-key UUID derivation unchanged.",
+          "dataFlow": "Parsed BuyAnime rows -> prepareInventoryUpsert projection + retained absent rows -> create/patch plan -> unchanged journal/RPC.",
+          "persistenceBehavior": "Schema-neutral; fewer writes (no delete).",
+          "writePath": "Unchanged RPCs; additional client-side pre-write refusal.",
+          "providerPath": "src/providers/cloud/inventoryImportPlan.ts; src/utils/myacgImportErrors.ts (pre-write classification only).",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
