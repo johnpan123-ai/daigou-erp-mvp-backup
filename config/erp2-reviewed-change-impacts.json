@@ -6677,6 +6677,138 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "p0-tab-auth-identity-and-cloud-cost-authority-v1",
+      "beforeHead": "cc6d7ac1a10a94999b593b5d7d398ea803f74fcc",
+      "reviewedHead": "aa8778ca4f4830478acf9f230fc1c062a7cc0b3a",
+      "patchSha256": "4c905d704cd6f43a6e8d7f3260f836a70bd19a42167b659ea44d66629ea974e6",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "realtime",
+        "draft",
+        "cas",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "src/auth/AuthProvider.tsx",
+          "beforeHash": "c5d055458f44e7d94fd97c898f698508ffffe597cb5e28bc8ebcda7a1d7f2ba8",
+          "afterHash": "808632b9bdc34ffbf95d0813b97cb9800509f3df07f9c7d24ed504fd8f1771f7",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "AuthProvider onAuthStateChange: keep the same-account User reference; background profile re-read"
+          ],
+          "changedInputs": "Supabase Auth re-emits SIGNED_IN / TOKEN_REFRESHED for the same account on every hidden->visible tab transition with a freshly parsed User. Owner video 2026-10-14 21:00:44: 0.75 s away from the tab -> 同步中 + 寫入已暫停, later 同步失敗・顯示快取.",
+          "changedOutputs": "The User object is replaced only when the account or any User field changes (key order ignored). Profile (role/permissions) is still re-read on every event; same-account re-reads do not flip profileLoading; an unchanged profile keeps its reference. Different account, sign-out, session loss and recovery flows unchanged.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Auth event -> AuthContext.user reference -> CloudRealtimeSyncBoundary effect deps (no longer torn down/rebuilt for the same account).",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/pages/PurchaseManagement.tsx",
+          "beforeHash": "fa967c85c4055f2cb1ca49d670e4b710d0db3f02f72436fa153cd41d8d45333e",
+          "afterHash": "fe781bdd9ae1c6c58331a86bb81aa9c50e7e91663c35fcd7d35bf78165ac8a63",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "legacy localStorage default cost fallback / migration disabled in Cloud mode (cloud, fallback)"
+          ],
+          "changedInputs": "Restore evidence: backup cloud-erp-snapshot-2026-10-14-114931.json (sha256 2fdb3f34…) has default_jpy_cost NULL for G07592375/G07592376; browser map variant_default_jpy_costs held 3333.",
+          "changedOutputs": "Cloud mode: a NULL product_variants.default_jpy_cost/default_twd_cost is shown unset; the browser map is neither read, shown, refreshed nor written back (no automatic saveProductVariants on page load). Explicit single edit, bulk-all and bulk-by-category still write through updateProductVariantPatch(/Bulk). Local and sandbox modes unchanged.",
+          "changedProviderContract": "NONE: provider methods and payloads unchanged; one automatic call site is no longer reached in Cloud mode.",
+          "dataFlow": "Cloud product_variants -> page state; browser legacy map only in Local/sandbox modes.",
+          "persistenceBehavior": "Removes the implicit Cloud write of browser-only legacy costs; explicit user writes unchanged (CAS / readback unchanged).",
+          "writePath": "Cloud: only explicit user actions write default costs.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/fixtures/p0-tab-sync-and-cost-harness.html",
+          "beforeHash": null,
+          "afterHash": "c170726770259eac25059fa54bb0cf880753d815f584deb053921477862979e4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0 regression harness: same-account auth events, Cloud sync generation count, Cloud default cost authority"
+          ],
+          "changedInputs": "Test-only (isolated Vite fixture, fake Auth client, sandbox test bridge, in-memory data provider; no network).",
+          "changedOutputs": "NONE for the product. C10 FAILS 4/5 checks (User replaced x5; sync attaches 5 / detaches 4; automatic saveProductVariants of 3333; NULL input shows 3333); fixed C11 PASSES 5/5.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/fixtures/p0-tab-sync-and-cost-harness.tsx",
+          "beforeHash": null,
+          "afterHash": "af86c9e7b2af651ca2cfd77eaf139dded002e906296606eb571b984d60a5823e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0 regression harness: same-account auth events, Cloud sync generation count, Cloud default cost authority"
+          ],
+          "changedInputs": "Test-only (isolated Vite fixture, fake Auth client, sandbox test bridge, in-memory data provider; no network).",
+          "changedOutputs": "NONE for the product. C10 FAILS 4/5 checks (User replaced x5; sync attaches 5 / detaches 4; automatic saveProductVariants of 3333; NULL input shows 3333); fixed C11 PASSES 5/5.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/p0-tab-sync-and-cost.mjs",
+          "beforeHash": null,
+          "afterHash": "2471623a8b824f2bd7bd9d0daf5b377d3e9dc6944e99334cf0ca17d04142a8a4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0 regression harness: same-account auth events, Cloud sync generation count, Cloud default cost authority"
+          ],
+          "changedInputs": "Test-only (isolated Vite fixture, fake Auth client, sandbox test bridge, in-memory data provider; no network).",
+          "changedOutputs": "NONE for the product. C10 FAILS 4/5 checks (User replaced x5; sync attaches 5 / detaches 4; automatic saveProductVariants of 3333; NULL input shows 3333); fixed C11 PASSES 5/5.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
