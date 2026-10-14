@@ -6202,6 +6202,348 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "p02-1a-c1f-realtime-readiness-v1",
+      "beforeHead": "78e41fd007ca7f95710f0afd5faa794f818faf09",
+      "reviewedHead": "4de65bd61b4aee546d67ec362fc4353ea860508e",
+      "patchSha256": "ce21bd9ba8151898fced78fd95966f992da6721737c296b12bc86ecec040d37a",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "realtime",
+        "cas",
+        "draft",
+        "buyanime-cache-authority",
+        "cloud-next",
+        "registry",
+        "execute-envelope"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "96d3d58b8dd2c9c18b2a75a9367a9efaf5f29a5b0372b352de1e6b2de68ced25",
+          "afterHash": "83ab1648954c94a4e4dec15c8274812bf15b8cbf908569d17b5253d8fe1bbfe2",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/contexts/CloudRealtimeSyncContext.tsx",
+          "beforeHash": "8c60187836f8b24e1d08adc698da055bb50eb7bdd2ac3f4372e38b33d6d3715c",
+          "afterHash": "e1f4b977261f1bfd711b0641d06cbda8d64e280f14210f5952b53d35d4dc894e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/contexts/globalSyncPresentation.ts",
+          "beforeHash": "040d94d1ecb9022c76ff7f13d41e9652b72c196abb236066059e6c457ff5a62c",
+          "afterHash": "0aa7d35ae2a04e5f153061f3e48a4ccb6814b51299c5633a01c7c8a7311f1312",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/contexts/realtimeRecoveryPolicy.ts",
+          "beforeHash": null,
+          "afterHash": "0c368cd65ebc2bfb8f9e96d4f0b100967f5b7e48922d24a2b03fa47933d57309",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudCacheWriteFence.ts",
+          "beforeHash": null,
+          "afterHash": "6e519f4f1eb0f3322cd5f7e5fdeaa23ee1333cc344d9f8927300f4ce2d823746",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudConnectivity.ts",
+          "beforeHash": "0eaa7de834949cc7606831acb07498b6d18350a970cf6a8956377489913a1d74",
+          "afterHash": "7bda25fd147d8c7568ff6192437d1f95ac30c8ddcc839428406e517c1408735c",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudRealtimeReadiness.ts",
+          "beforeHash": null,
+          "afterHash": "5f5f894b6d121bb354722ec35a1c512153f994fcf2a061280df96f2ba180f060",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudSyncObservability.ts",
+          "beforeHash": null,
+          "afterHash": "0fcf83ada20c2beadbab8e0c2380d93674d16defadb15554d65f9e5321fd9e30",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/cloudTargetedCache.ts",
+          "beforeHash": "fcebe025fefc38a11c629c88d467f4550a2b815c26608410cc4c92874c684478",
+          "afterHash": "f7ef88d76423a6c6af38a256010c0c82173aa0728310450d3023e1c80b9971d8",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "6ee459455cb25c840265f4b04d7d125887850e0d80b7dcbe1caa2126f2854194",
+          "afterHash": "13619318d5e916645eb634500a09080d4a3cda6e3bd1119982c2dbd21bde2882",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/providers/dataProvider.ts",
+          "beforeHash": "e045cc7dfb6a32315fc69c2f6a49cb7d0ebed16022efff4fa68da1bc1c52c383",
+          "afterHash": "9f1a7ff61136f99b59d35ef306ea2b1de97ad0998ac2dcfa9b1b62f6160db02f",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/p02-1a-context-guard.mjs",
+          "beforeHash": null,
+          "afterHash": "fc0b92f35704723e825d14b33213671a11fa1af60668e7c840a18e7331005bd3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/p02-1a-provider-guard.mjs",
+          "beforeHash": null,
+          "afterHash": "b69e4d6632584c4b6a97696e00aafd9611928ffcd29f74787418175295ee5d87",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/restore-ops-provider-guard.mjs",
+          "beforeHash": "201c9e4277503e91ab0494135605c1cfd3e278b8c4612cf2cfdebb847a75c16d",
+          "afterHash": "27566f87e85a129911dec54c7a19ac5496b48d55c5f92590c8468170d7edffd3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0-2 Phase 1a C1f exact patch (FULL_v5r7)"
+          ],
+          "changedInputs": "Exact immutable diff 78e41fd -> C5 (= FULL_v5r7 d0a34d0a, P0-2 Phase 1a C1..C1f realtime/readiness truthfulness; Runtime r3 + Guard r7). Guard r7 exact review verdict FAIL (N1-N3 Major, E5 static forging, no CSP/proxy hardening); released under owner-accepted residual risk, not a review PASS.",
+          "changedOutputs": "Global Sync / Fresh readiness is withheld until the client observes Realtime completeness for the current generation; writes are refused by the client while not fresh. Known accepted bypasses: exported readiness/connectivity/fence APIs (Guard r7 N1-N3), static SDK forging (E5), dynamic code (no CSP). No business data shape change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE: no SQL, no RPC signature or argument change.",
+          "changedProviderContract": "Provider/cache freshness and readback gating only (client-side; owner-accepted residual risks N1-N3/E5/CSP). CAS, idempotency, journal and persistence contracts unchanged.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Server reads/Realtime events -> readiness/fence -> cache -> UI; mutation path unchanged except stricter write gating.",
+          "persistenceBehavior": "Schema-neutral; no new write path.",
+          "writePath": "Unchanged RPCs; additional client-side refusal when not fresh.",
+          "providerPath": "src/providers cloud readiness/fence/observability modules.",
+          "externalContract": "No schema/RPC/backup/restore/durable-registry contract change.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
