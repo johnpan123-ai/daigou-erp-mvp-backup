@@ -34,6 +34,21 @@ interface AuthProviderProps {
 const RECOVERY_PATH = '/auth/recovery';
 const defaultAuthNavigation = (path: string): void => window.location.replace(path);
 
+const stableJson = (value: unknown): string => JSON.stringify(value, (_key, nested: unknown) => (
+  nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? Object.fromEntries(Object.entries(nested as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)))
+    : nested
+));
+
+/** Same account and no field of the User changed (key order is not a change). */
+const isSameAuthUser = (previous: User | null, next: User): boolean => (
+  previous !== null && previous.id === next.id && stableJson(previous) === stableJson(next)
+);
+
+const isSameProfile = (previous: UserProfile | null, next: UserProfile | null): boolean => (
+  previous === next || (previous !== null && next !== null && stableJson(previous) === stableJson(next))
+);
+
 export function AuthProvider({ children, authClient, navigateAuth }: AuthProviderProps) {
   const client = authClient ?? supabase;
   const redirect = navigateAuth ?? defaultAuthNavigation;
@@ -47,6 +62,8 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
   const explicitSignOutRef = useRef(false);
   const sessionRecoveryStartedRef = useRef(false);
   const hadAuthenticatedSessionRef = useRef(false);
+  // P0-1: account of the last normal (non-recovery) signed-in event; null after any other state.
+  const signedInUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isSandboxMode) return;
@@ -91,6 +108,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
           setProviderMode('local');
           if (!active) return;
           profileRequestId += 1;
+          signedInUserIdRef.current = null;
           setUser(null);
           setProfile(null);
           setProfileLoading(false);
@@ -116,6 +134,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
         clearCloudLoginIntent();
         setProviderMode('local');
         profileRequestId += 1;
+        signedInUserIdRef.current = null;
         setUser(currentUser);
         setProfile(null);
         setProfileLoading(false);
@@ -137,6 +156,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
         if (onRecoveryRoute) clearRecoverySession();
         profileRequestId += 1;
         setProviderMode('local');
+        signedInUserIdRef.current = null;
         setUser(null);
         setProfile(null);
         setProfileLoading(false);
@@ -152,6 +172,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
       if (hasRecoverySession()) {
         profileRequestId += 1;
         setProviderMode('local');
+        signedInUserIdRef.current = null;
         setUser(currentUser);
         setProfile(null);
         setProfileLoading(false);
@@ -164,6 +185,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
       if (onRecoveryRoute) {
         profileRequestId += 1;
         setProviderMode('local');
+        signedInUserIdRef.current = null;
         setUser(currentUser);
         setProfile(null);
         setProfileLoading(false);
@@ -179,9 +201,18 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
       const preserveManualLocal = isInitialResolution && consumeManualLocalEntry();
       if (loginIntent || (isInitialResolution && !preserveManualLocal)) setProviderMode('cloud');
 
-      setUser(currentUser);
+      // P0-1: Supabase Auth re-emits SIGNED_IN / TOKEN_REFRESHED for the same account (e.g. on
+      // every hidden -> visible tab transition) with a freshly parsed User object. Keep the
+      // existing reference when nothing in the User changed, so consumers keyed on it do not
+      // rebuild. A different account, or a real change to the same account, still replaces it;
+      // the profile (role/permissions) is still re-read below for every event.
+      const sameSignedInUser = signedInUserIdRef.current === currentUser.id;
+      signedInUserIdRef.current = currentUser.id;
+      setUser(previous => isSameAuthUser(previous, currentUser) ? previous : currentUser);
       const shouldFetchProfile = getProviderMode() === 'cloud' || getProviderMode() === 'fallback';
-      setProfileLoading(shouldFetchProfile);
+      // A same-account re-read refreshes permissions in the background; it does not flip the
+      // whole UI back into a profile-loading state.
+      if (!sameSignedInUser || isInitialResolution) setProfileLoading(shouldFetchProfile);
       if (isInitialResolution) setLoading(true);
       const requestId = ++profileRequestId;
 
@@ -189,7 +220,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
         const request = shouldFetchProfile ? fetchProfile(currentUser.id) : Promise.resolve(null);
         void request.then(nextProfile => {
           if (!active || requestId !== profileRequestId) return;
-          setProfile(nextProfile);
+          setProfile(previous => isSameProfile(previous, nextProfile) ? previous : nextProfile);
         }).finally(() => {
           if (!active || requestId !== profileRequestId) return;
           setProfileLoading(false);
@@ -238,6 +269,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
     clearCloudLoginIntent();
     clearManualLocalEntry();
     setProviderMode('local');
+    signedInUserIdRef.current = null;
     setUser(null);
     setProfile(null);
     setAuthFlow('normal');
@@ -257,6 +289,7 @@ export function AuthProvider({ children, authClient, navigateAuth }: AuthProvide
     explicitSignOutRef.current = true;
     const { error } = await client.auth.signOut({ scope: 'local' });
     if (error) clearStoredSupabaseAuthToken();
+    signedInUserIdRef.current = null;
     setUser(null);
     setProfile(null);
     setProviderMode('local');

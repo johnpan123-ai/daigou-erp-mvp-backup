@@ -23,6 +23,19 @@ import { stableFormIntent, readFormIntent, clearFormIntent, type PrivateOrderTra
 import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
 
 
+// P0-2: the legacy browser-only default-cost maps (localStorage) predate the
+// product_variants.default_jpy_cost / default_twd_cost columns. In Cloud mode the
+// database value is authoritative: a NULL cost stays unset, the browser map is
+// neither shown nor written back (e.g. after a Restore), and it is not refreshed
+// from Cloud values. Local and isolated sandbox modes keep the legacy behaviour.
+const legacyLocalCostsAllowed = (): boolean => {
+  const mode = getProviderMode();
+  return mode !== 'cloud' && mode !== 'fallback';
+};
+const writeLegacyLocalCosts = (key: string, costs: Record<string, number>): void => {
+  if (legacyLocalCostsAllowed()) localStorage.setItem(key, JSON.stringify(costs));
+};
+
 const HighlightText = ({ text, highlight }: { text: string | undefined | null; highlight: string }) => {
   if (!text) return null;
   if (!highlight.trim()) return <>{text}</>;
@@ -447,13 +460,13 @@ export default function PurchaseManagement() {
   const getVariantDefaultJpyCost = (v: ProductVariant): number | undefined | null => {
     return (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) 
       ? v.default_jpy_cost 
-      : variantDefaultJpyCosts[v.id];
+      : legacyLocalCostsAllowed() ? variantDefaultJpyCosts[v.id] : undefined;
   };
 
   const getVariantDefaultTwdCost = (v: ProductVariant): number | undefined | null => {
     return (v.default_twd_cost !== undefined && v.default_twd_cost !== null) 
       ? v.default_twd_cost 
-      : variantDefaultTwdCosts[v.id];
+      : legacyLocalCostsAllowed() ? variantDefaultTwdCosts[v.id] : undefined;
   };
   const [isStale, setIsStale] = useState<boolean>(false);
 
@@ -624,7 +637,7 @@ export default function PurchaseManagement() {
     }
     const defCost = (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) 
       ? v.default_jpy_cost 
-      : variantDefaultJpyCosts[v.id];
+      : legacyLocalCostsAllowed() ? variantDefaultJpyCosts[v.id] : undefined;
     return defCost !== undefined && defCost !== null ? String(defCost) : '';
   };
 
@@ -634,7 +647,7 @@ export default function PurchaseManagement() {
     }
     const defCost = (v.default_twd_cost !== undefined && v.default_twd_cost !== null) 
       ? v.default_twd_cost 
-      : variantDefaultTwdCosts[v.id];
+      : legacyLocalCostsAllowed() ? variantDefaultTwdCosts[v.id] : undefined;
     return defCost !== undefined && defCost !== null ? String(defCost) : '';
   };
 
@@ -814,6 +827,7 @@ export default function PurchaseManagement() {
 
   const [variantDefaultJpyCosts, setVariantDefaultJpyCosts] = useState<Record<string, number>>(() => {
     try {
+      if (!legacyLocalCostsAllowed()) return {};
       const stored = localStorage.getItem('variant_default_jpy_costs');
       return stored ? JSON.parse(stored) : {};
     } catch (e) {
@@ -851,13 +865,14 @@ export default function PurchaseManagement() {
       updated[variantId] = val;
     }
     setVariantDefaultJpyCosts(updated);
-    localStorage.setItem('variant_default_jpy_costs', JSON.stringify(updated));
+    writeLegacyLocalCosts('variant_default_jpy_costs', updated);
 
     setVariants(prev => prev.map(v => v.id === variantId ? authoritative : v));
   };
 
   const [variantDefaultTwdCosts, setVariantDefaultTwdCosts] = useState<Record<string, number>>(() => {
     try {
+      if (!legacyLocalCostsAllowed()) return {};
       const stored = localStorage.getItem('variant_default_twd_costs');
       return stored ? JSON.parse(stored) : {};
     } catch (e) {
@@ -895,7 +910,7 @@ export default function PurchaseManagement() {
       updated[variantId] = val;
     }
     setVariantDefaultTwdCosts(updated);
-    localStorage.setItem('variant_default_twd_costs', JSON.stringify(updated));
+    writeLegacyLocalCosts('variant_default_twd_costs', updated);
 
     setVariants(prev => prev.map(v => v.id === variantId ? authoritative : v));
   };
@@ -1100,7 +1115,10 @@ export default function PurchaseManagement() {
     if (!current()) return;
     setCanWrite(writePermission);
 
-    // Sync legacy costs to variants and update cost state maps
+    // Sync legacy costs to variants and update cost state maps.
+    // P0-2: Cloud mode never fills a NULL database cost from the browser map and never
+    // writes such a value back (see legacyLocalCostsAllowed).
+    const useLegacyLocalCosts = legacyLocalCostsAllowed();
     const jpyCosts = { ...variantDefaultJpyCosts };
     const twdCosts = { ...variantDefaultTwdCosts };
     let needsSync = false;
@@ -1113,7 +1131,7 @@ export default function PurchaseManagement() {
       // Hydrate local state if variant has database cost
       if (v.default_jpy_cost !== undefined && v.default_jpy_cost !== null) {
         jpyCosts[v.id] = v.default_jpy_cost;
-      } else {
+      } else if (useLegacyLocalCosts) {
         // Fallback to local storage cost if database column is null/empty
         const localJpy = jpyCosts[v.id];
         if (localJpy !== undefined && localJpy !== null) {
@@ -1124,7 +1142,7 @@ export default function PurchaseManagement() {
 
       if (v.default_twd_cost !== undefined && v.default_twd_cost !== null) {
         twdCosts[v.id] = v.default_twd_cost;
-      } else {
+      } else if (useLegacyLocalCosts) {
         const localTwd = twdCosts[v.id];
         if (localTwd !== undefined && localTwd !== null) {
           updatedTwd = localTwd;
@@ -1145,10 +1163,10 @@ export default function PurchaseManagement() {
 
     setVariantDefaultJpyCosts(jpyCosts);
     setVariantDefaultTwdCosts(twdCosts);
-    localStorage.setItem('variant_default_jpy_costs', JSON.stringify(jpyCosts));
-    localStorage.setItem('variant_default_twd_costs', JSON.stringify(twdCosts));
+    writeLegacyLocalCosts('variant_default_jpy_costs', jpyCosts);
+    writeLegacyLocalCosts('variant_default_twd_costs', twdCosts);
 
-    if (needsSync && writePermission && !readOnly) {
+    if (useLegacyLocalCosts && needsSync && writePermission && !readOnly) {
       console.log('[Default Cost Sync] Migrating legacy local storage costs to cloud...');
       if (allVars && allVars.length > 0) {
         const updatedAllVars = allVars.map(av => {
@@ -1507,7 +1525,7 @@ export default function PurchaseManagement() {
         updatedCosts[v.id] = val;
       });
       setCostState(updatedCosts);
-      localStorage.setItem(lsKey, JSON.stringify(updatedCosts));
+      writeLegacyLocalCosts(lsKey, updatedCosts);
       setVariants(variants.map(v => ({ ...v, [costField]: val })));
       setBulkMasterPrice('');
       alert('已成功更新所有規格預設單價！');
@@ -1572,7 +1590,7 @@ export default function PurchaseManagement() {
         updatedCosts[v.id] = val;
       });
       setCostState(updatedCosts);
-      localStorage.setItem(lsKey, JSON.stringify(updatedCosts));
+      writeLegacyLocalCosts(lsKey, updatedCosts);
       
       const targetIds = new Set(targetVariants.map(v => v.id));
       setVariants(variants.map(v => targetIds.has(v.id) ? { ...v, [costField]: val } : v));
