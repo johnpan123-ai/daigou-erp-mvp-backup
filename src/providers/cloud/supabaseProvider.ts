@@ -134,6 +134,10 @@ import {
   markCloudRequestFailed,
 } from './cloudConnectivity';
 import { CloudTargetedCache } from './cloudTargetedCache';
+import { getProviderMode } from '../providerMode';
+import { awaitRealtimeReadiness, isRealtimeReadyGeneration } from './cloudRealtimeReadiness';
+import { beginCloudSnapshot, commitCloudSnapshot, endCloudSnapshot } from './cloudCacheWriteFence';
+import { finishCloudSyncRun, noteCloudSyncEvent, recordCloudSyncPage, startCloudSyncRun } from './cloudSyncObservability';
 import { CLOUD_TABLE_RESOURCE } from './cloudSyncDomain';
 import {
   PURCHASE_BATCH_TRANSACTION_RPC,
@@ -366,6 +370,56 @@ const fetchAll = async <T>(
   return allData;
 };
 
+// P0-2 Phase 1a: keyset pagination. Unlike OFFSET, a row inserted or deleted on an
+// earlier page cannot shift later pages, so no committed-before-read row is skipped.
+// Cross-page atomicity is still NOT provided; rows changed after the read started
+// are converged by Realtime re-reads (or the authoritative catch-up).
+const KEYSET_PAGE_SIZE = 1000;
+type CloudSyncRunHandle = ReturnType<typeof startCloudSyncRun>;
+const fetchAllKeyset = async <T>(
+  keyColumn: string,
+  fetchPage: (afterKey: string | null, limit: number) => Promise<{ data: T[] | null; error: any }>,
+  run: CloudSyncRunHandle | null,
+): Promise<T[]> => {
+  const rows: T[] = [];
+  const seen = new Set<string>();
+  let afterKey: string | null = null;
+  while (true) {
+    const { data, error } = await fetchPage(afterKey, KEYSET_PAGE_SIZE);
+    if (error) {
+      markCloudRequestFailed(error);
+      throw error;
+    }
+    markCloudReachable();
+    const page = data || [];
+    recordCloudSyncPage(run, page);
+    for (const item of page) {
+      const key = (item as Record<string, unknown>)[keyColumn];
+      if (typeof key === 'string' && key) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      rows.push(item);
+    }
+    if (page.length < KEYSET_PAGE_SIZE) return rows;
+    const lastKey = (page[page.length - 1] as Record<string, unknown>)[keyColumn];
+    if (typeof lastKey !== 'string' || !lastKey || lastKey === afterKey) {
+      throw new Error(`CLOUD_KEYSET_CURSOR_NOT_ADVANCING:${keyColumn}`);
+    }
+    afterKey = lastKey;
+  }
+};
+
+/** Bounded wait for Realtime postgres_changes readiness before the core snapshot. */
+const CORE_REALTIME_READINESS_WAIT_MS = 3000;
+
+const CORE_SNAPSHOT_STORAGE_KEYS: Readonly<Record<string, string>> = {
+  inventory: 'erp_inventory', salesOrders: 'erp_sales_orders', salesOrderItems: 'erp_sales_order_items',
+  productGroups: 'erp_product_groups', productCategories: 'erp_product_categories', productVariants: 'erp_product_variants',
+  purchaseBatches: 'erp_purchase_batches', purchaseBatchItems: 'erp_purchase_batch_items', privateOrders: 'erp_private_orders',
+  privateOrderItems: 'erp_private_order_items', japanPackages: 'erp_japan_packages', japanPackageItems: 'erp_japan_package_items',
+  outboundShipments: 'erp_outbound_shipments', outboundShipmentItems: 'erp_outbound_shipment_items', bundleComponents: 'erp_bundle_components',
+};
 
 export class SupabaseProvider implements IDataProvider {
   async getAuthoritativeWacaVariants(): Promise<ProductVariant[]> {
@@ -945,6 +999,8 @@ export class SupabaseProvider implements IDataProvider {
   private pullPromise: Promise<void> | null = null;
   private corePullCompletionPromise: Promise<void> | null = null;
   private authoritativeCacheGeneration = 0;
+  /** Readiness evidence of the last committed core snapshot (P0-2 Phase 1a). */
+  private lastCoreSnapshotReadiness: { cacheGeneration: number; realtimeGeneration: number | null; readyAt: number | null; readStartedAt: number } | null = null;
   private cachedRole: 'owner' | 'staff' | 'viewer' | 'helper' | null = null;
   private cachedRoleUserId: string | null = null;
 
@@ -1037,6 +1093,8 @@ export class SupabaseProvider implements IDataProvider {
     if (this.pullPromise) return this.pullPromise;
     const startingAuthoritativeGeneration = this.authoritativeCacheGeneration;
 
+    const syncRun = startCloudSyncRun('core-bootstrap');
+    let snapshotToken: number | null = null;
     const syncPromise = (async () => {
       try {
         try {
@@ -1055,35 +1113,49 @@ export class SupabaseProvider implements IDataProvider {
 
           console.log(`[Sync] 已驗證登入身份: ${session.user.email}，正在從 Supabase 進行商品核心主檔（Groups, Categories, Variants）的全量只讀同步...`);
           
-          // 1. 同時從 Supabase 抓取未刪除的資料，並支援分頁處理
-          const [groups, categories, variants, batches, batchItems, po, poi, jp, jpi] = await Promise.all([
-            fetchAll<any>(async (from, to) => supabase.from('product_groups').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('product_categories').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('product_variants').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('purchase_batches').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('purchase_batch_items').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('private_orders').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('private_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('japan_packages').select('*').is('deleted_at', null).order('id').range(from, to)),
-            fetchAll<any>(async (from, to) => supabase.from('japan_package_items').select('*').is('deleted_at', null).order('id').range(from, to))
-          ]);
-          const [bcData, osData, osiData, salesOrderRows, salesOrderItemRows, inventoryRows, dashboardImageRows] = await Promise.all([
+          // P0-2 Phase 1a: subscribe-then-snapshot. Wait (bounded) until Realtime
+          // confirms postgres_changes is listening, so every commit after the first
+          // page request is also delivered as an event. If readiness is not shown,
+          // the snapshot still runs and the Realtime context keeps its authoritative
+          // catch-up (Wave B); nothing here trusts SUBSCRIBED alone.
+          const readiness = getProviderMode() === 'cloud'
+            ? await awaitRealtimeReadiness(CORE_REALTIME_READINESS_WAIT_MS, { waitForArm: true })
+            : { state: 'not-armed' as const, generation: null, readyAt: null };
+          syncRun.realtimeReadiness = readiness.state;
+          snapshotToken = beginCloudSnapshot();
+          const readStartedAt = Date.now();
+
+          // 1. 單一並行批次、Keyset 分頁、伺服器端排除已軟刪除資料
+          const keysetById = (table: string, activeOnly = true) => fetchAllKeyset<any>('id', async (afterKey, limit) => {
+            let query = supabase.from(table).select('*');
+            if (activeOnly) query = query.is('deleted_at', null);
+            if (afterKey !== null) query = query.gt('id', afterKey);
+            return query.order('id').limit(limit);
+          }, syncRun);
+          const [groups, categories, variants, batches, batchItems, po, poi, jp, jpi, bcData, osData, osiData, salesOrderRows, salesOrderItemRows, inventoryRows, dashboardImageRows] = await Promise.all([
+            keysetById('product_groups'),
+            keysetById('product_categories'),
+            keysetById('product_variants'),
+            keysetById('purchase_batches'),
+            keysetById('purchase_batch_items'),
+            keysetById('private_orders'),
+            keysetById('private_order_items'),
+            keysetById('japan_packages'),
+            keysetById('japan_package_items'),
+            keysetById('bundle_components', false),
+            keysetById('outbound_shipments'),
+            keysetById('outbound_shipment_items'),
+            keysetById('sales_orders'),
+            keysetById('sales_order_items'),
+            // inventory_key is the table's unique key: keyset on it keeps the existing cache order.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => supabase.from('bundle_components').select('*').order('id').range(from, to)),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => supabase.from('outbound_shipments').select('*').is('deleted_at', null).order('id').range(from, to)),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => supabase.from('outbound_shipment_items').select('*').is('deleted_at', null).order('id').range(from, to)),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => supabase.from('sales_orders').select('*').is('deleted_at', null).order('id').range(from, to)),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => supabase.from('sales_order_items').select('*').is('deleted_at', null).order('id').range(from, to)),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAll<any>(async (from, to) => {
+            fetchAllKeyset<any>('inventory_key', async (afterKey, limit) => {
               await awaitCatalogCommitReadFence('provider-bootstrap');
-              recordBuyAnimeCatalogEvidence('inventory-read',{caller:'provider-bootstrap',mode:'page',from,to});
-              return supabase.from('inventory_items').select('*').is('deleted_at', null).order('inventory_key').range(from, to);
-            }),
+              recordBuyAnimeCatalogEvidence('inventory-read',{caller:'provider-bootstrap',mode:'page',from:-1,to:limit});
+              let query = supabase.from('inventory_items').select('*').is('deleted_at', null);
+              if (afterKey !== null) query = query.gt('inventory_key', afterKey);
+              return query.order('inventory_key').limit(limit);
+            }, syncRun),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             fetchAll<any>(async (from, to) => supabase.from('dashboard_category_images').select('category_key, image_url, storage_path').is('deleted_at', null).order('category_key').range(from, to)),
           ]);
@@ -1294,7 +1366,11 @@ export class SupabaseProvider implements IDataProvider {
           // A successful Cloud read is applied as one all-or-nothing cache transaction.
           // Until this point every operation is read-only, so any failed/timeout request
           // leaves the previous Cloud cache intact.
-          const cacheApplied = await db.importData(JSON.stringify({
+          // P0-2 Phase 1a: the commit goes through the unified write fence: a collection
+          // already committed by a newer-started snapshot is kept as is, rows re-read by
+          // newer Realtime/targeted reads are overlaid, and a Restore epoch barrier rejects
+          // the whole commit. Fresh is published inside the same exclusive section.
+          const corePayload: Record<string, unknown[]> = {
             inventory: mappedInventory,
             salesOrders: mappedSalesOrders,
             salesOrderItems: mappedSalesOrderItems,
@@ -1310,10 +1386,40 @@ export class SupabaseProvider implements IDataProvider {
             outboundShipments: mappedShipments,
             outboundShipmentItems: mappedShipmentItems,
             bundleComponents: mappedBundleComponents,
-            importBatches: [],
-          }), 'cloud-sync');
-          if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
-          this.authoritativeCacheGeneration += 1;
+          };
+          const completeCloudRowCount = gLen + cLen + vLen + bLen + biLen + poLen + poiLen
+            + jp.length + jpi.length + bcData.length + osData.length + osiData.length
+            + mappedSalesOrders.length + mappedSalesOrderItems.length + mappedInventory.length
+            + dashboardImageRows.length;
+          const token = snapshotToken!;
+          snapshotToken = null;
+          await commitCloudSnapshot({
+            token,
+            storageKeys: Object.values(CORE_SNAPSHOT_STORAGE_KEYS),
+            apply: async plan => {
+              const payload: Record<string, unknown[]> = { importBatches: [] };
+              for (const [collection, rows] of Object.entries(corePayload)) {
+                const collectionPlan = plan(CORE_SNAPSHOT_STORAGE_KEYS[collection]);
+                payload[collection] = collectionPlan.superseded
+                  ? await this.readCoreCollectionForFence(collection)
+                  : collectionPlan.overlay(rows as Array<{ id: string }>);
+              }
+              const cacheApplied = await db.importData(JSON.stringify(payload), 'cloud-sync');
+              if (!cacheApplied) throw new Error('Cloud cache atomic replacement failed');
+            },
+            onCommitted: () => {
+              this.authoritativeCacheGeneration += 1;
+              this.lastCoreSnapshotReadiness = {
+                cacheGeneration: this.authoritativeCacheGeneration,
+                realtimeGeneration: readiness.state === 'ready' ? readiness.generation : null,
+                readyAt: readiness.state === 'ready' ? readiness.readyAt : null,
+                readStartedAt,
+              };
+              this.isPulled = true;
+              markCloudReadFresh(completeCloudRowCount);
+              finishCloudSyncRun(syncRun, 'committed');
+            },
+          });
 
           // Dashboard images are cache-only and are replaced only after the complete
           // server read and IndexedDB transaction have succeeded.
@@ -1329,12 +1435,6 @@ export class SupabaseProvider implements IDataProvider {
             if (item.storage_path) localStorage.setItem(`dashboard_cloud_path_${item.category_key}`, item.storage_path);
           });
 
-          this.isPulled = true;
-          const completeCloudRowCount = gLen + cLen + vLen + bLen + biLen + poLen + poiLen
-            + jp.length + jpi.length + bcData.length + osData.length + osiData.length
-            + mappedSalesOrders.length + mappedSalesOrderItems.length + mappedInventory.length
-            + dashboardImageRows.length;
-          markCloudReadFresh(completeCloudRowCount);
           console.log(`[Sync Pull] core applied: groups ${gLen} categories ${cLen} variants ${vLen} batches ${bLen} batchItems ${biLen}`);
 
           checkDataSizeWarnings({
@@ -1343,6 +1443,12 @@ export class SupabaseProvider implements IDataProvider {
             private_order_items: poiLen,
           }, role);
         } catch (err: any) {
+          if (snapshotToken !== null) {
+            endCloudSnapshot(snapshotToken);
+            snapshotToken = null;
+          }
+          finishCloudSyncRun(syncRun, 'failed');
+          noteCloudSyncEvent('hard-failure');
           console.error('[Sync] 商品核心主檔同步失敗:', err);
           const cachedRows = await Promise.all([
             db.getProductGroups(),
@@ -1374,10 +1480,14 @@ export class SupabaseProvider implements IDataProvider {
     });
 
     this.pullPromise = Promise.race([syncPromise, syncTimeout]).catch(async err => {
-      console.warn('[Sync Timeout Fallback] Sync failed or timed out. Falling back to local cache.', err);
       // A completed failure already published its final fail-closed state above.
       // Only the timer boundary means that an authoritative read is still pending.
+      // P0-2 Phase 1a: the four-second UI boundary is a soft deferral, not a failure.
+      // The detached read continues; its own commit or failure publishes the final state.
+      if (err === syncTimeoutError) console.info('[Sync Timeout Fallback] Authoritative read still running after 4000ms; showing cached data as deferred (not a failure).');
+      else console.warn('[Sync Timeout Fallback] Sync failed. Falling back to local cache.', err);
       if (err !== syncTimeoutError) return;
+      noteCloudSyncEvent('soft-timeout');
       // The detached authoritative pull continues after the four-second UI boundary.
       // If it committed while this fallback was being scheduled, it is newer than the
       // timeout and must not be downgraded back to stale or made eligible for a second pull.
@@ -1397,6 +1507,46 @@ export class SupabaseProvider implements IDataProvider {
     });
 
     return this.pullPromise;
+  }
+
+  /** Current cache rows of one core collection, used when a newer snapshot owns it. */
+  private async readCoreCollectionForFence(collection: string): Promise<unknown[]> {
+    switch (collection) {
+      case 'inventory': return db.getInventory();
+      case 'salesOrders': return db.getSalesOrders();
+      case 'salesOrderItems': return db.getSalesOrderItems();
+      case 'productGroups': return db.getProductGroups();
+      case 'productCategories': return db.getProductCategories();
+      case 'productVariants': return db.getProductVariants({ raw: true });
+      case 'purchaseBatches': return db.getPurchaseBatches();
+      case 'purchaseBatchItems': return db.getPurchaseBatchItems();
+      case 'privateOrders': return db.getPrivateOrders();
+      case 'privateOrderItems': return db.getPrivateOrderItems();
+      case 'japanPackages': return db.getJapanPackages();
+      case 'japanPackageItems': return db.getJapanPackageItems();
+      case 'outboundShipments': return db.getOutboundShipments();
+      case 'outboundShipmentItems': return db.getOutboundShipmentItems();
+      case 'bundleComponents': return db.getBundleComponents();
+      default: throw new Error(`CLOUD_CORE_COLLECTION_UNKNOWN:${collection}`);
+    }
+  }
+
+  /**
+   * P0-2 Phase 1a: true only when a core snapshot committed whose first page request
+   * started AFTER the given Realtime channel generation confirmed postgres_changes
+   * listening, and that channel is still confirmed ready. Waits for an in-flight
+   * core pull. Any other outcome returns false so the caller keeps the catch-up.
+   */
+  async awaitCoreSnapshotAfterRealtimeReady(realtimeGeneration: number): Promise<boolean> {
+    const completion = this.corePullCompletionPromise;
+    if (completion) {
+      try { await completion; } catch { return false; }
+    }
+    const evidence = this.lastCoreSnapshotReadiness;
+    if (!evidence || evidence.cacheGeneration !== this.authoritativeCacheGeneration) return false;
+    if (evidence.realtimeGeneration !== realtimeGeneration || evidence.readyAt === null) return false;
+    if (evidence.readyAt > evidence.readStartedAt) return false;
+    return isRealtimeReadyGeneration(realtimeGeneration, evidence.readStartedAt);
   }
 
   async waitForCloudBootstrapConvergence(): Promise<boolean> {

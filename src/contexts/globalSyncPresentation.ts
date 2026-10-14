@@ -17,6 +17,8 @@ export interface GlobalSyncPresentation {
   banner: string | null;
   tone: 'neutral' | 'success' | 'warning' | 'danger';
   writeAllowed: boolean;
+  /** C1f: the banner offers an immediate Realtime reconnect (which must still prove completeness). */
+  action?: 'realtime-reconnect';
 }
 
 export const GLOBAL_SYNC_LABELS: Record<GlobalSyncStatus, string> = {
@@ -28,10 +30,37 @@ export const GLOBAL_SYNC_LABELS: Record<GlobalSyncStatus, string> = {
   failed: '同步失敗',
 };
 
+/**
+ * C1d: Realtime could not prove postgres_changes listening (or its catch-up / channel was
+ * interrupted). This is not a read failure: rows shown are the last cache and may be out of
+ * date. Presentation only — Fresh, the write gate (assertCloudWriteAllowed) and the
+ * Realtime contract are unchanged; writes stay paused until completeness is proven again.
+ */
+export const REALTIME_UNPROVEN_LABEL = '即時同步未確認・唯讀';
+/** C1f (A4): unproven, read-only, possibly stale, recovery in progress, manual reconnect available. */
+export const REALTIME_UNPROVEN_BANNER = '即時同步目前未確認｜目前為唯讀模式：畫面上的資料可能不是最新；新增、修改、刪除與匯入已暫停，尚未送出的變更不會被視為已儲存。系統正在自動嘗試恢復連線，也可以按「立即重新連線」。';
+
+const isRealtimeUnproven = (connectivity: CloudConnectivitySnapshot): boolean =>
+  typeof connectivity.reason === 'string'
+  && connectivity.reason.startsWith('realtime-')
+  && (connectivity.readStatus === 'stale-cache' || connectivity.readStatus === 'offline');
+
+/** C1f: Realtime completeness evidence from the sync boundary (presentation input only). */
+export interface RealtimeCompletenessView {
+  /** The completeness hold is in its unproven phase (pending limit passed, channel error, recovery). */
+  unproven: boolean;
+}
+
+const realtimeUnprovenView = (): GlobalSyncPresentation => ({
+  status: 'cached', label: REALTIME_UNPROVEN_LABEL, tone: 'warning', writeAllowed: false,
+  banner: REALTIME_UNPROVEN_BANNER, action: 'realtime-reconnect',
+});
+
 export function resolveGlobalSyncPresentation(
   mode: string,
   connectivity: CloudConnectivitySnapshot,
   refresh: GlobalRefreshSnapshot,
+  realtime?: RealtimeCompletenessView,
 ): GlobalSyncPresentation {
   const cloudMode = mode === 'cloud' || mode === 'fallback';
   if (!cloudMode) return { status: 'local', label: GLOBAL_SYNC_LABELS.local, banner: null, tone: 'neutral', writeAllowed: true };
@@ -48,6 +77,10 @@ export function resolveGlobalSyncPresentation(
       banner: '雲端還原進行中｜等待完整性與最新畫面驗證；寫入已暫停',
     };
   }
+
+  // C1f (A3/A4): an unproven Realtime generation stays visibly read-only while its recovery
+  // reads run; it can never be shown as synced (Fresh is withheld by the same hold).
+  if (realtime?.unproven && !fresh) return realtimeUnprovenView();
 
   if (refresh.busy || connectivity.authoritativeReadPending) {
     if (cached) {
@@ -68,6 +101,7 @@ export function resolveGlobalSyncPresentation(
       banner: connectivity.readStatus === 'fresh-empty' ? '雲端已確認｜目前沒有資料' : null,
     };
   }
+  if (isRealtimeUnproven(connectivity)) return realtimeUnprovenView();
   if (connectivity.status === 'offline' || connectivity.readStatus === 'offline') {
     return {
       status: 'cached', label: GLOBAL_SYNC_LABELS.cached, tone: 'warning', writeAllowed: false,

@@ -221,6 +221,11 @@ class DynamicDataProvider implements IDataProvider {
     if (mode !== 'cloud' && mode !== 'fallback') return false;
     return this.supabaseProvider.waitForCloudBootstrapConvergence();
   }
+  /** P0-2 Phase 1a: see SupabaseProvider.awaitCoreSnapshotAfterRealtimeReady. */
+  async awaitCoreSnapshotAfterRealtimeReady(realtimeGeneration: number): Promise<boolean> {
+    if (getProviderMode() !== 'cloud') return false;
+    return this.supabaseProvider.awaitCoreSnapshotAfterRealtimeReady(realtimeGeneration);
+  }
   async upsertInventory(items: InventoryItem[]): Promise<ImportStats> {
     return this.guardedWrite(() => this.getActiveProvider().upsertInventory(items));
   }

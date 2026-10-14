@@ -25,6 +25,17 @@ import {
   markCloudReachable,
   markCloudRequestFailed,
 } from './cloudConnectivity';
+import {
+  beginCloudSnapshot,
+  CloudCacheFenceRejectedError,
+  cloudReadPassesEpochBarrier,
+  commitCloudSnapshot,
+  commitCloudTargeted,
+  endCloudSnapshot,
+  noteSkippedStaleDelete,
+  takeCloudReadToken,
+} from './cloudCacheWriteFence';
+import { finishCloudSyncRun, recordCloudSyncPage, startCloudSyncRun } from './cloudSyncObservability';
 
 type Row = Record<string, unknown> & { id?: string; local_id?: string; deleted_at?: string | null; updated_at?: string };
 
@@ -34,6 +45,10 @@ export interface CloudTargetedQueryRequest {
   updatedAfter?: string;
   from?: number;
   to?: number;
+  /** P0-2 Phase 1a keyset page: rows with id > afterId (null = first page), ordered by id. */
+  keyset?: { afterId: string | null; limit: number };
+  /** Exclude soft-deleted rows on the server. */
+  activeOnly?: boolean;
   signal?: AbortSignal;
 }
 
@@ -172,6 +187,21 @@ const tablesForResources = (resources: CloudResource[]): string[] => (
 );
 
 const AUTHORITATIVE_PAGE_SIZE = 1000;
+/** Tables without a deleted_at column (matches the core bootstrap read). */
+const TABLES_WITHOUT_SOFT_DELETE = new Set(['bundle_components']);
+
+/**
+ * P0-2 Phase 1a C1a: tables whose last targeted/authoritative read failed (query
+ * error, timeout, permission error, partial/invalid response, strict readback
+ * mismatch). Shared by every cache instance because Fresh is one global state:
+ * no later success may publish Fresh until these tables were re-read completely.
+ */
+const unresolvedTables = new Set<string>();
+export const getUnresolvedCloudTables = (): string[] => [...unresolvedTables].sort();
+/** C1c: a Restore epoch change makes every cached table unresolved until re-read. */
+export const markAllCloudTablesUnresolved = (): void => { Object.keys(TABLES).forEach(table => unresolvedTables.add(table)); };
+/** Test-only reset (never called by application code). */
+export const __resetUnresolvedCloudTablesForTests = (): void => { unresolvedTables.clear(); };
 
 class CloudAuthoritativeRefreshSupersededError extends Error {
   constructor() {
@@ -218,6 +248,9 @@ export class CloudTargetedCache {
     changes: CloudChange[],
     rowsByTable: Readonly<Record<string, ReadonlyArray<Row>>>,
   ): Promise<void> {
+    // The verified rows were read by the mutation pipeline before this call; the
+    // token is taken now, so it never claims to be newer than a later read.
+    const readToken = takeCloudReadToken();
     if (this.prepareDraftProtection) this.protectsDraft = await this.prepareDraftProtection();
     const grouped = new Map<string, CloudChange[]>();
     for (const change of changes) grouped.set(change.table, [...(grouped.get(change.table) || []), change]);
@@ -241,11 +274,26 @@ export class CloudTargetedCache {
         if (change.kind !== 'DELETE' && !row) throw new Error(`CLOUD_VERIFIED_ROWS_MISSING_ID:${table}:${change.kind}`);
         if (row && change.expectedFields) assertExpectedCloudFields(row, change.expectedFields);
       }
-      await this.merge(table, adapter, tableChanges.map(change => change.canonicalId), rows, []);
+      await this.merge(table, adapter, tableChanges.map(change => change.canonicalId), rows, [], readToken);
       const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
       if (newest) this.cursors.set(table, newest);
     }
-    markCloudReadFresh();
+    if (!cloudReadPassesEpochBarrier(readToken)) throw new CloudCacheFenceRejectedError('restore-epoch-barrier');
+    // C1a: verified rows never perform a read here (existing reviewed contract). If an
+    // earlier read is still unresolved, Fresh is withheld until a refresh re-reads it.
+    if (getUnresolvedCloudTables().length === 0) markCloudReadFresh();
+  }
+
+  /**
+   * C1a: complete authoritative re-read of every unresolved table before any Fresh.
+   * Throws (keeping them unresolved) when that read fails.
+   */
+  private async resolveUnresolvedTables(generation: number, signal?: AbortSignal, conflicts: CloudChange[] = [], authoritativeEpoch?: number): Promise<number> {
+    const pending = getUnresolvedCloudTables().filter(table => Boolean(TABLES[table]));
+    if (pending.length === 0) return 0;
+    const counts = await this.refreshAuthoritativeTables(pending, generation, authoritativeEpoch, signal, conflicts, { changed: false });
+    pending.forEach(table => unresolvedTables.delete(table));
+    return counts.reduce((sum, count) => sum + count, 0);
   }
 
   refreshWithResult(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
@@ -259,6 +307,8 @@ export class CloudTargetedCache {
 
   private async performRefresh(request: CloudRefreshRequest, signal?: AbortSignal): Promise<CloudRefreshResult> {
     this.readCaller='targeted-cache:'+request.reason;
+    // Oldest read token of this refresh: Fresh is never published for it after a Restore barrier.
+    const refreshToken = takeCloudReadToken();
     const conflicts: CloudChange[] = [];
     const comparison = { changed: false };
     const byTable = new Map<string, CloudChange[]>();
@@ -302,6 +352,18 @@ export class CloudTargetedCache {
       if (generation !== this.authoritativeGeneration) {
         throw new CloudAuthoritativeRefreshSupersededError();
       }
+      // C1a: a complete authoritative read of a table resolves an earlier failure of it;
+      // any other unresolved table is re-read now, so Fresh never masks an earlier failure.
+      if (isAuthoritativeResourceRead) tables.forEach(table => unresolvedTables.delete(table));
+      if (unresolvedTables.size > 0) {
+        markCloudReadLoading('cloud-read-recovery');
+        await this.resolveUnresolvedTables(generation, signal, conflicts, isAuthoritativeResourceRead ? request.authoritativeEpoch : undefined);
+        signal?.throwIfAborted();
+        if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
+      }
+      if (!cloudReadPassesEpochBarrier(refreshToken, request.authoritativeEpoch)) {
+        throw new CloudCacheFenceRejectedError('restore-epoch-barrier');
+      }
       markCloudReadFresh(isAuthoritativeResourceRead
         ? rowCounts.reduce((sum, count) => sum + count, 0)
         : undefined);
@@ -309,6 +371,10 @@ export class CloudTargetedCache {
     } catch (error) {
       if (error instanceof CloudAuthoritativeRefreshSupersededError) throw error;
       if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
+      // C1a: an uncertain read (error, timeout, permission, partial response, fence
+      // rejection) is never interpreted as deletion; the tables stay unresolved and
+      // block Fresh until a later complete authoritative read of them succeeds.
+      tables.forEach(table => { if (TABLES[table]) unresolvedTables.add(table); });
       const cachedRows = await Promise.all(tables.map(table => TABLES[table]?.get() ?? Promise.resolve([])));
       if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
       markCloudReadFailed(error, cachedRows.some(rows => rows.length > 0));
@@ -330,7 +396,7 @@ export class CloudTargetedCache {
       await awaitCatalogCommitReadFence(this.readCaller,request.signal);
       recordBuyAnimeCatalogEvidence('inventory-read',{caller:this.readCaller,
         mode:request.databaseIds?'ids':request.updatedAfter?'incremental':'page',
-        count:request.databaseIds?.length ?? 0,from:request.from ?? -1,to:request.to ?? -1});
+        count:request.databaseIds?.length ?? 0,from:request.from ?? -1,to:request.to ?? (request.keyset?.limit ?? -1)});
     }
     this.targetedQueries += 1;
     this.requestsByTable.set(request.table, (this.requestsByTable.get(request.table) || 0) + 1);
@@ -342,8 +408,12 @@ export class CloudTargetedCache {
     let query = (supabase as any).from(request.table).select('*');
     if (request.signal) query = query.abortSignal(request.signal);
     if (request.databaseIds) query = query.in('id', request.databaseIds);
+    if (request.activeOnly) query = query.is('deleted_at', null);
     if (request.updatedAfter) query = query.gt('updated_at', request.updatedAfter).order('updated_at');
-    if (request.from !== undefined && request.to !== undefined) {
+    if (request.keyset) {
+      if (request.keyset.afterId !== null) query = query.gt('id', request.keyset.afterId);
+      query = query.order('id').limit(request.keyset.limit);
+    } else if (request.from !== undefined && request.to !== undefined) {
       query = query.order('id').range(request.from, request.to);
     }
     const result = await query;
@@ -368,17 +438,38 @@ export class CloudTargetedCache {
     };
   }
 
+  /**
+   * P0-2 Phase 1a: keyset pagination (id > last id) with server-side soft-delete
+   * filtering. `from`/`to` are still supplied so injected test queries that page
+   * by position keep working; the Supabase path uses only the keyset.
+   */
   private async queryAll(table: string, signal?: AbortSignal): Promise<Row[]> {
     const rows: Row[] = [];
-    for (let from = 0; ; from += AUTHORITATIVE_PAGE_SIZE) {
-      const page = await this.query({
-        table,
-        from,
-        to: from + AUTHORITATIVE_PAGE_SIZE - 1,
-        signal,
-      });
-      rows.push(...page);
-      if (page.length < AUTHORITATIVE_PAGE_SIZE) return rows;
+    const run = this.queryOverride ? null : startCloudSyncRun('authoritative-refresh');
+    let afterId: string | null = null;
+    try {
+      for (let from = 0; ; from += AUTHORITATIVE_PAGE_SIZE) {
+        const page = await this.query({
+          table,
+          from,
+          to: from + AUTHORITATIVE_PAGE_SIZE - 1,
+          keyset: { afterId, limit: AUTHORITATIVE_PAGE_SIZE },
+          activeOnly: !TABLES_WITHOUT_SOFT_DELETE.has(table),
+          signal,
+        });
+        if (run) recordCloudSyncPage(run, page);
+        rows.push(...page);
+        if (page.length < AUTHORITATIVE_PAGE_SIZE) {
+          finishCloudSyncRun(run, 'committed');
+          return rows;
+        }
+        const lastId = page[page.length - 1]?.id;
+        if (typeof lastId !== 'string' || !lastId || lastId === afterId) throw new Error(`CLOUD_KEYSET_CURSOR_NOT_ADVANCING:${table}`);
+        afterId = lastId;
+      }
+    } catch (error) {
+      finishCloudSyncRun(run, 'failed');
+      throw error;
     }
   }
 
@@ -388,15 +479,24 @@ export class CloudTargetedCache {
     const touchedIds = [...new Set(changes.map(change => change.canonicalId).filter(Boolean))];
     const databaseIds = [...new Set(changes.map(change => change.databaseId).filter(Boolean))];
     if (databaseIds.length === 0) return 0;
+    const readToken = takeCloudReadToken();
     const rows = await readCloudRowsByIds({
       table, ids: databaseIds, signal,
-      allowMissing: new Set(changes.filter(change => change.kind === 'DELETE').map(change => change.databaseId)),
+      // C1a: a successful authenticated re-read is the row's current server state. Under
+      // the canonical RLS (SELECT to authenticated: deleted_at IS NULL OR is_owner; anon
+      // has no grant, so an unauthenticated read errors instead of returning nothing),
+      // an id absent from a successful response is not in the active set (hard-deleted,
+      // or soft-deleted and hidden). Remote Realtime changes may therefore be absent;
+      // mutation readbacks with expectedFields and local-origin changes stay strict.
+      allowMissing: new Set(changes
+        .filter(change => change.kind === 'DELETE' || (change.origin === 'remote' && !change.expectedFields))
+        .map(change => change.databaseId)),
       expected: new Map(changes.filter(change => change.expectedFields).map(change => [change.databaseId, change.expectedFields!])),
       load: (ids, chunkSignal) => this.query({ table, databaseIds: ids, signal: chunkSignal }),
     });
     signal?.throwIfAborted();
     if (generation !== this.authoritativeGeneration) return 0;
-    await this.merge(table, adapter, touchedIds, rows, conflicts);
+    await this.merge(table, adapter, touchedIds, rows, conflicts, readToken);
     const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
     if (newest) this.cursors.set(table, newest);
     return rows.length;
@@ -407,10 +507,11 @@ export class CloudTargetedCache {
     if (!adapter?.supportsIncremental) return 0;
     const cursor = this.cursors.get(table) || this.now().toISOString();
     const nextCursor = this.now().toISOString();
+    const readToken = takeCloudReadToken();
     const rows = await this.query({ table, updatedAfter: cursor, signal });
     signal?.throwIfAborted();
     if (generation !== this.authoritativeGeneration) return 0;
-    await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows, conflicts);
+    await this.merge(table, adapter, rows.map(row => canonicalId(table, row)), rows, conflicts, readToken);
     this.cursors.set(table, nextCursor);
     return rows.length;
   }
@@ -427,60 +528,113 @@ export class CloudTargetedCache {
     const abortAttempt = () => attemptController.abort();
     signal?.addEventListener('abort', abortAttempt, { once: true });
     signal?.throwIfAborted();
-    let prepared;
+    // P0-2 Phase 1a: snapshot token taken before the first page request.
+    const snapshotToken = beginCloudSnapshot();
+    let committing = false;
+    let fetched;
     try {
-      prepared = await Promise.all(tables.map(async table => {
+      fetched = await Promise.all(tables.map(async table => {
         const adapter = TABLES[table];
-        if (!adapter) return { table, adapter: null, rows: [], activeRows: [], newest: undefined };
+        if (!adapter) return { table, adapter: null, rows: [] as Row[], incoming: [] as Array<{ id: string }>, newest: undefined };
         const rows = await this.queryAll(table, attemptController.signal);
         attemptController.signal.throwIfAborted();
-        const current = await adapter.get();
         const incoming = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
-        const previous = new Map(current.map(row => [row.id, row]));
-        if (current.length !== incoming.length || incoming.some(row => !cloudBusinessRowsEqual(previous.get(row.id), row))) {
-          comparison.changed = true;
-        }
-        const activeRows = this.protectRows(table, current, incoming, conflicts);
         const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
-        return { table, adapter, rows, activeRows, newest };
+        return { table, adapter, rows, incoming, newest };
       }));
+      signal?.throwIfAborted();
+      if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
+      committing = true;
     } catch (error) {
       attemptController.abort();
       throw error;
     } finally {
       signal?.removeEventListener('abort', abortAttempt);
+      if (!committing) endCloudSnapshot(snapshotToken);
     }
 
-    signal?.throwIfAborted();
+    const counts = await commitCloudSnapshot({
+      token: snapshotToken,
+      targetEpoch: authoritativeEpoch,
+      storageKeys: fetched.filter(entry => entry.adapter && TABLE_STORAGE_KEYS[entry.table]).map(entry => TABLE_STORAGE_KEYS[entry.table]),
+      apply: async plan => {
+        if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
+        const writes: Array<{ storageKey: string; value: unknown[] }> = [];
+        const activeCounts: number[] = [];
+        for (const entry of fetched) {
+          if (!entry.adapter) {
+            activeCounts.push(0);
+            continue;
+          }
+          const storageKey = TABLE_STORAGE_KEYS[entry.table];
+          const current = await entry.adapter.get();
+          const collectionPlan = storageKey ? plan(storageKey) : null;
+          if (collectionPlan?.superseded) {
+            // A newer-started snapshot already owns this collection.
+            activeCounts.push(current.length);
+            continue;
+          }
+          const incoming = collectionPlan ? collectionPlan.overlay(entry.incoming) : entry.incoming;
+          const previous = new Map(current.map(row => [row.id, row]));
+          if (current.length !== incoming.length || incoming.some(row => !cloudBusinessRowsEqual(previous.get(row.id), row))) {
+            comparison.changed = true;
+          }
+          const activeRows = this.protectRows(entry.table, current, incoming, conflicts);
+          activeCounts.push(activeRows.length);
+          if (storageKey) writes.push({ storageKey, value: activeRows });
+        }
+        if (writes.length > 0) await db.replaceAuthoritativeCloudCollections(writes);
+        return activeCounts;
+      },
+    });
     if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
-    await db.replaceAuthoritativeCloudCollections(prepared
-      .filter(entry => entry.adapter && TABLE_STORAGE_KEYS[entry.table])
-      .map(entry => ({ storageKey: TABLE_STORAGE_KEYS[entry.table], value: entry.activeRows })));
-    if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
-    for (const entry of prepared) {
+    for (const entry of fetched) {
       if (entry.adapter) this.cursors.set(entry.table, entry.newest || this.now().toISOString());
     }
     if (authoritativeEpoch !== undefined) this.committedAuthoritativeEpoch = authoritativeEpoch;
-    return prepared.map(entry => entry.activeRows.length);
+    return counts;
   }
 
-  private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[], conflicts: CloudChange[]): Promise<void> {
-    const current = await adapter.get();
-    const previousById = new Map(current.map(row => [row.id, row]));
-    const next = new Map(current.map(row => [row.id, row]));
-    const touched = new Set(touchedIds);
-    for (const row of current) {
-      const databaseId = (row as T & { database_id?: string }).database_id;
-      if (touched.has(row.id) || (databaseId && touched.has(databaseId))) next.delete(row.id);
-    }
-    for (const row of rows) {
-      const id = canonicalId(table, row);
-      const previous = previousById.get(id) as Row | undefined;
-      if (previous && typeof previous.version === 'number' && typeof row.version === 'number' && previous.version > row.version) {
-        next.set(id, previous as T);
-      } else if (!row.deleted_at) next.set(id, adapter.map(row));
-    }
-    await adapter.save(this.protectRows(table, current, [...next.values()], conflicts));
+  private async merge<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, touchedIds: string[], rows: Row[], conflicts: CloudChange[], readToken: number): Promise<void> {
+    await commitCloudTargeted({
+      token: readToken,
+      storageKey: TABLE_STORAGE_KEYS[table] ?? `unmapped:${table}`,
+      apply: async fence => {
+        const current = await adapter.get();
+        const previousById = new Map(current.map(row => [row.id, row]));
+        const next = new Map(current.map(row => [row.id, row]));
+        const touched = new Set(touchedIds);
+        const returned = new Set(rows.map(row => canonicalId(table, row)));
+        const touchedCanonical = new Set<string>(touchedIds);
+        for (const row of current) {
+          const databaseId = (row as T & { database_id?: string }).database_id;
+          if (!(touched.has(row.id) || (databaseId && touched.has(databaseId)))) continue;
+          touchedCanonical.add(row.id);
+          // P0-2 Phase 1a: a newer-started snapshot already committed this collection;
+          // a row absent from this older read must not erase it.
+          if (fence.skipAbsentDeletes && !returned.has(row.id)) {
+            noteSkippedStaleDelete();
+            continue;
+          }
+          next.delete(row.id);
+        }
+        for (const row of rows) {
+          const id = canonicalId(table, row);
+          touchedCanonical.add(id);
+          const previous = previousById.get(id) as Row | undefined;
+          const versionsKnown = previous && typeof previous.version === 'number' && typeof row.version === 'number';
+          if (versionsKnown && (previous!.version as number) > (row.version as number)) {
+            next.set(id, previous as T);
+          } else if (!row.deleted_at) next.set(id, adapter.map(row));
+          else if (fence.skipAbsentDeletes && previous && !versionsKnown) {
+            noteSkippedStaleDelete();
+            next.set(id, previous as T);
+          }
+        }
+        for (const id of touchedCanonical) fence.record(id, (next.get(id) as unknown as { id: string } | undefined) ?? null);
+        await adapter.save(this.protectRows(table, current, [...next.values()], conflicts));
+      },
+    });
   }
 
   private protectRows<T extends { id: string }>(table: string, current: T[], next: T[], conflicts: CloudChange[]): T[] {

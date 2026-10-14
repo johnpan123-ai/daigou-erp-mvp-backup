@@ -99,7 +99,16 @@ const strip = (source, name) => {
   assert.ok(begin > 0 && end > begin, `marker ${name}`);
   return source.slice(0, source.lastIndexOf('\n', begin) + 1) + source.slice(source.indexOf('\n', end) + 1);
 };
-const restored = strip(strip(guard, 'restore-ops-g1 provider contract function'), 'restore-ops-g1 provider contract dispatch');
+// Version compatibility (P0-2 Phase 1a exact review p02-phase1a-c1-c1a-v1): its own two marked
+// blocks are removed first; they are proven additive by tests/p02-1a-provider-guard.mjs. The
+// restore-ops-g1 comparison below is unchanged and still requires byte-for-byte equality.
+const withoutP02 = guard
+  .replace(/\/\/ ---- BEGIN p02-1a provider contract function[\s\S]*?\/\/ ---- END p02-1a provider contract function ----\n\n/u, '')
+  .replace(/ {2}\/\/ ---- BEGIN p02-1a provider contract dispatch ----\n[\s\S]*? {2}\/\/ ---- END p02-1a provider contract dispatch ----\n/u, '')
+  // C1f (exact review p02-phase1a-c1f-guard-v1): realtime context blocks, proven additive by tests/p02-1a-context-guard.mjs.
+  .replace(/\/\/ ---- BEGIN p02-1a realtime context contract function[\s\S]*?\/\/ ---- END p02-1a realtime context contract function ----\n\n/u, '')
+  .replace(/ {2}\/\/ ---- BEGIN p02-1a realtime context contract dispatch ----\n[\s\S]*? {2}\/\/ ---- END p02-1a realtime context contract dispatch ----\n/u, '');
+const restored = strip(strip(withoutP02, 'restore-ops-g1 provider contract function'), 'restore-ops-g1 provider contract dispatch');
 assert.equal(restored, previousGuard, 'guard closure must be purely additive (no existing rule changed or relaxed)');
 assert.equal((guard.match(/^ *\/\/ ---- (?:BEGIN|END) restore-ops-g1 /gmu) || []).length, 4, 'exactly two marked blocks');
 cases.push('additive-only structural proof');

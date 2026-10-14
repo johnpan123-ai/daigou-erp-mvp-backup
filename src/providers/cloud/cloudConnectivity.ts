@@ -27,6 +27,16 @@ export class CloudOfflineWriteError extends Error {
 
 const listeners = new Set<() => void>();
 
+/**
+ * P0-2 Phase 1a C1c: Fresh holds. While a hold is active, a successful read is NOT
+ * published as Fresh (no false "已同步"): 'pending' shows a resync in progress,
+ * 'unproven' shows truthful stale data. The suppressed Fresh is published when the
+ * last hold is released, unless a later loading / failure / offline state replaced it.
+ */
+export type CloudFreshHoldMode = 'pending' | 'unproven';
+const freshHolds = new Map<string, { mode: CloudFreshHoldMode; reason: string }>();
+let suppressedFresh: { rowCount?: number } | null = null;
+
 let snapshot: CloudConnectivitySnapshot = {
   status: typeof navigator === 'undefined' ? 'online' : navigator.onLine === false ? 'offline' : 'checking',
   readStatus: typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'loading',
@@ -65,15 +75,33 @@ export const markCloudReachable = (): void => publish({
     : null,
 });
 
-export const markCloudReadLoading = (reason = 'cloud-read-loading'): void => publish({
-  ...snapshot,
-  readStatus: 'loading',
-  authoritativeReadPending: true,
-  reason,
-});
+const heldState = (): { readStatus: CloudReadFreshnessStatus; authoritativeReadPending: boolean; reason: string } | null => {
+  if (freshHolds.size === 0) return null;
+  const holds = [...freshHolds.values()];
+  const unproven = holds.find(hold => hold.mode === 'unproven');
+  return unproven
+    ? { readStatus: 'stale-cache', authoritativeReadPending: false, reason: unproven.reason }
+    : { readStatus: 'loading', authoritativeReadPending: true, reason: holds[0].reason };
+};
+
+export const markCloudReadLoading = (reason = 'cloud-read-loading'): void => {
+  suppressedFresh = null;
+  publish({
+    ...snapshot,
+    readStatus: 'loading',
+    authoritativeReadPending: true,
+    reason,
+  });
+};
 
 export const markCloudReadFresh = (rowCount?: number): void => {
   const now = Date.now();
+  const held = heldState();
+  if (held) {
+    suppressedFresh = { rowCount };
+    publish({ ...snapshot, status: 'online', lastReachableAt: now, ...held });
+    return;
+  }
   publish({
     ...snapshot,
     status: 'online',
@@ -86,6 +114,7 @@ export const markCloudReadFresh = (rowCount?: number): void => {
 };
 
 export const markCloudReadFailed = (error: unknown, hasCachedData: boolean): void => {
+  suppressedFresh = null;
   publish({
     ...snapshot,
     readStatus: hasCachedData ? 'stale-cache' : 'read-error',
@@ -95,28 +124,62 @@ export const markCloudReadFailed = (error: unknown, hasCachedData: boolean): voi
 };
 
 /** The UI boundary elapsed, but the same authoritative request is still running. */
-export const markCloudReadDeferred = (hasCachedData: boolean): void => publish({
-  ...snapshot,
-  readStatus: hasCachedData ? 'stale-cache' : 'loading',
-  authoritativeReadPending: true,
-  reason: 'cloud-read-soft-timeout',
-});
+export const markCloudReadDeferred = (hasCachedData: boolean): void => {
+  suppressedFresh = null;
+  publish({
+    ...snapshot,
+    readStatus: hasCachedData ? 'stale-cache' : 'loading',
+    authoritativeReadPending: true,
+    reason: 'cloud-read-soft-timeout',
+  });
+};
 
-export const markCloudReconnectPending = (): void => publish({
-  ...snapshot,
-  status: 'checking',
-  readStatus: 'loading',
-  authoritativeReadPending: true,
-  reason: 'reconnect-pending',
-});
+export const markCloudReconnectPending = (): void => {
+  suppressedFresh = null;
+  publish({
+    ...snapshot,
+    status: 'checking',
+    readStatus: 'loading',
+    authoritativeReadPending: true,
+    reason: 'reconnect-pending',
+  });
+};
 
-export const markCloudUnavailable = (reason = 'cloud-unavailable'): void => publish({
-  ...snapshot,
-  status: 'offline',
-  readStatus: 'offline',
-  authoritativeReadPending: false,
-  reason,
-});
+export const markCloudUnavailable = (reason = 'cloud-unavailable'): void => {
+  suppressedFresh = null;
+  publish({
+    ...snapshot,
+    status: 'offline',
+    readStatus: 'offline',
+    authoritativeReadPending: false,
+    reason,
+  });
+};
+
+/** Withhold Fresh under `key` (e.g. Realtime completeness not yet proven). */
+export const holdCloudFresh = (key: string, mode: CloudFreshHoldMode, reason: string): void => {
+  freshHolds.set(key, { mode, reason });
+  const fresh = snapshot.readStatus === 'fresh-online' || snapshot.readStatus === 'fresh-empty';
+  if (fresh) suppressedFresh = { rowCount: snapshot.readStatus === 'fresh-empty' ? 0 : undefined };
+  const held = heldState()!;
+  if (fresh || (snapshot.readStatus === 'loading' && held.readStatus === 'stale-cache' && suppressedFresh)) {
+    publish({ ...snapshot, ...held });
+  }
+};
+
+/** Release `key`; when no hold remains, a suppressed successful read is published as Fresh. */
+export const releaseCloudFresh = (key: string): void => {
+  if (!freshHolds.delete(key)) return;
+  if (freshHolds.size > 0) {
+    if (suppressedFresh) publish({ ...snapshot, ...heldState()! });
+    return;
+  }
+  const pending = suppressedFresh;
+  suppressedFresh = null;
+  if (pending) markCloudReadFresh(pending.rowCount);
+};
+
+export const getCloudFreshHolds = (): string[] => [...freshHolds.keys()].sort();
 
 export const isLikelyCloudConnectivityError = (error: unknown): boolean => {
   const record = error as { message?: unknown; name?: unknown; code?: unknown } | null;
