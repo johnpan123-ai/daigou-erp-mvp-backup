@@ -6640,6 +6640,43 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "buyanime-production-trace-warmup-v1",
+      "beforeHead": "a5544c0cd9ca56993d3b186c66f9643abc43a4dc",
+      "reviewedHead": "19a7bf1ca1d91b3960d22c4cd82212a7a5a324c1",
+      "patchSha256": "bbe0ccacd03b825ec99585af67a341696d708deff65f7e25d8288766defbd360",
+      "requiredRegressions": [
+        "buyanime-production-trace",
+        "buyanime-lint-delta",
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "tests/buyanime-production-trace.mjs",
+          "beforeHash": "0409a83d1cfda185001ecd05d8408136640ff1f6c29f79a441d41084fa37547d",
+          "afterHash": "dd6bb11118ff79247c6789ecff7354cc2e1753d8d2856a20649ec1746c5563fa",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "production-trace regression: one warm-up trace before the measured trace"
+          ],
+          "changedInputs": "Test-only: one throw-away begin/finish trace before the measured trace, so a cold Node process does not attribute one-time runtime set-up (crypto/Date/PerformanceObserver/JIT) before T00 to the import timeline. Windows F1-b S3 run failed with unattributed 2.6ms on the unchanged test (C6 run on the same machine passed).",
+          "changedOutputs": "NONE for the product. All assertions and budgets unchanged (unattributed < 2ms, overhead < 50ms, 32 points, 31 spans, no file name persisted).",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedProviderContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical 9c12 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
