@@ -5,6 +5,10 @@ import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
 
 type AuthoritativeInventory = InventoryItem & { deleted_at?: string | null };
 
+/** Pre-write validation failure: nothing was saved or dispatched. */
+const preflightError = (code: string, details: string[]) =>
+  Object.assign(new Error(code), { name: 'BuyAnimeImportPreflightError', preflight: true as const, details });
+
 /**
  * Bind the existing import projection to server identities before planning CAS.
  * A parsed external code/UUID never replaces an existing inventory_key's UUID.
@@ -27,7 +31,12 @@ export function planCloudInventoryImport(
   }
   const active = authoritative.filter(row => !row.deleted_at);
   const projection = prepareInventoryUpsert(active, incoming);
-  const inventory = projection.inventory.map(row => {
+  // BuyAnime import is create/patch only. The shared projection replaces a whole
+  // family (same parent code/title); active rows it dropped whose key is absent
+  // from this file are retained exactly as stored: no delete, no field change.
+  const projectedKeys = new Set(projection.inventory.map(row => row.inventory_key));
+  const retained = active.filter(row => !projectedKeys.has(row.inventory_key));
+  const projected = projection.inventory.map(row => {
     const existing = byKey.get(row.inventory_key!);
     if (existing?.deleted_at) throw new Error('CLOUD_INVENTORY_KEY_SOFT_DELETED');
     if (existing) {
@@ -47,6 +56,25 @@ export function planCloudInventoryImport(
     const id = canonicalCloudId('inventory_items', proposed as unknown as Record<string, unknown>);
     return { ...proposed, id, database_id: id };
   });
+  const inventory = [...projected, ...retained.map(row => {
+    const id = canonicalCloudId('inventory_items', row as unknown as Record<string, unknown>);
+    return { ...row, id, database_id: id };
+  })];
+  // A new key must not reuse a non-empty myacg_item_code already held by an
+  // active row or by another new key of this file (re-keyed SKU). Fail before
+  // any write; existing duplicate codes are neither repaired nor blocked here.
+  const skuCode = (row: InventoryItem) => String(row.myacg_item_code ?? '').trim().toUpperCase();
+  const activeCodes = new Set(active.map(skuCode).filter(Boolean));
+  const newCodes = new Set<string>();
+  const rekeyed = new Set<string>();
+  for (const row of projected) {
+    if (byKey.has(row.inventory_key!)) continue;
+    const code = skuCode(row);
+    if (!code) continue;
+    if (activeCodes.has(code) || newCodes.has(code)) rekeyed.add(code);
+    newCodes.add(code);
+  }
+  if (rekeyed.size) throw preflightError('BUYANIME_INVENTORY_SKU_REKEY_CONFLICT', [...rekeyed].sort());
   const operations = buildCloudCollectionMutationPlan('inventory_items',
     active.map(row => toCloudFieldRow('inventory_items', row)),
     inventory.map(row => toCloudFieldRow('inventory_items', row)));
@@ -68,6 +96,9 @@ export function planCloudInventoryImport(
     if (operation.kind === 'delete' && nextById.has(operation.id)) {
       throw new Error('CLOUD_INVENTORY_IDENTITY_REPLACEMENT_FORBIDDEN');
     }
+  }
+  if (operations.some(op => op.kind !== 'create' && op.kind !== 'patch')) {
+    throw preflightError('BUYANIME_INVENTORY_UNSUPPORTED_OPERATION', [...new Set(operations.map(op => op.kind))].sort());
   }
   // Use exactly the existing import's key normalization/duplicate merge.
   const importedKeys = new Set(prepareInventoryUpsert([], incoming).inventory.map(row => row.inventory_key));

@@ -40,6 +40,8 @@ export class MyAcgImportError extends Error {
 
 export function classifyMyAcgImportError(error: unknown, phase: MyAcgImportPhase): MyAcgImportError {
   if (error instanceof MyAcgImportError) return error;
+  // Pre-write validation (nothing saved or dispatched) is never an unknown commit.
+  if ((error as { preflight?: unknown } | null)?.preflight === true) return new MyAcgImportError('VALIDATION_ERROR', phase, error);
   if (error instanceof CloudMutationBoundaryError) return new MyAcgImportError(
     error.state === 'result-unknown' ? 'COMMIT_RESULT_UNKNOWN' : 'COMMITTED_READBACK_PENDING', phase, error);
   const value = error as { code?: unknown; message?: unknown; status?: unknown; category?: unknown } | null;
@@ -79,7 +81,7 @@ export function myAcgImportDiagnostic(error: MyAcgImportError, requestId: string
     postgresCode: /^[0-9A-Z]{5}$/u.test(code) ? code : undefined,
     reason: /^(?:CLOUD_|REQUIRED_|VALIDATION_|BUYANIME_)[A-Z_]+$/u.test(message) ? message : undefined,
     constraint: message.match(/constraint "([a-z0-9_]+)"/iu)?.[1],
-    rpc: ['commit', 'readback'].includes(error.phase) ? 'erp_apply_field_mutations' : undefined,
+    rpc: ['commit', 'readback'].includes(error.phase) && error.code !== 'VALIDATION_ERROR' ? 'erp_apply_field_mutations' : undefined,
     serverPhase: code === '23505' ? 'INSERT' : undefined,
     stack: typeof cause?.stack === 'string' ? cause.stack.split('\n').slice(1)
       .filter(line => /^\s*at /u.test(line)).slice(0, 8).join('\n') : undefined };
