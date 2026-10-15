@@ -6809,6 +6809,94 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "p0-duplicate-sku-readmodel-and-tab-scope-v1",
+      "beforeHead": "ed73bd00bd13a4559bbef99e174504142986c257",
+      "reviewedHead": "6f38831484dd45588f1698919254c88dc0ed8ddb",
+      "patchSha256": "6554c43a15e906f23ebb60cdf8c1c4a241288b0bda082a5bfae3a78b6ada4fef",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "realtime",
+        "draft",
+        "cas",
+        "buyanime-simple-flow",
+        "buyanime-cache-authority",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "src/lib/db.ts",
+          "beforeHash": "a9e2e24784fb113757d2c693970a05b2ae8c38938f40fe0e278de47d4d769f3c",
+          "afterHash": "e50ff65b45c6db9a2e015dcfb2a847d51af591f5b023cf4de85c14b8d49584a8",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "IndexedDbAdapter.computeVariantDedupe: primary selection and manual-quantity fallback for same group+SKU+spec+title duplicate rows"
+          ],
+          "changedInputs": "ERP1 v1 backup carries 221 same-key duplicate Variant sets (224 extra rows). After the 2026-10-15 ERP2 restore, the BuyAnime create-mode recalculation (13:06:56Z) rewrote computed fields of stale duplicates and bumped their updated_at.",
+          "changedOutputs": "The duplicate row carrying more non-zero manual quantities (myacg/waca/private/purchased) is the read-model primary; updated_at, sort_order and id only break ties. A manual quantity that is NULL on the primary is taken from a duplicate; two different explicit values are never summed and never overwritten. aliasMap remapping, the dedupe key and every unique row are unchanged.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Raw cached product_variants -> deduped canonical read model (UI, demand/gap calculation, alias remap of batch/private items).",
+          "persistenceBehavior": "No new write. Existing save-back of the canonical view (restoredDupes safety net, unchanged) may persist the displayed canonical values in the local cache only; Cloud writes still go through explicit mutation RPCs and the catalog planner keeps raw identities.",
+          "writePath": "Unchanged.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/pages/PurchaseRecords.tsx",
+          "beforeHash": "14f782292000eb3de89efb28a1e116287e465a81a725335ae1af174b6b5090ae",
+          "afterHash": "c7d2ffeb7dba798e0728af3f2d9317309765b0134364b27048dd0e789ca50e4c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "category tab counts (全部商品/C108/Hololive/VSPO/代理版/其他) use the Purchase Records group scope"
+          ],
+          "changedInputs": "BuyAnime master import created 638 inventory-only Product Master groups (source inventory_import) that are not Purchase Records.",
+          "changedOutputs": "Tab counts use purchaseRecordGroupIds(variants), the same scope as the list and status chips (ERP2 real data: 1460 -> 822, matching ERP1 817 + 5 new purchase records). Product Master groups are not deleted or hidden elsewhere; list, filters and chips unchanged.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "groups + variants -> purchaseRecordTabGroups -> tab labels only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/p0-duplicate-sku-readmodel.mjs",
+          "beforeHash": null,
+          "afterHash": "27b3a91a17c82c162a3baf96d87b1045ccdcebd806e55de847a39e9c8000fd4d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P0 regression: duplicate-SKU read model (manual quantities survive a recalculation bump) and Purchase Records tab scope"
+          ],
+          "changedInputs": "Test-only (SSR module load, synthetic rows, no IndexedDB, no network).",
+          "changedOutputs": "NONE for the product. C12 FAILS 3/5 checks; fixed C13 PASSES 5/5.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
