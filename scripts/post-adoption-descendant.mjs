@@ -189,6 +189,50 @@ export function assertReviewedRestoreAdapterContract(file, before, after) {
   }
 }
 
+// ---- BEGIN restore-variant-duplicate-normalization-v1 panel contract ----
+export const RESTORE_VARIANT_NORMALIZATION_REVIEW = 'restore-variant-duplicate-normalization-v1';
+const RESTORE_VARIANT_NORMALIZATION_PANEL_ADDITIONS = Object.freeze([
+  ["import { normalizeCloudRestoreCandidateVariants, type CloudRestoreVariantNormalizationRecord } from '../lib/cloudRestoreVariantNormalization';\n", 1],
+  ['  const [variantNormalization, setVariantNormalization] = useState<CloudRestoreVariantNormalizationRecord | null>(null);\n', 1],
+  ['    setVariantNormalization(null);\n', 2],
+  [`      // Duplicate Variants are normalized before portability/upload; unknown conflicts stop here (nothing is sent).
+      const variantStep = await normalizeCloudRestoreCandidateVariants(source);
+      if (candidateGenerationRef.current !== generation) return;
+      setVariantNormalization(variantStep.record);
+      if (!variantStep.candidate) throw variantStep.error;
+      source = variantStep.candidate;
+      finishPhase('variantNormalization');
+`, 1],
+  [`      {variantNormalization && <div data-testid="cloud-restore-variant-normalization" style={{ marginTop: 14, padding: 12, borderRadius: 8,
+        border: \`1px solid \${variantNormalization.status === 'BLOCKED' ? '#dc2626' : '#cbd5e1'}\`, fontSize: 13, overflowWrap: 'anywhere' }}>
+        <strong>重複規格正規化：{variantNormalization.status === 'BLOCKED' ? '已停止（未送出任何資料）'
+          : variantNormalization.status === 'NORMALIZED' ? '已整理，將以整理後資料還原' : '無重複，資料未變更'}</strong>
+        <div>重複組數：{variantNormalization.duplicateSets}；合併：{variantNormalization.normalizedSets}；已核准衝突：{variantNormalization.approvedConflictsApplied}；
+          軟刪除規格：{variantNormalization.softDeletedVariants}；改指向引用：{variantNormalization.repointedReferences}；軟刪除組合：{variantNormalization.softDeletedBundles}</div>
+        <div>原始檔 SHA-256：<code>{variantNormalization.sourceFileSha256}</code></div>
+        <div>原始資料 fingerprint：<code>{variantNormalization.sourceSnapshotFingerprint}</code></div>
+        <div>正規化後 fingerprint：<code>{variantNormalization.normalizedSnapshotFingerprint ?? '（未產生）'}</code></div>
+        {variantNormalization.conflicts.length > 0 && <table data-testid="cloud-restore-variant-conflicts" style={{ marginTop: 8, borderCollapse: 'collapse' }}>
+          <thead><tr><th>SKU</th><th>規格</th><th>欄位</th><th>各 Variant 數值</th><th>原因</th></tr></thead>
+          <tbody>{variantNormalization.conflicts.map(conflict => <tr key={\`\${conflict.setStateFingerprint}:\${conflict.field}\`}>
+            <td>{conflict.key.sku}</td><td>{conflict.key.spec || '—'}</td><td>{conflict.field}</td>
+            <td>{Object.entries(conflict.values).map(([id, value]) => \`\${id}=\${JSON.stringify(value)}\`).join('；')}</td><td>{conflict.reason}</td>
+          </tr>)}</tbody>
+        </table>}
+      </div>}
+`, 1],
+]);
+export function assertRestoreVariantNormalizationPanelContract(previous, after) {
+  if (previous === null || after === null) fail('restore variant normalization panel requires the exact reviewed previous source');
+  let restored = after.replace(/\r\n?/gu, '\n');
+  for (const [text, count] of RESTORE_VARIANT_NORMALIZATION_PANEL_ADDITIONS) {
+    if (restored.split(text).length - 1 !== count) fail('restore variant normalization panel addition missing, changed or repeated');
+    restored = restored.split(text).join('');
+  }
+  if (restored !== previous.replace(/\r\n?/gu, '\n')) fail('restore panel changed beyond the exact variant normalization additions');
+}
+// ---- END restore-variant-duplicate-normalization-v1 panel contract ----
+
 export function assertReviewedRestoreOrchestrationContract(file, before, after) {
   if (before === null || after === null) fail('Restore orchestration requires an existing exact reviewed source');
   let restored = after;
@@ -1042,6 +1086,18 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
       assertReviewedRestoreOrchestrationContract(file, before, after);
       return true;
     }
+    // ---- BEGIN restore-variant-duplicate-normalization-v1 (exact review) ----
+    // Only the Restore panel may change, only by the exact approved statements
+    // (a pre-portability duplicate-Variant normalization step and its display),
+    // and every provider/RPC/proof/readback port must stay byte-identical.
+    if (file === 'src/components/CloudAtomicRestorePanel.tsx'
+      && reviewed?.review.id === RESTORE_VARIANT_NORMALIZATION_REVIEW
+      && reviewed.row.classification === 'APPLICATION_DOMAIN_ONLY') {
+      assertReviewedRestoreOrchestrationContract(file, before, after);
+      assertRestoreVariantNormalizationPanelContract(git(['show', `${reviewed.review.beforeHead}:${file}`]), after);
+      return true;
+    }
+    // ---- END restore-variant-duplicate-normalization-v1 ----
     if (file !== 'src/providers/cloud/cloudAtomicRestore.ts'
       || reviewed?.review.id !== 'erp1-v1-outbound-timestamp-adapter-v1'
       || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;

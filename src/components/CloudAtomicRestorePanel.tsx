@@ -58,6 +58,7 @@ import type { CloudResource } from '../providers/cloud/cloudSyncDomain';
 import { getProviderMode } from '../providers/providerMode';
 import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import CloudRestoreIntegrityAuditTool from './CloudRestoreIntegrityAudit';
+import { normalizeCloudRestoreCandidateVariants, type CloudRestoreVariantNormalizationRecord } from '../lib/cloudRestoreVariantNormalization';
 import { verifyCommittedRestore, RestoreReadbackError, classifyRestoreReadbackError,
   type RestoreVerificationSummary, type RestoreVerificationIdentity } from '../providers/cloud/cloudRestorePostCommit';
 
@@ -121,6 +122,7 @@ export default function CloudAtomicRestorePanel({
   const [initialUnresolvedAttempt] = useState(readCloudRestoreUnresolvedAttempt);
   const [candidateGeneration, setCandidateGeneration] = useState(0);
   const [sourceCandidate, setSourceCandidate] = useState<CloudRestoreCandidate | null>(null);
+  const [variantNormalization, setVariantNormalization] = useState<CloudRestoreVariantNormalizationRecord | null>(null);
   const [candidate, setCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [proofRecord, setProofRecord] = useState<CloudRestoreCandidateProofRecord | null>(null);
   const [proofMessage, setProofMessage] = useState('尚未完成安全檢查');
@@ -264,6 +266,7 @@ export default function CloudAtomicRestorePanel({
     submissionLockedRef.current = false;
     setCandidate(null);
     setSourceCandidate(null);
+    setVariantNormalization(null);
     setResult(null);
     setVerificationSummary(null);
     setVerificationError(null);
@@ -300,6 +303,7 @@ export default function CloudAtomicRestorePanel({
     setMessage('正在讀取備份檔案；尚未寫入任何資料。');
     setCandidate(null);
     setSourceCandidate(null);
+    setVariantNormalization(null);
     setResult(null);
     setVerificationSummary(null);
     setVerificationError(null);
@@ -346,6 +350,13 @@ export default function CloudAtomicRestorePanel({
         source = await preserveLegacyCloudDashboardImages(source, targetImages);
       }
       setSourceCandidate(source);
+      // Duplicate Variants are normalized before portability/upload; unknown conflicts stop here (nothing is sent).
+      const variantStep = await normalizeCloudRestoreCandidateVariants(source);
+      if (candidateGenerationRef.current !== generation) return;
+      setVariantNormalization(variantStep.record);
+      if (!variantStep.candidate) throw variantStep.error;
+      source = variantStep.candidate;
+      finishPhase('variantNormalization');
       const preserveAuditIdentity = !source.legacyWacaBackup
         && await dataProvider.canPreserveCloudRestoreAuditIdentity(source);
       const portable = preserveAuditIdentity ? source
@@ -905,6 +916,23 @@ export default function CloudAtomicRestorePanel({
         }} style={{ marginTop: 12 }}>重新驗證最近一次還原結果</button>}
       </div>
 
+      {variantNormalization && <div data-testid="cloud-restore-variant-normalization" style={{ marginTop: 14, padding: 12, borderRadius: 8,
+        border: `1px solid ${variantNormalization.status === 'BLOCKED' ? '#dc2626' : '#cbd5e1'}`, fontSize: 13, overflowWrap: 'anywhere' }}>
+        <strong>重複規格正規化：{variantNormalization.status === 'BLOCKED' ? '已停止（未送出任何資料）'
+          : variantNormalization.status === 'NORMALIZED' ? '已整理，將以整理後資料還原' : '無重複，資料未變更'}</strong>
+        <div>重複組數：{variantNormalization.duplicateSets}；合併：{variantNormalization.normalizedSets}；已核准衝突：{variantNormalization.approvedConflictsApplied}；
+          軟刪除規格：{variantNormalization.softDeletedVariants}；改指向引用：{variantNormalization.repointedReferences}；軟刪除組合：{variantNormalization.softDeletedBundles}</div>
+        <div>原始檔 SHA-256：<code>{variantNormalization.sourceFileSha256}</code></div>
+        <div>原始資料 fingerprint：<code>{variantNormalization.sourceSnapshotFingerprint}</code></div>
+        <div>正規化後 fingerprint：<code>{variantNormalization.normalizedSnapshotFingerprint ?? '（未產生）'}</code></div>
+        {variantNormalization.conflicts.length > 0 && <table data-testid="cloud-restore-variant-conflicts" style={{ marginTop: 8, borderCollapse: 'collapse' }}>
+          <thead><tr><th>SKU</th><th>規格</th><th>欄位</th><th>各 Variant 數值</th><th>原因</th></tr></thead>
+          <tbody>{variantNormalization.conflicts.map(conflict => <tr key={`${conflict.setStateFingerprint}:${conflict.field}`}>
+            <td>{conflict.key.sku}</td><td>{conflict.key.spec || '—'}</td><td>{conflict.field}</td>
+            <td>{Object.entries(conflict.values).map(([id, value]) => `${id}=${JSON.stringify(value)}`).join('；')}</td><td>{conflict.reason}</td>
+          </tr>)}</tbody>
+        </table>}
+      </div>}
       <details data-testid="cloud-restore-technical-details" style={{ marginTop: 14 }}>
         <summary>查看技術資訊</summary>
         <div style={{ marginTop: 8, overflowWrap: 'anywhere', fontSize: 12 }}>
