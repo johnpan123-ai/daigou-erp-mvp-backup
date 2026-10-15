@@ -3011,7 +3011,18 @@ export class IndexedDbAdapter implements DatabaseAdapter {
         const t = v.updated_at ? Date.parse(v.updated_at) : NaN;
         return Number.isFinite(t) ? t : 0;
       };
+      // P2: a background demand recalculation rewrites only computed fields, but it bumps
+      // updated_at. Ranking by updated_at alone let such a write promote a stale duplicate
+      // (no manual quantities, no purchase history) over the row the user actually maintains,
+      // so purchased/WACA manual quantities "disappeared" (2026-10-15 false 待採購). The row
+      // carrying more manual business quantities now wins first; updated_at only breaks ties.
+      const manualScore = (v: ProductVariant): number => [
+        v.myacg_manual_adjustment, v.waca_manual_adjustment, v.private_manual_adjustment, v.purchased_manual_adjustment,
+      ].filter(value => typeof value === 'number' && value !== 0).length;
       const sorted = [...group].sort((a, b) => {
+        const aScore = manualScore(a);
+        const bScore = manualScore(b);
+        if (aScore !== bScore) return bScore - aScore; // more manual business data first
         const aTime = updatedAtMs(a);
         const bTime = updatedAtMs(b);
         if (aTime !== bTime) return bTime - aTime; // newest updated_at first
@@ -3033,6 +3044,12 @@ export class IndexedDbAdapter implements DatabaseAdapter {
       // the freshly-edited one. Reading only primary's value means an edit takes effect
       // immediately on the next read, with no write needed anywhere (including Supabase).
       for (const dup of dupes) {
+        // P2: a manual quantity the primary does not carry (null/undefined) is never dropped.
+        // Two different explicit values are not combined; the primary's own value is kept.
+        if (merged.myacg_manual_adjustment == null && dup.myacg_manual_adjustment != null) merged.myacg_manual_adjustment = dup.myacg_manual_adjustment;
+        if (merged.waca_manual_adjustment == null && dup.waca_manual_adjustment != null) merged.waca_manual_adjustment = dup.waca_manual_adjustment;
+        if (merged.private_manual_adjustment == null && dup.private_manual_adjustment != null) merged.private_manual_adjustment = dup.private_manual_adjustment;
+        if (merged.purchased_manual_adjustment == null && dup.purchased_manual_adjustment != null) merged.purchased_manual_adjustment = dup.purchased_manual_adjustment;
         if (merged.default_jpy_cost == null && dup.default_jpy_cost != null) merged.default_jpy_cost = dup.default_jpy_cost;
         if (merged.default_twd_cost == null && dup.default_twd_cost != null) merged.default_twd_cost = dup.default_twd_cost;
         if (!merged.note && dup.note) merged.note = dup.note;

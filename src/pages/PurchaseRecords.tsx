@@ -1119,6 +1119,14 @@ export default function PurchaseRecords() {
     [categories, groups, isProxyProductMap, variants],
   );
 
+  // P1: the category tab counts use the same Purchase Records scope as the list and the
+  // status chips. Inventory-only Product Master groups (BuyAnime import, not yet projected
+  // into Purchase Records) remain valid data but are not counted as purchase records.
+  const purchaseRecordTabGroups = useMemo(() => {
+    const projected = purchaseRecordGroupIds(variants);
+    return groups.filter(group => projected.has(group.id));
+  }, [groups, variants]);
+
   const baseGroups = useMemo(() => {
     if (linkedGroupId !== null) return groups.filter(group => group.id === linkedGroupId);
     const projected = purchaseRecordGroupIds(variants);
@@ -2791,7 +2799,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          全部商品 ({groups.length})
+          全部商品 ({purchaseRecordTabGroups.length})
         </button>
         <button
           onClick={() => { setActiveTab('c108'); setSearchTerm(''); }}
@@ -2810,7 +2818,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          C108專區 ({groups.filter(isC108Product).length})
+          C108專區 ({purchaseRecordTabGroups.filter(isC108Product).length})
         </button>
         <button 
           onClick={() => { setActiveTab('hololive'); setSearchTerm(''); }}
@@ -2829,7 +2837,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          Hololive商品 ({groups.filter(isHololiveProduct).length})
+          Hololive商品 ({purchaseRecordTabGroups.filter(isHololiveProduct).length})
         </button>
         <button 
           onClick={() => { setActiveTab('vspo'); setSearchTerm(''); }}
@@ -2848,7 +2856,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          VSPO商品 ({groups.filter(isVspoProduct).length})
+          VSPO商品 ({purchaseRecordTabGroups.filter(isVspoProduct).length})
         </button>
         <button 
           onClick={() => { setActiveTab('proxy'); setSearchTerm(''); }}
@@ -2867,7 +2875,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          代理版商品 ({groups.filter(isProxyCategoryProduct).length})
+          代理版商品 ({purchaseRecordTabGroups.filter(isProxyCategoryProduct).length})
         </button>
         <button 
           onClick={() => { setActiveTab('other'); setSearchTerm(''); }}
@@ -2886,7 +2894,7 @@ export default function PurchaseRecords() {
             flex: isMobile ? '0 0 auto' : undefined
           }}
         >
-          其他商品 ({groups.filter(isOtherProduct).length})
+          其他商品 ({purchaseRecordTabGroups.filter(isOtherProduct).length})
         </button>
 
         {/* WACA 迷你更新資訊區塊 */}
