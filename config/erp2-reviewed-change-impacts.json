@@ -6897,6 +6897,188 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "restore-variant-duplicate-normalization-v1",
+      "beforeHead": "187fb888d8eb8cc31982ed909aafd16916925b02",
+      "reviewedHead": "4e04ebb18dfa474da853cf46debb04a01c72ca6f",
+      "patchSha256": "72ad15cf146c4d30eb1894e71ba548a1fe4bb4c450240242d647ccf2ddb924f6",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "registry",
+        "execute-envelope",
+        "cloud-next",
+        "sync",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "83ab1648954c94a4e4dec15c8274812bf15b8cbf908569d17b5253d8fe1bbfe2",
+          "afterHash": "e163316b45cbe88f8983403e361ce76f6c33a727e2310cd5ef5f7e68f1144b7a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "backupParity: exact review branch restore-variant-duplicate-normalization-v1 for CloudAtomicRestorePanel.tsx",
+            "assertRestoreVariantNormalizationPanelContract"
+          ],
+          "changedInputs": "Release-control only. Owner approval 2026-10-16 (方案 A): an exact Guard rule for this Restore change; no other check is relaxed.",
+          "changedOutputs": "The panel is accepted only when (1) every provider/RPC/proof/readback port is byte-identical to the adopted baseline (existing orchestration contract) AND (2) removing the exact approved additions (import, state, 2 resets, the normalization step, the display block) yields the previous reviewed source byte-for-byte. Any other panel edit, a changed/repeated addition, or any other Restore file change still fails closed. cloudAtomicRestore.ts and all other Restore files are unchanged.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Guard evaluation only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/components/CloudAtomicRestorePanel.tsx",
+          "beforeHash": "12ef9a9390eb504b9ec437717da1c88a53ed902d93b2262f94fef1aac5215869",
+          "afterHash": "e58b5760e3530927c4bceb2125393154b7e14b8bcde33fdcfa57b88b13b49b46",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "selectFile: duplicate-Variant normalization step after legacy dashboard preservation, before portability/proof",
+            "variant normalization summary / conflict table"
+          ],
+          "changedInputs": "ERP1 v1 backups contain 221 same-key duplicate Variant sets (224 extra rows); a Restore re-introduced them into ERP2.",
+          "changedOutputs": "The candidate passed to the unchanged portability/proof/Restore path is the normalized candidate (manifest rebuilt from the normalized data). Unknown conflicts stop before any upload with an ID-exact conflict table. Source file SHA-256 and the source fingerprint are shown next to the normalized fingerprint. No provider call, RPC, payload, proof or readback changed.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "File -> prepareCloudRestoreSnapshot -> preserveLegacyCloudDashboardImages -> normalizeCloudRestoreCandidateVariants -> (unchanged) portability -> proof -> atomic Restore -> post-commit verification.",
+          "persistenceBehavior": "NONE added: the single existing atomic Restore writes the normalized candidate.",
+          "writePath": "Unchanged.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/lib/cloudRestoreVariantNormalization.ts",
+          "beforeHash": null,
+          "afterHash": "9f0927c3b8b2480f4dddc38730b7c2e8b22e40baf5f7990dfe17b3d002ea4d58",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "normalizeCloudRestoreCandidateVariants"
+          ],
+          "changedInputs": "A verified, not-yet-portable Restore candidate.",
+          "changedOutputs": "Refuses post-portability input and changed candidates; on conflicts returns BLOCKED + CloudRestoreValidationError RESTORE_VARIANT_DUPLICATE_CONFLICT; otherwise rebuilds the manifest with the existing rebuildCurrentCloudRestoreCandidate and fails closed unless row counts are unchanged, orphan/duplicate-ID counts are 0, unknown products unchanged and a second pass finds no duplicate. Records sourceFileSha256, source and normalized fingerprints.",
+          "changedProviderContract": "NONE: only exported cloudAtomicRestore helpers are called.",
+          "dataFlow": "Candidate -> normalized candidate.",
+          "persistenceBehavior": "As above; no new write path.",
+          "writePath": "Unchanged.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/lib/restoreVariantApprovals.ts",
+          "beforeHash": null,
+          "afterHash": "190fb382468c2ab0e976dc2030f450703c010edb906932af36c40c4e104835a2",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "OWNER_APPROVED_VARIANT_CONFLICTS (10 exact-state approvals)"
+          ],
+          "changedInputs": "Owner approval 2026-10-15 22:40 +08 (ERP1 displayed values) for 10 conflict sets of ERP1 backup 7d1c6124….",
+          "changedOutputs": "Frozen registry; each approval applies only when the set state fingerprint, keep ID and value match exactly.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Constant data.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/lib/restoreVariantNormalization.ts",
+          "beforeHash": null,
+          "afterHash": "025bf940f8686d07a961f1777a64ee0c464439dcd6921f388531f9d90b3fabc2",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "normalizeRestoreVariantDuplicates (pure)",
+            "variantDuplicateKey",
+            "setStateFingerprint"
+          ],
+          "changedInputs": "Restore candidate tables (24 resources).",
+          "changedOutputs": "Deterministic duplicate-Variant normalization: key = group+SKU+spec+title (manual/blank never merged); kept ID = most business references, then all references, then the row ERP1 displayed, then id; manual quantities never summed or guessed (conflict -> stop); Owner approvals bound to the exact set state; active references re-pointed, merged-away rows and new duplicate bundle pairs soft-deleted; WACA ledger references are never rewritten (conflict). Clean data is returned unchanged.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "In-memory candidate only (no I/O).",
+          "persistenceBehavior": "Changes which rows the existing Restore writes as deleted/re-pointed; schema-neutral.",
+          "writePath": "Unchanged.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/restore-variant-normalization-e2e.mjs",
+          "beforeHash": null,
+          "afterHash": "67b2c66dbe1e587a1a0803c261bd321a736f4dc30a088bdb05a352aae3c75539",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Full Restore RPC end-to-end in a disposable PostgreSQL (ERP2 v2, real ERP1 v1, repeated Restore, unknown conflict)"
+          ],
+          "changedInputs": "Test-only (SSR module load / disposable PostgreSQL; real snapshots via environment, SHA-256 pinned, never in Git).",
+          "changedOutputs": "NONE for the product. Original C14 has no normalization module (FAIL).",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/restore-variant-normalization.mjs",
+          "beforeHash": null,
+          "afterHash": "5a09f8752171c4c07447e2bb8a8a4bcc20b3c0c04f020e1219f89d9b07b6247f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Restore duplicate-Variant normalization contract + exact Guard panel contract"
+          ],
+          "changedInputs": "Test-only (SSR module load / disposable PostgreSQL; real snapshots via environment, SHA-256 pinned, never in Git).",
+          "changedOutputs": "NONE for the product. Original C14 has no normalization module (FAIL).",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
