@@ -533,6 +533,95 @@ export function assertP02Phase1aProviderContract(file, before, after) {
   finally { p02RestoringReviewedSource = false; }
 }
 // ---- END p02-1a provider contract function ----
+// ---- BEGIN waca-counted-transition-provider-v1 (exact review) ----
+// WACA transition import (C17 / Migration 073): the two provider files may differ from their previous source only by
+// the exact reviewed pieces below (SHA-256 of the canonical, comment-free AST print): one type-only import per file,
+// the new counted-commit / Restore-epoch members and the one-line refusal of the legacy WACA auto-quantity write.
+// Every piece is checked by hash AND by explicit fail-closed rules (single approved RPC, epoch read is read-only,
+// legacy auto-quantity write refused, cloud write permission + write fence kept), then restored to its previous form
+// and the restored source is judged by every pre-existing provider rule (incl. p02 1a) unchanged. No wildcard.
+export const WACA_COUNTED_PROVIDER_REVIEW = 'waca-counted-transition-provider-v1';
+const WACA_COUNTED_RPC = 'erp_commit_waca_counted_snapshot';
+const WACA_COUNTED_PROVIDER_PIECES = Object.freeze({
+  'src/providers/cloud/supabaseProvider.ts': { className: 'SupabaseProvider',
+    statements: ['6126b9a509026974a121b0d4e88272e589ba350c113b6afdfdfecf86e0dd03a0'],
+    members: { commitWacaCountedSnapshot: { after: '68cee09982e00e24092140a6d081b9756057ee5db07e25dd59f524c7372021eb', before: null }, readWacaRestoreEpoch: { after: '27acb67a1a87cbe2682f6a189c6be7499bc58480f1de593efb9f225c873b9886', before: null } } },
+  'src/providers/dataProvider.ts': { className: 'DynamicDataProvider',
+    statements: ['8334e14d4f54ee9be1192b1aa533f4c32ddb19f4653f330af1629a931bae088d'],
+    members: { commitNextWacaSnapshot: { after: '60c7959897daf812eba14d771897e4506876d95c3049ec8c005c67103020f514', before: '53fc382e8790ac7f31184d833b4ac40fe642e07e981c310b82eda1029b5e2be2' }, supportsWacaCountedImport: { after: 'b01386d2f6088f20c46142177299194657189758368b6f01b773ad1c0ec31c16', before: null },
+      readWacaRestoreEpoch: { after: '96b2e724b0d9462dae9e6a0f37e7d7d19ae605ceec9e4901346a8baf7c9e9163', before: null }, commitWacaCountedSnapshot: { after: '6a2f18076d7b104eff9ad50bb923b73e82dfbc60464ff1d8282e971069073bcf', before: null } } },
+});
+const WACA_COUNTED_NEW_MEMBERS = new Set(['commitWacaCountedSnapshot', 'readWacaRestoreEpoch', 'supportsWacaCountedImport']);
+let wacaCountedRestoringReviewedSource = false;
+const wacaPieceHash = (tree, node) => hash(canonical(tree, node));
+const wacaClass = (tree, name) => tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === name);
+const wacaMemberName = (tree, member) => member.name ? member.name.getText(tree) : `#${ts.SyntaxKind[member.kind]}`;
+export function wacaCountedProviderReviewApplies(file, after) {
+  const review = WACA_COUNTED_PROVIDER_PIECES[file];
+  if (!review || after === null) return false;
+  let tree;
+  try { tree = parse(file, after); } catch { return false; }
+  if (tree.statements.some(node => review.statements.includes(wacaPieceHash(tree, node)))) return true;
+  const cls = wacaClass(tree, review.className);
+  return Boolean(cls?.members.some(member => WACA_COUNTED_NEW_MEMBERS.has(wacaMemberName(tree, member))));
+}
+function assertWacaCountedPieceRules(file, tree, name, member) {
+  const calls = nodes(tree).filter(ts.isCallExpression).filter(call => call.getStart(tree) >= member.getStart(tree) && call.end <= member.end);
+  const callee = call => call.expression.getText(tree);
+  if (calls.some(call => /\.(?:insert|update|upsert|delete)$/u.test(callee(call)))) fail(`waca counted reviewed code writes to Cloud directly: ${name}`);
+  const rpcs = calls.filter(call => /(?:^|\.)rpc$/u.test(callee(call)));
+  const approvedRpc = file === 'src/providers/cloud/supabaseProvider.ts' && name === 'commitWacaCountedSnapshot';
+  if (!approvedRpc && rpcs.length) fail(`waca counted reviewed code calls an RPC: ${name}`);
+  if (approvedRpc && (rpcs.length !== 1 || callee(rpcs[0]) !== 'supabase.rpc' || !ts.isStringLiteral(rpcs[0].arguments[0])
+    || rpcs[0].arguments[0].text !== WACA_COUNTED_RPC)) fail(`waca counted write may call only ${WACA_COUNTED_RPC}`);
+  const text = canonical(tree, member);
+  if (file === 'src/providers/cloud/supabaseProvider.ts' && name === 'commitWacaCountedSnapshot'
+    && !text.includes('await this.requireCloudWritePermission();')) fail('waca counted write lost the cloud write permission check');
+  if (file === 'src/providers/cloud/supabaseProvider.ts' && name === 'readWacaRestoreEpoch') {
+    const froms = calls.filter(call => callee(call) === 'supabase.from');
+    if (froms.length !== 1 || !ts.isStringLiteral(froms[0].arguments[0]) || froms[0].arguments[0].text !== 'erp_cloud_restore_epoch'
+      || !calls.some(call => /\.select$/u.test(callee(call)))) fail('waca restore epoch read is not the exact read-only epoch select');
+  }
+  if (file === 'src/providers/dataProvider.ts' && name === 'commitWacaCountedSnapshot'
+    && !text.includes('this.guardedWrite(() => this.supabaseProvider.commitWacaCountedSnapshot(')) fail('waca counted write bypasses the guarded write fence');
+  if (file === 'src/providers/dataProvider.ts' && name === 'commitNextWacaSnapshot'
+    && !nodes(tree).filter(ts.isIfStatement).some(node => node.getStart(tree) >= member.getStart(tree) && node.end <= member.end
+      && node.expression.getText(tree) === 'updateAutoQuantity' && ts.isThrowStatement(node.thenStatement)
+      && node.thenStatement.getText(tree) === "throw new Error('WACA_LEGACY_QUANTITY_COMMIT_DISABLED');")) {
+    fail('waca legacy auto-quantity write is not refused');
+  }
+}
+export function assertWacaCountedProviderContract(file, before, after) {
+  const review = WACA_COUNTED_PROVIDER_PIECES[file];
+  if (!review || before === null || after === null) fail('unreviewed waca counted provider exception');
+  const oldTree = parse(file, before); const newTree = parse(file, after);
+  const oldClass = wacaClass(oldTree, review.className); const newClass = wacaClass(newTree, review.className);
+  if (!oldClass || !newClass) fail('waca counted provider class missing');
+  const edits = [];
+  for (const [name, pin] of Object.entries(review.members)) {
+    const now = newClass.members.filter(member => wacaMemberName(newTree, member) === name);
+    const was = oldClass.members.filter(member => wacaMemberName(oldTree, member) === name);
+    if (now.length !== 1) fail(`waca counted reviewed member missing or duplicated: ${name}`);
+    if (wacaPieceHash(newTree, now[0]) !== pin.after) fail(`waca counted reviewed member drifted: ${name}`);
+    if (pin.before === null ? was.length !== 0 : (was.length !== 1 || wacaPieceHash(oldTree, was[0]) !== pin.before)) {
+      fail(`waca counted reviewed member previous source mismatch: ${name}`);
+    }
+    assertWacaCountedPieceRules(file, newTree, name, now[0]);
+    edits.push({ start: now[0].getStart(newTree), end: now[0].end, text: pin.before === null ? '' : before.slice(was[0].getStart(oldTree), was[0].end) });
+  }
+  for (const pin of review.statements) {
+    const now = newTree.statements.filter(node => wacaPieceHash(newTree, node) === pin);
+    if (now.length !== 1 || oldTree.statements.some(node => wacaPieceHash(oldTree, node) === pin)) fail('waca counted reviewed import missing or duplicated');
+    if (!ts.isImportDeclaration(now[0]) || !now[0].importClause?.isTypeOnly) fail('waca counted reviewed import is not type-only');
+    edits.push({ start: now[0].getStart(newTree), end: now[0].end, text: '' });
+  }
+  let restored = after;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) restored = restored.slice(0, edit.start) + edit.text + restored.slice(edit.end);
+  wacaCountedRestoringReviewedSource = true;
+  try { assertReviewedProviderContract(file, before, restored); }
+  finally { wacaCountedRestoringReviewedSource = false; }
+}
+// ---- END waca-counted-transition-provider-v1 ----
 
 // ---- BEGIN p02-1a realtime context contract function (exact review p02-phase1a-c1f-guard-v1) ----
 // P0-2 Phase 1a C1f (M-2): Realtime completeness / Fresh / write-fence contract of the sync
@@ -834,6 +923,12 @@ export function assertP02FreshHoldCallers(files) {
 // ---- END p02-1a realtime context contract function ----
 
 export function assertReviewedProviderContract(file, before, after) {
+  // ---- BEGIN waca-counted-transition-provider-v1 dispatch ----
+  if (!wacaCountedRestoringReviewedSource && wacaCountedProviderReviewApplies(file, after)) {
+    assertWacaCountedProviderContract(file, before, after);
+    return;
+  }
+  // ---- END waca-counted-transition-provider-v1 dispatch ----
   // ---- BEGIN p02-1a provider contract dispatch ----
   if (!p02RestoringReviewedSource && p02Phase1aReviewApplies(file, after)) {
     assertP02Phase1aProviderContract(file, before, after);

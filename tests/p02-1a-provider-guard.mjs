@@ -1,4 +1,5 @@
 // P0-2 Phase 1a (C1 + C1a + C1b + C1d) exact provider guard closure: positive and negative proof.
+// + waca-counted-transition-provider-v1 (WACA C17 / 073 provider pieces): positive and negative proof.
 // Runs entirely on local Git objects; no network, no production access.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -120,6 +121,58 @@ await probeCase('readiness adds a dynamic import', readiness, `${rSrc}\nexport c
 await probeCase('observability gains any import (no allowance)', observability, `import { getRealtimeReadiness } from './cloudRealtimeReadiness';\n${oSrc}`, /p02 1a module dependency changed/u);
 await probeCase('fence gains any import (no allowance)', fence, `import { noteRealtimeSystemOk } from './cloudSyncObservability';\n${fSrc}`, /p02 1a module dependency changed/u);
 await probeCase('observability gains network I/O', observability, `${oSrc}\nexport const leak = () => fetch('https://x.invalid');\n`, /network\/persistence I\/O/u);
+
+// ---- waca-counted-transition-provider-v1 (exact review): positive + negative proof
+const wsp = 'src/providers/cloud/supabaseProvider.ts', wdp = 'src/providers/dataProvider.ts';
+const wspAfter = read(wsp), wdpAfter = read(wdp), wspBefore = show(wsp), wdpBefore = show(wdp);
+const WACA_DRIFT = name => new RegExp(`waca counted reviewed member drifted: ${name}`, 'u');
+// Mutations of the counted write are scoped to that member (the legacy commitWacaSnapshot shares some lines).
+const inCounted = (source, from, to) => { const at = source.indexOf('  /** 073 counted transition import'); assert.ok(at > 0, 'counted member anchor missing'); return source.slice(0, at) + mutate(source.slice(at), from, to); };
+pass('POS waca counted: reviewed supabaseProvider pieces accepted, remainder judged by the unchanged rules', () => assertReviewedProviderContract(wsp, wspBefore, wspAfter));
+pass('POS waca counted: reviewed dataProvider pieces accepted, remainder judged by the unchanged rules', () => assertReviewedProviderContract(wdp, wdpBefore, wdpAfter));
+rejects('waca: commitWacaCountedSnapshot drift (message changed)', wsp, wspBefore, inCounted(wspAfter, "throw new Error('WACA 雲端寫入結果無法確認，請先重新讀取訂單與數量。');", "throw new Error('changed');"), WACA_DRIFT('commitWacaCountedSnapshot'));
+rejects('waca: counted write calls another RPC', wsp, wspBefore, inCounted(wspAfter, "supabase.rpc('erp_commit_waca_counted_snapshot'", "supabase.rpc('erp_commit_waca_snapshot'"), WACA_DRIFT('commitWacaCountedSnapshot'));
+rejects('waca: counted write gains a direct table write', wsp, wspBefore, inCounted(wspAfter, '    await this.requireCloudWritePermission();\n    let data: unknown;', "    await this.requireCloudWritePermission();\n    await supabase.from('product_variants').update({ waca_auto_quantity: 0 });\n    let data: unknown;"), WACA_DRIFT('commitWacaCountedSnapshot'));
+rejects('waca: counted write loses the cloud write permission check', wsp, wspBefore, inCounted(wspAfter, '    await this.requireCloudWritePermission();\n    let data: unknown;', '    let data: unknown;'), WACA_DRIFT('commitWacaCountedSnapshot'));
+rejects('waca: Restore epoch read gains a write', wsp, wspBefore, mutate(wspAfter, ".from('erp_cloud_restore_epoch').select('epoch,restored_at')", ".from('erp_cloud_restore_epoch').update({ epoch: 0 }).select('epoch,restored_at')"), WACA_DRIFT('readWacaRestoreEpoch'));
+rejects('waca: reviewed member duplicated', wsp, wspBefore, mutate(wspAfter, '  async readCloudRestoreIntegrityAudit() {', "  async readWacaRestoreEpoch(): Promise<number> { return 0; }\n  async readCloudRestoreIntegrityAudit() {"), /waca counted reviewed member missing or duplicated: readWacaRestoreEpoch/u);
+rejects('waca: reviewed member removed while its import stays', wsp, wspBefore, wspAfter.replace(/ {2}\/\*\* 073 counted transition import[\s\S]*?\n {2}\}\n\n/u, ''), /waca counted reviewed member missing or duplicated: commitWacaCountedSnapshot/u);
+rejects('waca: reviewed type-only import turned into a value import', wsp, wspBefore, mutate(wspAfter, "import type { WacaCountedPlan } from '../../waca/countedImport';", "import { WacaCountedPlan } from '../../waca/countedImport';"), /waca counted reviewed import missing or duplicated/u);
+rejects('waca: extra unreviewed import next to the reviewed one', wsp, wspBefore, mutate(wspAfter, "import type { WacaCountedPlan } from '../../waca/countedImport';", "import type { WacaCountedPlan } from '../../waca/countedImport';\nimport { planWacaCountedImport } from '../../waca/countedImport';"), /unreviewed top-level statement/u);
+rejects('waca: new unreviewed provider member next to the reviewed ones', wsp, wspBefore, mutate(wspAfter, '  async readCloudRestoreIntegrityAudit() {', "  async wacaLeak(): Promise<void> { await supabase.rpc('erp_commit_waca_snapshot', {}); }\n  async readCloudRestoreIntegrityAudit() {"), /unreviewed provider member changed/u);
+rejects('waca: unpinned provider member changed while the reviewed pieces are present', wsp, wspBefore, mutate(wspAfter, 'async canWriteCloud(): Promise<boolean> {', 'async canWriteCloud(): Promise<boolean> {\n    void 0;'), /unreviewed provider member changed/u);
+rejects('waca: legacy auto-quantity refusal removed', wdp, wdpBefore, mutate(wdpAfter, "      if (updateAutoQuantity) throw new Error('WACA_LEGACY_QUANTITY_COMMIT_DISABLED');\n", ''), WACA_DRIFT('commitNextWacaSnapshot'));
+rejects('waca: counted write bypasses the guarded write fence', wdp, wdpBefore, mutate(wdpAfter, 'return this.guardedWrite(() => this.supabaseProvider.commitWacaCountedSnapshot(snapshot, expectedRevision, plan));', 'return this.supabaseProvider.commitWacaCountedSnapshot(snapshot, expectedRevision, plan);'), WACA_DRIFT('commitWacaCountedSnapshot'));
+rejects('waca: counted import enabled outside Cloud', wdp, wdpBefore, mutate(wdpAfter, "    return mode === 'cloud' || mode === 'fallback';\n  }\n  async readWacaRestoreEpoch", "    return true;\n  }\n  async readWacaRestoreEpoch"), WACA_DRIFT('supportsWacaCountedImport'));
+rejects('waca: dataProvider epoch read drift', wdp, wdpBefore, mutate(wdpAfter, 'return this.supabaseProvider.readWacaRestoreEpoch();', 'return { epoch: 0, restoredAt: null };'), WACA_DRIFT('readWacaRestoreEpoch'));
+rejects('waca: previous source of the modified member differs (not the reviewed baseline)', wdp, mutate(wdpBefore, "if (mode !== 'next') throw new Error('WACA_ENVIRONMENT_NOT_SUPPORTED');", "if (mode !== 'next') throw new Error('OTHER');"), wdpAfter, /waca counted reviewed member previous source mismatch: commitNextWacaSnapshot/u);
+rejects('waca: reviewed pieces against a source without a previous version', wdp, null, wdpAfter, /unreviewed waca counted provider exception/u);
+// The hash pin rejects every mutation first. To prove the explicit rules themselves, a temporary copy of the guard
+// with ONLY the member hash comparison disabled judges each mutated source (test-only file, removed afterwards).
+const wacaProbe = async (file, mutated) => {
+  const anchor = "if (wacaPieceHash(newTree, now[0]) !== pin.after) fail(`waca counted reviewed member drifted: ${name}`);";
+  assert.equal(guardSource.split(anchor).length, 2, 'waca hash check anchor must appear exactly once');
+  const temp = fileURLToPath(new URL(`../scripts/.waca-rule-probe-${process.pid}-${probeSeq += 1}.mjs`, import.meta.url));
+  writeFileSync(temp, guardSource.replace(anchor, '/* hash check disabled for the rule probe */'));
+  try { (await import(pathToFileURL(temp).href)).assertReviewedProviderContract(file, file === wsp ? wspBefore : wdpBefore, mutated); return null; }
+  catch (error) { return error; } finally { unlinkSync(temp); }
+};
+const wacaRule = async (name, file, mutated, pattern) => {
+  const error = await wacaProbe(file, mutated);
+  pass(`${pattern ? 'NEG' : 'POS'} waca rule: ${name}`, () => { if (pattern) assert.match(String(error?.message), pattern); else assert.equal(error, null); });
+};
+await wacaRule('probe sanity, reviewed supabaseProvider accepted without the hash check', wsp, wspAfter, null);
+await wacaRule('probe sanity, reviewed dataProvider accepted without the hash check', wdp, wdpAfter, null);
+await wacaRule('counted write may call only erp_commit_waca_counted_snapshot', wsp, inCounted(wspAfter, "supabase.rpc('erp_commit_waca_counted_snapshot'", "supabase.rpc('erp_commit_waca_snapshot'"), /waca counted write may call only erp_commit_waca_counted_snapshot/u);
+await wacaRule('counted write may call the RPC only once', wsp, inCounted(wspAfter, '    if (error) { markCloudRequestFailed(error); throw error; }\n    const revision', "    if (error) { markCloudRequestFailed(error); throw error; }\n    await supabase.rpc('erp_commit_waca_counted_snapshot', {});\n    const revision"), /waca counted write may call only erp_commit_waca_counted_snapshot/u);
+await wacaRule('counted write never writes a table directly', wsp, inCounted(wspAfter, '    await this.requireCloudWritePermission();\n    let data: unknown;', "    await this.requireCloudWritePermission();\n    await supabase.from('product_variants').update({ waca_auto_quantity: 0 });\n    let data: unknown;"), /waca counted reviewed code writes to Cloud directly: commitWacaCountedSnapshot/u);
+await wacaRule('counted write keeps the cloud write permission check', wsp, inCounted(wspAfter, '    await this.requireCloudWritePermission();\n    let data: unknown;', '    let data: unknown;'), /waca counted write lost the cloud write permission check/u);
+await wacaRule('Restore epoch read stays read-only (no write)', wsp, mutate(wspAfter, ".from('erp_cloud_restore_epoch').select('epoch,restored_at')", ".from('erp_cloud_restore_epoch').update({ epoch: 0 }).select('epoch,restored_at')"), /waca counted reviewed code writes to Cloud directly: readWacaRestoreEpoch/u);
+await wacaRule('Restore epoch read stays read-only (no RPC)', wsp, mutate(wspAfter, "const result = await supabase.from('erp_cloud_restore_epoch')", "await supabase.rpc('erp_reset', {});\n    const result = await supabase.from('erp_cloud_restore_epoch')"), /waca counted reviewed code calls an RPC: readWacaRestoreEpoch/u);
+await wacaRule('Restore epoch read reads only erp_cloud_restore_epoch', wsp, mutate(wspAfter, ".from('erp_cloud_restore_epoch').select('epoch,restored_at')", ".from('inventory_items').select('epoch,restored_at')"), /waca restore epoch read is not the exact read-only epoch select/u);
+await wacaRule('legacy WACA auto-quantity write stays refused', wdp, mutate(wdpAfter, "      if (updateAutoQuantity) throw new Error('WACA_LEGACY_QUANTITY_COMMIT_DISABLED');\n", ''), /waca legacy auto-quantity write is not refused/u);
+await wacaRule('counted write keeps the guarded write fence', wdp, mutate(wdpAfter, 'return this.guardedWrite(() => this.supabaseProvider.commitWacaCountedSnapshot(snapshot, expectedRevision, plan));', 'return this.supabaseProvider.commitWacaCountedSnapshot(snapshot, expectedRevision, plan);'), /waca counted write bypasses the guarded write fence/u);
+await wacaRule('dataProvider pieces never call an RPC', wdp, mutate(wdpAfter, 'return this.supabaseProvider.readWacaRestoreEpoch();', "await this.supabaseProvider.rpc('erp_x');\n    return this.supabaseProvider.readWacaRestoreEpoch();"), /waca counted reviewed code calls an RPC: readWacaRestoreEpoch/u);
 
 const failed = results.filter(r => !r.ok);
 console.log(JSON.stringify({ suite: 'P02_1A_PROVIDER_GUARD', total: results.length, passed: results.length - failed.length, failed: failed.length }, null, 1));
