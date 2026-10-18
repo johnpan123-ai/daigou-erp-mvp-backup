@@ -7079,6 +7079,146 @@
           "schemaExpectation": "Schema-neutral; no migration."
         }
       ]
+    },
+    {
+      "id": "egress-realtime-full-read-budget-v1",
+      "beforeHead": "7aa11a55e2515529af4a9674034bcf0e42bb1ac7",
+      "reviewedHead": "6b5f51b3a4435622e8087eeb3026fdd3c21a94af",
+      "patchSha256": "ad564f5e762dc1c70b7751b8859fc9e0a7b921303cdb0cd77ed48d4ca84fefa7",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "realtime",
+        "cas",
+        "draft",
+        "buyanime-cache-authority",
+        "cloud-next",
+        "registry",
+        "execute-envelope",
+        "buyanime-lint-delta",
+        "buyanime-provider"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "e163316b45cbe88f8983403e361ce76f6c33a727e2310cd5ef5f7e68f1144b7a",
+          "afterHash": "3fc7540427024bbfce8110c0aa1acafa8933b3dabb282a5a39536afb4ce4d79d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P02_CTX_PINS.context.syncEngine (exact pin only)"
+          ],
+          "changedInputs": "Release-control only. Owner approval 2026-10-18 08:01 +08: only P02_CTX_PINS.context.syncEngine changes, to 0024b2c2 = the canonical digest of the reviewed E1 sync engine (ERP2_EGRESS_E1_r1.patch 8c13e22d).",
+          "changedOutputs": "The Realtime context is accepted only when its sync engine is exactly the reviewed E1 engine. Every other pin (imports, top-level statements, boundary statements, banner, presentation, recovery policy), the protected-identifier containment and every other Guard rule are unchanged.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Guard evaluation only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/contexts/CloudRealtimeSyncContext.tsx",
+          "beforeHash": "e1f4b977261f1bfd711b0641d06cbda8d64e280f14210f5952b53d35d4dc894e",
+          "afterHash": "985dac9f1802697fac207b1a95495149b99ba75a259b770e5922b682b44f129d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "sync engine: full authoritative catch-up admission (waitForFullReadAdmission / admitFullRead)",
+            "focus / visibility / cross-tab handlers",
+            "epoch handler budget re-open",
+            "manual reconnect grant"
+          ],
+          "changedInputs": "Egress P0: a Realtime channel that never confirms listening re-read all cached tables every ~75 s without limit (100.93 MB per 5 min per tab); a persistently failing read restarted immediately after the bounded retries (128 MB per 2 min); hidden tabs re-read on every rejoin.",
+          "changedOutputs": "Automatic authoritative full reads are admitted at most once while listening is unconfirmed and three times per withheld-Fresh period, at most six per hour, and never in a hidden tab. A withheld read is one pending I/O-free attempt (no retry loop) that resumes when the tab is visible, the user focuses / returns / reconnects manually (at most every 30 s), listening is confirmed, a Restore epoch changes (always re-verified) or the budget re-opens (proof). The completeness hold, readiness proof, epoch barrier, write fence and presentation are unchanged: nothing withheld is ever shown as synced or writable.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Realtime events / focus / visibility -> catch-up admission -> unchanged coordinator.fallback(reconnect) -> unchanged authoritative read and proof.",
+          "persistenceBehavior": "NONE (fewer reads only).",
+          "writePath": "Unchanged.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/buyanime-cloud-provider.mjs",
+          "beforeHash": "1e4191f8d080bc4f4e12978d62ff2eb3dc628dee43591b5157805b215cd33537",
+          "afterHash": "a5d209962e981f3f130bbdb38bd274ad9a6eee7ca45c163bd48af24cafe4e513",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "test server port only (BUYANIME_PROVIDER_TEST_PORT, default 4291)"
+          ],
+          "changedInputs": "Test-only. Owner request 2026-10-18 13:21 +08: fixed port 4291 is held by a running catalog SEO next-server that must not be stopped. The Vite test server port and the page URL now come from the same optional BUYANIME_PROVIDER_TEST_PORT (default unchanged 4291, strictPort unchanged).",
+          "changedOutputs": "NONE: every assertion, fixture, provider call and the real-Chrome flow are byte-identical; only where the isolated test server listens can be chosen by the release port plan.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/fixtures/egress-fake-supabase.mjs",
+          "beforeHash": null,
+          "afterHash": "67efb8848cbd32ed34bafad6623897c8292ca1b63f65d9891bdff5ec107735f5",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Isolated fake Supabase (REST/Auth/Realtime) fixture"
+          ],
+          "changedInputs": "Test-only (backup data via environment, never in Git).",
+          "changedOutputs": "NONE for the product. C16 fails it (6 unproven full reads in 3 min).",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/realtime-full-read-budget.mjs",
+          "beforeHash": null,
+          "afterHash": "71662915e1cda961443780e288804b2b57fbbec132048c6aea4e376c8feac798",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Realtime full-read budget regression (real app, isolated fake Supabase, no network)"
+          ],
+          "changedInputs": "Test-only (backup data via environment, never in Git).",
+          "changedOutputs": "NONE for the product. C16 fails it (6 unproven full reads in 3 min).",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "NONE.",
+          "providerPath": "NONE.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: ERP2_SEMANTIC_SCHEMA_V3 canonical unchanged; no migration.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
