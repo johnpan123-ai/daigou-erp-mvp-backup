@@ -13,10 +13,21 @@ export type WacaCutoverMode =
   | 'ORDER_REBASELINE_REQUIRED'
   | 'ORDER_DRIVEN_ACTIVE';
 
+export interface WacaTransitionBaseline {
+  contract: 'waca-counted-import-v1';
+  restoreEpoch: number;
+  baselineAt: string;
+  restoreSnapshotFingerprint?: string | null;
+  previousMode?: WacaCutoverMode;
+  establishedAt: string;
+}
+
 export interface WacaCutoverState {
   mode: WacaCutoverMode;
   updatedAt: string;
   sourceBackupFormatVersion: number | null;
+  /** Set by the first counted transition import (073); restored with ERP2 v2 backups. */
+  transition?: WacaTransitionBaseline;
 }
 
 export type WorkbenchBackupKind = 'legacy-pre-waca' | 'waca-unversioned' | 'waca-v2';

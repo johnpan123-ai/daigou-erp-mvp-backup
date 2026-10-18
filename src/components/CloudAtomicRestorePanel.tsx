@@ -59,6 +59,8 @@ import { getProviderMode } from '../providers/providerMode';
 import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import CloudRestoreIntegrityAuditTool from './CloudRestoreIntegrityAudit';
 import { normalizeCloudRestoreCandidateVariants, type CloudRestoreVariantNormalizationRecord } from '../lib/cloudRestoreVariantNormalization';
+import { assessWacaRestoreLoss, type WacaRestoreLossReport } from '../waca/restoreLoss';
+import { WacaRestoreLossNotice } from './WacaRestoreLossNotice';
 import { verifyCommittedRestore, RestoreReadbackError, classifyRestoreReadbackError,
   type RestoreVerificationSummary, type RestoreVerificationIdentity } from '../providers/cloud/cloudRestorePostCommit';
 
@@ -123,6 +125,8 @@ export default function CloudAtomicRestorePanel({
   const [candidateGeneration, setCandidateGeneration] = useState(0);
   const [sourceCandidate, setSourceCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [variantNormalization, setVariantNormalization] = useState<CloudRestoreVariantNormalizationRecord | null>(null);
+  const [wacaRestoreLoss, setWacaRestoreLoss] = useState<WacaRestoreLossReport | null>(null);
+  const [wacaRestoreLossAcknowledged, setWacaRestoreLossAcknowledged] = useState(false);
   const [candidate, setCandidate] = useState<CloudRestoreCandidate | null>(null);
   const [proofRecord, setProofRecord] = useState<CloudRestoreCandidateProofRecord | null>(null);
   const [proofMessage, setProofMessage] = useState('尚未完成安全檢查');
@@ -267,6 +271,8 @@ export default function CloudAtomicRestorePanel({
     setCandidate(null);
     setSourceCandidate(null);
     setVariantNormalization(null);
+    setWacaRestoreLoss(null);
+    setWacaRestoreLossAcknowledged(false);
     setResult(null);
     setVerificationSummary(null);
     setVerificationError(null);
@@ -304,6 +310,8 @@ export default function CloudAtomicRestorePanel({
     setCandidate(null);
     setSourceCandidate(null);
     setVariantNormalization(null);
+    setWacaRestoreLoss(null);
+    setWacaRestoreLossAcknowledged(false);
     setResult(null);
     setVerificationSummary(null);
     setVerificationError(null);
@@ -357,6 +365,10 @@ export default function CloudAtomicRestorePanel({
       if (!variantStep.candidate) throw variantStep.error;
       source = variantStep.candidate;
       finishPhase('variantNormalization');
+      // WACA work in ERP2 that this backup lacks is shown before any write (a Restore never re-applies it).
+      const wacaLossReport = assessWacaRestoreLoss(await dataProvider.getNextWacaSnapshot(), source.data);
+      if (candidateGenerationRef.current !== generation) return;
+      setWacaRestoreLoss(wacaLossReport);
       const preserveAuditIdentity = !source.legacyWacaBackup
         && await dataProvider.canPreserveCloudRestoreAuditIdentity(source);
       const portable = preserveAuditIdentity ? source
@@ -776,6 +788,7 @@ export default function CloudAtomicRestorePanel({
 
   const confirmRestore = () => {
     if (!candidate || !allowed || !proofCurrent || inFlightRef.current || pendingAttemptRef.current || submissionLockedRef.current) return;
+    if (wacaRestoreLoss?.atRisk && !wacaRestoreLossAcknowledged) return;
     const identity = readOrCreateCloudRestoreIntentIdentity(candidate.executionFingerprint, retryKeys.current,
       { newIntent: freshIntentRef.current });
     freshIntentRef.current = false;
@@ -853,12 +866,13 @@ export default function CloudAtomicRestorePanel({
           <p style={{ margin: '4px 0' }}>資料類別：{candidate.manifest.resourceCount} 個</p>
           {candidate.legacyWacaBackup && <p style={{ margin: '4px 0' }}>
             此備份建立於 WACA 訂單系統啟用前。還原後會保留當時的 WACA 數量，
-            並標記需要匯入完整 WACA 歷史訂單；匯入後會由訂單重新計算並取代舊數量。
+            下次匯入 WACA 時會建立新的接管基準，歷史數量不會因匯入不完整而自動減少。
             舊備份也不含首頁圖片與期限對照，因此會保留目前的首頁圖片和期限對照，不會當成空資料清除。
           </p>}
           <p style={{ margin: '4px 0' }}>安全檢查：已通過</p>
           {candidate.portability && <p data-testid="cloud-restore-portability-summary" style={{ margin: '4px 0' }}>系統已自動處理跨環境欄位。</p>}
           <p style={{ margin: '10px 0' }}>目前測試環境的資料將由這份備份取代。</p>
+          <WacaRestoreLossNotice report={wacaRestoreLoss} acknowledged={wacaRestoreLossAcknowledged} onAcknowledge={setWacaRestoreLossAcknowledged} />
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
             <button type="button" className="btn btn-primary" data-testid="cloud-restore-confirm" onClick={confirmRestore}>確認還原</button>
             <button type="button" className="btn btn-outline" data-testid="cloud-restore-cancel" onClick={cancelPreparedRestore}>取消</button>

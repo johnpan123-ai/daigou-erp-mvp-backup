@@ -24,11 +24,13 @@ const groups = populated ? [{ id: 'group-a', title, normalized_title: displayTit
   product_url: '', created_at: '', updated_at: '' }] : [];
 const variants = populated ? [10, 2, 1].map(n => ({ id: `variant-${n}`, product_group_id: 'group-a',
   myacg_item_code: `G${n}`, product_title: title, variant_name: `規格${n}`, raw_variant_name: `規格${n}`,
-  note: '', sort_order: n, waca_auto_quantity: 0, waca_manual_adjustment: 0 })) : [];
+  note: '', sort_order: n, waca_auto_quantity: 0,
+  waca_manual_adjustment: params.get('history') === '1' ? ({ 10: 10, 2: 3, 1: 0 })[n] : 0 })) : [];
 const inventory = variants.map(row => ({ id: row.id, inventory_key: row.id,
   myacg_item_code: row.myacg_item_code, myacg_parent_code: 'GP-A', product_title: title,
   raw_variant_name: row.variant_name, listing_type: '', final_price: 100, myacg_sold_quantity: 0 }));
-let snapshot = { revision: 0, orders: [], items: [], mappings: [], batches: [], masterLinks: [], cutoverAudit: [] };
+let snapshot = { revision: 0, orders: [], items: [], mappings: [], batches: [], masterLinks: [], cutoverAudit: [],
+  ...(params.get('history') === '1' ? { cutoverState: { mode: 'ORDER_REBASELINE_REQUIRED', updatedAt: '1970-01-01T00:00:00.000Z', sourceBackupFormatVersion: 1 } } : {}) };
 if (params.get('pending') === '1') {
   const items = Array.from({length:84},(_,n)=>{
     const featureNumber=n<45?n:n-45;
@@ -52,7 +54,9 @@ supabase.from = table => {
   const builder = {
     select() { return builder; }, is() { return builder; }, order() { return builder; },
     eq() { return builder; }, limit() { return builder; },
-    async single() { return { data: { role: params.get('role') || 'owner' }, error: null }; },
+    async single() { return table === 'erp_cloud_restore_epoch' ? { data: params.get('history') === '1'
+        ? { epoch: 5, restored_at: '2026-10-16T02:20:45+00:00' } : { epoch: 0, restored_at: null }, error: null }
+      : { data: { role: params.get('role') || 'owner' }, error: null }; },
     async range() {
       calls.tables[table] = (calls.tables[table] || 0) + 1;
       // Real catalog bootstrap completes after the first cache-read opportunity.
@@ -71,7 +75,8 @@ supabase.rpc = async (name, args) => {
     return readFailure ? { data: null, error: { message: '隔離測試：訂單讀取失敗' } }
       : { data: clone(snapshot), error: null };
   }
-  if (name === 'erp_commit_waca_snapshot') {
+  if (name === 'erp_commit_waca_snapshot' || name === 'erp_commit_waca_counted_snapshot') {
+    if (name === 'erp_commit_waca_counted_snapshot') calls.countedCommits = (calls.countedCommits || 0) + 1;
     calls.commits++;
     if (args.p_expected_revision !== snapshot.revision) return { data: null, error: { message: 'stale revision' } };
     const delta = clone(args.p_snapshot);
@@ -88,12 +93,33 @@ supabase.rpc = async (name, args) => {
       masterLinks: merge(snapshot.masterLinks, delta.masterLinks, row => row.childCode),
       cutoverAudit: merge(snapshot.cutoverAudit ?? [], delta.cutoverAudit ?? [], row => row.productVariantId),
     };
+    if (name === 'erp_commit_waca_counted_snapshot') {
+      // Emulates the 073 server outcome: auto = effective ledger, display = reviewed expectation.
+      calls.lastCounted = clone(args);
+      const effective = new Map();
+      for (const item of snapshot.items) {
+        const order = snapshot.orders.find(row => row.key === item.orderKey);
+        if (item.productVariantId && order && ['處理中', '完成付款'].includes(order.status))
+          effective.set(item.productVariantId, (effective.get(item.productVariantId) ?? 0) + item.quantity);
+      }
+      for (const variant of variants) {
+        const auto = effective.get(variant.id) ?? 0;
+        const expected = args.p_plan.expectedDisplay[variant.id];
+        const display = expected ? expected.after : variant.waca_auto_quantity + variant.waca_manual_adjustment;
+        variant.waca_auto_quantity = auto; variant.waca_manual_adjustment = display - auto;
+      }
+      if (!snapshot.cutoverAudit.length) snapshot.cutoverAudit = variants.map(variant => ({ productVariantId: variant.id,
+        sku: variant.myacg_item_code, legacyWacaQuantity: 0, newOrderDerivedQuantity: variant.waca_auto_quantity }));
+    }
+    if (name === 'erp_commit_waca_counted_snapshot') snapshot.cutoverState = { mode: 'ORDER_DRIVEN_ACTIVE', updatedAt: '2026-10-18T00:00:00Z',
+      sourceBackupFormatVersion: null, transition: snapshot.cutoverState?.transition ?? { contract: 'waca-counted-import-v1', restoreEpoch: 0,
+        baselineAt: '2026-10-18T00:00:00.000000Z', establishedAt: '2026-10-18T00:00:00Z' } };
     return { data: { revision: snapshot.revision }, error: null };
   }
   throw new Error(`Unexpected fixture RPC ${name}`);
 };
 window.wacaUiFixture = {
-  calls: () => clone(calls), recover() { readFailure = false; },
+  calls: () => clone(calls), variants: () => clone(variants), snapshot: () => clone(snapshot), recover() { readFailure = false; },
   async providerCommit() {
     markCloudReadFresh(variants.length);
     const current = await dataProvider.getNextWacaSnapshot();

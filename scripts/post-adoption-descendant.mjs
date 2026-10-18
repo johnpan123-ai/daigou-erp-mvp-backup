@@ -222,6 +222,50 @@ const RESTORE_VARIANT_NORMALIZATION_PANEL_ADDITIONS = Object.freeze([
       </div>}
 `, 1],
 ]);
+export const WACA_TRANSITION_RESTORE_REVIEW = 'waca-counted-transition-restore-v1';
+const WACA_TRANSITION_PANEL_ADDITIONS = Object.freeze([
+  ["import { assessWacaRestoreLoss, type WacaRestoreLossReport } from '../waca/restoreLoss';\nimport { WacaRestoreLossNotice } from './WacaRestoreLossNotice';\n", 1],
+  ['  const [wacaRestoreLoss, setWacaRestoreLoss] = useState<WacaRestoreLossReport | null>(null);\n  const [wacaRestoreLossAcknowledged, setWacaRestoreLossAcknowledged] = useState(false);\n', 1],
+  ['    setWacaRestoreLoss(null);\n    setWacaRestoreLossAcknowledged(false);\n', 2],
+  [`      // WACA work in ERP2 that this backup lacks is shown before any write (a Restore never re-applies it).
+      const wacaLossReport = assessWacaRestoreLoss(await dataProvider.getNextWacaSnapshot(), source.data);
+      if (candidateGenerationRef.current !== generation) return;
+      setWacaRestoreLoss(wacaLossReport);
+`, 1],
+  ['    if (wacaRestoreLoss?.atRisk && !wacaRestoreLossAcknowledged) return;\n', 1],
+  ['          <WacaRestoreLossNotice report={wacaRestoreLoss} acknowledged={wacaRestoreLossAcknowledged} onAcknowledge={setWacaRestoreLossAcknowledged} />\n', 1],
+]);
+const WACA_TRANSITION_PANEL_REPLACEMENTS = Object.freeze([
+  ['            下次匯入 WACA 時會建立新的接管基準，歷史數量不會因匯入不完整而自動減少。',
+    '            並標記需要匯入完整 WACA 歷史訂單；匯入後會由訂單重新計算並取代舊數量。'],
+]);
+/** Exact review waca-counted-transition-restore-v1: only the WACA Restore pre-check additions, one
+ * reworded legacy notice, and exactly one added read-only provider port (getNextWacaSnapshot). */
+export function assertWacaTransitionPanelContract(previous, after) {
+  if (previous === null || after === null) fail('WACA transition panel requires the exact reviewed previous source');
+  let restored = after.replace(/\r\n?/gu, '\n');
+  for (const [text, count] of WACA_TRANSITION_PANEL_ADDITIONS) {
+    if (restored.split(text).length - 1 !== count) fail('WACA transition panel addition missing, changed or repeated');
+    restored = restored.split(text).join('');
+  }
+  for (const [now, was] of WACA_TRANSITION_PANEL_REPLACEMENTS) {
+    if (restored.split(now).length - 1 !== 1) fail('WACA transition panel replacement missing or repeated');
+    restored = restored.replace(now, was);
+  }
+  if (restored !== previous.replace(/\r\n?/gu, '\n')) fail('restore panel changed beyond the exact WACA transition additions');
+  const file = 'src/components/CloudAtomicRestorePanel.tsx';
+  const ports = source => {
+    const tree = parse(file, source);
+    return nodes(tree).filter(ts.isCallExpression).filter(node =>
+      /dataProvider\.|executeRestore|checkRestoreOutcome|prepareCloudRestore|verifyCloudRestore|refreshAuthoritative|restoreCloudDeadline/u
+        .test(node.expression.getText(tree))).map(node => canonical(tree, node));
+  };
+  const added = ports(after).filter(port => !ports(previous).includes(port));
+  if (added.length !== 1 || !added[0].includes('getNextWacaSnapshot')
+    || JSON.stringify(ports(after).filter(port => port !== added[0])) !== JSON.stringify(ports(previous))) {
+    fail('WACA transition panel may only add the read-only WACA snapshot port');
+  }
+}
 export function assertRestoreVariantNormalizationPanelContract(previous, after) {
   if (previous === null || after === null) fail('restore variant normalization panel requires the exact reviewed previous source');
   let restored = after.replace(/\r\n?/gu, '\n');
@@ -1098,6 +1142,14 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
       return true;
     }
     // ---- END restore-variant-duplicate-normalization-v1 ----
+    // ---- BEGIN waca-counted-transition-restore-v1 (exact review) ----
+    if (file === 'src/components/CloudAtomicRestorePanel.tsx'
+      && reviewed?.review.id === WACA_TRANSITION_RESTORE_REVIEW
+      && reviewed.row.classification === 'APPLICATION_DOMAIN_ONLY') {
+      assertWacaTransitionPanelContract(git(['show', `${reviewed.review.beforeHead}:${file}`]), after);
+      return true;
+    }
+    // ---- END waca-counted-transition-restore-v1 ----
     if (file !== 'src/providers/cloud/cloudAtomicRestore.ts'
       || reviewed?.review.id !== 'erp1-v1-outbound-timestamp-adapter-v1'
       || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;

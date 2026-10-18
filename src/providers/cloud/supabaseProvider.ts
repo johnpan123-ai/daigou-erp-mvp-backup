@@ -89,6 +89,7 @@ import { CATALOG_RECONCILE_RPC } from './catalogTransaction';
 import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackupDiagnostic } from './cloudBackupDiagnostics';
 import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError, type RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
+import type { WacaCountedPlan } from '../../waca/countedImport';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
 import { isCloudRestoreFailureCode } from './cloudRestoreFailure';
@@ -480,6 +481,38 @@ export class SupabaseProvider implements IDataProvider {
     }
     return revision;
   }
+  /** 073 counted transition import (owner-only RPC). Same CAS revision contract as commitWacaSnapshot. */
+  async commitWacaCountedSnapshot(
+    snapshot: NextWacaSnapshot, expectedRevision: number, plan: WacaCountedPlan,
+  ): Promise<number> {
+    await this.requireCloudWritePermission();
+    let data: unknown;
+    let error: unknown;
+    try {
+      ({ data, error } = await supabase.rpc('erp_commit_waca_counted_snapshot', {
+        p_snapshot: snapshot, p_expected_revision: expectedRevision, p_plan: plan,
+      }));
+    } catch (cause) { markCloudRequestFailed(cause); throw cause; }
+    if (error) { markCloudRequestFailed(error); throw error; }
+    const revision = Number((data as { revision?: unknown } | null)?.revision);
+    if (!Number.isSafeInteger(revision) || revision !== expectedRevision + 1) {
+      throw new Error('WACA 雲端寫入結果無法確認，請先重新讀取訂單與數量。');
+    }
+    markCloudReachable();
+    this.isPulled = false;
+    this.pullPromise = null;
+    return revision;
+  }
+
+  async readWacaRestoreEpoch(): Promise<{ epoch: number; restoredAt: string | null }> {
+    const result = await supabase.from('erp_cloud_restore_epoch').select('epoch,restored_at').eq('singleton', true).single();
+    if (result.error) { markCloudRequestFailed(result.error); throw result.error; }
+    const epoch = Number(result.data?.epoch);
+    if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error('WACA_RESTORE_EPOCH_INVALID');
+    markCloudReachable();
+    return { epoch, restoredAt: result.data?.restored_at ?? null };
+  }
+
   async readCloudRestoreIntegrityAudit() {
     return readCloudRestoreIntegrityAudit(supabase);
   }

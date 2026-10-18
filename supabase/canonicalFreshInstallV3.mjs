@@ -71,6 +71,7 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '070_catalog_set_based_commit_and_reconciliation.sql',
   '071_restore_postcommit_readonly_verification.sql',
   '072_inventory_import_set_based_receipt.sql',
+  '073_waca_counted_transition_import.sql',
 ]);
 
 // Checksum-bearing source history. These artifacts remain reviewable and are
@@ -110,6 +111,7 @@ export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
   '070_catalog_set_based_commit_and_reconciliation.sql',
   '071_restore_postcommit_readonly_verification.sql',
   '072_inventory_import_set_based_receipt.sql',
+  '073_waca_counted_transition_import.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,

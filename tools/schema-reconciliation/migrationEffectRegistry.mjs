@@ -42,6 +42,20 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '073': {
+    sourceFile: '073_waca_counted_transition_import.sql', dependencies: ['023', '044'],
+    risk: 'WACA_TRANSITION_COUNTED_IMPORT', idempotency: 'ADDITIVE_FUNCTION',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [table('waca_order_items'), table('waca_state'), table('erp_cloud_restore_epoch'),
+      fn('erp_commit_waca_snapshot(jsonb,bigint,boolean)')],
+    postconditions: [fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
+      publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      definitionIncludes: ['erp_commit_waca_snapshot(p_snapshot, p_expected_revision, false)', 'WACA_RESTORE_EPOCH_CHANGED',
+        'WACA_COUNTED_PREVIEW_MISMATCH', 'WACA_COUNTED_NEGATIVE_DISPLAY', 'WACA_OVERWRITE_NOT_FULLY_COUNTED'],
+    })],
+  },
   '072': {
     sourceFile: '072_inventory_import_set_based_receipt.sql', dependencies: ['058', '071'],
     risk: 'INVENTORY_ATOMIC_EXECUTION_OPTIMIZATION', idempotency: 'ADDITIVE_FUNCTION',

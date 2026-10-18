@@ -21,6 +21,9 @@ export interface WacaBatch {
   result: WacaImportResult;
   conflictRows: WacaRow[];
   reconciliation?: { status: 'PASS' | 'FAIL'; passed: number; total: number; effectiveQuantity: number; checkedAt: string };
+  /** 073 transition import decisions (per-variant mode and quantities), kept with the batch for audit / v2 Restore. */
+  transition?: { contract: string; restoreEpoch: number; variants: Array<{ variantId: string; mode: string; before: number;
+    ledger: number; countedDelta: number; after: number; pending: number }> };
 }
 
 export interface WacaCutoverAudit {

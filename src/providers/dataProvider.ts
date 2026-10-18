@@ -43,6 +43,7 @@ import {
   readNextWacaSnapshot, commitNextWacaSnapshot,
   type NextWacaSnapshot,
 } from '../waca/nextStorage';
+import type { WacaCountedPlan } from '../waca/countedImport';
 import { classifyWorkbenchBackup } from '../waca/backupFormat';
 import { readDeadlineDurableBackup, restoreDeadlineDurableBackup,
   validateDeadlineDurableBackup } from '../lib/closingDateSidecarBackup';
@@ -477,6 +478,9 @@ class DynamicDataProvider implements IDataProvider {
   ): Promise<number> {
     const mode = getProviderMode();
     if (mode === 'cloud' || mode === 'fallback') {
+      // Cloud WACA quantities are written only through the counted transition RPC (073). The legacy
+      // quantity path would zero the ERP1 historical quantity on a first cutover, so it is refused here.
+      if (updateAutoQuantity) throw new Error('WACA_LEGACY_QUANTITY_COMMIT_DISABLED');
       return this.guardedWrite(() => this.supabaseProvider.commitWacaSnapshot(snapshot, expectedRevision, updateAutoQuantity));
     }
     if (mode !== 'next') throw new Error('WACA_ENVIRONMENT_NOT_SUPPORTED');
@@ -485,6 +489,19 @@ class DynamicDataProvider implements IDataProvider {
       if (updateAutoQuantity) notifyLocalVariantCollectionChanged();
       return revision;
     });
+  }
+  /** WACA transition import (073). Cloud only; NEXT keeps the existing local writer. */
+  supportsWacaCountedImport(): boolean {
+    const mode = getProviderMode();
+    return mode === 'cloud' || mode === 'fallback';
+  }
+  async readWacaRestoreEpoch(): Promise<{ epoch: number; restoredAt: string | null }> {
+    if (!this.supportsWacaCountedImport()) throw new Error('WACA_COUNTED_IMPORT_CLOUD_ONLY');
+    return this.supabaseProvider.readWacaRestoreEpoch();
+  }
+  async commitWacaCountedSnapshot(snapshot: NextWacaSnapshot, expectedRevision: number, plan: WacaCountedPlan): Promise<number> {
+    if (!this.supportsWacaCountedImport()) throw new Error('WACA_COUNTED_IMPORT_CLOUD_ONLY');
+    return this.guardedWrite(() => this.supabaseProvider.commitWacaCountedSnapshot(snapshot, expectedRevision, plan));
   }
   async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');

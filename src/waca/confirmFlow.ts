@@ -1,4 +1,5 @@
 import type { ProductVariant } from '../lib/db';
+import type { WacaCountedPlan } from './countedImport';
 import type { NextWacaSnapshot } from './nextStorage';
 import { reconcileWacaReadback } from './reconciliation';
 import type { WacaStage } from './importErrors';
@@ -126,5 +127,48 @@ export async function commitAndVerifyWacaRematch(options: {
   if (checked.issues.some(issue => issue.reason !== 'UNMATCHED_SOURCE')) {
     throw new Error('WACA_READBACK_QUANTITY_MISMATCH');
   }
+  return { snapshot, variants, checked };
+}
+
+export interface WacaCountedConfirmProvider {
+  getNextWacaSnapshot(): Promise<NextWacaSnapshot>;
+  getAuthoritativeWacaVariants(): Promise<ProductVariant[]>;
+  commitWacaCountedSnapshot(snapshot: NextWacaSnapshot, revision: number, plan: WacaCountedPlan): Promise<unknown>;
+}
+
+/** 073 counted transition commit: same delta, CAS, receipt and read-back as commitAndVerifyWaca,
+ * plus an exact check that every planned variant quantity equals the reviewed preview. */
+export async function commitAndVerifyWacaCounted(options: {
+  provider: WacaCountedConfirmProvider; current: NextWacaSnapshot; candidate: NextWacaSnapshot;
+  plan: WacaCountedPlan; requestId: string | null; onStage?: (stage: WacaStage) => void;
+}) {
+  const { provider, current, candidate, plan, requestId } = options;
+  const onStage = options.onStage ?? (() => undefined);
+  const payload = wacaAtomicDelta(current, candidate);
+  const verify = (saved: NextWacaSnapshot) => requestId
+    ? assertReceipt(saved, candidate, requestId, current.revision) : assertState(saved, candidate, current.revision);
+  onStage('commit');
+  let saved: NextWacaSnapshot | undefined;
+  try {
+    await provider.commitWacaCountedSnapshot(payload, current.revision, plan);
+  } catch (error) {
+    try { saved = await provider.getNextWacaSnapshot(); verify(saved); } catch { throw error; }
+  }
+  onStage('readback');
+  const [snapshot, variants] = await Promise.all([
+    saved ? Promise.resolve(saved) : provider.getNextWacaSnapshot(),
+    provider.getAuthoritativeWacaVariants(),
+  ]);
+  verify(snapshot);
+  const checked = reconcileWacaReadback(snapshot, variants);
+  if (checked.issues.some(issue => issue.reason !== 'UNMATCHED_SOURCE')) throw new Error('WACA_READBACK_QUANTITY_MISMATCH');
+  const byId = new Map(variants.map(row => [row.id, row]));
+  for (const [variantId, expected] of Object.entries(plan.expectedDisplay)) {
+    const variant = byId.get(variantId);
+    if (!variant || Number(variant.waca_auto_quantity ?? 0) + Number(variant.waca_manual_adjustment ?? 0) !== expected.after) {
+      throw new Error('WACA_READBACK_PREVIEW_MISMATCH');
+    }
+  }
+  if (snapshot.cutoverState?.mode !== 'ORDER_DRIVEN_ACTIVE') throw new Error('WACA_READBACK_TRANSITION_MISSING');
   return { snapshot, variants, checked };
 }

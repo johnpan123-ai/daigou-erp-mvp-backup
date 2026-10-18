@@ -73,7 +73,14 @@ export interface WacaItem {
     | 'PARENT_NAME_CONFLICT' | 'SPEC_NAME_NOT_MATCHED' | 'SOURCE_SPEC_IDENTITY_CONFLICT' | null;
   resolution?: WacaResolution;
   candidateCount?: number;
+  /** Transition contract (073): part of this item already reflected in the WACA quantity. */
+  countedQuantity?: number;
+  countedReason?: WacaCountedReason;
+  countedBy?: string;
 }
+
+export type WacaCountedReason = 'LEGACY_COUNTED' | 'NEW_AFTER_BASELINE' | 'OWNER_CONFIRMED_NEW'
+  | 'SOURCE_CHANGE_APPLIED' | 'OVERWRITE' | 'BASELINE_INCLUDED' | 'PENDING_REVIEW' | 'KEPT';
 
 export interface WacaRepository {
   orders: Map<string, WacaOrder>;
@@ -653,6 +660,12 @@ export function importWacaRows(
       resolveWacaItem(item, repo, masterIndex, importId);
       const matchKind = item.match;
       const prior = repo.items.get(keyForItem);
+      // Counted-transition evidence belongs to the durable item identity, never to one file.
+      if (prior?.countedQuantity !== undefined) {
+        item.countedQuantity = prior.countedQuantity;
+        item.countedReason = prior.countedReason;
+        item.countedBy = prior.countedBy;
+      }
       if (!prior) inserted += 1;
       else if (JSON.stringify(prior) !== JSON.stringify(item) || oldOrder?.status !== status) updated += 1;
       else unchanged += 1;

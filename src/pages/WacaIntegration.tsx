@@ -31,7 +31,12 @@ import {
 } from '../waca/previewReconciliation';
 import { supportsWacaProvider } from '../waca/providerSupport';
 import { classifyWacaError, wacaNotice, type WacaStage, type WacaUiError } from '../waca/importErrors';
-import { commitAndVerifyWaca, commitAndVerifyWacaRematch } from '../waca/confirmFlow';
+import { commitAndVerifyWaca, commitAndVerifyWacaCounted, commitAndVerifyWacaRematch } from '../waca/confirmFlow';
+import {
+  applyCountedItems, planWacaCountedImport, wacaTransitionContext,
+  type WacaCountedImportResult, type WacaOverlapChoice, type WacaTransitionContext, type WacaUpdateMode,
+} from '../waca/countedImport';
+import { type WacaRepository } from '../waca/orderCore';
 import { useCloudResourceSync, useGlobalSyncControl } from '../contexts/CloudRealtimeSyncContext';
 import './WacaIntegration.css';
 
@@ -46,6 +51,15 @@ type PendingImport = {
   candidateOrders: Array<{ key: string; orderNumber: string; status: WacaStatus }>;
   links: MyAcgMasterLink[];
   comparisonByVariant: Map<string, WacaVariantPreviewComparison>;
+  /** Cloud transition import (073): planned against this ledger / Restore epoch. */
+  counted: { context: WacaTransitionContext; currentRepo: WacaRepository; candidate: WacaRepository; importedKeys: Set<string> } | null;
+};
+const MODE_LABEL: Record<WacaUpdateMode, string> = { OVERWRITE: '覆蓋', ACCUMULATE: '累加', KEEP: '維持' };
+const STATE_LABEL: Record<string, string> = { COUNTED: '已計入', PENDING: '待核對（未計入）', BASELINE: '已含在 ERP1 歷史', UNMATCHED: '未配對' };
+const REASON_LABEL: Record<string, string> = {
+  LEGACY_COUNTED: '已計入', NEW_AFTER_BASELINE: '接管後新訂單', OWNER_CONFIRMED_NEW: 'Owner 確認為新訂單',
+  SOURCE_CHANGE_APPLIED: '來源數量／狀態變更已套用', OVERWRITE: '覆蓋計入', BASELINE_INCLUDED: '已含在 ERP1 歷史數量',
+  PENDING_REVIEW: '接管前訂單，可能已含在 ERP1 數量，待確認', KEPT: '本次選擇維持，待核對',
 };
 type PendingLinks = { fileName: string; revision: number; result: LinkImportResult; links: MyAcgMasterLink[] };
 type UnresolvedPreviewTrace = {
@@ -103,6 +117,10 @@ export default function WacaIntegration() {
   const [showUnchanged, setShowUnchanged] = useState(false);
   const [showOnlyBaselineDifferences, setShowOnlyBaselineDifferences] = useState(false);
   const [expandedTraces, setExpandedTraces] = useState<ReadonlySet<string>>(new Set());
+  const [updateModes, setUpdateModes] = useState<ReadonlyMap<string, WacaUpdateMode>>(new Map());
+  const [overlapChoices, setOverlapChoices] = useState<ReadonlyMap<string, WacaOverlapChoice>>(new Map());
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  const countedSupported = dataProvider.supportsWacaCountedImport();
   const [pendingLinks, setPendingLinks] = useState<PendingLinks | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<Record<string, string>>({});
   const [selectedParent, setSelectedParent] = useState<Record<string, string>>({});
@@ -120,6 +138,25 @@ export default function WacaIntegration() {
   const setError = useCallback((value: WacaUiError | string) => setErrorState(
     typeof value === 'string' ? value ? wacaNotice('VALIDATION_ERROR', value) : null : value,
   ), []);
+
+  /** Cloud ledger writes outside an import (rematch, manual mapping, pending decisions) keep every
+   * counted decision: counted orders follow their source, pending orders stay pending unless decided. */
+  const commitCountedLedger = useCallback(async (options: {
+    current: NextWacaSnapshot; candidate: WacaRepository; batches: WacaBatch[]; links: MyAcgMasterLink[];
+    variants: ProductVariant[]; requestId: string | null; importedKeys?: Set<string>;
+    choices?: ReadonlyMap<string, WacaOverlapChoice>; defaultMode?: WacaUpdateMode;
+  }) => {
+    const epoch = await dataProvider.readWacaRestoreEpoch();
+    const context = wacaTransitionContext(options.current.cutoverState, epoch, new Date().toISOString());
+    const planned = planWacaCountedImport({ variants: options.variants,
+      current: repositoryFromSnapshot(options.current, options.variants), candidate: options.candidate, context,
+      importedKeys: options.importedKeys ?? new Set(), defaultMode: options.defaultMode ?? 'ACCUMULATE',
+      overlapChoices: options.choices, actor: 'owner' });
+    applyCountedItems(options.candidate, planned);
+    const wanted = snapshotFromRepository(options.current, options.candidate, options.batches, options.links);
+    return commitAndVerifyWacaCounted({ provider: dataProvider, current: options.current, candidate: wanted,
+      plan: planned.plan, requestId: options.requestId });
+  }, []);
 
   const load = useCallback(async () => {
     if (masterRefreshRunning.current) return;
@@ -195,13 +232,15 @@ export default function WacaIntegration() {
         const result = rematchHistoricalWaca(candidate, master, crypto.randomUUID(), affectedCodes);
         refreshWacaMasterStatus(candidate, master);
         if (result.changed || result.quantityChanges.length || linkDelta.links.length) {
-          const wanted = snapshotFromRepository(nextSnapshot, candidate, nextSnapshot.batches, mergedLinks);
-          const verified = await commitAndVerifyWacaRematch({ provider: dataProvider,
-            current: nextSnapshot, candidate: wanted, cloud: getProviderMode() !== 'next' });
+          const verified = dataProvider.supportsWacaCountedImport()
+            ? await commitCountedLedger({ current: nextSnapshot, candidate, batches: nextSnapshot.batches,
+              links: mergedLinks, variants: nextVariants, requestId: null })
+            : await commitAndVerifyWacaRematch({ provider: dataProvider, current: nextSnapshot,
+              candidate: snapshotFromRepository(nextSnapshot, candidate, nextSnapshot.batches, mergedLinks), cloud: false });
           nextSnapshot = verified.snapshot;
           nextVariants = verified.variants;
           setMessage(result.autoResolved
-            ? `商品主檔更新後已自動配對 ${result.autoResolved} 筆歷史待處理資料，WACA 數量已重新計算。`
+            ? `商品主檔更新後已自動配對 ${result.autoResolved} 筆歷史待處理資料；已計入的訂單依來源更新，未確認是否已含在 ERP1 數量的訂單保留為待核對。`
             : '商品主檔對照證據已更新。');
         }
       }
@@ -213,7 +252,7 @@ export default function WacaIntegration() {
     } finally {
       masterRefreshRunning.current = false;
     }
-  }, [setError]);
+  }, [setError, commitCountedLedger]);
 
   const { refreshAuthoritative } = useCloudResourceSync('waca-orders', ['products'], false,
     useCallback(async () => { if (!confirming.current) await load(); }, [load]));
@@ -276,6 +315,16 @@ export default function WacaIntegration() {
   const multipleFeatures = mappingItems.filter(item => item.diagnostic === 'MULTIPLE_VARIANT_CANDIDATES').length;
   const rebaselinePreview = snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED'
     || snapshot?.cutoverState?.mode === 'LEGACY_QUANTITY_ACTIVE';
+  const countedPlanning = useMemo<{ plan: WacaCountedImportResult | null; error: string }>(() => {
+    const counted = pendingImport?.counted;
+    if (!counted) return { plan: null, error: '' };
+    try {
+      return { plan: planWacaCountedImport({ variants, current: counted.currentRepo,
+        candidate: cloneWacaRepository(counted.candidate), context: counted.context, importedKeys: counted.importedKeys,
+        modes: updateModes, defaultMode: 'OVERWRITE', overlapChoices, actor: 'owner' }), error: '' };
+    } catch (cause) { return { plan: null, error: classifyWacaError(cause, 'validation').message }; }
+  }, [pendingImport, variants, updateModes, overlapChoices]);
+  const countedPlan = countedPlanning.plan;
   const previewFeatures = useMemo(() => pendingImport
     ? [...new Map(pendingImport.items.map(item => [item.feature, item])).values()] : [], [pendingImport]);
   const previewReasons = useMemo(() => {
@@ -320,7 +369,11 @@ export default function WacaIntegration() {
   const previewGroups = useMemo(() => {
     if (!pendingImport) return [];
     const touched = new Set([...pendingImport.items.map(item => item.productVariantId),
-      ...pendingImport.result.quantityChanges.map(change => change.variantId)].filter((id): id is string => Boolean(id)));
+      ...pendingImport.result.quantityChanges.map(change => change.variantId),
+      ...[...(countedPlan?.variants.values() ?? [])].filter(row => row.touched || row.difference !== 0).map(row => row.variantId),
+    ].filter((id): id is string => Boolean(id)));
+    const differenceFor = (variantId: string, fallback: number) => countedPlan
+      ? countedPlan.variants.get(variantId)?.difference ?? 0 : fallback;
     const touchedGroups = new Set(variants.filter(row => touched.has(row.id)).map(row => row.product_group_id || row.id));
     for (const groupId of previewUnresolvedByGroup.keys()) touchedGroups.add(groupId);
     const variantsByGroup = new Map<string, ProductVariant[]>();
@@ -343,14 +396,18 @@ export default function WacaIntegration() {
       return { id, title: group ? productGroupDisplayName(group)
         : normalizeProductTitle(children[0]?.variant.product_title || '未命名商品群組'),
         children, unresolved: previewUnresolvedByGroup.get(id) ?? [],
-        increases: children.filter(row => row.comparison.difference > 0).length,
-        decreases: children.filter(row => row.comparison.difference < 0).length,
-        unchanged: children.filter(row => row.comparison.difference === 0).length };
+        increases: children.filter(row => differenceFor(row.variant.id, row.comparison.difference) > 0).length,
+        decreases: children.filter(row => differenceFor(row.variant.id, row.comparison.difference) < 0).length,
+        unchanged: children.filter(row => differenceFor(row.variant.id, row.comparison.difference) === 0).length };
     }).sort((a, b) => Number(b.increases + b.decreases > 0) - Number(a.increases + a.decreases > 0)
       || (b.increases + b.decreases) - (a.increases + a.decreases) || a.title.localeCompare(b.title));
-  }, [pendingImport, variants, groupById, previewUnresolvedByGroup]);
-  const visiblePreviewGroups = previewGroups.map(group => ({ ...group, children: group.children.filter(row =>
-    isWacaPreviewVariantVisible(row.comparison, showUnchanged, showOnlyBaselineDifferences)) }))
+  }, [pendingImport, variants, groupById, previewUnresolvedByGroup, countedPlan]);
+  const visiblePreviewGroups = previewGroups.map(group => ({ ...group, children: group.children.filter(row => {
+    const counted = countedPlan?.variants.get(row.variant.id);
+    if (!countedPlan) return isWacaPreviewVariantVisible(row.comparison, showUnchanged, showOnlyBaselineDifferences);
+    if (showOnlyBaselineDifferences) return Boolean(counted && counted.difference !== 0);
+    return showUnchanged || Boolean(counted && (counted.touched || counted.difference !== 0 || counted.pendingQuantity > 0));
+  }) }))
     .filter(group => group.children.length > 0 || group.unresolved.length > 0);
   const changedPreviewVariants = previewGroups.reduce((sum, group) => sum
     + group.children.filter(row => row.comparison.ledgerBeforeQuantity !== row.comparison.ledgerAfterQuantity).length, 0);
@@ -369,12 +426,17 @@ export default function WacaIntegration() {
     setChosenFileName(file.name);
     setBusy(true); setError(''); setMessage(''); setPendingImport(null); setShowUnchanged(false);
     setShowOnlyBaselineDifferences(false); setExpandedTraces(new Set());
+    setUpdateModes(new Map()); setOverlapChoices(new Map()); setRiskAcknowledged(false);
     try {
       if (masterState.error) throw new Error(masterState.error);
       const parsed = parseWacaWorkbook(await file.arrayBuffer());
       const importId = crypto.randomUUID();
       const { currentRepo, candidate, result } = run(parsed.rows, snapshot, importId);
       const keys = new Set(parsed.rows.map(row => `${wacaOrderKey(row.orderNumber)}::${wacaFeature(row)}`));
+      const counted = countedSupported ? {
+        context: wacaTransitionContext(snapshot.cutoverState, await dataProvider.readWacaRestoreEpoch(), new Date().toISOString()),
+        currentRepo, candidate, importedKeys: new Set([...candidate.items.keys()].filter(key => keys.has(key))),
+      } : null;
       const comparisonByVariant = buildWacaPreviewComparisons(
         variants, currentRepo, candidate, snapshot.cutoverState?.mode,
       );
@@ -384,6 +446,7 @@ export default function WacaIntegration() {
         candidateOrders: [...candidate.orders.values()],
         links: masterState.links,
         comparisonByVariant,
+        counted,
       });
     } catch (cause) { setChosenFileName(''); setError(classifyWacaError(cause, 'parse')); }
     finally { setBusy(false); }
@@ -413,12 +476,42 @@ export default function WacaIntegration() {
         unchanged: result.unchanged, result,
         conflictRows: pendingImport.rows.filter(row => conflicts.has(wacaOrderKey(row.orderNumber))),
       };
-      const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
       const cloud = getProviderMode() !== 'next';
-      const { snapshot: finalSnapshot, variants: finalVariants, checked: finalCheck } = await commitAndVerifyWaca({
-        provider: dataProvider, current, candidate: next, requestId: batch.id, cloud,
-        onStage: value => { stage = value; if (value === 'readback') performance.mark('waca-confirm:readback'); },
-      });
+      const onStage = (value: WacaStage) => { stage = value; if (value === 'readback') performance.mark('waca-confirm:readback'); };
+      let committed: Awaited<ReturnType<typeof commitAndVerifyWaca>>;
+      if (pendingImport.counted && countedPlan) {
+        // Re-plan against the authoritative ledger + Restore epoch with the reviewed choices; any difference
+        // from the preview the Owner saw stops here (nothing is written).
+        if (countedPlan.riskyOverwrites.length && !riskAcknowledged) throw new Error('WACA_OVERWRITE_CONFIRMATION_REQUIRED');
+        const epoch = await dataProvider.readWacaRestoreEpoch();
+        const keys = new Set(pendingImport.rows.map(row => `${wacaOrderKey(row.orderNumber)}::${wacaFeature(row)}`));
+        const planned = planWacaCountedImport({ variants, current: repositoryFromSnapshot(current, variants), candidate,
+          context: wacaTransitionContext(current.cutoverState, epoch, new Date().toISOString()),
+          importedKeys: new Set([...candidate.items.keys()].filter(key => keys.has(key))),
+          modes: updateModes, defaultMode: 'OVERWRITE', overlapChoices, actor: 'owner' });
+        const stable = (plan: typeof planned.plan) => JSON.stringify([plan.restoreEpoch, plan.overwriteVariantIds,
+          Object.entries(plan.expectedDisplay).sort(([a], [b]) => a.localeCompare(b))]);
+        if (stable(planned.plan) !== stable(countedPlan.plan)) throw new Error('WACA_PREVIEW_STALE');
+        applyCountedItems(candidate, planned);
+        batch.transition = {
+          contract: planned.plan.contract, restoreEpoch: planned.plan.restoreEpoch,
+          variants: [...planned.variants.values()].filter(row => row.touched || row.difference !== 0).map(row => ({
+            variantId: row.variantId, mode: row.mode, before: row.displayBefore, ledger: row.ledgerAfter,
+            countedDelta: row.countedDelta, after: row.displayAfter, pending: row.pendingQuantity })),
+        };
+        const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
+        committed = await commitAndVerifyWacaCounted({ provider: dataProvider, current, candidate: next,
+          plan: planned.plan, requestId: batch.id, onStage });
+      } else {
+        const next = snapshotFromRepository(current, candidate, [...current.batches, batch], pendingImport.links);
+        committed = await commitAndVerifyWaca({ provider: dataProvider, current, candidate: next, requestId: batch.id, cloud, onStage });
+      }
+      const { snapshot: finalSnapshot, variants: finalVariants, checked: finalCheck } = committed;
+      const decided = batch.transition?.variants ?? [];
+      const countedSummary = batch.transition
+        ? `覆蓋 ${decided.filter(row => row.mode === 'OVERWRITE').length}、累加 ${decided.filter(row => row.mode === 'ACCUMULATE').length}、維持 ${decided.filter(row => row.mode === 'KEEP').length} 個規格；`
+          + `本次新計入 ${decided.reduce((sum, row) => sum + Math.max(0, row.countedDelta), 0)} 件，`
+          + `待核對 ${decided.reduce((sum, row) => sum + Math.max(0, row.pending), 0)} 件已保存；已計入過的訂單沒有重複加算。` : '';
       performance.mark('waca-confirm:refresh');
       if (cloud) {
         if (!refreshAuthoritative) throw new Error('WACA_TARGETED_REFRESH_UNAVAILABLE');
@@ -447,9 +540,9 @@ export default function WacaIntegration() {
         // Historical pending items are retained and counted, but do not open
         // thousands of manual-choice controls behind the completion dialog.
         // The visible Pending tab remains available; no work is deferred.
-        setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。商品主檔建立後，系統會自動重新配對並更新數量，不必重傳 WACA Excel。`);
+        setMessage(`WACA 訂單已保存，已配對商品的數量已更新；${pendingFeatures} 個商品／規格保留為待處理。商品主檔建立後，系統會自動重新配對並更新數量，不必重傳 WACA Excel。${countedSummary}`);
       } else {
-        setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。`);
+        setMessage(`WACA 更新完成：${finalCheck.passed} / ${finalCheck.total} 商品對帳一致，${finalCheck.effectiveQuantity} 件有效數量已更新，0 個需要處理。${countedSummary}`);
       }
       if (!integrityIssues.length && !result.statusConflicts.length) setCompletion({
         orders: new Set(pendingImport.rows.map(row => wacaOrderKey(row.orderNumber))).size,
@@ -523,15 +616,21 @@ export default function WacaIntegration() {
         masterStatus: 'ACTIVE',
       }, masterIndex, selectedParent[item.feature]);
       stage = 'commit';
-      await dataProvider.commitNextWacaSnapshot(
-        snapshotFromRepository(current, candidate, current.batches, masterState.links), current.revision, true,
-      );
+      if (dataProvider.supportsWacaCountedImport()) {
+        await commitCountedLedger({ current, candidate, batches: current.batches, links: masterState.links, variants, requestId: null });
+      } else {
+        await dataProvider.commitNextWacaSnapshot(
+          snapshotFromRepository(current, candidate, current.batches, masterState.links), current.revision, true,
+        );
+      }
       stage = 'readback';
       await load();
-      setMessage('商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
+      setMessage(dataProvider.supportsWacaCountedImport()
+        ? '商品對照已保存；已計入的訂單依來源更新，接管前且尚未確認的訂單保留為待核對（可在「待處理」決定是否計入）。'
+        : '商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
     } catch (cause) { setError(classifyWacaError(cause, stage)); }
     finally { setBusy(false); }
-  }, [snapshot, choicesFor, selectedVariant, selectedParent, variants, masterState.links, masterIndex, load, setError]);
+  }, [snapshot, choicesFor, selectedVariant, selectedParent, variants, masterState.links, masterIndex, load, setError, commitCountedLedger]);
 
   const parentConfirmation = useCallback((item: WacaItem) => item.diagnostic !== 'SOURCE_SPEC_IDENTITY_CONFLICT' && !item.specCode.trim()
     && !matchByFeature.get(item.feature)?.candidates.length ? <label>先人工確認商品群組
@@ -584,12 +683,51 @@ export default function WacaIntegration() {
         unchanged: result.unchanged, result, conflictRows: [],
       });
       stage = 'commit';
-      await dataProvider.commitNextWacaSnapshot(
-        snapshotFromRepository(current, candidate, batches, masterState.links), current.revision, true,
-      );
+      if (dataProvider.supportsWacaCountedImport()) {
+        await commitCountedLedger({ current, candidate, batches, links: masterState.links, variants, requestId: importId,
+          importedKeys: new Set([...candidate.items.keys()].filter(key => key.startsWith(`${orderKey}::`))),
+          defaultMode: 'ACCUMULATE' });
+      } else {
+        await dataProvider.commitNextWacaSnapshot(
+          snapshotFromRepository(current, candidate, batches, masterState.links), current.revision, true,
+        );
+      }
       stage = 'readback';
       await load();
       setMessage(`${orderKey} 已按「${status}」重新計算。`);
+    } catch (cause) { setError(classifyWacaError(cause, stage)); }
+    finally { setBusy(false); }
+  };
+
+  // Matched orders not (fully) counted yet: pending Owner decision, never silently counted or dropped.
+  const countedPendingItems = useMemo(() => {
+    if (!countedSupported || !snapshot || !repo) return [];
+    const driven = snapshot.cutoverState?.mode === 'ORDER_DRIVEN_ACTIVE';
+    return items.filter(item => {
+      if (!item.productVariantId) return false;
+      const order = repo.orders.get(item.orderKey);
+      const effective = order && ['處理中', '完成付款'].includes(order.status) ? item.quantity : 0;
+      const counted = item.countedQuantity ?? (driven ? effective : 0);
+      return item.countedReason !== 'BASELINE_INCLUDED' && counted !== effective;
+    });
+  }, [countedSupported, snapshot, repo, items]);
+
+  const decidePending = async (item: WacaItem, choice: WacaOverlapChoice) => {
+    if (!snapshot) return;
+    setBusy(true); setError('');
+    let stage: WacaStage = 'read';
+    try {
+      const current = await dataProvider.getNextWacaSnapshot();
+      stage = 'validation';
+      if (current.revision !== snapshot.revision) throw new Error('WACA 資料已變更，請重新讀取。');
+      const candidate = repositoryFromSnapshot(current, variants);
+      stage = 'commit';
+      await commitCountedLedger({ current, candidate, batches: current.batches, links: masterState.links, variants,
+        requestId: null, choices: new Map([[item.key, choice]]) });
+      stage = 'readback';
+      await load();
+      setMessage(choice === 'COUNT_AS_NEW' ? `訂單 ${item.orderKey.replace('WACA::', '')} 已計入 WACA 數量。`
+        : `訂單 ${item.orderKey.replace('WACA::', '')} 已標記為包含在 ERP1 歷史數量，不再重複計入。`);
     } catch (cause) { setError(classifyWacaError(cause, stage)); }
     finally { setBusy(false); }
   };
@@ -649,13 +787,19 @@ export default function WacaIntegration() {
     </div>}
     {!snapshot && !error && <p role="status">正在讀取 WACA 訂單資料…</p>}
     {message && <div className="waca-notice" role="status"><span className="badge badge-success">已完成</span> {message}</div>}
-    {snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED' &&
-      <div className="waca-notice" role="status">目前顯示的是舊備份當時的 WACA 數量。請匯入完整 WACA 歷史訂單；確認更新後，系統會重新計算並取代舊數量。</div>}
+    {snapshot?.cutoverState?.mode === 'ORDER_REBASELINE_REQUIRED' && (countedSupported
+      ? <div className="waca-notice" role="status" data-testid="waca-transition-notice">目前的 WACA 數量來自 ERP1 備份（歷史數量），尚未建立 WACA 接管基準。
+        第一次匯入時可逐一選擇「覆蓋／累加／維持」；不需要先匯入全部歷史訂單。會使數量減少的覆蓋必須另外確認，
+        早於接管基準時間的訂單可能已含在 ERP1 數量中，會先列為待核對。</div>
+      : <div className="waca-notice" role="status">目前顯示的是舊備份當時的 WACA 數量。請匯入完整 WACA 歷史訂單；確認更新後，系統會重新計算並取代舊數量。</div>)}
+    {countedSupported && snapshot?.cutoverState?.transition && <div className="waca-notice" role="status" data-testid="waca-transition-baseline">
+      WACA 接管基準：Restore 第 {snapshot.cutoverState.transition.restoreEpoch} 次，基準時間 {snapshot.cutoverState.transition.baselineAt}。
+      之後的新訂單可自動累加；之前的訂單需確認是否已含在 ERP1 歷史數量。</div>}
     {masterState.error && <div className="waca-notice waca-error">{masterState.error}</div>}
     <nav className="waca-tabs" aria-label="WACA 功能">
       {([
         ['import', 'WACA 匯入'], ['orders', '來源訂單'], ['mappings', '商品對照'],
-        ['history', '匯入紀錄'], ['pending', `待處理 ${pendingItems.length + conflicts.length + (reconciliation?.issues.length ?? 0)}`],
+        ['history', '匯入紀錄'], ['pending', `待處理 ${pendingItems.length + conflicts.length + (reconciliation?.issues.length ?? 0) + countedPendingItems.length}`],
       ] as const).map(([key, label]) =>
         <button key={key} className={tab === key ? 'active' : ''} onClick={() => {
           if (key === 'mappings') setVisitedMappings(true);
@@ -710,7 +854,77 @@ export default function WacaIntegration() {
         <div className="waca-group-list">{visiblePreviewGroups.map(group => <details className={`waca-group ${group.increases + group.decreases ? 'changed' : 'unchanged'}`} key={group.id}>
           <summary><strong>{group.title}</strong><span>增加 {group.increases}、減少 {group.decreases}、差異 {group.increases + group.decreases}
             {showUnchanged ? `、一致 ${group.unchanged}` : ''}{group.unresolved.length ? `、待處理 ${group.unresolved.length}` : ''}</span></summary>
-          {!!group.children.length && <div className="waca-scroll"><table><thead><tr><th>規格／SKU</th>
+          {!!group.children.length && countedPlan && <>
+            <div className="waca-preview-filters" data-testid="waca-group-mode">
+              <label>整組套用更新方式
+                <select aria-label={`整組套用 ${group.title}`} value="" disabled={busy}
+                  onChange={event => {
+                    const mode = event.target.value as WacaUpdateMode;
+                    if (!mode) return;
+                    setUpdateModes(previous => { const next = new Map(previous);
+                      for (const { variant } of group.children) if (countedPlan.variants.get(variant.id)?.touched) next.set(variant.id, mode);
+                      return next; });
+                    setRiskAcknowledged(false);
+                  }}>
+                  <option value="">選擇…</option>
+                  {(['OVERWRITE', 'ACCUMULATE', 'KEEP'] as const).map(mode => <option key={mode} value={mode}>{MODE_LABEL[mode]}</option>)}
+                </select></label>
+            </div>
+            <div className="waca-scroll"><table data-testid="waca-counted-preview"><thead><tr><th>規格／SKU</th>
+              <th>現有 WACA</th><th>本次來源數量</th><th>可認列新訂單</th><th>更新方式</th><th>更新後預估</th><th>差異</th><th>明細</th></tr></thead><tbody>
+              {group.children.map(({ variant }) => {
+                const current = Number(variant.waca_auto_quantity ?? 0) + Number(variant.waca_manual_adjustment ?? 0);
+                const row = countedPlan.variants.get(variant.id) ?? { variantId: variant.id, mode: 'ACCUMULATE' as WacaUpdateMode,
+                  displayBefore: current, autoBefore: Number(variant.waca_auto_quantity ?? 0), manualBefore: Number(variant.waca_manual_adjustment ?? 0),
+                  ledgerAfter: 0, countedBefore: 0, countedAfter: 0, countedDelta: 0, displayAfter: current,
+                  manualAfter: Number(variant.waca_manual_adjustment ?? 0), difference: 0, pendingQuantity: 0, uncertainItems: 0,
+                  baselineChangedItems: 0, newCountableQuantity: 0, touched: false, items: [] };
+                const expanded = expandedTraces.has(variant.id);
+                const risky = countedPlan.riskyOverwrites.includes(variant.id);
+                return <Fragment key={variant.id}><tr data-testid={`waca-counted-row-${variant.myacg_item_code}`}>
+                  <td><strong>{variant.variant_name || '標準規格'}</strong><small>SKU {variant.myacg_item_code}</small>
+                    {[...(previewReasons.get(variant.id) ?? [])].map(reason => <small key={reason}>{reason}</small>)}</td>
+                  <td className="waca-quantity-value">{quantity(row.displayBefore)}</td>
+                  <td className="waca-quantity-value">{quantity(row.ledgerAfter)}</td>
+                  <td className="waca-quantity-value">{quantity(row.newCountableQuantity)}</td>
+                  <td>{row.touched ? <select aria-label={`更新方式 ${variant.myacg_item_code}`} value={row.mode} disabled={busy}
+                    onChange={event => { const mode = event.target.value as WacaUpdateMode;
+                      setUpdateModes(previous => new Map(previous).set(variant.id, mode)); setRiskAcknowledged(false); }}>
+                    {(['OVERWRITE', 'ACCUMULATE', 'KEEP'] as const).map(mode => <option key={mode} value={mode}>{MODE_LABEL[mode]}</option>)}
+                  </select> : <span className="waca-row-note">本次未匯入（不變）</span>}</td>
+                  <td className="waca-quantity-value">{quantity(row.displayAfter)}</td>
+                  <td className={row.difference > 0 ? 'waca-increase' : row.difference < 0 ? 'waca-decrease' : 'waca-unchanged'}>
+                    {signedQuantity(row.difference)}
+                    {risky && <span className="waca-row-note waca-danger">{row.difference < 0 ? '覆蓋會減少，需確認' : '首次接管覆蓋，需確認'}</span>}
+                    {row.pendingQuantity > 0 && <span className="waca-row-note">待核對 {quantity(row.pendingQuantity)} 件</span>}
+                    {row.uncertainItems > 0 && row.mode === 'ACCUMULATE' && <span className="waca-row-note">接管前訂單 {row.uncertainItems} 筆待確認</span>}
+                    {row.baselineChangedItems > 0 && <span className="waca-row-note waca-danger">ERP1 歷史內訂單有異動 {row.baselineChangedItems} 筆，未自動套用</span>}</td>
+                  <td><button type="button" className="waca-detail-toggle" aria-expanded={expanded}
+                    aria-label={`${expanded ? '收合' : '查看'} ${variant.myacg_item_code} 明細`}
+                    onClick={() => setExpandedTraces(previous => {
+                      const next = new Set(previous); if (next.has(variant.id)) next.delete(variant.id); else next.add(variant.id); return next;
+                    })}>{expanded ? '▼ 收合明細' : '▶ 查看明細'}</button></td>
+                </tr>{expanded && <tr className="waca-trace-row"><td colSpan={8}>
+                  <div className="waca-trace-summary">現有 {quantity(row.displayBefore)}｜本次來源 {quantity(row.ledgerAfter)}｜
+                    {MODE_LABEL[row.mode]}後 {quantity(row.displayAfter)}（{signedQuantity(row.difference)}）｜本次新計入 {signedQuantity(row.countedDelta)}</div>
+                  <div className="waca-scroll waca-trace-table"><table><thead><tr><th>訂單編號</th><th>購買日期</th><th>有效數量</th><th>已計入</th><th>狀態</th><th>確認</th></tr></thead><tbody>
+                    {row.items.map(trace => <tr key={trace.key}><td>{trace.orderNumber}{trace.isNew && <span className="waca-row-note">本次新增</span>}</td>
+                      <td>{trace.purchasedAt}<span className="waca-row-note">{trace.afterBaseline ? '接管後' : '接管前／日期不明'}</span></td>
+                      <td>{quantity(trace.effectiveQuantity)}</td><td>{quantity(trace.countedAfter)}</td>
+                      <td>{STATE_LABEL[trace.state]}<span className="waca-row-note">{REASON_LABEL[trace.reason] ?? trace.reason}</span></td>
+                      <td>{row.mode === 'ACCUMULATE' && (trace.overlapUncertain || overlapChoices.has(trace.key))
+                        ? <select aria-label={`確認訂單 ${trace.orderNumber}`} value={overlapChoices.get(trace.key) ?? 'PENDING'} disabled={busy}
+                          onChange={event => { const choice = event.target.value as WacaOverlapChoice;
+                            setOverlapChoices(previous => new Map(previous).set(trace.key, choice)); }}>
+                          <option value="PENDING">待核對（暫不計入）</option>
+                          <option value="COUNT_AS_NEW">計入（新訂單）</option>
+                          <option value="BASELINE_INCLUDED">已含在 ERP1 歷史</option>
+                        </select> : null}</td></tr>)}
+                  </tbody></table></div>
+                </td></tr>}</Fragment>;
+              })}
+            </tbody></table></div></>}
+          {!!group.children.length && !countedPlan && <div className="waca-scroll"><table><thead><tr><th>規格／SKU</th>
             <th>{rebaselinePreview ? 'ERP1 原 WACA' : '目前 WACA'}</th>
             <th>匯入後 WACA</th><th>差異</th><th>明細</th></tr></thead><tbody>
             {group.children.map(({ variant, comparison }) => {
@@ -763,7 +977,22 @@ export default function WacaIntegration() {
             </tr>)}
           </tbody></table></div>
         </details>
-        <button className="btn btn-md btn-primary" disabled={busy || pendingImport.result.errors.length > 0}
+        {countedPlan && <div className="waca-notice" data-testid="waca-counted-summary">
+          接管基準：Restore 第 {pendingImport.counted?.context.restoreEpoch} 次，基準時間 {pendingImport.counted?.context.baselineAt}。
+          覆蓋 {countedPlan.plan.overwriteVariantIds.length}、累加 {[...countedPlan.variants.values()].filter(row => row.touched && row.mode === 'ACCUMULATE').length}、
+          維持 {[...countedPlan.variants.values()].filter(row => row.touched && row.mode === 'KEEP').length} 個規格；
+          數量增加 {[...countedPlan.variants.values()].filter(row => row.difference > 0).length}、減少 {[...countedPlan.variants.values()].filter(row => row.difference < 0).length}；
+          待核對 {[...countedPlan.variants.values()].reduce((sum, row) => sum + Math.max(0, row.pendingQuantity), 0)} 件（已保存，不計入、不重複）。
+        </div>}
+        {countedPlan && countedPlan.riskyOverwrites.length > 0 && <label className="waca-notice waca-risk" data-testid="waca-overwrite-ack" style={{ display: 'block', borderColor: '#fca5a5', background: '#fef2f2' }}>
+          <input type="checkbox" checked={riskAcknowledged} onChange={event => setRiskAcknowledged(event.target.checked)} />
+          我已確認：以「覆蓋」更新的 {countedPlan.riskyOverwrites.length} 個規格{!pendingImport.counted?.context.driven ? '（尚未建立接管基準）' : ''}
+          會以本次訂單重算取代目前數量，其中 {countedPlan.riskyOverwrites.filter(id => (countedPlan.variants.get(id)?.difference ?? 0) < 0).length} 個會減少。
+          若本次歷史訂單不完整，請改用「累加」或「維持」。</label>}
+        {countedPlanning.error && <p className="waca-danger" role="alert">{countedPlanning.error}</p>}
+        <button className="btn btn-md btn-primary" disabled={busy || pendingImport.result.errors.length > 0
+          || Boolean(pendingImport.counted && !countedPlan)
+          || Boolean(countedPlan && countedPlan.riskyOverwrites.length > 0 && !riskAcknowledged)}
           onClick={() => void confirmImport()}>確認更新</button>
       </>}
       <details className="waca-master-import"><summary>進階／維護工具</summary>
@@ -856,7 +1085,18 @@ export default function WacaIntegration() {
         </select>
         <button className="btn btn-outline" disabled={busy || !selectedVariant[item.feature]} onClick={() => void manualMap(item)}>確認對照</button>
       </div>)}
-      {!pendingItems.length && !conflicts.length && !reconciliation?.issues.length && <p>目前沒有需要處理的商品。</p>}
+      {countedPendingItems.length > 0 && <div className="waca-pending-card" data-testid="waca-counted-pending">
+        <strong>待核對：已配對但尚未計入 WACA 數量的訂單（{countedPendingItems.length}）</strong>
+        <p>這些訂單已保存，不會遺失；確認前不計入數量，也不會重複計入。</p>
+        <div className="waca-scroll"><table><thead><tr><th>訂單</th><th>商品／規格</th><th>數量</th><th>已計入</th><th>原因</th><th>決定</th></tr></thead><tbody>
+          {countedPendingItems.map(item => <tr key={item.key}><td>{item.orderKey.replace('WACA::', '')}<small>{repo?.orders.get(item.orderKey)?.purchasedAt}</small></td>
+            <td>{displayNameForVariant(item.productVariantId, item.productTitle)}<small>{variantById.get(item.productVariantId ?? '')?.variant_name}／SKU {variantById.get(item.productVariantId ?? '')?.myacg_item_code}</small></td>
+            <td>{item.quantity}</td><td>{item.countedQuantity ?? 0}</td><td>{REASON_LABEL[item.countedReason ?? 'PENDING_REVIEW'] ?? item.countedReason}</td>
+            <td><button className="btn btn-outline" disabled={busy} onClick={() => void decidePending(item, 'COUNT_AS_NEW')}>計入（新訂單）</button>
+              <button className="btn btn-outline" disabled={busy} onClick={() => void decidePending(item, 'BASELINE_INCLUDED')}>已含在 ERP1 歷史</button></td></tr>)}
+        </tbody></table></div>
+      </div>}
+      {!pendingItems.length && !conflicts.length && !reconciliation?.issues.length && !countedPendingItems.length && <p>目前沒有需要處理的商品。</p>}
       {conflicts.map(({ batch, orderKey, rows }) => <div className="waca-pending-card" key={`${batch.id}::${orderKey}`}>
         <strong>狀態衝突：{orderKey.replace('WACA::', '')}</strong>
         <p>{batch.fileName}；同一匯入檔出現 {new Set(rows.map(row => row.orderStatus)).size} 種訂單狀態，尚未計入。</p>

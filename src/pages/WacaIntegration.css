@@ -77,3 +77,7 @@
   .waca-group summary { display: block; }
   .waca-group summary span { display: block; margin-top: 5px; }
 }
+
+/* 073 transition preview: secondary notes inside quantity cells (not the SKU line). */
+.waca-row-note { display: block; font-size: 12px; color: #64748b; }
+.waca-row-note.waca-danger { color: #b91c1c; }

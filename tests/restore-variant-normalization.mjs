@@ -109,7 +109,8 @@ try {
     const file = 'src/components/CloudAtomicRestorePanel.tsx';
     const intro = git(['log', '--format=%H', '-S', 'setVariantNormalization', '--', file]).trim().split('\n').filter(Boolean).at(-1);
     const previous = git(['show', intro ? `${intro}^:${file}` : `HEAD:${file}`]);
-    const after = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    // The reviewed RVN result itself (later exact reviews build on top of it and have their own contracts).
+    const after = git(['show', intro ? `${intro}:${file}` : `HEAD:${file}`]);
     G.assertRestoreVariantNormalizationPanelContract(previous, after);
     assert.throws(() => G.assertRestoreVariantNormalizationPanelContract(previous, after.replace('source = variantStep.candidate;', 'source = variantStep.candidate; void 0;')), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
     assert.throws(() => G.assertRestoreVariantNormalizationPanelContract(previous, after.replace("const variantStep = await normalizeCloudRestoreCandidateVariants(source);", "const variantStep = await normalizeCloudRestoreCandidateVariants(source, []);")), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
