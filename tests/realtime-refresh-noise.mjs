@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fixtureId } from './fixtures/cloud-fixture-ids.mjs';
 import { spawn } from 'node:child_process';
 import { chromium } from 'playwright';
 
@@ -18,7 +19,7 @@ try {
   const page = await browser.newPage();
   const liveRequests = [];
   await page.route('**/*.supabase.co/**', route => { liveRequests.push(route.request().url()); return route.abort(); });
-  await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/outbound-shipments/out-react-1`);
+  await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?uuidFixtures=1&route=/outbound-shipments/out-react-1`);
   await page.getByRole('button', { name: '✏️', exact: true }).waitFor();
   await page.evaluate(() => window.__P0_REACT_HARNESS__.fallback('reconnect', ['outboundShipments']));
   await page.getByRole('button', { name: '✏️', exact: true }).click();
@@ -30,40 +31,40 @@ try {
     await h.emitUpsert('outbound_shipments', { ...row, ...patch });
   }, { id, patch });
   const conflict = () => page.getByRole('alert').filter({ hasText: '資料已被其他使用者更新' }).count();
-  await change('out-other', { title: 'Remote B', version: 2 });
+  await change(fixtureId('out-other'), { title: 'Remote B', version: 2 });
   assert.equal(await conflict(), 0, 'unrelated record B must not conflict with draft A');
-  await change('out-react-1', { version: 3, updated_at: '2026-09-22T00:00:00Z', updated_by: 'same-account' });
+  await change(fixtureId('out-react-1'), { version: 3, updated_at: '2026-09-22T00:00:00Z', updated_by: 'same-account' });
   assert.equal(await conflict(), 0, 'metadata-only update must not conflict');
   assert.equal(await input.inputValue(), 'DRAFT A');
   const cachedVersion = await page.evaluate(async () => {
     const { cloudCacheDb } = await import('/src/lib/db.ts');
-    return (await cloudCacheDb.getOutboundShipments()).find(r => r.id === 'out-react-1').version;
+    return (await cloudCacheDb.getOutboundShipments()).find(r => r.id === fixtureId('out-react-1')).version;
   });
   assert.equal(cachedVersion, 3, 'metadata must advance the cached CAS version');
   await page.evaluate(() => window.__P0_REACT_HARNESS__.fallback('reconnect', ['outboundShipments']));
   assert.equal(await conflict(), 0, 'unchanged reconnect must not invent conflict');
-  await change('out-react-1', { title: 'Remote A changed', version: 4, updated_by: 'same-account' });
+  await change(fixtureId('out-react-1'), { title: 'Remote A changed', version: 4, updated_by: 'same-account' });
   assert.equal(await conflict(), 1, 'same-account other client business change must conflict');
   assert.equal(await input.inputValue(), 'DRAFT A');
-  await change('out-other', { title: 'Remote B again', version: 3 });
+  await change(fixtureId('out-other'), { title: 'Remote B again', version: 3 });
   assert.equal(await conflict(), 1, 'unrelated refresh must not clear the genuine conflict');
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByText('Remote A changed', { exact: true }).waitFor();
   assert.equal(await conflict(), 0);
-  await change('out-react-1', { title: 'Same account auto-converged', version: 5, updated_by: 'same-account' });
+  await change(fixtureId('out-react-1'), { title: 'Same account auto-converged', version: 5, updated_by: 'same-account' });
   await page.getByText('Same account auto-converged', { exact: true }).waitFor();
   assert.equal(await conflict(), 0, 'relevant same-account update without draft converges without prompt');
   await page.getByRole('button', { name: '✏️', exact: true }).click();
   await input.fill('Saved A only');
-  await change('out-other', { title: 'B must survive A save', version: 6 });
+  await change(fixtureId('out-other'), { title: 'B must survive A save', version: 6 });
   assert.equal(await conflict(), 0);
   await page.getByRole('button', { name: '儲存', exact: true }).click();
   await page.getByText('Saved A only', { exact: true }).waitFor();
-  const untouched = await page.evaluate(() => window.__P0_REACT_HARNESS__.server.outboundShipments.find(r => r.id === 'out-other').title);
+  const untouched = await page.evaluate(() => window.__P0_REACT_HARNESS__.server.outboundShipments.find(r => r.id === fixtureId('out-other')).title);
   assert.equal(untouched, 'B must survive A save', 'Saving A must not revert the stale page copy of B');
   const result = await page.evaluate(async () => {
     const h = window.__P0_REACT_HARNESS__;
-    const row = h.server.outboundShipments.find(r => r.id === 'out-react-1');
+    const row = h.server.outboundShipments.find(r => r.id === fixtureId('out-react-1'));
     await h.emitSelfEcho('outbound_shipments', row);
     await h.emitDuplicate('outbound_shipments', row);
     return h.snapshot();
@@ -74,7 +75,7 @@ try {
     const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');
     const { cloudCacheDb } = await import('/src/lib/db.ts');
     const h = window.__P0_REACT_HARNESS__;
-    const base = h.server.outboundShipments.find(r => r.id === 'out-react-1');
+    const base = h.server.outboundShipments.find(r => r.id === fixtureId('out-react-1'));
     let release;
     let started;
     const entered = new Promise(resolve => { started = resolve; });

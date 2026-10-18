@@ -26,7 +26,7 @@ const open = async (browser, route, width) => {
   const errors = [];
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${BASE_URL}?route=${encodeURIComponent(route)}&partialReceiving=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE_URL}?route=${encodeURIComponent(route)}&partialReceiving=1&uuidFixtures=1`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.__P0_REACT_HARNESS__?.snapshot().metrics));
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().connectivity.readStatus !== 'loading');
   return { context, page, errors };
@@ -63,7 +63,7 @@ try {
         await page.evaluate(() => {
           const harness = window.__P0_REACT_HARNESS__;
           harness.holdNextPageRead();
-          const row = structuredClone(harness.server.japanPackages.find(item => item.id === 'jp-react-1'));
+          const row = structuredClone(harness.server.japanPackages.find(item => item.id === harness.fixtureId('jp-react-1')));
           window.__ECHO_PROMISE__ = harness.emitUpsert('japan_packages', row);
         });
         await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().pageReadHeld === true);
@@ -102,7 +102,7 @@ try {
         await page.evaluate(() => {
           const harness = window.__P0_REACT_HARNESS__;
           harness.holdNextPageRead();
-          const current = harness.server.japanPackages.find(item => item.id === 'jp-react-1');
+          const current = harness.server.japanPackages.find(item => item.id === harness.fixtureId('jp-react-1'));
           window.__LIST_REFRESH_PROMISE__ = harness.emitUpsert('japan_packages', { ...current, title: 'React Japan Package B', updated_at: new Date().toISOString() });
         });
         await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().pageReadHeld === true);

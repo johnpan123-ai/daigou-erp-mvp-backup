@@ -81,3 +81,129 @@
 /* 073 transition preview: secondary notes inside quantity cells (not the SKU line). */
 .waca-row-note { display: block; font-size: 12px; color: #64748b; }
 .waca-row-note.waca-danger { color: #b91c1c; }
+
+/* WACA counted preview UI v2 (layout only): group header, segmented group mode, readable table, mobile cards. */
+.waca-group summary { align-items: flex-start; }
+.waca-group-title { flex: 1 1 320px; font-size: 15px; line-height: 1.45; color: #0f172a; }
+.waca-group-counts { display: flex; flex-wrap: wrap; gap: 6px; }
+.waca-chip { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-style: normal; font-weight: 600; white-space: nowrap; }
+.waca-chip-up { background: #ecfdf5; color: #047857; }
+.waca-chip-down { background: #fff1f2; color: #be123c; }
+.waca-chip-pending { background: #fffbeb; color: #b45309; }
+.waca-chip-mode { background: #e0f2fe; color: #075985; }
+.waca-group-mode { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 18px;
+  margin: 0 12px 4px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+.waca-group-mode-label { display: grid; gap: 2px; min-width: 0; }
+.waca-group-mode-label span { font-weight: 700; color: #0f172a; font-size: 14px; }
+.waca-group-mode-label small { color: #475569; font-size: 12px; }
+.waca-segmented { display: inline-grid; grid-template-columns: repeat(3, minmax(84px, 1fr)); gap: 0; border: 1px solid #94a3b8; border-radius: 9px; overflow: hidden; background: #fff; }
+.waca-segmented button { min-height: 38px; padding: 7px 16px; border: 0; border-left: 1px solid #cbd5e1; background: #fff; color: #334155; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.waca-segmented button:first-child { border-left: 0; }
+.waca-segmented button:hover:not(:disabled):not(.active) { background: #f1f5f9; }
+.waca-segmented button.active { background: #0369a1; color: #fff; }
+.waca-segmented button:focus-visible { outline: 3px solid #7dd3fc; outline-offset: -3px; }
+.waca-segmented button:disabled { cursor: not-allowed; opacity: .6; }
+.waca-counted-table { font-size: 14px; }
+.waca-counted-table th.num, .waca-counted-table td.num, .waca-trace-table th.num, .waca-trace-table td.num { text-align: right; }
+.waca-counted-table td { vertical-align: middle; }
+.waca-sku-cell { min-width: 170px; }
+.waca-sku-cell strong { display: block; color: #0f172a; font-size: 14px; }
+.waca-sku { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.waca-mode-cell select { min-width: 96px; max-width: 120px; margin: 0; }
+.waca-mode-cell.overridden select { border-color: #0369a1; box-shadow: 0 0 0 2px #e0f2fe; }
+.waca-diff { font-size: 15px; font-variant-numeric: tabular-nums; }
+.waca-row-note.waca-warn { color: #b45309; }
+.waca-status { display: block; font-weight: 700; font-size: 13px; }
+.waca-status-counted { color: #047857; }
+.waca-status-pending { color: #b45309; }
+.waca-status-baseline { color: #1d4ed8; }
+.waca-status-unmatched { color: #64748b; }
+.waca-status-void { color: #64748b; }
+.waca-trace-void td { color: #64748b; background: #f8fafc; }
+.waca-trace-table td { vertical-align: top; }
+@media (max-width: 700px) {
+  .waca-group-mode { margin: 0 8px 4px; }
+  .waca-segmented { display: grid; width: 100%; }
+  .waca-segmented button { min-height: 44px; }
+  .waca-counted-scroll { overflow-x: visible; margin: 8px; }
+  .waca-counted-table, .waca-counted-table tbody, .waca-counted-table tr, .waca-counted-table td { display: block; width: 100%; box-sizing: border-box; }
+  .waca-counted-table thead { display: none; }
+  .waca-counted-table > tbody > tr:not(.waca-trace-row) { border: 1px solid #e2e8f0; border-radius: 10px; margin: 0 0 10px; padding: 6px 4px; background: #fff; }
+  .waca-counted-table > tbody > tr:not(.waca-trace-row) > td { border: 0; padding: 5px 10px; text-align: left; }
+  .waca-counted-table > tbody > tr:not(.waca-trace-row) > td[data-label] { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; }
+  .waca-counted-table > tbody > tr:not(.waca-trace-row) > td[data-label]::before { content: attr(data-label); color: #64748b; font-size: 12px; font-weight: 600; }
+  .waca-counted-table > tbody > tr:not(.waca-trace-row) > td[data-label] .waca-row-note { grid-column: 2; }
+  .waca-mode-cell select { max-width: none; width: 100%; min-height: 40px; }
+  .waca-counted-table .waca-trace-row > td { padding: 10px 6px; border: 0; }
+  .waca-trace-table table, .waca-trace-table tbody, .waca-trace-table tr, .waca-trace-table td { display: block; width: 100%; box-sizing: border-box; }
+  .waca-trace-table thead { display: none; }
+  .waca-trace-table tr { border: 1px solid #e2e8f0; border-radius: 8px; margin: 0 0 8px; padding: 4px 2px; background: #fff; }
+  .waca-trace-table td { border: 0; padding: 4px 8px; text-align: left !important; }
+  .waca-trace-table td[data-label] { display: grid; grid-template-columns: 84px 1fr; gap: 6px; }
+  .waca-trace-table td[data-label]::before { content: attr(data-label); color: #64748b; font-size: 12px; }
+  .waca-trace-table td[data-label] > *:not(select) { grid-column: 2; }
+  .waca-trace-table td[data-label]:empty { display: none; }
+  .waca-counted-table > tbody > tr:not(.waca-trace-row) > td[data-label] > * { grid-column: 2; justify-self: start; text-align: left; }
+  .waca-trace-table td:last-child select { width: 100%; max-width: none; min-height: 40px; margin: 0; }
+}
+/* WACA UI v3 (layout only): compact desktop review workbench. */
+.waca-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.waca-review-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 200px)); gap: 12px; margin: 12px 0 14px; }
+.waca-review-summary > div { display: grid; gap: 2px; padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.waca-review-summary strong { font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; color: #0f172a; }
+.waca-review-summary span { color: #475569; font-size: 13px; font-weight: 600; }
+.waca-review-summary .attention { border-color: #fcd34d; background: #fffbeb; }
+.waca-review-summary .attention strong { color: #b45309; }
+.waca-review-summary .up strong { color: #047857; }
+.waca-review-summary .down strong { color: #be123c; }
+.waca-review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; margin: 0 0 10px; }
+.waca-review-filter { grid-template-columns: repeat(3, minmax(96px, auto)); }
+.waca-review-filter .waca-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 12px; }
+.waca-review-filter button.active .waca-count { background: rgba(255,255,255,.25); color: #fff; }
+.waca-mode-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; color: #64748b; font-size: 12px; }
+.waca-mode-legend b { color: #334155; }
+.waca-review-group.needs-review { border-left: 3px solid #f59e0b; }
+.waca-chip-confirm { background: #fef3c7; color: #92400e; }
+.waca-review-group .waca-group-mode { justify-content: flex-start; padding: 8px 12px; gap: 8px 14px; }
+.waca-review-group .waca-group-mode-label { font-weight: 700; color: #0f172a; font-size: 13px; }
+.waca-review-group .waca-segmented button { min-height: 32px; padding: 4px 14px; font-size: 13px; }
+.waca-review-group [data-testid="waca-group-mode-state"] { color: #475569; font-size: 12px; }
+.waca-review-group .waca-mixed { color: #075985; font-weight: 700; }
+.waca-review-table td { padding-top: 7px; padding-bottom: 7px; }
+.waca-review-table .waca-quantity-value { font-size: 15px; font-variant-numeric: tabular-nums; }
+.waca-review-table .waca-after { font-weight: 700; color: #0f172a; white-space: nowrap; }
+.waca-arrow::before { content: '→'; margin-right: 8px; color: #94a3b8; font-weight: 400; }
+.waca-review-table tr.needs-review > td { background: #fffdf5; }
+.waca-flags { min-width: 120px; }
+.waca-flag { display: inline-block; margin: 1px 4px 1px 0; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.waca-flag-danger { background: #fff1f2; color: #be123c; }
+.waca-flag-warn { background: #fef3c7; color: #92400e; }
+.waca-flag-muted { background: #f1f5f9; color: #475569; }
+.waca-review-table .waca-detail-toggle { white-space: nowrap; }
+.waca-review-table .waca-trace-summary { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.waca-group-pending { margin: 4px 12px 10px; padding: 8px 12px; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; font-size: 13px; }
+.waca-file-info { margin-top: 14px; }
+.waca-final-confirm { margin-top: 18px; padding: 14px 18px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
+.waca-final-confirm h3 { margin: 0 0 8px; }
+.waca-final-list { display: grid; gap: 4px; margin: 0 0 10px; padding-left: 18px; font-size: 14px; }
+.waca-final-list .up b { color: #047857; }
+.waca-final-list .down b { color: #be123c; }
+.waca-final-list .danger { color: #be123c; }
+.waca-final-list .warn { color: #92400e; }
+.waca-final-decreases { margin: 0 0 10px; padding: 8px 12px; border: 1px solid #fecdd3; border-radius: 8px; background: #fff; font-size: 13px; }
+.waca-final-decreases ul { margin: 4px 0 0; padding-left: 18px; }
+.waca-final-decreases .waca-row-note { display: inline; margin-left: 8px; }
+.waca-final-guard { color: #475569; font-size: 12px; }
+.waca-final-confirm .waca-risk { display: block; border-color: #fca5a5; background: #fef2f2; }
+@media (max-width: 700px) {
+  .waca-review-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .waca-review-summary > div { padding: 8px; }
+  .waca-review-summary strong { font-size: 20px; }
+  .waca-review-filter { width: 100%; grid-template-columns: repeat(3, 1fr); }
+  .waca-review-filter button { padding: 6px 4px; }
+  .waca-flag { white-space: normal; }
+  .waca-arrow::before { display: none; }
+}
+.waca-final-tech { margin: 0 0 10px; color: #64748b; font-size: 12px; }
+.waca-final-tech summary { cursor: pointer; }
+.waca-final-tech p { margin: 4px 0 0; }

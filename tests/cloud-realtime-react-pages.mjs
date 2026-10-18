@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { fixtureId } from './fixtures/cloud-fixture-ids.mjs';
+import { fixCloudFixtureTime } from './fixtures/cloud-fixture-clock.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +37,7 @@ const boot = async route => {
   const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei', viewport: { width: 1440, height: 1000 } });
   await context.addInitScript(() => localStorage.setItem('erp_provider_mode', 'experimental'));
   const page = await context.newPage();
+  await fixCloudFixtureTime(page);
   page.on('request', request => {
     if (/\.supabase\.co\//iu.test(request.url())) supabaseRequests.push(request.url());
   });
@@ -43,7 +46,7 @@ const boot = async route => {
   });
   page.on('pageerror', error => consoleErrors.push(error.message));
   page.on('framenavigated', frame => { if (frame === page.mainFrame()) pageReloads += 1; });
-  await page.goto(`${FIXTURE_URL}?route=${encodeURIComponent(route)}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${FIXTURE_URL}?uuidFixtures=1&route=${encodeURIComponent(route)}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.__P0_REACT_HARNESS__?.snapshot().metrics));
   await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().connectivity.readStatus !== 'loading');
   return { context, page };
@@ -84,6 +87,55 @@ const exercisePage = async ({ route, readyText, table, collection, id, patch, ex
 };
 
 try {
+  // Calendar windows include today and exclude the first day outside the range.
+  {
+    const session = await boot('/dashboard');
+    const { page } = session;
+    try {
+      await page.evaluate(async () => {
+        const h = window.__P0_REACT_HARNESS__;
+        const dates = ['2026-09-08', '2026-09-07', '2026-09-06', '2026-09-01', '2026-08-31', '2026-08-09', '2026-08-08'];
+        const batches = dates.map((date, index) => ({
+          id: fixtureId(`boundary-batch-${index}`), product_group_id: fixtureId('g-holo'),
+          name: `Calendar ${date}`, date, created_at: `${date}T12:00:00+08:00`,
+        }));
+        const items = batches.map((batch, index) => ({
+          id: fixtureId(`boundary-item-${index}`), purchase_batch_id: batch.id,
+          product_variant_id: fixtureId('v-holo'), quantity: index + 1, cost: 100,
+        }));
+        h.setServerRows('purchase_batches', batches);
+        h.setServerRows('purchase_batch_items', items);
+        await h.setCacheRows('purchase_batches', batches);
+        await h.setCacheRows('purchase_batch_items', items);
+        h.navigate('/recent-purchases');
+      });
+      const sections = page.getByTestId('recent-purchases-date-section');
+      await sections.first().waitFor();
+      const assertDates = async (filter, expected) => {
+        await page.getByTestId(`recent-purchases-filter-${filter}`).click();
+        await page.waitForFunction(dates => {
+          const actual = [...document.querySelectorAll('[data-testid="recent-purchases-date-section"]')].map(section => section.getAttribute('data-date'));
+          return JSON.stringify(actual) === JSON.stringify(dates);
+        }, expected);
+        assert.deepEqual(await sections.evaluateAll(elements => elements.map(element => element.getAttribute('data-date'))), expected);
+      };
+      await assertDates('7d', ['2026-09-07', '2026-09-06', '2026-09-01']);
+      const sixDaysAgo = page.locator('[data-testid="recent-purchases-date-section"][data-date="2026-09-01"]');
+      const toggle = sixDaysAgo.getByTestId('recent-purchases-date-toggle');
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+      await toggle.click();
+      assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+      assert.equal(await sixDaysAgo.getByTestId('recent-purchase-row').getAttribute('data-quantity'), '4');
+      await toggle.click();
+      assert.equal(await sixDaysAgo.getByTestId('recent-purchases-date-content').count(), 0);
+      await assertDates('today', ['2026-09-07']);
+      await assertDates('yesterday', ['2026-09-06']);
+      await assertDates('30d', ['2026-09-07', '2026-09-06', '2026-09-01', '2026-08-31', '2026-08-09']);
+      await assertDates('7d', ['2026-09-07', '2026-09-06', '2026-09-01']);
+      coverage.push({ route: '/recent-purchases', calendarWindows: 'PASS', dateToggle: 'PASS' });
+    } finally { await closeSession(session); }
+  }
+
   // Dashboard: actual React DOM and Cloud freshness states.
   {
     const session = await boot('/dashboard');
@@ -93,7 +145,7 @@ try {
       const beforeCounts = await page.locator('[data-dashboard-task] [data-task-count]').allTextContents();
       const before = await snap(page);
       const navigationsBeforeEvent = pageReloads;
-      await emitPatch(page, 'product_groups', 'productGroups', 'g-c108', { title: 'Dashboard Remote B' });
+      await emitPatch(page, 'product_groups', 'productGroups', fixtureId('g-c108'), { title: 'Dashboard Remote B' });
       await waitText(page, 'Dashboard Remote B');
       const after = await snap(page);
       assert.ok(after.metrics.targetedRefreshes > before.metrics.targetedRefreshes);
@@ -103,7 +155,7 @@ try {
       await page.evaluate(() => window.__P0_REACT_HARNESS__.failTargetedReadOnce());
       await page.evaluate(async () => {
         const h = window.__P0_REACT_HARNESS__;
-        const row = { ...h.server.productGroups.find(item => item.id === 'g-c108'), title: 'SHOULD NOT BE FRESH' };
+        const row = { ...h.server.productGroups.find(item => item.id === fixtureId('g-c108')), title: 'SHOULD NOT BE FRESH' };
         try { await h.emitUpsert('product_groups', row); } catch { /* expected */ }
       });
       await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().connectivity.readStatus === 'stale-cache');
@@ -111,7 +163,7 @@ try {
       assert.deepEqual(await page.locator('[data-dashboard-task] [data-task-count]').allTextContents(), beforeCounts);
       assert.equal((await snap(page)).connectivity.readStatus, 'stale-cache');
 
-      await emitPatch(page, 'product_groups', 'productGroups', 'g-c108', { title: 'Dashboard Recovered Fresh' });
+      await emitPatch(page, 'product_groups', 'productGroups', fixtureId('g-c108'), { title: 'Dashboard Recovered Fresh' });
       await waitText(page, 'Dashboard Recovered Fresh');
       assert.equal((await snap(page)).connectivity.readStatus, 'fresh-online');
 
@@ -156,15 +208,15 @@ try {
 
   // Every primary React consumer receives a real event, targeted-refetches, and changes the actual DOM.
   const pageCases = [
-    { route: '/purchase-records', readyText: '訂購紀錄表', table: 'product_groups', collection: 'productGroups', id: 'g-holo', patch: { normalized_title: 'records remote b' }, expectedText: 'records remote b' },
-    { route: '/purchase-records/g-holo', readyText: '代購工作規格表', table: 'product_categories', collection: 'productCategories', id: 'c-holo', patch: { title: 'Category Remote B' }, expectedText: 'Category Remote B' },
-    { route: '/purchase-records/g-holo', readyText: '代購工作規格表', table: 'product_variants', collection: 'productVariants', id: 'v-holo', patch: { variant_name: 'Variant Remote B' }, expectedText: 'Variant Remote B' },
-    { route: '/recent-purchases', readyText: '近期採購', table: 'product_groups', collection: 'productGroups', id: 'g-holo', patch: { normalized_title: 'recent remote b' }, expectedText: 'recent remote b', beforeAction: page => page.locator('[data-testid="recent-purchases-date-toggle"]').click() },
-    { route: '/purchasing', readyText: '採購總表', table: 'product_groups', collection: 'productGroups', id: 'g-holo', patch: { normalized_title: 'purchasing remote b' }, expectedText: 'purchasing remote b' },
-    { route: '/japan-packages', readyText: 'React Japan Package A', table: 'japan_packages', collection: 'japanPackages', id: 'jp-react-1', patch: { title: 'Japan List Remote B' }, expectedText: 'Japan List Remote B' },
-    { route: '/japan-packages/jp-react-1', readyText: '包裹基本資訊', table: 'japan_packages', collection: 'japanPackages', id: 'jp-react-1', patch: { title: 'Japan Detail Remote B' }, expectedText: 'Japan Detail Remote B' },
-    { route: '/outbound-shipments', readyText: 'React Outbound A', table: 'outbound_shipments', collection: 'outboundShipments', id: 'out-react-1', patch: { title: 'Outbound List Remote B' }, expectedText: 'Outbound List Remote B' },
-    { route: '/outbound-shipments/out-react-1', readyText: '出庫清單', table: 'outbound_shipments', collection: 'outboundShipments', id: 'out-react-1', patch: { title: 'Outbound Detail Remote B' }, expectedText: 'Outbound Detail Remote B' },
+    { route: '/purchase-records', readyText: '訂購紀錄表', table: 'product_groups', collection: 'productGroups', id: fixtureId('g-holo'), patch: { normalized_title: 'records remote b' }, expectedText: 'records remote b' },
+    { route: '/purchase-records/g-holo', readyText: '代購工作規格表', table: 'product_categories', collection: 'productCategories', id: fixtureId('c-holo'), patch: { title: 'Category Remote B' }, expectedText: 'Category Remote B' },
+    { route: '/purchase-records/g-holo', readyText: '代購工作規格表', table: 'product_variants', collection: 'productVariants', id: fixtureId('v-holo'), patch: { variant_name: 'Variant Remote B' }, expectedText: 'Variant Remote B' },
+    { route: '/recent-purchases', readyText: '近期採購', table: 'product_groups', collection: 'productGroups', id: fixtureId('g-holo'), patch: { normalized_title: 'recent remote b' }, expectedText: 'recent remote b', beforeAction: page => page.locator('[data-testid="recent-purchases-date-toggle"]').click() },
+    { route: '/purchasing', readyText: '採購總表', table: 'product_groups', collection: 'productGroups', id: fixtureId('g-holo'), patch: { normalized_title: 'purchasing remote b' }, expectedText: 'purchasing remote b' },
+    { route: '/japan-packages', readyText: 'React Japan Package A', table: 'japan_packages', collection: 'japanPackages', id: fixtureId('jp-react-1'), patch: { title: 'Japan List Remote B' }, expectedText: 'Japan List Remote B' },
+    { route: '/japan-packages/jp-react-1', readyText: '包裹基本資訊', table: 'japan_packages', collection: 'japanPackages', id: fixtureId('jp-react-1'), patch: { title: 'Japan Detail Remote B' }, expectedText: 'Japan Detail Remote B' },
+    { route: '/outbound-shipments', readyText: 'React Outbound A', table: 'outbound_shipments', collection: 'outboundShipments', id: fixtureId('out-react-1'), patch: { title: 'Outbound List Remote B' }, expectedText: 'Outbound List Remote B' },
+    { route: '/outbound-shipments/out-react-1', readyText: '出庫清單', table: 'outbound_shipments', collection: 'outboundShipments', id: fixtureId('out-react-1'), patch: { title: 'Outbound Detail Remote B' }, expectedText: 'Outbound Detail Remote B' },
   ];
   for (const pageCase of pageCases) {
     if (pageCase.route === '/recent-purchases' && process.env.REALTIME_SKIP_KNOWN_RECENT_PURCHASES === '1') {
@@ -181,7 +233,7 @@ try {
     try {
       await page.getByText('私下登記紀錄', { exact: true }).click();
       await waitText(page, 'Core Fixture');
-      await emitPatch(page, 'private_orders', 'privateOrders', 'po-closed', { customer_name: 'Private Remote B' });
+      await emitPatch(page, 'private_orders', 'privateOrders', fixtureId('po-closed'), { customer_name: 'Private Remote B' });
       await waitText(page, 'Private Remote B');
       coverage.push({ route: '/purchase-records/:id', table: 'private_orders/private_order_items', reactDom: 'PASS', targetedRefresh: 'PASS' });
     } finally { await closeSession(session); }
@@ -192,8 +244,8 @@ try {
     try {
       const totalCard = page.getByText('訂單總金額', { exact: true }).locator('xpath=../..');
       await totalCard.getByText('1,000', { exact: true }).waitFor();
-      await emitPatch(page, 'sales_orders', 'salesOrders', 'so-react-1', { buyer_name: 'Sales Remote B' });
-      await emitPatch(page, 'sales_order_items', 'salesOrderItems', 'soi-react-1', { amount: 9000 });
+      await emitPatch(page, 'sales_orders', 'salesOrders', fixtureId('so-react-1'), { buyer_name: 'Sales Remote B' });
+      await emitPatch(page, 'sales_order_items', 'salesOrderItems', fixtureId('soi-react-1'), { amount: 9000 });
       await totalCard.getByText('9,000', { exact: true }).waitFor();
       coverage.push({ route: '/purchase-records/:id', table: 'sales_orders/sales_order_items', reactDom: 'PASS', targetedRefresh: 'PASS' });
     } finally { await closeSession(session); }
@@ -210,7 +262,7 @@ try {
       const initialGap = Number(await gapValue.innerText());
       const expectGap = async value => page.waitForFunction(expected => Number(document.querySelector('.detail-stat-card .stat-value')?.textContent) === expected, value);
 
-      const item = { id: 'bi-react-event', purchase_batch_id: 'b-holo', product_variant_id: 'v-holo', quantity: 1, cost: 1000, note: '', updated_at: '2026-09-07T12:00:00.000Z' };
+      const item = { id: fixtureId('bi-react-event'), purchase_batch_id: fixtureId('b-holo'), product_variant_id: fixtureId('v-holo'), quantity: 1, cost: 1000, note: '', updated_at: '2026-09-07T12:00:00.000Z' };
       await page.evaluate(async row => window.__P0_REACT_HARNESS__.emitUpsert('purchase_batch_items', row, 'INSERT'), item);
       await expectGap(initialGap - 1);
       await emitPatch(page, 'purchase_batch_items', 'purchaseBatchItems', item.id, { quantity: 2 });
@@ -218,15 +270,15 @@ try {
       await page.evaluate(id => window.__P0_REACT_HARNESS__.emitDelete('purchase_batch_items', id), item.id);
       await expectGap(initialGap);
 
-      const orphanItem = { ...item, id: 'bi-react-header', purchase_batch_id: 'b-react-header', quantity: 2 };
+      const orphanItem = { ...item, id: fixtureId('bi-react-header'), purchase_batch_id: fixtureId('b-react-header'), quantity: 2 };
       await page.evaluate(async row => window.__P0_REACT_HARNESS__.emitUpsert('purchase_batch_items', row, 'INSERT'), orphanItem);
       await expectGap(initialGap);
-      const batch = { id: 'b-react-header', product_group_id: 'g-holo', name: 'Batch Insert B', date: '2026-09-07', note: '', created_at: '2026-09-07T12:00:00.000Z', updated_at: '2026-09-07T12:00:00.000Z' };
+      const batch = { id: fixtureId('b-react-header'), product_group_id: fixtureId('g-holo'), name: 'Batch Insert B', date: '2026-09-07', note: '', created_at: '2026-09-07T12:00:00.000Z', updated_at: '2026-09-07T12:00:00.000Z' };
       await page.evaluate(async row => window.__P0_REACT_HARNESS__.emitUpsert('purchase_batches', row, 'INSERT'), batch);
       await expectGap(initialGap - 2);
-      await emitPatch(page, 'purchase_batches', 'purchaseBatches', batch.id, { product_group_id: 'g-vspo' });
+      await emitPatch(page, 'purchase_batches', 'purchaseBatches', batch.id, { product_group_id: fixtureId('g-vspo') });
       await expectGap(initialGap);
-      await emitPatch(page, 'purchase_batches', 'purchaseBatches', batch.id, { product_group_id: 'g-holo' });
+      await emitPatch(page, 'purchase_batches', 'purchaseBatches', batch.id, { product_group_id: fixtureId('g-holo') });
       await expectGap(initialGap - 2);
       await page.evaluate(id => window.__P0_REACT_HARNESS__.emitDelete('purchase_batches', id), batch.id);
       await expectGap(initialGap);
@@ -246,7 +298,7 @@ try {
       const modal = page.locator('#purchase-batch-modal');
       const nameInput = modal.locator('input').first();
       await nameInput.fill('USER-DRAFT');
-      await emitPatch(page, 'product_groups', 'productGroups', 'g-holo', { title: 'Modal Remote B', normalized_title: 'modal remote b' });
+      await emitPatch(page, 'product_groups', 'productGroups', fixtureId('g-holo'), { title: 'Modal Remote B', normalized_title: 'modal remote b' });
       assert.equal(await nameInput.inputValue(), 'USER-DRAFT');
       await page.evaluate(() => window.__P0_REACT_HARNESS__.focus());
       await page.evaluate(() => window.__P0_REACT_HARNESS__.visibility('hidden'));
@@ -254,7 +306,7 @@ try {
       await page.evaluate(() => window.__P0_REACT_HARNESS__.offline());
       await page.evaluate(() => {
         const h = window.__P0_REACT_HARNESS__;
-        h.mutateServerRow('product_groups', { ...h.server.productGroups.find(row => row.id === 'g-holo'), title: 'Reconnect Remote B', normalized_title: 'reconnect remote b' });
+        h.mutateServerRow('product_groups', { ...h.server.productGroups.find(row => row.id === fixtureId('g-holo')), title: 'Reconnect Remote B', normalized_title: 'reconnect remote b' });
         h.online();
       });
       assert.equal(await nameInput.inputValue(), 'USER-DRAFT');
@@ -267,7 +319,7 @@ try {
 
       await page.getByRole('button', { name: '新增採購批次' }).click();
       await modal.locator('input').first().fill('USER-DRAFT-CLOSE');
-      await emitPatch(page, 'product_groups', 'productGroups', 'g-holo', { title: 'Close Remote B', normalized_title: 'close remote b' });
+      await emitPatch(page, 'product_groups', 'productGroups', fixtureId('g-holo'), { title: 'Close Remote B', normalized_title: 'close remote b' });
       assert.equal(await modal.locator('input').first().inputValue(), 'USER-DRAFT-CLOSE');
       await modal.locator('button').first().click();
       await waitText(page, 'close remote b');
@@ -286,7 +338,7 @@ try {
       const modal = page.locator('#purchase-batch-modal');
       await modal.locator('input').first().fill('USER-SAVE');
       await modal.locator('input[inputmode="numeric"]').first().fill('1');
-      await emitPatch(page, 'product_groups', 'productGroups', 'g-holo', { title: 'Save Catchup Remote B', normalized_title: 'save catchup remote b' });
+      await emitPatch(page, 'product_groups', 'productGroups', fixtureId('g-holo'), { title: 'Save Catchup Remote B', normalized_title: 'save catchup remote b' });
       await modal.getByRole('button', { name: '儲存', exact: true }).click();
       await modal.waitFor({ state: 'detached' });
       await waitText(page, 'save catchup remote b');
@@ -304,7 +356,7 @@ try {
       await page.getByRole('button', { name: '✏️' }).click();
       const input = page.locator('input').first();
       await input.fill('DETAIL-USER-DRAFT');
-      await emitPatch(page, 'outbound_shipments', 'outboundShipments', 'out-react-1', { title: 'Detail Remote Catchup B' });
+      await emitPatch(page, 'outbound_shipments', 'outboundShipments', fixtureId('out-react-1'), { title: 'Detail Remote Catchup B' });
       assert.equal(await input.inputValue(), 'DETAIL-USER-DRAFT');
       await page.getByRole('button', { name: '取消', exact: true }).click();
       await waitText(page, 'Detail Remote Catchup B');
@@ -321,22 +373,22 @@ try {
       const input = page.getByRole('textbox', { name: 'WACA 需求 SKU-HOLO' });
       await input.fill('20');
       await input.press('Enter');
-      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productVariants.find(row => row.id === 'v-holo').waca_manual_adjustment === 18);
+      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productVariants.find(row => row.id === fixtureId('v-holo')).waca_manual_adjustment === 18);
       assert.equal(await input.inputValue(), '20');
 
       await page.evaluate(async () => {
         const h = window.__P0_REACT_HARNESS__;
-        const canonical = h.server.productVariants.find(row => row.id === 'v-holo');
+        const canonical = h.server.productVariants.find(row => row.id === fixtureId('v-holo'));
         await h.emitSelfEcho('product_variants', { ...canonical, updated_at: new Date().toISOString() });
       });
       assert.equal(await input.inputValue(), '20', 'Self echo rolled the real input back to 18');
       await input.fill('21');
       await input.press('Enter');
-      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productVariants.find(row => row.id === 'v-holo').waca_manual_adjustment === 19);
+      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productVariants.find(row => row.id === fixtureId('v-holo')).waca_manual_adjustment === 19);
       assert.equal(await input.inputValue(), '21', 'Second save failed after self echo');
 
       await input.fill('77');
-      await emitPatch(page, 'product_variants', 'productVariants', 'v-holo', { variant_name: 'Inline Remote Pending B' });
+      await emitPatch(page, 'product_variants', 'productVariants', fixtureId('v-holo'), { variant_name: 'Inline Remote Pending B' });
       assert.equal(await input.inputValue(), '77');
       await page.evaluate(() => window.__P0_REACT_HARNESS__.focus());
       assert.equal(await input.inputValue(), '77');
@@ -352,7 +404,7 @@ try {
       // preservation must not rely on an unhandled provider rejection.
       const blockedErrors = consoleErrors.splice(errorsBeforeBlockedBlur);
       assert.deepEqual(blockedErrors, []);
-      assert.equal((await serverRow(page, 'productVariants', 'v-holo')).waca_manual_adjustment, 19, 'Stale blur must not write draft 77');
+      assert.equal((await serverRow(page, 'productVariants', fixtureId('v-holo'))).waca_manual_adjustment, 19, 'Stale blur must not write draft 77');
       const result = await snap(page);
       assert.ok(result.metrics.editingCatchUps >= 1);
       assert.equal(result.metrics.fullPulls, 0);
@@ -367,7 +419,7 @@ try {
       const before = await snap(page);
       await page.evaluate(async () => {
         const h = window.__P0_REACT_HARNESS__;
-        const row = { ...h.server.productGroups.find(item => item.id === 'g-c108'), title: 'Duplicate Remote B', updated_at: new Date().toISOString() };
+        const row = { ...h.server.productGroups.find(item => item.id === fixtureId('g-c108')), title: 'Duplicate Remote B', updated_at: new Date().toISOString() };
         await h.emitDuplicate('product_groups', row);
       });
       await waitText(page, 'Duplicate Remote B');
@@ -392,7 +444,7 @@ try {
         h.setServerRows('purchase_batches', [
           ...h.server.purchaseBatches,
           {
-            id: 'p0-4-replay-missed-batch', product_group_id: 'g-holo', name: 'P0-4 Missed Replay Batch',
+            id: fixtureId('p0-4-replay-missed-batch'), product_group_id: fixtureId('g-holo'), name: 'P0-4 Missed Replay Batch',
             date: '2026-09-08', note: 'same-key replay has no second event',
             created_at: '2026-09-08T00:00:00.000Z', updated_at: '2026-09-08T00:00:00.000Z',
           },
@@ -400,13 +452,13 @@ try {
         h.setServerRows('purchase_batch_items', [
           ...h.server.purchaseBatchItems,
           {
-            id: 'p0-4-replay-missed-item', purchase_batch_id: 'p0-4-replay-missed-batch',
-            product_variant_id: 'v-holo', quantity: 3, cost: 777, note: 'P0-4 Missed Replay Item',
+            id: fixtureId('p0-4-replay-missed-item'), purchase_batch_id: fixtureId('p0-4-replay-missed-batch'),
+            product_variant_id: fixtureId('v-holo'), quantity: 3, cost: 777, note: 'P0-4 Missed Replay Item',
             updated_at: '2026-09-08T00:00:00.000Z',
           },
         ]);
         // The same-key replay returns the existing canonical result and intentionally emits no DB event.
-        h.replaySameKey({ batchId: 'p0-4-replay-missed-batch', itemIds: ['p0-4-replay-missed-item'], replayed: true });
+        h.replaySameKey({ batchId: fixtureId('p0-4-replay-missed-batch'), itemIds: [fixtureId('p0-4-replay-missed-item')], replayed: true });
         h.failTargetedTableRead('purchase_batch_items', 1);
       });
       const completed = await page.evaluate(() => window.__P0_REACT_HARNESS__.online());
@@ -519,10 +571,10 @@ try {
       const atomic = await page.evaluate(async () => {
         const { cloudCacheDb } = await import('/src/lib/db.ts');
         const { CloudTargetedCache } = await import('/src/providers/cloud/cloudTargetedCache.ts');
-        const oldBatch = { id: 'atomic-old-batch', product_group_id: 'g-holo', name: 'Atomic Old Batch', date: '2026-09-08' };
-        const oldItem = { id: 'atomic-old-item', purchase_batch_id: oldBatch.id, product_variant_id: 'v-holo', quantity: 1, cost: 1 };
-        const newBatch = { ...oldBatch, id: 'atomic-new-batch', name: 'Atomic New Batch' };
-        const newItem = { ...oldItem, id: 'atomic-new-item', purchase_batch_id: newBatch.id, quantity: 2 };
+        const oldBatch = { id: fixtureId('atomic-old-batch'), product_group_id: fixtureId('g-holo'), name: 'Atomic Old Batch', date: '2026-09-08' };
+        const oldItem = { id: fixtureId('atomic-old-item'), purchase_batch_id: oldBatch.id, product_variant_id: fixtureId('v-holo'), quantity: 1, cost: 1 };
+        const newBatch = { ...oldBatch, id: fixtureId('atomic-new-batch'), name: 'Atomic New Batch' };
+        const newItem = { ...oldItem, id: fixtureId('atomic-new-item'), purchase_batch_id: newBatch.id, quantity: 2 };
         await cloudCacheDb.savePurchaseBatchTransaction([oldBatch], [oldItem]);
         let failItem = true;
         const cache = new CloudTargetedCache({
@@ -548,10 +600,10 @@ try {
           },
         };
       });
-      assert.equal(atomic.afterFailure.batches[0].id, 'atomic-old-batch');
-      assert.equal(atomic.afterFailure.items[0].id, 'atomic-old-item');
-      assert.equal(atomic.afterSuccess.batches[0].id, 'atomic-new-batch');
-      assert.equal(atomic.afterSuccess.items[0].id, 'atomic-new-item');
+      assert.equal(atomic.afterFailure.batches[0].id, fixtureId('atomic-old-batch'));
+      assert.equal(atomic.afterFailure.items[0].id, fixtureId('atomic-old-item'));
+      assert.equal(atomic.afterSuccess.batches[0].id, fixtureId('atomic-new-batch'));
+      assert.equal(atomic.afterSuccess.items[0].id, fixtureId('atomic-new-item'));
     } finally { await closeSession(session); }
   }
 

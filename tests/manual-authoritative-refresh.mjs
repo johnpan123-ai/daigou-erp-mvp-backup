@@ -22,7 +22,7 @@ try {
   page.on('pageerror', error => runtimeErrors.push(error.message));
   let discardDrafts = false;
   page.on('dialog', dialog => discardDrafts && dialog.type() === 'confirm' && dialog.message().startsWith('鎖定將放棄') ? dialog.accept() : dialog.dismiss());
-  await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1`);
+  await page.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1&uuidFixtures=1`);
   const reload = () => page.getByRole('button', { name: '同步資料', exact: true })
     .or(page.getByRole('button', { name: '重新載入最新資料', exact: true })).last();
   const refreshed = async () => {
@@ -35,7 +35,7 @@ try {
   const rootNode = await page.locator('.main-area').elementHandle();
   const patchVariant = patch => page.evaluate(patch => {
     const h = window.__P0_REACT_HARNESS__;
-    h.mutateServerRow('product_variants', { ...h.server.productVariants.find(r => r.id === 'v-holo'), ...patch });
+    h.mutateServerRow('product_variants', { ...h.server.productVariants.find(r => r.id === h.fixtureId('v-holo')), ...patch });
   }, patch);
   // Real users leave this persisted switch unlocked. Being editable is not an
   // unsaved draft: the previous fixture always refreshed the locked route.
@@ -58,11 +58,11 @@ try {
   // manual-refresh client stays mounted throughout this equivalence assertion.
   const bootstrapPage = await browser.newPage();
   await bootstrapPage.route('**/*.supabase.co/**', route => { liveRequests.push(route.request().url()); return route.abort(); });
-  await bootstrapPage.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1&bootstrapVariant=Manual%20authoritative%20A`);
+  await bootstrapPage.goto(`${origin}/tests/fixtures/cloud-p0-2-react-harness.html?route=/purchase-records/g-holo&realReads=1&uuidFixtures=1&bootstrapVariant=Manual%20authoritative%20A`);
   await bootstrapPage.getByText('Manual authoritative A', { exact: false }).filter({ visible: true }).first().waitFor();
   const projectedVariant = async target => target.evaluate(async () => {
     const { supabaseProvider } = await import('/src/providers/cloud/supabaseProvider.ts');
-    const row = (await supabaseProvider.getProductVariants()).find(row => row.id === 'v-holo');
+    const row = (await supabaseProvider.getProductVariants()).find(row => row.id === window.__P0_REACT_HARNESS__.fixtureId('v-holo'));
     return { id: row.id, name: row.variant_name, sku: row.myacg_item_code, group: row.product_group_id, version: row.version };
   });
   assert.deepEqual(await projectedVariant(page), await projectedVariant(bootstrapPage));
@@ -96,15 +96,15 @@ try {
   await page.getByRole('button', { name: '🔒 已鎖定' }).click();
   const draft = page.getByRole('textbox', { name: 'WACA 需求 SKU-HOLO' });
   await draft.fill('77');
-  const base = await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductVariants()).find(r => r.id === 'v-holo'));
+  const base = await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductVariants()).find(r => r.id === window.__P0_REACT_HARNESS__.fixtureId('v-holo')));
   await page.evaluate(() => {
     const h = window.__P0_REACT_HARNESS__;
-    h.mutateServerRow('product_groups', { ...h.server.productGroups.find(r => r.id === 'g-closed'), title: 'Unrelated B manual' });
+    h.mutateServerRow('product_groups', { ...h.server.productGroups.find(r => r.id === h.fixtureId('g-closed')), title: 'Unrelated B manual' });
   });
   await refreshed();
   assert.equal(await draft.inputValue(), '77');
   assert.equal(await page.getByRole('alert').count(), 0);
-  assert.equal(await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductGroups()).find(r => r.id === 'g-closed').title), 'Unrelated B manual');
+  assert.equal(await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductGroups()).find(r => r.id === window.__P0_REACT_HARNESS__.fixtureId('g-closed')).title), 'Unrelated B manual');
   await patchVariant({ version: 11, updated_by: 'same-owner', updated_at: '2026-09-22T12:00:00Z' });
   await refreshed();
   assert.equal(await draft.inputValue(), '77');
@@ -113,7 +113,7 @@ try {
   await refreshed();
   assert.equal(await draft.inputValue(), '77');
   assert.equal(await page.getByRole('alert').filter({ hasText: '資料已被其他使用者更新' }).count(), 1);
-  const protectedBase = await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductVariants()).find(r => r.id === 'v-holo'));
+  const protectedBase = await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductVariants()).find(r => r.id === window.__P0_REACT_HARNESS__.fixtureId('v-holo')));
   assert.equal(protectedBase.variant_name, base.variant_name);
   assert.equal(protectedBase.version, 11, 'preserve original business/CAS base, never silently rebase draft');
   await page.evaluate(async () => {
@@ -136,7 +136,7 @@ try {
   await refreshed();
   await page.getByRole('alert').filter({ hasText: '尚未完成更新' }).waitFor();
   assert.equal(await page.getByText('Must not partially commit', { exact: false }).count(), 0);
-  assert.equal(await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductVariants()).find(r => r.id === 'v-holo').version), 12);
+  assert.equal(await page.evaluate(async () => (await (await import('/src/lib/db.ts')).cloudCacheDb.getProductVariants()).find(r => r.id === window.__P0_REACT_HARNESS__.fixtureId('v-holo')).version), 12);
   assert.notEqual((await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot())).connectivity.readStatus, 'fresh-online');
   await refreshed();
   await page.getByText('Must not partially commit', { exact: false }).first().waitFor();
@@ -146,7 +146,7 @@ try {
   await reload().waitFor();
   await page.evaluate(() => {
     const h = window.__P0_REACT_HARNESS__;
-    h.mutateServerRow('product_groups', { ...h.server.productGroups.find(r => r.id === 'g-holo'), title: 'Summary manual fresh', normalized_title: 'Summary manual fresh' });
+    h.mutateServerRow('product_groups', { ...h.server.productGroups.find(r => r.id === h.fixtureId('g-holo')), title: 'Summary manual fresh', normalized_title: 'Summary manual fresh' });
   });
   await refreshed();
   await page.getByText('Summary manual fresh', { exact: false }).first().waitFor();
@@ -169,17 +169,17 @@ try {
   const stat = label => page.getByText(label, { exact: true }).locator('..').locator('span').last();
   await page.evaluate(async () => {
     const h = window.__P0_REACT_HARNESS__;
-    const make = (count, prefix, base) => Array.from({ length: count }, (_, i) => ({ ...base, id: prefix + i }));
-    h.server.productGroups = make(705, 'manual-g-', h.server.productGroups[0]);
-    h.server.productCategories = make(390, 'manual-c-', h.server.productCategories[0]);
-    h.server.productVariants = make(3254, 'manual-v-', h.server.productVariants[0]);
+    const make = (count, prefix, rows) => [...rows, ...Array.from({ length: count - rows.length }, (_, i) => ({ ...rows[0], id: h.fixtureId(prefix + i), ...(prefix === 'manual-v-' ? { myacg_item_code: 'MANUAL-SKU-' + i } : {}) }))];
+    h.server.productGroups = make(705, 'manual-g-', h.server.productGroups);
+    h.server.productCategories = make(390, 'manual-c-', h.server.productCategories);
+    h.server.productVariants = make(3254, 'manual-v-', h.server.productVariants);
   });
   await refreshed();
   assert.equal(await stat('商品 SKU (ProductVariant)').textContent(), '3254 筆');
   await page.evaluate(() => {
     const h = window.__P0_REACT_HARNESS__;
     const base = h.server.productVariants[0];
-    h.server.productVariants = Array.from({ length: 3461 }, (_, i) => ({ ...base, id: 'manual-v-' + i }));
+    h.server.productVariants.push(...Array.from({ length: 3461 - h.server.productVariants.length }, (_, i) => ({ ...base, id: h.fixtureId('manual-v-more-' + i), myacg_item_code: 'MANUAL-SKU-MORE-' + i })));
     h.holdNextTargetedRead();
   });
   await reload().click();
@@ -199,7 +199,7 @@ try {
   assert.equal((await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot())).connectivity.readStatus, 'fresh-online');
   await page.evaluate(() => {
     const h = window.__P0_REACT_HARNESS__;
-    for (const key of ['productGroups', 'productCategories', 'productVariants']) h.server[key].push({ ...h.server[key][0], id: 'extra-' + key });
+    for (const key of ['productGroups', 'productCategories', 'productVariants']) h.server[key].push({ ...h.server[key][0], id: h.fixtureId('extra-' + key), ...(key === 'productVariants' ? { myacg_item_code: 'MANUAL-SKU-EXTRA' } : {}) });
   });
   await refreshed();
   await page.waitForFunction(() => [...document.querySelectorAll('span')].some(e => e.textContent === '3462 筆'));

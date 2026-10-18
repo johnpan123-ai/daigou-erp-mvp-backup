@@ -48,28 +48,40 @@ try {
   await page.getByLabel('選擇 WACA Excel').setInputFiles({ name: 'transition.xlsx',
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }) });
   await page.getByTestId('waca-counted-summary').waitFor();
-  await page.locator('.waca-group summary').click();
+  assert.equal(await page.locator('.waca-group[open]').count(), 1, 'UI v3: a needs-review group opens on a new preview');
   const cells = async sku => (await page.getByTestId(`waca-counted-row-${sku}`).locator('td').allInnerTexts()).map(t => t.replace(/\s+/gu, ' ').trim());
-  // Default OVERWRITE: 10 -> 2 and 3 -> 2 are flagged; confirmation is blocked until acknowledged.
+  // UI v3 row: [規格, 目前, 更新後, 差異, 更新方式, 需確認, 來源訂單]; source / counted detail lives in the expansion.
+  // Default 累加 (Owner decision 2026-10-18): the old-dated order is uncertain (not counted), the new one adds 2.
   let g10 = await cells('G10'), g2 = await cells('G2');
-  assert.deepEqual([g10[1], g10[2], g10[5]], ['10', '2', '2']); assert.match(g10[6], /^-8/u); assert.match(g10[6], /覆蓋會減少，需確認/u);
-  assert.deepEqual([g2[1], g2[2], g2[3], g2[5]], ['3', '2', '2', '2']);
+  assert.equal(await page.getByLabel('更新方式 G10').inputValue(), 'ACCUMULATE'); assert.equal(await page.getByLabel('更新方式 G2').inputValue(), 'ACCUMULATE');
+  assert.deepEqual([g10[1], g10[2], g10[3]], ['10', '10', '±0']); assert.match(g10[5], /接管前訂單 1 筆待確認/u); assert.match(g10[5], /待核對 2 件/u);
+  assert.deepEqual([g2[1], g2[2], g2[3]], ['3', '5', '+2']);
+  await page.getByLabel('查看 G2 來源訂單').click();
+  assert.match((await page.getByTestId('waca-calc-G2').innerText()).replace(/\s+/gu, ' '), /目前 3 來源訂單合計 2 件 本次實際計入 \+2 接管後新訂單 2 件 累加後 5（\+2）/u);
+  await page.getByLabel('收合 G2 來源訂單').click();
+  assert.equal(await page.getByTestId('waca-overwrite-ack').count(), 0, 'no risky overwrite by default');
+  assert.equal(await page.getByRole('button', { name: '確認更新' }).isDisabled(), false, 'default accumulate needs no overwrite acknowledgement');
+  // 覆蓋 (manual): 10 -> 2 and 3 -> 2 are flagged; confirmation is blocked until acknowledged (protection unchanged).
+  await page.getByLabel('更新方式 G10').selectOption('OVERWRITE');
+  await page.getByLabel('更新方式 G2').selectOption('OVERWRITE');
+  g10 = await cells('G10'); g2 = await cells('G2');
+  assert.deepEqual([g10[1], g10[2], g10[3], g10[5]], ['10', '2', '−8', '覆蓋會減少']);
+  assert.deepEqual([g2[1], g2[2], g2[3], g2[5]], ['3', '2', '−1', '覆蓋會減少']);
   assert.equal(await page.getByRole('button', { name: '確認更新' }).isDisabled(), true, 'risky overwrite blocks confirmation');
   await page.getByTestId('waca-overwrite-ack').waitFor();
-  // Owner keeps history: ACCUMULATE for both. The old-dated order is uncertain (not counted), the new one adds 2.
+  // Back to 累加 for both (the Owner choice is kept, never silently reset).
   await page.getByLabel('更新方式 G10').selectOption('ACCUMULATE');
   await page.getByLabel('更新方式 G2').selectOption('ACCUMULATE');
   g10 = await cells('G10'); g2 = await cells('G2');
-  assert.equal(g10[5], '10'); assert.match(g10[6], /接管前訂單 1 筆待確認/u); assert.match(g10[6], /待核對 2 件/u);
-  assert.equal(g2[5], '5'); assert.match(g2[6], /^\+2/u);
+  assert.equal(g10[2], '10'); assert.equal(g2[2], '5'); assert.equal(g2[3], '+2');
   assert.equal(await page.getByRole('button', { name: '確認更新' }).isDisabled(), false, 'no risky overwrite left');
   // Per-order decision: the old-dated order is confirmed as a new order -> 12.
-  await page.getByLabel('查看 G10 明細').click();
+  await page.getByLabel('查看 G10 來源訂單').click();
   await page.getByLabel('確認訂單 ORDER-OLD').selectOption('COUNT_AS_NEW');
-  g10 = await cells('G10'); assert.equal(g10[5], '12');
+  g10 = await cells('G10'); assert.equal(g10[2], '12');
   // KEEP preview check on G2 then back to ACCUMULATE (choice must affect the projection, not only the label).
   await page.getByLabel('更新方式 G2').selectOption('KEEP');
-  g2 = await cells('G2'); assert.equal(g2[5], '3'); assert.match(g2[6], /待核對 2 件/u);
+  g2 = await cells('G2'); assert.equal(g2[2], '3'); assert.match(g2[5], /待核對 2 件/u);
   await page.getByLabel('更新方式 G2').selectOption('ACCUMULATE');
   for (const width of [1366, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -99,7 +111,7 @@ try {
   await page.getByRole('button', { name: '重新讀取' }).click();
   await page.getByTestId('waca-transition-baseline').waitFor();
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS', defaultOverwriteFlagged: true, confirmBlockedUntilAck: true,
+  console.log(JSON.stringify({ result: 'PASS', defaultAccumulate: true, manualOverwriteFlagged: true, confirmBlockedUntilAck: true,
     accumulate: 'G10 10 (1 uncertain pending), G2 3->5', ownerConfirmedOrder: 'G10 -> 12', keepPreview: 'G2 stays 3',
     rpcPlan: plan.expectedDisplay, countedItems: items, noOverflow: [1366, 390] }));
 } finally { await browser?.close(); vite.kill(); }

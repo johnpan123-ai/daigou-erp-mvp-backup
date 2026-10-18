@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { fixtureId } from './fixtures/cloud-fixture-ids.mjs';
+import { fixCloudFixtureTime } from './fixtures/cloud-fixture-clock.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -33,12 +35,13 @@ const open = async (route, extra = '', width = 1366) => {
   const context = await browser.newContext({ viewport: { width, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('erp_provider_mode', 'experimental'));
   const page = await context.newPage();
+  await fixCloudFixtureTime(page);
   const errors = [];
   page.on('console', message => {
     if (message.type() === 'error' && !message.text().includes('simulated outbound confirmation failure')) errors.push(message.text());
   });
   page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`${FIXTURE_URL}?route=${encodeURIComponent(route)}${extra}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${FIXTURE_URL}?uuidFixtures=1&route=${encodeURIComponent(route)}${extra}`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => Boolean(window.__P0_REACT_HARNESS__?.snapshot().metrics));
   return { context, page, errors };
 };
@@ -217,19 +220,19 @@ try {
   for (const pageCase of [
     {
       route: '/outbound-shipments', rootTestId: 'outbound-shipments-list-root', loadingText: '載入中...',
-      table: 'outbound_shipments', collection: 'outboundShipments', id: 'out-react-1', patch: { title: 'Mounted Outbound B' },
+      table: 'outbound_shipments', collection: 'outboundShipments', id: fixtureId('out-react-1'), patch: { title: 'Mounted Outbound B' },
     },
     {
       route: '/recent-purchases', rootTestId: 'recent-purchases-page', loadingText: '載入近期採購資料中…',
-      table: 'product_groups', collection: 'productGroups', id: 'g-holo', patch: { normalized_title: 'mounted recent b' },
+      table: 'product_groups', collection: 'productGroups', id: fixtureId('g-holo'), patch: { normalized_title: 'mounted recent b' },
     },
     {
       route: '/duplicate-variants', rootTestId: 'duplicate-variants-root', loadingText: '載入中…',
-      table: 'product_variants', collection: 'productVariants', id: 'v-holo', patch: { variant_name: 'Mounted Duplicate B' },
+      table: 'product_variants', collection: 'productVariants', id: fixtureId('v-holo'), patch: { variant_name: 'Mounted Duplicate B' },
     },
     {
       route: '/unlisted-items', rootTestId: 'unlisted-items-root', loadingText: '資料整理中...',
-      table: 'product_groups', collection: 'productGroups', id: 'g-holo', patch: { normalized_title: 'mounted unlisted b' },
+      table: 'product_groups', collection: 'productGroups', id: fixtureId('g-holo'), patch: { normalized_title: 'mounted unlisted b' },
     },
   ]) await assertBackgroundContinuity(pageCase);
 

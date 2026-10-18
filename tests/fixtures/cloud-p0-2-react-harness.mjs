@@ -10,8 +10,13 @@ import {
 import { markLocalCloudWrite } from '/src/providers/cloud/cloudRealtimeEchoRegistry.ts';
 import { installCloudRealtimeTestBridge } from '/src/contexts/cloudRealtimeTestBridge.ts';
 import '/src/index.css';
+import { fixtureId, fixtureRows, fixtureRoute } from './cloud-fixture-ids.mjs';
 
 const fixtureParams = new URL(location.href).searchParams;
+const uuidFixtures = fixtureParams.get('uuidFixtures') === '1';
+if (uuidFixtures) globalThis.fixtureId = fixtureId;
+const mapRows = value => uuidFixtures ? fixtureRows(value) : value;
+const mapRoute = value => uuidFixtures ? fixtureRoute(value) : value;
 localStorage.setItem('erp_provider_mode', fixtureParams.get('providerMode') || localStorage.getItem('erp_provider_mode') || 'experimental');
 const requestedRoute = fixtureParams.get('route') || (location.pathname.startsWith('/tests/') ? '/dashboard' : location.pathname + location.search);
 const partialReceivingScenario = fixtureParams.get('partialReceiving') === '1';
@@ -19,7 +24,7 @@ const outboundReceivingScenario = fixtureParams.get('outboundReceiving') === '1'
 const proxyDemandScenario = fixtureParams.get('proxyDemand') === '1';
 const realProviderReads = fixtureParams.get('realReads') === '1';
 const { supabaseProvider } = realProviderReads ? await import('/src/providers/cloud/supabaseProvider.ts') : {};
-const routeUrl = new URL(requestedRoute, location.origin);
+const routeUrl = new URL(mapRoute(requestedRoute), location.origin);
 routeUrl.searchParams.set('p0ReactHarness', '1');
 history.replaceState({}, '', routeUrl.pathname + routeUrl.search);
 
@@ -156,6 +161,10 @@ if (outboundReceivingScenario) {
   });
 }
 if (partialReceivingScenario) server.outboundShipmentItems = [];
+if (uuidFixtures) {
+  server.inventory = server.inventory.map(row => ({ ...row, id: fixtureId(row.id || row.inventory_key) }));
+  for (const [collection, rows] of Object.entries(server)) server[collection] = mapRows(rows);
+}
 
 const tableToCollection = {
   inventory_items: 'inventory',
@@ -199,7 +208,14 @@ const seedCache = async () => {
   for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAdapters)) {
     void getMethod;
     const rows = clone(server[collection] || []);
-    if (saveMethod === 'upsertInventory') await cloudCacheDb.upsertInventory(rows);
+    if (saveMethod === 'upsertInventory' && uuidFixtures) {
+      // Cloud seeds preserve authoritative business fields; CSV import upsert
+      // normalizes keys/titles/listing types and would invent a later conflict.
+      await cloudCacheDb.saveInventory(rows);
+      if (JSON.stringify(await cloudCacheDb.getInventory()) !== JSON.stringify(rows)) {
+        throw new Error('CLOUD_FIXTURE_INVENTORY_SEED_MISMATCH');
+      }
+    } else if (saveMethod === 'upsertInventory') await cloudCacheDb.upsertInventory(rows);
     else await cloudCacheDb[saveMethod](rows);
   }
 };
@@ -332,6 +348,7 @@ let idempotentReplays = 0;
 let japanPackageTransactionCalls = 0;
 
 const applyReceivingState = (itemId, checked, checkedAt = new Date().toISOString()) => {
+  itemId = uuidFixtures ? fixtureId(itemId) : itemId;
   server.japanPackageItems = server.japanPackageItems.map(item => item.id === itemId ? {
     ...item,
     checked,
@@ -339,14 +356,15 @@ const applyReceivingState = (itemId, checked, checkedAt = new Date().toISOString
     version: Number(item.version || 1) + 1,
     updated_at: checkedAt,
   } : item);
-  const activeItems = server.japanPackageItems.filter(item => item.japan_package_id === 'jp-react-1' && !item.deleted_at);
-  const currentPackage = server.japanPackages.find(pkg => pkg.id === 'jp-react-1');
+  const packageId = uuidFixtures ? fixtureId('jp-react-1') : 'jp-react-1';
+  const activeItems = server.japanPackageItems.filter(item => item.japan_package_id === packageId && !item.deleted_at);
+  const currentPackage = server.japanPackages.find(pkg => pkg.id === packageId);
   let status = currentPackage.status;
   if (status !== 'problem') {
     if (activeItems.length > 0 && activeItems.every(item => item.checked)) status = 'confirmed';
     else if (activeItems.some(item => item.checked) || status === 'arrived' || status === 'confirmed') status = 'arrived';
   }
-  server.japanPackages = server.japanPackages.map(pkg => pkg.id === 'jp-react-1' ? {
+  server.japanPackages = server.japanPackages.map(pkg => pkg.id === packageId ? {
     ...pkg,
     status,
     arrived_at: status === 'arrived' || status === 'confirmed' ? (pkg.arrived_at || '2026-09-20') : pkg.arrived_at,
@@ -410,7 +428,17 @@ const readServer = async request => {
     if (request.updatedAfter) {
       rows = rows.filter(row => !row.updated_at || row.updated_at > request.updatedAfter);
     }
-    if (request.from !== undefined && request.to !== undefined) rows = rows.slice(request.from, request.to + 1);
+    const afterId = request.keyset?.afterId ?? request.afterId;
+    if (afterId !== undefined && afterId !== null) rows = rows.filter(row => row.id > afterId);
+    if (request.activeOnly) rows = rows.filter(row => !row.deleted_at);
+    const orderColumn = request.keyset ? 'id' : request.orderColumn;
+    if (orderColumn) rows.sort((a, b) => {
+      const result = a[orderColumn] < b[orderColumn] ? -1 : a[orderColumn] > b[orderColumn] ? 1 : 0;
+      return request.ascending === false ? -result : result;
+    });
+    if (!request.keyset && request.from !== undefined && request.to !== undefined) rows = rows.slice(request.from, request.to + 1);
+    const limit = request.keyset?.limit ?? request.limit;
+    if (limit !== undefined) rows = rows.slice(0, limit);
     return rows;
 };
 
@@ -421,17 +449,18 @@ if (realProviderReads) {
   supabase.auth.getSession = async () => ({ data: { session: { user: { id: 'fixture-owner' } } }, error: null });
   supabase.from = table => {
     const request = { table };
-    let activeOnly = false;
     const builder = {
-      select() { return builder; }, order() { return builder; }, limit() { return builder; },
+      select() { return builder; },
+      order(column, options) { Object.assign(request, { orderColumn: column, ascending: options?.ascending !== false }); return builder; },
+      limit(count) { request.limit = count; return builder; },
       eq() { return builder; }, abortSignal() { return builder; },
-      is(column, value) { if (column === 'deleted_at' && value === null) activeOnly = true; return builder; },
+      is(column, value) { if (column === 'deleted_at' && value === null) request.activeOnly = true; return builder; },
       range(from, to) { Object.assign(request, { from, to }); return builder; },
       in(column, ids) { if (column === 'id') request.databaseIds = ids; return builder; },
-      gt(column, value) { if (column === 'updated_at') request.updatedAfter = value; return builder; },
+      gt(column, value) { if (column === 'updated_at') request.updatedAfter = value; if (column === 'id') request.afterId = value; return builder; },
       single: async () => ({ data: table === 'profiles' ? { role: 'owner' } : null, error: null }),
       then(resolve, reject) {
-        return readServer(request).then(rows => ({ data: activeOnly ? rows.filter(row => !row.deleted_at) : rows, error: null })).then(resolve, reject);
+        return readServer(request).then(rows => ({ data: rows, error: null })).then(resolve, reject);
       },
     };
     return builder;
@@ -449,6 +478,7 @@ installCloudRealtimeTestBridge({
 });
 
 const updateServerRow = (table, row) => {
+  row = mapRows(row);
   const collection = tableToCollection[table];
   const rows = server[collection];
   const index = rows.findIndex(candidate => candidate.id === row.id);
@@ -457,9 +487,12 @@ const updateServerRow = (table, row) => {
 };
 
 window.__P0_REACT_HARNESS__ = {
+  uuidFixtures,
+  fixtureId: value => uuidFixtures ? fixtureId(value) : value,
   ready: () => controllerReady,
   server,
   async emitUpsert(table, row, eventType = 'UPDATE') {
+    row = mapRows(row);
     updateServerRow(table, row);
     const activeController = controller || await controllerReady;
     await activeController.emit(table, {
@@ -470,6 +503,7 @@ window.__P0_REACT_HARNESS__ = {
     });
   },
   async emitDelete(table, id) {
+    id = uuidFixtures ? fixtureId(id) : id;
     const collection = tableToCollection[table];
     const existing = server[collection].find(row => row.id === id) || { id };
     server[collection] = server[collection].filter(row => row.id !== id);
@@ -482,6 +516,7 @@ window.__P0_REACT_HARNESS__ = {
     });
   },
   async emitSelf(table, row) {
+    row = mapRows(row);
     markLocalCloudWrite(table, [row.id]);
     updateServerRow(table, row);
     const activeController = controller || await controllerReady;
@@ -493,6 +528,7 @@ window.__P0_REACT_HARNESS__ = {
     });
   },
   async emitSelfEcho(table, eventRow) {
+    eventRow = mapRows(eventRow);
     markLocalCloudWrite(table, [eventRow.id]);
     const activeController = controller || await controllerReady;
     await activeController.emit(table, {
@@ -503,6 +539,7 @@ window.__P0_REACT_HARNESS__ = {
     });
   },
   async emitDuplicate(table, row) {
+    row = mapRows(row);
     updateServerRow(table, row);
     const activeController = controller || await controllerReady;
     const payload = {
@@ -517,14 +554,15 @@ window.__P0_REACT_HARNESS__ = {
     ]);
   },
   navigate(path) {
-    history.pushState({}, '', path);
+    history.pushState({}, '', mapRoute(path));
     window.dispatchEvent(new PopStateEvent('popstate'));
   },
   async remoteReceiving(itemId, checked) {
+    itemId = uuidFixtures ? fixtureId(itemId) : itemId;
     if (!partialReceivingScenario) throw new Error('PARTIAL_RECEIVING_SCENARIO_REQUIRED');
     const changedAt = new Date().toISOString();
     applyReceivingState(itemId, checked, changedAt);
-    const packageRow = clone(server.japanPackages.find(pkg => pkg.id === 'jp-react-1'));
+    const packageRow = clone(server.japanPackages.find(pkg => pkg.id === (uuidFixtures ? fixtureId('jp-react-1') : 'jp-react-1')));
     const itemRow = clone(server.japanPackageItems.find(item => item.id === itemId));
     const activeController = controller || await controllerReady;
     await activeController.emitMany([
@@ -539,9 +577,10 @@ window.__P0_REACT_HARNESS__ = {
     ]);
   },
   setServerRows(table, rows) {
-    server[tableToCollection[table]] = clone(rows);
+    server[tableToCollection[table]] = clone(mapRows(rows));
   },
   async setCacheRows(table, rows) {
+    rows = mapRows(rows);
     const collection = tableToCollection[table];
     const [, saveMethod] = collectionAdapters[collection];
     if (saveMethod === 'upsertInventory') {

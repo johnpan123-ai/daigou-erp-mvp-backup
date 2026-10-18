@@ -22,8 +22,14 @@ const mutate = (source, from, to) => { assert.ok(source.includes(from), `mutatio
 // ---- positive: the exact reviewed C1/C1a/C1b sources pass every provider rule
 for (const file of FILES) pass(`POS exact reviewed source accepted: ${file}`, () => assertReviewedProviderContract(file, show(file), read(file)));
 pass('POS guard change is additive (stripping the p02 markers restores the previous guard byte-for-byte)', () => {
-  const current = read('scripts/post-adoption-descendant.mjs');
-  const original = execFileSync('git', ['-C', ROOT, 'show', 'HEAD:scripts/post-adoption-descendant.mjs'], { encoding: 'utf8' });
+  // Prove the original additive patch against its immutable parent. Later guard
+  // additions are exercised by the current-source positive and negative cases.
+  const historicalAfter = '4de65bd61b4aee546d67ec362fc4353ea860508e';
+  const historicalBefore = '78e41fd007ca7f95710f0afd5faa794f818faf09';
+  assert.equal(execFileSync('git', ['-C', ROOT, 'rev-parse', `${historicalAfter}^`], { encoding: 'utf8' }).trim(), historicalBefore);
+  const historicalSource = head => execFileSync('git', ['-C', ROOT, 'show', `${head}:scripts/post-adoption-descendant.mjs`], { encoding: 'utf8' }).replace(/\r\n?/gu, '\n');
+  const current = historicalSource(historicalAfter);
+  const original = historicalSource(historicalBefore);
   const stripped = current
     .replace(/\/\/ ---- BEGIN p02-1a provider contract function[\s\S]*?\/\/ ---- END p02-1a provider contract function ----\n\n/u, '')
     .replace(/ {2}\/\/ ---- BEGIN p02-1a provider contract dispatch ----\n[\s\S]*? {2}\/\/ ---- END p02-1a provider contract dispatch ----\n/u, '')
