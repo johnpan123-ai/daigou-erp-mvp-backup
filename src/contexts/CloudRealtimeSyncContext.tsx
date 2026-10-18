@@ -344,8 +344,76 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       };
     };
     const publishFaultSnapshot = () => setFaultSnapshot(buildFaultSnapshot());
+    /**
+     * Egress E1 (D1/D2): every authoritative catch-up re-reads all cached tables (about 12.6 MB for
+     * ERP2). Automatic ones are bounded: while Fresh is withheld at most one read that cannot prove
+     * completeness (listening unconfirmed) and three in total, and at most six per hour; a hidden tab
+     * defers them until it is visible again. A withheld read only keeps the existing hold (read-only,
+     * never shown as synced). The user (focus, visible again, manual reconnect) may grant one more
+     * read at most every 30 s; a Restore epoch change always re-opens the budget. The proof itself,
+     * the epoch barrier and the write fence are unchanged.
+     */
+    const FULL_READ_UNPROVEN_LIMIT = 1;
+    const FULL_READ_HELD_LIMIT = 3;
+    const FULL_READ_WINDOW_MS = 60 * 60 * 1000;
+    const FULL_READ_WINDOW_LIMIT = 6;
+    const FULL_READ_USER_GRANT_INTERVAL_MS = 30_000;
+    let heldFullReads = 0;
+    let automaticFullReadTimes: number[] = [];
+    let userFullReadGranted = false;
+    let lastUserFullReadGrantAt = Number.NEGATIVE_INFINITY;
+    const isTabHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const grantUserFullRead = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastUserFullReadGrantAt < FULL_READ_USER_GRANT_INTERVAL_MS) return;
+      lastUserFullReadGrantAt = now;
+      userFullReadGranted = true;
+      wakeFullReadAdmission();
+    };
+    // A withheld read stays one pending, I/O-free attempt (never a retry loop): it waits until the
+    // tab is visible, the user grants a read, the budget re-opens, listening is confirmed, or the
+    // attempt is superseded (abort). The hourly window is re-checked once a minute.
+    const FULL_READ_RECHECK_MS = 60_000;
+    const fullReadAdmissionWaiters = new Set<() => void>();
+    const wakeFullReadAdmission = () => { [...fullReadAdmissionWaiters].forEach(wake => wake()); };
+    const resetFullReadBudget = () => { heldFullReads = 0; wakeFullReadAdmission(); };
+    function admitFullRead(): 'allow' | 'hidden-tab' | 'held-budget' | 'hourly-budget' {
+      if (isTabHidden()) return 'hidden-tab';
+      if (userFullReadGranted) { userFullReadGranted = false; return 'allow'; }
+      const now = Date.now();
+      automaticFullReadTimes = automaticFullReadTimes.filter(at => now - at < FULL_READ_WINDOW_MS);
+      if (automaticFullReadTimes.length >= FULL_READ_WINDOW_LIMIT) return 'hourly-budget';
+      if (completenessHeld) {
+        const listening = readinessGeneration !== null && isRealtimeReadyGeneration(readinessGeneration);
+        if (heldFullReads >= (listening ? FULL_READ_HELD_LIMIT : FULL_READ_UNPROVEN_LIMIT)) return 'held-budget';
+        heldFullReads += 1;
+      }
+      automaticFullReadTimes.push(now);
+      return 'allow';
+    }
+    const waitForFullReadAdmission = async (signal: AbortSignal) => {
+      let reported: string | null = null;
+      for (;;) {
+        signal.throwIfAborted();
+        const admission = admitFullRead();
+        if (admission === 'allow') return;
+        if (reported !== admission) {
+          reported = admission;
+          emitRecovery({ kind: 'full-read-withheld', reason: admission, held: completenessHeld, heldFullReads });
+        }
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => { fullReadAdmissionWaiters.delete(wake); signal.removeEventListener('abort', onAbort); clearTimeout(timer); };
+          const wake = () => { cleanup(); resolve(); };
+          const onAbort = () => { cleanup(); reject(signal.reason ?? new Error('FULL_READ_ADMISSION_ABORTED')); };
+          const timer = setTimeout(wake, FULL_READ_RECHECK_MS);
+          fullReadAdmissionWaiters.add(wake);
+          signal.addEventListener('abort', onAbort, { once: true });
+        });
+      }
+    };
     const reconnect = new CloudReconnectCatchUp({
       refresh: async (resources, signal) => {
+        await waitForFullReadAdmission(signal);
         // C1e: one evidence record per actual attempt (attempts are strictly serialized).
         const attempt: CatchUpAttemptEvidence = {
           id: ++attemptIds, requestedAt: Date.now(), readStartSeq: null, readStartedAt: null,
@@ -425,6 +493,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       setRealtimeUnproven(effective === 'unproven');
     };
     const releaseCompleteness = () => {
+      resetFullReadBudget();
       completenessHeld = false;
       completenessMode = null;
       clearReadinessWatchdog();
@@ -548,6 +617,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         // C1e: order of this generation's listening confirmation (first time only).
         if (isRealtimeReadyGeneration(channelReadiness) && !readySeqByGeneration.has(channelReadiness)) {
           readySeqByGeneration.set(channelReadiness, { seq: ++proofSeq, at: Date.now() });
+          wakeFullReadAdmission();
         }
       });
       for (const table of REALTIME_TABLES) {
@@ -567,6 +637,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         if (knownEpoch && maxEpochSeen !== null && epoch <= maxEpochSeen) return;
         if (knownEpoch) maxEpochSeen = epoch;
         epochChanges += 1;
+        // Egress E1: a Restore epoch change is always re-verified (budget re-opened, one read granted).
+        resetFullReadBudget();
+        grantUserFullRead(true);
         raiseCloudCacheEpochBarrier(knownEpoch ? epoch : null);
         // C1c: the old Fresh state ends now ("重新同步中"), and every cached table must be
         // re-read by a refresh started after the barrier before Fresh can return.
@@ -739,7 +812,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
           emitRecovery({ kind: 'recovery-view', ...view });
         },
       });
-      realtimeReconnectRef.current = () => requestRealtimeReconnect('manual');
+      realtimeReconnectRef.current = () => { grantUserFullRead(true); requestRealtimeReconnect('manual'); };
     }
 
     if (testBridge) {
@@ -828,8 +901,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       const { readStatus } = getCloudConnectivitySnapshot();
       return reconnect.isPending() && readStatus !== 'fresh-online' && readStatus !== 'fresh-empty';
     };
-    const handleFocus = () => {
+    const handleFocus = (userInitiated = true) => {
       if (faultDisconnected) return;
+      if (userInitiated) grantUserFullRead();
       // C1c: a withheld Fresh can be proven by a complete catch-up once listening is confirmed.
       if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) { void completeCatchUp(readinessGeneration, 'focus'); return; }
       requestRealtimeReconnect('focus');
@@ -839,6 +913,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const handleVisibility = () => {
       if (faultDisconnected) return;
       if (document.visibilityState !== 'visible') return;
+      grantUserFullRead();
+      wakeFullReadAdmission();
       if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) { void completeCatchUp(readinessGeneration, 'visibility'); return; }
       if (needsAuthoritativeCatchUp()) void reconnect.request('visibility', activeResources());
       else void coordinator.fallback('visibility', activeResources());
@@ -848,8 +924,11 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       requestRealtimeReconnect('online');
       void reconnect.request('online', activeResources());
     };
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('cloud-cross-tab-change', handleFocus);
+    // Another tab's write marker is not a user action: it never grants an extra full read.
+    const handleCrossTabChange = () => handleFocus(false);
+    const handleWindowFocus = () => handleFocus(true);
+    window.addEventListener('focus', handleWindowFocus);
+    window.addEventListener('cloud-cross-tab-change', handleCrossTabChange);
     window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleVisibility);
 
@@ -864,8 +943,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       setRealtimeRecovery(null);
       disposedForHolds = true;
       releaseCompleteness();
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('cloud-cross-tab-change', handleFocus);
+      window.removeEventListener('focus', handleWindowFocus);
+      window.removeEventListener('cloud-cross-tab-change', handleCrossTabChange);
       window.removeEventListener('online', handleOnline);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (coordinatorRef.current === coordinator) coordinatorRef.current = null;

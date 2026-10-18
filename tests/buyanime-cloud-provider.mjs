@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 
+const PORT = process.env.BUYANIME_PROVIDER_TEST_PORT || '4291';
 const server = await createServer({ configFile: 'tests/fixtures/inventory-cloud-import-vite.config.mjs',
-  configLoader: 'runner', mode: 'staging', server: { host: '127.0.0.1', port: 4291, strictPort: true } });
+  configLoader: 'runner', mode: 'staging', server: { host: '127.0.0.1', port: Number(PORT), strictPort: true } });
 await server.listen();
 const browser = await chromium.launch({ executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true });
 try {
   const page = await browser.newPage();
-  await page.goto('http://127.0.0.1:4291/tests/fixtures/inventory-cloud-import.html');
+  await page.goto(`http://127.0.0.1:${PORT}/tests/fixtures/inventory-cloud-import.html`);
   const result = await page.evaluate(async () => {
     const [{ SupabaseProvider }, { supabase }, { cloudCacheDb }, connectivity] = await Promise.all([
       import('/src/providers/cloud/supabaseProvider.ts'), import('/src/providers/cloud/supabaseClient.ts'),
