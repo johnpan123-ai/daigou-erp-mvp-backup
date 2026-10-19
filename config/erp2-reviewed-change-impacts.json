@@ -8167,6 +8167,43 @@
           "schemaExpectation": "Schema-neutral persistence behavior only where explicitly classified; no migration, provider change or guard exception."
         }
       ]
+    },
+    {
+      "id": "waca-normal-import-finite-gate-binding-v2",
+      "beforeHead": "9aa4c4887e662cd8e6d4c7d28e5cbab18799da43",
+      "reviewedHead": "011163021701ab48367e4fb1d23292ec24055ecc",
+      "patchSha256": "fff6ddf7f4f7fbed42f3acbcc1e6613805861a036c62809270f951a26f7de4f4",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "waca-normal-import-native",
+        "waca-normal-import-preview",
+        "waca-preview-filter-ui"
+      ],
+      "files": [
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "42fe132eb794b3d659879891e1fea665222ef1933123ed5f16a4489e705c5463",
+          "afterHash": "40e91f30a83d3aa490edf6cb6afe1791fa4f40594df4291114a04d0aa0311e94",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "regressionScripts"
+          ],
+          "changedInputs": "Historical waca-normal-import-preview regression ID retained so prior immutable reviews remain fully enforced.",
+          "changedOutputs": "The ID now executes tests/waca-preview-filter-ui.mjs: finite real React assertions, server/browser cleanup in finally, full provider-request equality and exact seven-spec +8 preview. It no longer invokes the persistent manual preview server.",
+          "dataFlow": "Release regression binding only. Both the historical ID and existing filter ID execute the same assertions separately; no evidence row is synthesized or omitted.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "No production write.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE. 073 / v28 unchanged.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "Owner preview launcher preserved unmodified for manual review on existing 4740 service.",
+          "schemaExpectation": "No schema change or migration. All source classification, ancestry, evidence freshness, exact-head and regression verification logic unchanged."
+        }
+      ]
     }
   ]
 }
