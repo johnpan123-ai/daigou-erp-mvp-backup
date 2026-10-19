@@ -11,7 +11,8 @@ export const impactHash = value => createHash('sha256').update(JSON.stringify(st
 
 export const regressionScripts = Object.freeze({
   'waca-normal-import-native': 'tests/waca-normal-import-isolated.mjs',
-  'waca-normal-import-preview': 'tests/waca-normal-import-preview.mjs',
+  // Historical review ID: bind to the finite React assertions, NEVER the persistent Owner preview launcher.
+  'waca-normal-import-preview': 'tests/waca-preview-filter-ui.mjs',
   'waca-counted-transition': 'tests/waca-counted-transition.mjs',
   'waca-counted-restore': 'tests/waca-counted-restore-e2e.mjs',
   'waca-preview-visibility': 'tests/waca-preview-visibility.mjs',
