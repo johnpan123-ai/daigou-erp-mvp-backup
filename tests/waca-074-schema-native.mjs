@@ -9,7 +9,7 @@ import { planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
 const file = '074_waca_counted_state_safeupdate.sql';
 const old = readFileSync('supabase/sql/073_waca_counted_transition_import.sql');
 assert.equal(createHash('sha256').update(old).digest('hex'), 'f96b253bacaa129d5d3757d9055a40619f6e83339502c21c5abcda2b8b5c42a6');
-const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3.filter(f => f !== file) });
+const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3.slice(0, CANONICAL_FRESH_INSTALL_V3.indexOf(file)) });
 try {
   const capture = async () => {
     const s = (await db.sql.query(readFileSync('tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql', 'utf8'))).rows[0].erp_schema_snapshot;
@@ -32,8 +32,8 @@ try {
   const bodyAfter = after.functions[signature].definition.replaceAll('\r\n', '\n');
   assert.equal(bodyAfter, bodyBefore.replace('  v_now timestamptz := now();', '  v_state_rows bigint;\n  v_now timestamptz := now();')
     .replace('    updated_at=v_now, updated_by=v_actor;', "    updated_at=v_now, updated_by=v_actor\n    where id='00000000-0000-4000-8000-000000000001'::uuid and revision=v_revision+1;\n  get diagnostics v_state_rows = row_count;\n  if v_state_rows <> 1 then\n    raise exception using errcode='23514',message='WACA_COUNTED_STATE_UPDATE_MISMATCH';\n  end if;"));
-  const contract = JSON.parse(readFileSync('config/erp-environment-identity.json'));
-  assert.equal(fingerprintStructuralSnapshot(after), contract.schemaBaseline.canonicalFingerprint);
+  // This historical repair gate ends at 074, independent of later candidate baselines.
+  assert.equal(fingerprintStructuralSnapshot(after), '8410d8090f11ac1441c803b01d2d364f552fcb07d58386d03463d238f026c1fa');
   const registry = await buildMigrationEffectRegistry();
   const plan = planSchemaDelta(before, registry, { expectedSnapshot: after });
   const self = planSchemaDelta(after, registry, { expectedSnapshot: after });

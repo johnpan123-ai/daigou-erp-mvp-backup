@@ -19,14 +19,14 @@
     }
   },
   "schemaBaseline": {
-    "requiredBaselineId": "erp2-canonical-schema-v29-waca-counted-state-safeupdate",
+    "requiredBaselineId": "erp2-canonical-schema-v30-waca-order-recognition",
     "evidenceContractVersion": 2,
     "fingerprintContractVersion": 3,
     "canonicalContract": "ERP2_SEMANTIC_SCHEMA_V3",
     "canonicalAlgorithm": "POSTGRESQL_LEXICAL_V3",
     "preAdoptionMode": "READ_ONLY_RECONCILIATION",
     "postAdoptionLedger": "public.erp_schema_migration_ledger",
-    "canonicalFingerprint": "8410d8090f11ac1441c803b01d2d364f552fcb07d58386d03463d238f026c1fa",
+    "canonicalFingerprint": "5be9d80aeb00f2ab741904181660b46e0f5c2e238422c87dca41aa1fde5537f0",
     "snapshotToolChecksum": "ea74a283f565adc2af090284b3dfd78ac83b8ff5c24e71707867839b1e424281",
     "snapshotMaxAgeMs": 86400000,
     "liveObservationMaxAgeMs": 7200000

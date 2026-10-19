@@ -42,10 +42,28 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '075': {
+    sourceFile: '075_waca_order_recognition_management.sql', dependencies: ['074'],
+    risk: 'WACA_OWNER_ORDER_LINE_RECOGNITION', idempotency: 'TRANSACTIONAL_RENAME_ONCE',
+    classification: 'EXISTING_BUSINESS_PAYLOAD_NO_NEW_RESOURCE', repairs: ['044', '073', '074'],
+    preconditions: [fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)'), table('waca_order_items'), table('waca_import_batches')],
+    postconditions: [fn('erp_commit_waca_recognition(jsonb,jsonb)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb', publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=15s'],
+      definitionIncludes: ['WACA_OWNER_REQUIRED', 'CLOUD_RESTORE_MAINTENANCE_LOCKED', 'WACA_RESTORE_EPOCH_CHANGED',
+        'WACA_RECOGNITION_REQUEST_REUSED', 'WACA_RECOGNITION_PREVIEW_CHANGED', 'get diagnostics n=row_count'],
+    }), fn('erp_preview_waca_recognition(jsonb)', { securityDefiner: true, publicExecute: false, anonExecute: false, authenticatedExecute: true }),
+      ...['erp_commit_waca_snapshot_v044(jsonb,bigint,boolean)', 'erp_commit_waca_counted_snapshot_v074(jsonb,bigint,jsonb)',
+        'erp_plan_waca_recognition(jsonb)', 'erp_waca_reversal_keys(uuid,bigint)', 'erp_waca_reversal_proven(uuid,bigint,text)',
+        'erp_store_waca_recognition_continuity(uuid,bigint,jsonb)', 'erp_assert_waca_recognition_preserved(jsonb)',
+        'erp_prune_waca_recognition_evidence(jsonb)'].map(s => fn(s, {
+          securityDefiner: true, publicExecute: false, anonExecute: false, authenticatedExecute: false,
+        }))],
+  },
   '074': {
     sourceFile: '074_waca_counted_state_safeupdate.sql', dependencies: ['073'],
     risk: 'WACA_COUNTED_SINGLETON_SAFEUPDATE', idempotency: 'REPLACE_FUNCTION',
-    classification: 'NO_NEW_DURABLE_RESOURCE',
+    classification: 'NO_NEW_DURABLE_RESOURCE', repairClosure: '075',
     preconditions: [table('waca_state'), fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)')],
     postconditions: [fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)', {
       owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
@@ -60,7 +78,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
   '073': {
     sourceFile: '073_waca_counted_transition_import.sql', dependencies: ['023', '044'],
     risk: 'WACA_TRANSITION_COUNTED_IMPORT', idempotency: 'ADDITIVE_FUNCTION',
-    classification: 'NO_NEW_DURABLE_RESOURCE',
+    classification: 'NO_NEW_DURABLE_RESOURCE', repairClosure: '075',
     preconditions: [table('waca_order_items'), table('waca_state'), table('erp_cloud_restore_epoch'),
       fn('erp_commit_waca_snapshot(jsonb,bigint,boolean)')],
     postconditions: [fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)', {

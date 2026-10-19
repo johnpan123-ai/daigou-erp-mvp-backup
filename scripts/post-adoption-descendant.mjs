@@ -623,6 +623,53 @@ export function assertWacaCountedProviderContract(file, before, after) {
 }
 // ---- END waca-counted-transition-provider-v1 ----
 
+// Exact additive provider review for the 075 candidate. Strip ONLY these pinned
+// type/method additions, then run every previous provider rule unchanged.
+const WACA_RECOGNITION_PINS = Object.freeze({
+  'src/providers/cloud/supabaseProvider.ts': { className: 'SupabaseProvider', import: '12896c1d3b6f570caf3da60255f59773a7b47c82159527a7cecf905bb94c0be3',
+    previewWacaRecognition: 'ac1ce1911f935964d83f13ce5c993c8611af168980ef58431c26ffb806378ef2',
+    commitWacaRecognition: '69d39084955f95296e7e4fa20e0dd181d8d8bbd4edd6cbdffe0c4cb90f073c9b' },
+  'src/providers/dataProvider.ts': { className: 'DynamicDataProvider', import: 'ca8b77c3b8d3881d45d5b270f73f52048c466862e3889f1e7969bc5c37f373cb',
+    previewWacaRecognition: 'f0df59a8f1eae5d8d4a8b9bc136f17fd273142ad4c1c53dc40760e0a5d2ea3d3',
+    commitWacaRecognition: 'c8564da5e4388ecb01d48b84bd33491fa3dbc404e8a3d2f046a55652f6b65e73' },
+});
+function wacaRecognitionReviewApplies(file, source) {
+  return Boolean(WACA_RECOGNITION_PINS[file] && source && /(?:preview|commit)WacaRecognition\s*\(/u.test(source));
+}
+export function assertWacaRecognitionProviderContract(file, before, after) {
+  const pins = WACA_RECOGNITION_PINS[file];
+  if (before === null && wacaCountedProviderReviewApplies(file, after)) fail('unreviewed waca counted provider exception');
+  if (!pins || before === null || after === null) fail('unreviewed WACA recognition provider');
+  const strip = (source, required) => {
+    const tree = parse(file, source), cls = wacaClass(tree, pins.className), edits = [];
+    if (!cls) fail('WACA recognition provider class missing');
+    for (const name of ['previewWacaRecognition', 'commitWacaRecognition']) {
+      const pieces = cls.members.filter(n => wacaMemberName(tree, n) === name);
+      if (!pieces.length && !required) continue;
+      if (pieces.length !== 1 || wacaPieceHash(tree, pieces[0]) !== pins[name]) fail(`WACA recognition reviewed member drifted: ${name}`);
+      const text = canonical(tree, pieces[0]);
+      if (file.endsWith('supabaseProvider.ts')) {
+        const calls = nodes(tree).filter(ts.isCallExpression).filter(n => n.getStart(tree) >= pieces[0].getStart(tree) && n.end <= pieces[0].end);
+        const rpcs = calls.filter(n => n.expression.getText(tree) === 'supabase.rpc');
+        const expectedRpc = name === 'previewWacaRecognition' ? 'erp_preview_waca_recognition' : 'erp_commit_waca_recognition';
+        if (rpcs.length !== 1 || !ts.isStringLiteral(rpcs[0].arguments[0]) || rpcs[0].arguments[0].text !== expectedRpc
+          || calls.some(n => /\.(?:insert|update|upsert|delete)$/u.test(n.expression.getText(tree)))) fail('WACA recognition RPC boundary changed');
+        if (name === 'commitWacaRecognition' && !text.includes('await this.requireCloudWritePermission();')) fail('WACA recognition permission missing');
+      } else if (name === 'commitWacaRecognition' && !text.includes('this.guardedWrite(() => this.supabaseProvider.commitWacaRecognition(')) fail('WACA recognition write fence missing');
+      edits.push({ start: pieces[0].getStart(tree), end: pieces[0].end });
+    }
+    const imports = tree.statements.filter(n => ts.isImportDeclaration(n) && /recognitionManagement/u.test(n.moduleSpecifier.getText(tree)));
+    if (required || imports.length) {
+      if (imports.length !== 1 || !imports[0].importClause?.isTypeOnly || wacaPieceHash(tree, imports[0]) !== pins.import) fail('WACA recognition type import drifted');
+      edits.push({ start: imports[0].getStart(tree), end: imports[0].end });
+    }
+    let restored = source;
+    for (const e of edits.sort((a, b) => b.start - a.start)) restored = restored.slice(0, e.start) + restored.slice(e.end);
+    return restored;
+  };
+  assertReviewedProviderContract(file, strip(before, false), strip(after, true));
+}
+
 // ---- BEGIN p02-1a realtime context contract function (exact review p02-phase1a-c1f-guard-v1) ----
 // P0-2 Phase 1a C1f (M-2): Realtime completeness / Fresh / write-fence contract of the sync
 // boundary. Three files are covered; any difference from the adopted baseline must match the
@@ -923,6 +970,10 @@ export function assertP02FreshHoldCallers(files) {
 // ---- END p02-1a realtime context contract function ----
 
 export function assertReviewedProviderContract(file, before, after) {
+  if (wacaRecognitionReviewApplies(file, after)) {
+    assertWacaRecognitionProviderContract(file, before, after);
+    return;
+  }
   // ---- BEGIN waca-counted-transition-provider-v1 dispatch ----
   if (!wacaCountedRestoringReviewedSource && wacaCountedProviderReviewApplies(file, after)) {
     assertWacaCountedProviderContract(file, before, after);

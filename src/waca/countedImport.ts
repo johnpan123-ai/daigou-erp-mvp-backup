@@ -166,7 +166,20 @@ export function planWacaCountedImport(options: {
     }
     if (item.productVariantId) {
       const mode = modeFor(item.productVariantId);
-      if (!touchedVariants.has(item.productVariantId)) {
+      if (prior?.recognition) {
+        // A durable line decision is stronger than this file's quantity update mode.
+        // Changing it requires the dedicated, server-reviewed management transaction.
+        if (item.productVariantId !== prior.productVariantId) throw new Error('WACA_MANAGED_IDENTITY_CHANGED');
+        if (prior.recognition.mode !== 'COUNT') {
+          if (mode === 'OVERWRITE' && q > 0) throw new Error('WACA_MANAGED_OVERWRITE_CONFLICT');
+          c = 0; reason = prior.recognition.mode === 'INCLUDED' ? 'BASELINE_INCLUDED' : 'PENDING_REVIEW';
+          if (item.quantity !== prior.recognition.sourceQuantity || order?.status !== prior.recognition.sourceStatus) review = 'OWNER_SOURCE_CHANGED';
+          overlapUncertain = review === 'OWNER_SOURCE_CHANGED';
+        } else if (mode !== 'KEEP') {
+          if (q !== cBefore && prior.recognition.restoreEpoch !== context.restoreEpoch) throw new Error('WACA_MANAGED_RESTORE_REVIEW_REQUIRED');
+          c = q; reason = q === cBefore ? priorReason! : 'SOURCE_CHANGE_APPLIED';
+        }
+      } else if (!touchedVariants.has(item.productVariantId)) {
         // Variants absent from this file are never re-decided: counted orders follow their source,
         // pending / kept / baseline orders keep their recorded state until a later import or decision.
         const choice = options.overlapChoices?.get(item.key);
@@ -205,7 +218,7 @@ export function planWacaCountedImport(options: {
           c = q; reason = 'NORMAL_IMPORT';
         }
       }
-      baselineChanged = review === 'BASELINE_SOURCE_CHANGED' || review === 'UNPROVEN_CANCELLATION';
+      baselineChanged = review === 'BASELINE_SOURCE_CHANGED' || review === 'UNPROVEN_CANCELLATION' || review === 'OWNER_SOURCE_CHANGED';
     }
     const next: WacaItem = { ...item, countedQuantity: c, countedReason: reason,
       countedReview: review,

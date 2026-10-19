@@ -1,0 +1,79 @@
+ERP2 WACA 來源訂單認列管理 — Owner UI Review candidate
+
+範圍及狀態
+- 基準：ba04839b5f25bb962c4590c7ae205939935f6b63（已發布的 074／v29）。
+- 獨立分支：codex/erp2-waca-source-recognition-v1。
+- 僅本機開發、隔離 PostgreSQL/PostgREST 交易、React 展示及本機 Commit。
+- 不 Push、不部署、不套正式 Migration、不寫正式 Ledger／業務資料、不 Restore 正式環境；ERP1 完全未操作。
+- v30 是本機候選契約，不代表正式採納；不得拿本機測試結果冒充正式 POST_ADOPTION。
+
+Owner 操作
+WACA → 來源訂單 → 查看／管理 → 各 SKU 選擇認列 → 填原因 → 預覽 → 確認保存。
+認列方式：計入數量／已含原本數量／暫不計入。
+這不是匯入更新方式「覆蓋／累加／維持」。選單與預覽本身沒有寫入；無差異不寫入。
+多個 SKU 分開選擇，其他訂單相同 SKU 的明細身分不會被更改。
+來源訂單不刪除；調整前後、原因、操作者及伺服器時間皆留在不可變更的批次證據。
+UI 可展開認列紀錄。回應遺失只做唯讀確認，不自動重送。
+
+數量契約
+保留既有 auto = 有效已配對來源數量；管理動作不改來源訂購數量。
+本筆差額 = 新 countedQuantity - 原 countedQuantity。
+只有相應 SKU 的 manual offset 調整此差額，auto+manual 不得小於零。
+計入 → 已含／暫不計入：需要可證明尚未抵銷的 ERP2 額外認列，否則拒絕。
+已含／暫不計入 → 計入：有效訂單依當下來源補入；取消、失敗不能補入。
+取消、減量與恢復有效沿用來源認列，已回沖不再重複扣除。
+INCLUDED／HOLD 持續保存；來源改變時標示需重新核對，不被新 Excel 無條件覆蓋。
+匯入 OVERWRITE 若與人工排除決定衝突會拒絕，須先在管理畫面明確處理，不默默覆蓋。
+
+安全與證據
+新 RPC：erp_preview_waca_recognition（只讀）、erp_commit_waca_recognition（Owner 原子提交）。
+Revision、Restore Epoch、Variant version／數量及預覽計畫均由伺服器重查；Restore maintenance lock 不變。
+Restore 後舊人工 COUNT 決定的數量變化，前端及伺服器均拒絕；不能只把匯入計畫改綁新 Epoch 來繞過。
+同一 requestId 重複請求只回原 receipt；不同內容重用身分拒絕。
+回沖採連續證據鏈：任何中途人工／其他 Variant 變更或 Restore 失配即失去舊回沖資格。
+之後的普通匯入不得「洗白」這些已失效的舊數量；只為新額外認列建立新證據。
+原 044／074 函式保留為不可供 authenticated/anon 呼叫的 private delegate，外層新增決定／證據保護。
+原 073／074 檔案不修改，safeupdate 保持啟用；精確 WHERE 與 row_count 檢查不放寬。
+
+Migration 候選
+075_waca_order_recognition_management.sql，追加式一次交易。
+只新增／包裝必要函式及最小 Execute grants；沒有新表、新欄、新索引或採納時業務 DML。
+正式使用前須另外取得 Owner Schema／Migration／部署核准，刷新備份及唯讀發布 Gate。
+不得重跑 073／074，不得直接改 Ledger。
+
+資料分類及可攜性
+recognition：waca_order_items.payload，MUST BACKUP+RESTORE。
+recognitionContinuity：waca_cutover_audit.payload，MUST BACKUP+RESTORE；Restore 後舊 Epoch 證據不可繼續寫入。
+request／plan／result／actor／time：waca_import_batches.payload.recognition，MUST BACKUP+RESTORE。
+仍為原有 24 資源，沒有新 durable store，沒有新 OPS table。
+每個實際調整只有一筆不可變 receipt；無差異／重試不增加重複歷史；連續證據僅保存每個 SKU 當前有效明細鍵集合。
+ERP1 舊備份仍走既有 adapter／歷史人工核對政策，不捏造舊認列證據。
+NEXT 可還原及查看完整管理證據，但此管理功能為 Cloud Owner 專用；含人工決定的 NEXT 資料禁止舊數量 writer 更新。
+沒有人工決定的原 NEXT WACA 流程不受影響。
+
+保守限制
+- 既有歷史明細如缺少可追溯的額外認列，不能強制回沖。
+- 連續證據以 Variant version 為安全界線；即使是不涉及 WACA 的 Variant 編輯，也可能要求重新核對。
+- 本輪不建立強制「忽略風險扣除」的替代入口。
+- Owner UI Review 不等於正式發布核准。
+
+本機預覽
+在本工作樹以 PowerShell 執行：
+  powershell -File scripts/WACA_ORDER_RECOGNITION_PREVIEW.ps1
+瀏覽器開：http://127.0.0.1:4742/tests/fixtures/waca-recognition.html
+使用既有 loopback PostgreSQL 55492 與已驗證的本機 safeupdate/PostgREST；只建立可拋棄合成資料庫。
+不需密碼、Token 或正式 JWT；若本機隔離 runtime 不存在即停止，不能改連雲端。
+4740 既有 Owner 預覽不動。Ctrl+C 關閉本機服務及本輪合成資料庫。
+自動 UI Gate 使用不帶 --serve 的有限測試，不把永久啟動器納入 Gate。
+
+回退／發布注意
+未正式 Apply 前，移除本候選不影響正式站。
+若未來已使用此功能，不能直接退回舊 RPC 而讓舊匯入覆寫人工決定。
+安全停用方式應保留 guards／證據並關閉新 UI 提交能力，另外審核向前修復；不可清空 Ledger。
+
+測試及完整證據
+測試：tests/waca-order-recognition-postgrest.mjs、waca-order-recognition-ui.mjs、waca-recognition-portability.mjs、
+      waca-recognition-schema-native.mjs、waca-recognition-provider-guard.mjs，以及既有 WACA／CAS／Realtime／Guard 回歸。
+Canonical 候選：docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json。
+每次執行與失敗日誌另存本機 scratch/waca-source-recognition-evidence-20261019，不覆寫舊結果。
+正式發布準備尚需 Owner 另行授權；本輪最終停在 Owner UI Review。

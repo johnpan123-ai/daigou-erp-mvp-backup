@@ -40,6 +40,7 @@ import { hasWacaPreviewReview, isWacaCountedReviewRowVisible } from '../waca/pre
 import { type WacaRepository } from '../waca/orderCore';
 import { useCloudResourceSync, useGlobalSyncControl } from '../contexts/CloudRealtimeSyncContext';
 import './WacaIntegration.css';
+import { OrderRecognitionManager } from '../waca/OrderRecognitionManager';
 
 type Tab = 'import' | 'orders' | 'mappings' | 'history' | 'pending';
 type PendingImport = {
@@ -326,7 +327,9 @@ export default function WacaIntegration() {
   const evidenceByChildCode = useMemo(() => new Map(masterState.links.map(link => [link.childCode, link])), [masterState.links]);
   const matchByFeature = useMemo(() => new Map(mappingItems.map(item =>
     [item.feature, matchWacaItem(item, masterIndex)] as const)), [mappingItems, masterIndex]);
-  const latestBatch = snapshot?.batches.at(-1);
+  // Recognition receipts remain in the durable snapshot, but are not Excel imports.
+  const importBatches = useMemo(() => (snapshot?.batches ?? []).filter(batch => !batch.recognition), [snapshot]);
+  const latestBatch = importBatches.at(-1);
   const matchedFeatures = mappingItems.filter(item => item.productVariantId).length;
   const manualFeatures = mappingItems.filter(item => item.match === 'MANUAL_MATCH').length;
   const multipleFeatures = mappingItems.filter(item => item.diagnostic === 'MULTIPLE_VARIANT_CANDIDATES').length;
@@ -1249,27 +1252,41 @@ export default function WacaIntegration() {
     </section>}
     {tab === 'orders' && <section className="waca-panel"><h2>WACA 來源訂單</h2>
       {snapshot && !orders.length && <p>目前沒有 WACA 訂單。匯入 WACA Excel 後會顯示在這裡。</p>}
-      <div className="waca-scroll"><table><thead><tr><th>訂單編號</th><th>購買日期</th><th>狀態</th><th>品項</th><th>有效已配對數量</th></tr></thead><tbody>
+      <div className="waca-scroll"><table><thead><tr><th>訂單編號</th><th>購買日期</th><th>狀態</th><th>品項</th><th>有效已配對數量</th><th>操作</th></tr></thead><tbody>
         {orders.map(order => {
           const orderItems = itemsByOrder.get(order.key) ?? [];
           const counted = ['處理中', '完成付款'].includes(order.status)
             ? orderItems.filter(item => item.productVariantId).reduce((sum, item) => sum + item.quantity, 0) : 0;
-          return <tr key={order.key} className="waca-click-row" onClick={() => setExpandedOrder(expandedOrder === order.key ? null : order.key)}>
-            <td>{order.orderNumber}{expandedOrder === order.key && <div className="waca-order-lines">
-              {orderItems.map(item => <p key={item.key}>{displayNameForVariant(item.productVariantId, item.productTitle)}／{item.spec1} {item.spec2} × {item.quantity}
-                {item.productVariantId ? `／SKU ${variantById.get(item.productVariantId)?.myacg_item_code}` : `／${statusText[item.diagnostic ?? '']}`}
-                <details className="waca-tech"><summary>原始資料</summary>{item.productTitle}／{item.productCode}</details></p>)}
-            </div>}</td><td>{order.purchasedAt}</td><td>{order.status}</td><td>{orderItems.length}</td><td>{counted}</td>
-          </tr>;
+          return <Fragment key={order.key}><tr>
+            <td>{order.orderNumber}</td><td>{order.purchasedAt}</td><td>{order.status}</td><td>{orderItems.length}</td><td>{counted}</td>
+            <td><button type="button" className="waca-detail-toggle" aria-expanded={expandedOrder === order.key}
+              aria-label={`查看／管理 ${order.orderNumber}`} onClick={() => setExpandedOrder(expandedOrder === order.key ? null : order.key)}>查看／管理</button></td>
+          </tr>{expandedOrder === order.key && <tr><td colSpan={6}>
+            <OrderRecognitionManager order={order} items={orderItems} variants={variantById} enabled={countedSupported && !busy}
+              batches={snapshot?.batches ?? []}
+              driven={snapshot?.cutoverState?.mode === 'ORDER_DRIVEN_ACTIVE'}
+              onWriteStateChange={value => { confirming.current = value; setBusy(value); }}
+              onCommitted={async (saved, freshVariants) => {
+                if (!refreshAuthoritative) throw new Error('WACA_TARGETED_REFRESH_UNAVAILABLE');
+                const refreshed = await refreshAuthoritative(['products']);
+                if (!refreshed || refreshed.conflicts.length) throw new Error('WACA_TARGETED_REFRESH_CONFLICT');
+                const deadline = Date.now() + 10_000;
+                while (syncRef.current.status !== 'fresh' || !syncRef.current.writeAllowed) {
+                  if (Date.now() >= deadline) throw new Error('WACA_GLOBAL_SYNC_NOT_CONVERGED');
+                  await new Promise(resolve => setTimeout(resolve, 25));
+                }
+                setSnapshot(saved); setVariants(freshVariants);
+              }} />
+          </td></tr>}</Fragment>;
         })}
       </tbody></table></div>
     </section>}
     {(tab === 'mappings' || visitedMappings) && <section hidden={tab !== 'mappings'}
       className={tab === 'mappings' ? 'waca-panel' : undefined}>{mappingsPanel}</section>}
     {tab === 'history' && <section className="waca-panel"><h2>WACA 匯入紀錄</h2>
-      {snapshot && !snapshot.batches.length && <p>目前沒有 WACA 匯入紀錄。</p>}
+      {snapshot && !importBatches.length && <p>目前沒有 WACA 匯入紀錄。</p>}
       <div className="waca-scroll"><table><thead><tr><th>匯入時間</th><th>檔案</th><th>訂單</th><th>商品列</th><th>新增</th><th>更新</th><th>未變更</th><th>取消／失敗</th><th>已配對</th><th>待處理</th><th>有效數量</th><th>數量對帳</th></tr></thead><tbody>
-        {[...(snapshot?.batches ?? [])].reverse().map(batch => <tr key={batch.id}><td>{batch.importedAt}</td><td>{batch.fileName}</td>
+        {[...importBatches].reverse().map(batch => <tr key={batch.id}><td>{batch.importedAt}</td><td>{batch.fileName}</td>
           <td>{batch.result.ordersTotal}</td><td>{batch.result.productRows}</td><td>{batch.inserted}</td><td>{batch.updated}</td><td>{batch.unchanged}</td>
           <td>{batch.result.cancelledOrders + batch.result.failedOrders}</td><td>{batch.result.matched}</td>
           <td>{batch.result.unmatched + batch.result.multipleCandidates + batch.result.statusConflicts.length}</td>

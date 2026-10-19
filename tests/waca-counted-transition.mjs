@@ -8,7 +8,7 @@ import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
-assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '074_waca_counted_state_safeupdate.sql', '074 is the append-only singleton repair');
+assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '075_waca_order_recognition_management.sql', '075 appends protected line recognition');
 const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3 });
 const out = {};
 const id = n => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -155,7 +155,10 @@ try {
   assert.equal(ledgerAfterReject.orders.some(o => o.orderNumber === 'O-ATOM'), false, 'order upsert rolled back');
   assert.equal(ledgerAfterReject.items.length, ledgerBefore.items.length); assert.equal(ledgerAfterReject.batches.length, ledgerBefore.batches.length);
   const fnSrc = (await q("select prosrc, prosecdef from pg_proc where proname='erp_commit_waca_counted_snapshot'")).rows[0];
-  assert.equal(fnSrc.prosecdef, true); assert.match(fnSrc.prosrc, /perform public\.erp_commit_waca_snapshot\(p_snapshot, p_expected_revision, false\)/u);
+  assert.equal(fnSrc.prosecdef, true); assert.match(fnSrc.prosrc, /public\.erp_commit_waca_counted_snapshot_v074\(clean,p_expected_revision,p_plan\)/u);
+  const delegate = (await q("select prosrc,prosecdef from pg_proc where proname='erp_commit_waca_counted_snapshot_v074'")).rows[0];
+  assert.equal(delegate.prosecdef, true); assert.match(delegate.prosrc, /perform public\.erp_commit_waca_snapshot\(p_snapshot, p_expected_revision, false\)/u);
+  assert.equal((await q("select has_function_privilege('authenticated','public.erp_commit_waca_counted_snapshot_v074(jsonb,bigint,jsonb)','execute') allowed")).rows[0].allowed,false);
   out.e1 = 'PASS single transaction: a failure raised after the ledger upsert rolls back order/item/batch/revision (0 rows left)';
 
   // E2. Permissions, identity, CAS, epoch, duplicate submission, Restore maintenance lock.

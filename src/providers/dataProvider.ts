@@ -44,6 +44,7 @@ import {
   type NextWacaSnapshot,
 } from '../waca/nextStorage';
 import type { WacaCountedPlan } from '../waca/countedImport';
+import type { WacaRecognitionPlan, WacaRecognitionRequest, WacaRecognitionResult } from '../waca/recognitionManagement';
 import { classifyWorkbenchBackup } from '../waca/backupFormat';
 import { readDeadlineDurableBackup, restoreDeadlineDurableBackup,
   validateDeadlineDurableBackup } from '../lib/closingDateSidecarBackup';
@@ -502,6 +503,14 @@ class DynamicDataProvider implements IDataProvider {
   async commitWacaCountedSnapshot(snapshot: NextWacaSnapshot, expectedRevision: number, plan: WacaCountedPlan): Promise<number> {
     if (!this.supportsWacaCountedImport()) throw new Error('WACA_COUNTED_IMPORT_CLOUD_ONLY');
     return this.guardedWrite(() => this.supabaseProvider.commitWacaCountedSnapshot(snapshot, expectedRevision, plan));
+  }
+  async previewWacaRecognition(request: WacaRecognitionRequest): Promise<WacaRecognitionPlan> {
+    if (!this.supportsWacaCountedImport()) throw new Error('WACA_COUNTED_IMPORT_CLOUD_ONLY');
+    return this.supabaseProvider.previewWacaRecognition(request);
+  }
+  async commitWacaRecognition(request: WacaRecognitionRequest, plan: WacaRecognitionPlan): Promise<WacaRecognitionResult> {
+    if (!this.supportsWacaCountedImport()) throw new Error('WACA_COUNTED_IMPORT_CLOUD_ONLY');
+    return this.guardedWrite(() => this.supabaseProvider.commitWacaRecognition(request, plan));
   }
   async validateCloudRestoreTarget(command: CloudRestoreCommand): Promise<CloudRestoreTargetCompatibilityResult> {
     if (getProviderMode() !== 'cloud') throw new Error('CLOUD_RESTORE_REQUIRES_CLOUD_MODE');

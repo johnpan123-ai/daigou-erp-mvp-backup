@@ -10,7 +10,7 @@ const migration = '074_waca_counted_state_safeupdate.sql';
 const safeupdateLibrary = process.env.WACA_TEST_SAFEUPDATE_LIBRARY;
 assert.ok(safeupdateLibrary, 'Native safeupdate library is required; never silently skip');
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
-const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3.filter(f => f !== migration), safeupdateLibrary,
+const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3.slice(0, CANONICAL_FRESH_INSTALL_V3.indexOf(migration)), safeupdateLibrary,
   postgrestBinary: process.env.WACA_TEST_POSTGREST_BINARY });
 const checks = {};
 const q = (s, a) => db.sql.query(s, a);

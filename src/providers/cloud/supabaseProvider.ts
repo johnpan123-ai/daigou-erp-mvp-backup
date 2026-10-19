@@ -90,6 +90,7 @@ import { classifyCloudBackupError, recordCloudBackupDiagnostic, type CloudBackup
 import { uploadCloudRestoreCandidate, CloudRestoreUploadServerError, type RestorePrepareCallTiming } from './cloudRestoreStagedUpload';
 import type { NextWacaSnapshot } from '../../waca/nextStorage';
 import type { WacaCountedPlan } from '../../waca/countedImport';
+import type { WacaRecognitionPlan, WacaRecognitionRequest, WacaRecognitionResult } from '../../waca/recognitionManagement';
 import { readDeadlineDurableBackup } from '../../lib/closingDateSidecarBackup';
 import { CLOUD_RESTORE_RECOVERY_COLUMNS, parseCloudRestoreRecoveryRows } from './cloudRestoreRecovery';
 import { isCloudRestoreFailureCode } from './cloudRestoreFailure';
@@ -504,6 +505,31 @@ export class SupabaseProvider implements IDataProvider {
     return revision;
   }
 
+  async previewWacaRecognition(request: WacaRecognitionRequest): Promise<WacaRecognitionPlan> {
+    let data: unknown; let error: unknown;
+    try { ({ data, error } = await supabase.rpc('erp_preview_waca_recognition', { p_request: request })); }
+    catch (cause) { markCloudRequestFailed(cause); throw cause; }
+    if (error) { markCloudRequestFailed(error); throw error; }
+    const plan = data as WacaRecognitionPlan;
+    if (plan?.contract !== 'waca-recognition-v1' || plan.requestId !== request.requestId
+      || plan.revision !== request.revision || plan.restoreEpoch !== request.restoreEpoch
+      || !Array.isArray(plan.lines) || !Array.isArray(plan.quantities)) throw new Error('WACA_RECOGNITION_PLAN_INVALID');
+    markCloudReachable();
+    return plan;
+  }
+  async commitWacaRecognition(request: WacaRecognitionRequest, plan: WacaRecognitionPlan): Promise<WacaRecognitionResult> {
+    await this.requireCloudWritePermission();
+    let data: unknown; let error: unknown;
+    try { ({ data, error } = await supabase.rpc('erp_commit_waca_recognition', { p_request: request, p_expected_plan: plan })); }
+    catch (cause) { markCloudRequestFailed(cause); throw cause; }
+    if (error) { markCloudRequestFailed(error); throw error; }
+    const result = data as WacaRecognitionResult;
+    if (!result || result.requestId !== request.requestId || !['COMMITTED', 'NO_CHANGE'].includes(result.status)
+      || result.revision !== request.revision + (result.status === 'COMMITTED' ? 1 : 0)) throw new Error('WACA_RECOGNITION_COMMIT_UNKNOWN');
+    this.isPulled = false; this.pullPromise = null;
+    markCloudReachable();
+    return result;
+  }
   async readWacaRestoreEpoch(): Promise<{ epoch: number; restoredAt: string | null }> {
     const result = await supabase.from('erp_cloud_restore_epoch').select('epoch,restored_at').eq('singleton', true).single();
     if (result.error) { markCloudRequestFailed(result.error); throw result.error; }

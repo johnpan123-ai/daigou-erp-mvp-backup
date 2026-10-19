@@ -1,7 +1,7 @@
 import { formatStructuredError } from '../utils/structuredError';
 
 export type WacaStage = 'read' | 'parse' | 'validation' | 'backup' | 'commit' | 'readback';
-export type WacaCommitRpc = 'erp_commit_waca_snapshot' | 'erp_commit_waca_counted_snapshot';
+export type WacaCommitRpc = 'erp_commit_waca_snapshot' | 'erp_commit_waca_counted_snapshot' | 'erp_commit_waca_recognition';
 export type WacaErrorCategory = 'BACKUP_TIMEOUT' | 'BACKUP_FAILED' | 'FILE_PARSE_ERROR' | 'VALIDATION_ERROR'
   | 'WACA_COMMIT_REJECTED' | 'WACA_COMMIT_UNKNOWN' | 'READBACK_FAILED' | 'PERMISSION_ERROR'
   | 'NETWORK_ERROR' | 'PENDING' | 'CONFLICT' | 'STALE_CONFLICT';

@@ -9,8 +9,11 @@ import {
 import type { MyAcgMasterLink } from './masterReference';
 import { buildWacaCutoverAudit, reconcileWacaReadback } from './reconciliation';
 import type { WacaCutoverState } from './backupFormat';
+import type { WacaRecognitionEvidence } from './recognitionManagement';
 
 export interface WacaBatch {
+  /** Immutable management receipt, stored in the existing business Backup resource. */
+  recognition?: WacaRecognitionEvidence;
   id: string;
   fileName: string;
   importedAt: string;
@@ -185,6 +188,12 @@ export async function commitNextWacaSnapshot(
   updateAutoQuantity: boolean,
 ): Promise<number> {
   assertNext();
+  // 075 management is Cloud/Owner-only. NEXT preserves these payloads for
+  // Backup/Restore, but its legacy quantity writer cannot validate Cloud credit
+  // continuity. Refuse a source update rather than silently override decisions.
+  if (updateAutoQuantity && snapshot.items.some(item => item.recognition)) {
+    throw new Error('NEXT_WACA_MANAGED_RECOGNITION_READ_ONLY');
+  }
   const database = await openNext();
   try {
     const committedRevision = await new Promise<number>((resolve, reject) => {
