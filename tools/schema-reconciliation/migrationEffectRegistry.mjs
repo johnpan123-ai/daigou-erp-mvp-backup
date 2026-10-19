@@ -42,6 +42,21 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '074': {
+    sourceFile: '074_waca_counted_state_safeupdate.sql', dependencies: ['073'],
+    risk: 'WACA_COUNTED_SINGLETON_SAFEUPDATE', idempotency: 'REPLACE_FUNCTION',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [table('waca_state'), fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)')],
+    postconditions: [fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
+      publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      definitionIncludes: ["where id='00000000-0000-4000-8000-000000000001'::uuid and revision=v_revision+1",
+        'get diagnostics v_state_rows = row_count', 'WACA_COUNTED_STATE_UPDATE_MISMATCH',
+        'WACA_OWNER_REQUIRED', 'WACA_STALE_REVISION', 'WACA_RESTORE_EPOCH_CHANGED',
+        'CLOUD_RESTORE_MAINTENANCE_LOCKED', 'WACA_COUNTED_PREVIEW_MISMATCH'],
+    })],
+  },
   '073': {
     sourceFile: '073_waca_counted_transition_import.sql', dependencies: ['023', '044'],
     risk: 'WACA_TRANSITION_COUNTED_IMPORT', idempotency: 'ADDITIVE_FUNCTION',

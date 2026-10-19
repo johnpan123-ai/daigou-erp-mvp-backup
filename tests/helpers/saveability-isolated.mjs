@@ -9,7 +9,13 @@ import { CANONICAL_FRESH_INSTALL_V3 } from '../../supabase/canonicalFreshInstall
 export const uuid=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 export const owner='00000000-0000-4000-8000-000000000099';
 export const viewer='00000000-0000-4000-8000-000000000098';
-export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3}={}) {
+export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3, safeupdateLibrary, postgrestBinary}={}) {
+  if(safeupdateLibrary !== undefined) assert.match(safeupdateLibrary,
+    /^\/tmp\/erp2-waca-21000-safeupdate\.[A-Za-z0-9]+\/safeupdate\.so$/u,
+    'Only the disposable, locally built safeupdate library is allowed');
+  if(postgrestBinary !== undefined) assert.match(postgrestBinary,
+    /^\/tmp\/erp2-waca-074-postgrest\.[A-Za-z0-9]+\/postgrest$/u,
+    'Only the official checksum-verified disposable PostgREST runtime is allowed');
   const base=new URL(process.env.WACA_ISOLATED_PG_URL||'invalid:');
   assert.equal(base.hostname,'127.0.0.1'); assert.equal(base.port,'55492');
   assert.ok(base.pathname.startsWith('/waca_v3_'));
@@ -64,14 +70,20 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3}={
     const response=await fetch(`http://127.0.0.1:${port}`+path,{method:options.method??(body===undefined?'GET':'POST'),headers:{
       ...options.headers,
       ...(sub?{authorization:'Bearer '+token(sub)}:{}),...(body===undefined?{}:{'content-type':'application/json'}),
-    },body:body===undefined?undefined:JSON.stringify(body)});
+    },body:body===undefined?undefined:JSON.stringify(body),signal:options.signal});
     const text=await response.text();
     return {status:response.status,data:text?JSON.parse(text):null};
   };
-  return {sql,url,close,http,async startPostgrest(){
-    server=spawn('wsl.exe',['-e','env','PGRST_DB_URI='+url.toString(),'PGRST_DB_SCHEMAS=public',
+  const stopPostgrest=async()=>{
+    if(!server)return;
+    const stopped=new Promise(resolve=>server.once('exit',resolve));
+    server.kill(); await stopped; server=undefined;
+  };
+  return {sql,url,close,http,stopPostgrest,async startPostgrest(){
+    server=spawn('wsl.exe',['-e','env',...(safeupdateLibrary ? ['PGOPTIONS=-c session_preload_libraries='+safeupdateLibrary] : []),
+      'PGRST_DB_URI='+url.toString(),'PGRST_DB_SCHEMAS=public',
       'PGRST_DB_ANON_ROLE=anon','PGRST_JWT_SECRET='+secret,'PGRST_SERVER_HOST=127.0.0.1',
-      'PGRST_SERVER_PORT='+port,'/tmp/hippo-waca-v3-postgrest-bin/postgrest'],{stdio:'ignore'});
+      'PGRST_SERVER_PORT='+port,postgrestBinary ?? '/tmp/hippo-waca-v3-postgrest-bin/postgrest'],{stdio:'ignore'});
     for(let n=0;n<60;n++){
       try{const r=await http('/'); if(r.status===200)return;}catch{}
       await new Promise(r=>setTimeout(r,250));

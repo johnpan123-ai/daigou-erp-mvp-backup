@@ -201,6 +201,6 @@ try {
     }
     checks.incidentSevenSpecs = 'real SQL commit: +8; G07595265 2->3; G07654825 0->2; other five 0->1; cancelled 0->0';
   } finally { await incidentDb.close(); }
-  console.log(JSON.stringify({ result: 'PASS', checks, appliedMigration: 'existing canonical 073 only, disposable databases',
-    migration073Unchanged: true, newMigrationRequired: false, existingItemPayloadEvidence: 'MUST BACKUP+RESTORE (same waca_order_items resource)', productionWrites: 0 }, null, 2));
+  console.log(JSON.stringify({ result: 'PASS', checks, appliedMigration: 'canonical chain including append-only 074, disposable databases',
+    migration073Unchanged: true, newMigrationRequired: '074 candidate; no live apply', existingItemPayloadEvidence: 'MUST BACKUP+RESTORE (same waca_order_items resource)', productionWrites: 0 }, null, 2));
 } finally { await db.close(); await vite.close(); }

@@ -1,6 +1,7 @@
 import { formatStructuredError } from '../utils/structuredError';
 
 export type WacaStage = 'read' | 'parse' | 'validation' | 'backup' | 'commit' | 'readback';
+export type WacaCommitRpc = 'erp_commit_waca_snapshot' | 'erp_commit_waca_counted_snapshot';
 export type WacaErrorCategory = 'BACKUP_TIMEOUT' | 'BACKUP_FAILED' | 'FILE_PARSE_ERROR' | 'VALIDATION_ERROR'
   | 'WACA_COMMIT_REJECTED' | 'WACA_COMMIT_UNKNOWN' | 'READBACK_FAILED' | 'PERMISSION_ERROR'
   | 'NETWORK_ERROR' | 'PENDING' | 'CONFLICT' | 'STALE_CONFLICT';
@@ -31,7 +32,7 @@ const labels: Record<WacaErrorCategory, string> = {
 export function wacaNotice(category: WacaErrorCategory, message = messages[category]): WacaUiError {
   return { category, label: labels[category], message };
 }
-export function classifyWacaError(cause: unknown, stage: WacaStage, requestId?: string): WacaUiError {
+export function classifyWacaError(cause: unknown, stage: WacaStage, requestId?: string, commitRpc?: WacaCommitRpc): WacaUiError {
   const error = formatStructuredError(cause);
   const timeout = error.code === '57014' || /statement timeout|timed?\s*out|timeout|逾時/iu.test(error.message);
   const permission = ['42501', 'PGRST301', 'PGRST302'].includes(error.code ?? '')
@@ -53,5 +54,5 @@ export function classifyWacaError(cause: unknown, stage: WacaStage, requestId?: 
   const safeCode = /^[A-Z0-9_]{2,80}$/u.test(error.code ?? '') ? error.code : undefined;
   return { ...wacaNotice(category), diagnostic: { stage, code: safeCode, reason, requestId,
     rpc: stage === 'backup' ? 'erp_export_cloud_restore_snapshot_json'
-      : stage === 'commit' ? 'erp_commit_waca_snapshot' : undefined } };
+      : stage === 'commit' ? commitRpc : undefined } };
 }

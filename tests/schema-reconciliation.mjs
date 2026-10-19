@@ -18,7 +18,11 @@ import { readdir } from 'node:fs/promises';
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
-assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051','052','053','054','055','056','057'].sort());
+assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051','052','053','054','055','056','057',
+  '058','059','060','061','062','063','064','065','066','067','068','069','070','071','072','073','074'].sort());
+assert.deepEqual(registry['074'].dependencies, ['073']);
+assert.equal(registry['074'].sourceEffects.tables.length, 0);
+assert.deepEqual(registry['074'].sourceEffects.functions.map(f => f.name), ['erp_commit_waca_counted_snapshot']);
 assert.deepEqual(registry['049'].dependencies, ['048']);
 assert.deepEqual(registry['050'].dependencies, ['049']);
 assert.deepEqual(registry['051'].dependencies, ['050']);

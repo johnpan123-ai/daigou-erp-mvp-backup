@@ -611,7 +611,8 @@ export default function WacaIntegration() {
         orders: new Set(pendingImport.rows.map(row => wacaOrderKey(row.orderNumber))).size,
         variants: result.quantityChanges.length, pending: pendingFeatures,
       });
-    } catch (cause) { setMessage(''); setError(classifyWacaError(cause, stage, pendingImport.importId)); }
+    } catch (cause) { setMessage(''); setError(classifyWacaError(cause, stage, pendingImport.importId,
+      pendingImport.counted && countedPlan ? 'erp_commit_waca_counted_snapshot' : 'erp_commit_waca_snapshot')); }
     finally { confirming.current = false; setBusy(false); }
   };
 
@@ -643,7 +644,7 @@ export default function WacaIntegration() {
       setPendingLinks(null);
       await load();
       setMessage(`已保存 ${pendingLinks.result.accepted} 筆買動漫 GP → G 對照證據。`);
-    } catch (cause) { setError(classifyWacaError(cause, stage)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage, undefined, 'erp_commit_waca_snapshot')); }
     finally { setBusy(false); }
   };
 
@@ -691,7 +692,8 @@ export default function WacaIntegration() {
       setMessage(dataProvider.supportsWacaCountedImport()
         ? '商品對照已保存；已計入的訂單依來源更新，接管前且尚未確認的訂單保留為待核對（可在「待處理」決定是否計入）。'
         : '商品對照已保存；所有受影響歷史訂單的 WACA 數量已重算。');
-    } catch (cause) { setError(classifyWacaError(cause, stage)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage, undefined,
+      dataProvider.supportsWacaCountedImport() ? 'erp_commit_waca_counted_snapshot' : 'erp_commit_waca_snapshot')); }
     finally { setBusy(false); }
   }, [snapshot, choicesFor, selectedVariant, selectedParent, variants, masterState.links, masterIndex, load, setError, commitCountedLedger]);
 
@@ -758,7 +760,8 @@ export default function WacaIntegration() {
       stage = 'readback';
       await load();
       setMessage(`${orderKey} 已按「${status}」重新計算。`);
-    } catch (cause) { setError(classifyWacaError(cause, stage)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage, undefined,
+      dataProvider.supportsWacaCountedImport() ? 'erp_commit_waca_counted_snapshot' : 'erp_commit_waca_snapshot')); }
     finally { setBusy(false); }
   };
 
@@ -791,7 +794,7 @@ export default function WacaIntegration() {
       await load();
       setMessage(choice === 'COUNT_AS_NEW' ? `訂單 ${item.orderKey.replace('WACA::', '')} 已計入 WACA 數量。`
         : `訂單 ${item.orderKey.replace('WACA::', '')} 已標記為包含在 ERP1 歷史數量，不再重複計入。`);
-    } catch (cause) { setError(classifyWacaError(cause, stage)); }
+    } catch (cause) { setError(classifyWacaError(cause, stage, undefined, 'erp_commit_waca_counted_snapshot')); }
     finally { setBusy(false); }
   };
 

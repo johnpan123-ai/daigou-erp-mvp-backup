@@ -17,6 +17,11 @@ try {
  assert.equal(classifyWacaError({code:'42501',message:'permission denied'},'read').category,'PERMISSION_ERROR');
  assert.equal(classifyWacaError(new Error('Failed to fetch'),'commit').category,'WACA_COMMIT_UNKNOWN');
  assert.equal(classifyWacaError(timeout,'commit').category,'WACA_COMMIT_REJECTED');
+ const rejected={code:'21000',message:'UPDATE requires a WHERE clause'};
+ assert.equal(classifyWacaError(rejected,'commit','fixture','erp_commit_waca_counted_snapshot').diagnostic.rpc,'erp_commit_waca_counted_snapshot');
+ assert.equal(classifyWacaError(rejected,'commit','fixture','erp_commit_waca_snapshot').diagnostic.rpc,'erp_commit_waca_snapshot');
+ assert.equal(classifyWacaError(rejected,'commit').diagnostic.rpc,undefined,'unknown path must not invent a legacy RPC');
+ assert.equal(classifyWacaError(rejected,'commit','fixture','erp_commit_waca_counted_snapshot').diagnostic.code,'21000');
  assert.equal(classifyWacaError(timeout,'readback').category,'READBACK_FAILED');
  assert.equal(classifyWacaError(new Error('secret customer row'),'backup').diagnostic.reason,'STRUCTURED_ERROR');
  assert.equal(wacaNotice('PENDING').label,'待處理');assert.equal(wacaNotice('CONFLICT').label,'需核對衝突');

@@ -8,7 +8,7 @@ import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
-assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '073_waca_counted_transition_import.sql', '073 is the last canonical migration');
+assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '074_waca_counted_state_safeupdate.sql', '074 is the append-only singleton repair');
 const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3 });
 const out = {};
 const id = n => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
