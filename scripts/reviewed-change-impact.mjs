@@ -10,6 +10,18 @@ const stable = value => Array.isArray(value) ? value.map(stable)
 export const impactHash = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
 export const regressionScripts = Object.freeze({
+  'waca-normal-import-native': 'tests/waca-normal-import-isolated.mjs',
+  'waca-normal-import-preview': 'tests/waca-normal-import-preview.mjs',
+  'waca-counted-transition': 'tests/waca-counted-transition.mjs',
+  'waca-counted-restore': 'tests/waca-counted-restore-e2e.mjs',
+  'waca-preview-visibility': 'tests/waca-preview-visibility.mjs',
+  'waca-preview-filter-ui': 'tests/waca-preview-filter-ui.mjs',
+  'waca-accumulate-ui': 'tests/waca-accumulate-default.mjs',
+  'waca-counted-ui': 'tests/waca-counted-ui.mjs',
+  'waca-review-ui': 'tests/waca-ui-review.mjs',
+  'egress-full-read-budget': 'tests/realtime-full-read-budget.mjs',
+  'provider-guard': 'tests/p02-1a-provider-guard.mjs',
+  'context-guard': 'tests/p02-1a-context-guard.mjs',
   'buyanime-journal-identity': 'tests/buyanime-journal-identity.mjs',
   'buyanime-journal-scanner': 'tests/buyanime-journal-scanner.mjs',
   'buyanime-recovery-epoch': 'tests/buyanime-recovery-epoch.mjs',

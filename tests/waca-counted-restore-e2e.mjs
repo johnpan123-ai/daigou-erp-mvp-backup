@@ -114,12 +114,16 @@ try {
   const canonicalVariant = (await variants()).find(v => v.id === canonicalOfSet);
   const awayVariant = (await variantsAll()).find(v => away.has(v.id) && v.myacg_item_code === canonicalVariant.myacg_item_code);
 
-  // 10. ERP1 baseline kept: old-dated order is overlap-uncertain (no change), a new order adds once.
+  // 10. ERP1 baseline kept: explicit inclusion evidence (not the order date) prevents a duplicate.
+  // Normal old-dated orders without evidence add normally; waca-normal-import-isolated covers that case.
   const base = firstEpoch.restoredAt;
   const before = new Date(Date.parse(base) - 3 * 86400000).toISOString().replace('T', ' ').slice(0, 16).replaceAll('-', '/');
   const after = new Date(Date.parse(base) + 86400000 + 8 * 3600000).toISOString().replace('T', ' ').slice(0, 16).replaceAll('-', '/');
-  const r1 = await runImport([row('E2E-OLD', before, hakosVariant, 2), row('E2E-NEW', after, hakosVariant, 1),
-    row('E2E-NORM', after, canonicalVariant, 1)]);
+  const historyRow = row('E2E-OLD', before, hakosVariant, 2);
+  const historyKey = `${core.wacaOrderKey(historyRow.orderNumber)}::${core.wacaFeature(historyRow)}`;
+  const r1 = await runImport([historyRow, row('E2E-NEW', after, hakosVariant, 1),
+    row('E2E-NORM', after, canonicalVariant, 1)], { overlap: new Map([[historyKey, 'BASELINE_INCLUDED']]) });
+  assert.equal(r1.saved.items.find(i => i.orderKey === core.wacaOrderKey('E2E-OLD')).countedReason, 'BASELINE_INCLUDED');
   const savedNorm = r1.saved.items.find(i => i.key.startsWith('WACA::E2E-NORM'));
   assert.equal(savedNorm.productVariantId, canonicalVariant.id, 'NORMALIZED_SET_RESOLVES_TO_CANONICAL');
   if (awayVariant) assert.notEqual(savedNorm.productVariantId, awayVariant.id);
@@ -131,7 +135,7 @@ try {
   assert.equal(untouchedChanged.length, 0, 'first counted commit zeroes nothing: every other variant keeps its ERP1 manual quantity');
   assert.equal((await snapshot()).cutoverAudit.length > 0, true, 'cutover audit recorded (legacy values kept as evidence)');
   assert.equal(r1.saved.cutoverState.transition.restoreEpoch, firstEpoch.epoch);
-  out.s10 = 'PASS ERP1 history 899 restored; first counted commit zeroes nothing (all other variants unchanged); Hakos 6 -> 7, old-dated order pending; transition bound to Restore epoch';
+  out.s10 = 'PASS ERP1 history 899 restored; first counted commit zeroes nothing (all other variants unchanged); Hakos 6 -> 7, proven baseline-included order not added; transition bound to Restore epoch';
   out.s13 = `PASS normalized set order -> canonical ${canonicalVariant.id.slice(0, 8)}${awayVariant ? ` (merged-away ${awayVariant.id.slice(0, 8)} never used)` : ''}`;
 
   // ERP2 v2 backup of this state (server export -> v2 document).
