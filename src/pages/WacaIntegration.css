@@ -214,6 +214,6 @@
 .waca-recognition-manager td { vertical-align: top; }
 .waca-recognition-manager select { max-width: 180px; padding: 7px; }
 .waca-recognition-reason { display: flex; gap: 12px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
-.waca-recognition-reason input { flex: 1; min-width: 180px; padding: 8px; }
+.waca-recognition-reason input, .waca-recognition-reason select { flex: 1; min-width: 180px; max-width: 100%; padding: 8px; }
 .waca-recognition-review { margin-top: 12px; padding: 12px 16px; background: var(--bg-primary, white); border: 1px solid #cbd5e1; border-radius: 8px; }
 .waca-recognition-warning { color: #9a3412; }

@@ -17,7 +17,9 @@ export function OrderRecognitionManager({ order, items, variants, batches, enabl
 }) {
   const { profile } = useAuth();
   const [choices, setChoices] = useState<Record<string, WacaRecognitionMode>>({});
-  const [reason, setReason] = useState('');
+  const [reasonChoice, setReasonChoice] = useState('');
+  const [reasonNote, setReasonNote] = useState('');
+  const reason = reasonChoice === 'OTHER' ? reasonNote.trim() : reasonChoice;
   const [review, setReview] = useState<{ request: WacaRecognitionRequest; plan: WacaRecognitionPlan } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -46,7 +48,7 @@ export function OrderRecognitionManager({ order, items, variants, batches, enabl
     try {
       const verified = await commitAndVerifyWacaRecognition(dataProvider, review.request, review.plan, value => { stage = value; });
       await onCommitted(verified.snapshot, verified.variants);
-      setChoices({}); setReview(null); setReason('');
+      setChoices({}); setReview(null); setReasonChoice(''); setReasonNote('');
       setMessage('認列調整已保存，來源訂單、認列紀錄及商品數量已權威讀回確認。');
     } catch (cause) {
       const classified = classifyWacaError(cause, stage, review.request.requestId, 'erp_commit_waca_recognition');
@@ -98,8 +100,16 @@ export function OrderRecognitionManager({ order, items, variants, batches, enabl
             disabled={mode === 'COUNT' && !isEffectiveWacaStatus(order.status)}>{label}</option>)}
         </select></td>
       </tr>)}</tbody></table></div>
-    <label className="waca-recognition-reason">調整原因（必填）<input aria-label="認列調整原因" value={reason} maxLength={500}
-      disabled={!allowed || busy || uncertain} onChange={event => { setReason(event.target.value); setReview(null); }} placeholder="例如：此訂單已包含在原本歷史數量" /></label>
+    <label className="waca-recognition-reason">調整原因（必填）<select aria-label="認列調整原因" value={reasonChoice}
+      disabled={!allowed || busy || uncertain} onChange={event => { setReasonChoice(event.target.value); setReview(null); }}>
+      <option value="">請選擇調整原因</option>
+      <option value="已包含原本 WACA 數量">已包含原本 WACA 數量</option>
+      <option value="先前認列錯誤">先前認列錯誤</option>
+      <option value="暫時不計入">暫時不計入</option>
+      <option value="OTHER">其他（需填寫備註）</option>
+    </select></label>
+    {reasonChoice === 'OTHER' && <label className="waca-recognition-reason">備註（必填）<input aria-label="其他調整原因備註" value={reasonNote} maxLength={500}
+      disabled={!allowed || busy || uncertain} onChange={event => { setReasonNote(event.target.value); setReview(null); }} placeholder="請填寫這次認列調整的原因" /></label>}
     <button type="button" className="btn btn-md btn-secondary" disabled={!allowed || busy || uncertain || !Object.keys(choices).length || !reason.trim()}
       onClick={() => void preview()}>預覽認列調整</button>
     {review && review.plan.lines.length > 0 && <section className="waca-recognition-review" aria-label="認列調整預覽">

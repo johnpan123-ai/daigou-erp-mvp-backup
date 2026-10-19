@@ -25,7 +25,9 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3, s
   const admin=new pg.Client({connectionString:adminUrl.toString()}); await admin.connect();
   await admin.query(`create database ${name}`);
   const sql=new pg.Client({connectionString:url.toString()}); await sql.connect();
-  let server; const port=4399; const secret=randomBytes(32).toString('hex');
+  const port=Number(process.env.WACA_TEST_POSTGREST_PORT??4399);
+  assert.ok(Number.isInteger(port)&&port>=1024&&port<=65535,'Isolated PostgREST port must be bounded');
+  let server; const secret=randomBytes(32).toString('hex');
   const token=sub=>{
     const a=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
     const b=Buffer.from(JSON.stringify({role:'authenticated',sub,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
@@ -85,7 +87,11 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3, s
       'PGRST_DB_ANON_ROLE=anon','PGRST_JWT_SECRET='+secret,'PGRST_SERVER_HOST=127.0.0.1',
       'PGRST_SERVER_PORT='+port,postgrestBinary ?? '/tmp/hippo-waca-v3-postgrest-bin/postgrest'],{stdio:'ignore'});
     for(let n=0;n<60;n++){
-      try{const r=await http('/'); if(r.status===200)return;}catch{}
+      if(server.exitCode!==null)throw new Error('Disposable PostgREST exited before readiness');
+      // A different existing preview can return 200 at /. Verify our ephemeral
+      // authenticated identity instead of accidentally accepting another DB.
+      try{const r=await http('/profiles?select=user_id&user_id=eq.'+owner);
+        if(r.status===200&&Array.isArray(r.data)&&r.data.some(p=>p.user_id===owner))return;}catch{}
       await new Promise(r=>setTimeout(r,250));
     }
     throw new Error('Disposable PostgREST not ready');
