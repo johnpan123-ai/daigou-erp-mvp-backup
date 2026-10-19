@@ -11,7 +11,12 @@ const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 const snapshotSql = await read('../tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql');
 const inventorySql = await read('../tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql');
 const releaseStart = CANONICAL_FRESH_INSTALL_V3.indexOf('049_private_order_atomic_transaction.sql');
-const releaseFiles = CANONICAL_FRESH_INSTALL_V3.slice(releaseStart);
+const historicalEnd = CANONICAL_FRESH_INSTALL_V3.indexOf('057_atomic_restore_staged_execution_and_validation.sql') + 1;
+assert.ok(historicalEnd > releaseStart);
+// This historical progression is v4 -> v11, not the mutable current release.
+const releaseFiles = CANONICAL_FRESH_INSTALL_V3.slice(releaseStart, historicalEnd);
+const fullRegistry = await buildMigrationEffectRegistry();
+const historicalRegistry = Object.fromEntries(Object.entries(fullRegistry).filter(([,effect])=>effect.canonicalOrder <= fullRegistry['057'].canonicalOrder));
 const saveabilityFiles = releaseFiles.slice(0, 3);
 const wacaDeltaFile = releaseFiles[3];
 const restoreCompatFile = releaseFiles[4];
@@ -25,7 +30,8 @@ const v7Fingerprint = 'e8cbbbc041367e2f2a6b240f72932e53a8622cd2ba9dab8261f2b0b44
 const v8Fingerprint = '14b941f5196f15e1ed53250b195a67f52e357ac0168d5aa30f7d61a270728a1e';
 const v9Fingerprint = 'a7f079e6015ecdba0bd86d369293b4e771e698f90f5ab3e350cba0539146b8eb';
 const v10Fingerprint = 'c68d12c37811c377ac5d56799b273d8e7c9b5385d22c693b66f3aa2411146122';
-const v11Fingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
+const v11Fingerprint = '87d1d8da91c9911410d5db67fbeb6e0f193586c85aee8ea178953c4b9f5c1068';
+const currentFingerprint = JSON.parse(await read('../config/erp-environment-identity.json')).schemaBaseline.canonicalFingerprint;
 const partialPlans = [];
 
 async function createDatabase() {
@@ -103,14 +109,14 @@ try {
   assert.equal(detectInventoryBridgeState(await capture(upgraded)).state, 'STATE_C');
   await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(bridgeIndex + 1, wacaStart), 'through-043');
   const preWacaSnapshot = await capture(upgraded);
-  const preWacaPlan = planSchemaDelta(preWacaSnapshot, await buildMigrationEffectRegistry(), { expectedSnapshot: freshSnapshot });
+  const preWacaPlan = planSchemaDelta(preWacaSnapshot, historicalRegistry, { expectedSnapshot: freshSnapshot });
   assert.ok(['041','042','043'].every(id => preWacaPlan.migrations.find(item => item.migrationId === id).state === 'SATISFIED'));
   assert.equal(preWacaPlan.migrations.find(item => item.migrationId === '044').state, 'NEEDS_APPLY');
   assert.ok(preWacaPlan.migrations.every(item => item.historicalExecution === 'UNPROVEN'));
   const beforeBridgeReplay = fingerprintStructuralSnapshot(preWacaSnapshot);
   await apply(upgraded, ['026b_cloud_inventory_uuid_identity_bridge.sql'], 'bridge-replay');
   assert.equal(fingerprintStructuralSnapshot(await capture(upgraded)), beforeBridgeReplay);
-  await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(wacaStart), 'upgrade-tail');
+  await apply(upgraded, CANONICAL_FRESH_INSTALL_V3.slice(wacaStart, historicalEnd), 'upgrade-tail');
 
   await apply(partialBridge, CANONICAL_FRESH_INSTALL_V3.slice(0, bridgeIndex), 'partial-base');
   await partialBridge.exec('alter table public.inventory_items add column id uuid not null default extensions.gen_random_uuid();');
@@ -121,7 +127,7 @@ try {
   assert.equal(fingerprintStructuralSnapshot(freshSnapshot), fingerprintStructuralSnapshot(upgradedSnapshot));
   console.log('PASS fresh target fingerprint = reconciled upgrade target fingerprint');
 
-  const registry = await buildMigrationEffectRegistry();
+  const registry = historicalRegistry;
   const plan = planSchemaDelta(freshSnapshot, registry, { expectedSnapshot: upgradedSnapshot,
     requiredBaselineId: 'erp2-canonical-schema-v11-atomic-restore-staged-execution' });
   const failed = plan.migrations.filter(item => item.state !== 'SATISFIED');
@@ -215,6 +221,15 @@ try {
   assert.equal(Object.keys(businessSnapshot).length, 24);
   assert.equal(Object.hasOwn(businessSnapshot, 'erp_schema_migration_ledger'), false);
   console.log('PASS baseline ledger is owner-only operational metadata outside 24-resource Restore');
+  // Independently retain full current-schema coverage, not only historical v11.
+  await apply(fresh,CANONICAL_FRESH_INSTALL_V3.slice(historicalEnd),'v11-to-current');
+  const currentSnapshot=await capture(fresh);
+  assert.equal(fingerprintStructuralSnapshot(currentSnapshot),currentFingerprint);
+  const currentPlan=planSchemaDelta(currentSnapshot,fullRegistry,{expectedSnapshot:currentSnapshot});
+  assert.equal(currentPlan.migrations.length,44);
+  assert.ok(currentPlan.migrations.every(item=>item.state==='SATISFIED' && item.applyMethod==='NO_APPLY'));
+  assert.equal(currentPlan.readyForApply,true);assert.deepEqual(currentPlan.applyPlan,[]);
+  console.log('PASS full current v30 PGlite schema -> 44/44 SATISFIED, empty apply delta');
 } finally {
   await fresh.close(); await upgraded.close(); await partialBridge.close(); await compatibility.close();
 }

@@ -28,6 +28,7 @@ try {
   const registry=await buildMigrationEffectRegistry(),pre=planSchemaDelta(before,registry,{expectedSnapshot:after}),post=planSchemaDelta(after,registry,{expectedSnapshot:after});
   assert.equal(pre.readyForApply,true,JSON.stringify(pre.blockers));assert.deepEqual(pre.applyPlan.map(x=>x.migrationId),['075']);
   assert.equal(post.readyForApply,true,JSON.stringify(post.blockers));assert.deepEqual(post.applyPlan,[]);
+  assert.equal(post.migrations.length,44);assert.ok(post.migrations.every(m=>m.state==='SATISFIED' && m.applyMethod==='NO_APPLY'));
   const result={result:'PASS',classification:'SCHEMA_RPC_CHANGE_NOT_UI_ONLY',before:fingerprintStructuralSnapshot(before),after:fingerprintStructuralSnapshot(after),
     sourceSha256:createHash('sha256').update(readFileSync('supabase/sql/'+migration)).digest('hex'),businessMutation:0,resources:24,newTable:0,newColumn:0,
     preApplyPlan:pre.applyPlan,postApplyPlan:post.applyPlan,repairDelegatesPrivate:true,historicalMigrationExecutionClaimed:false,cloudApply:0,ledgerWrites:0};

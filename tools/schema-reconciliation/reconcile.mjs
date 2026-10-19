@@ -2,6 +2,7 @@ import { fingerprintStructuralSnapshot, fingerprintValue, normalizeDefinition,
   diffStructuralSnapshots, SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT,
   SQL_CANONICAL_ALGORITHM } from './schemaContract.mjs';
 import { SCHEMA_EVIDENCE_CONTRACT_VERSION, sealSchemaEvidence } from './evidenceContract.mjs';
+import { fingerprintFunctionImplementation } from './functionImplementation.mjs';
 import { classifyRestoreFunctionState, RESTORE_FUNCTION_STATES,
   restoreFactsFromStructuralSnapshot } from './restoreFunctionState.mjs';
 
@@ -107,6 +108,18 @@ function evidenceFor(snapshot, condition) {
     }
     case 'function': {
       const value = getFunction(snapshot, condition.object);
+      const retained = condition.retainedImplementation;
+      if (retained && retained.activationObjects.some(object => getFunction(snapshot, object))) {
+        const proof = retained.functions.map(entry => {
+          const actual = fingerprintFunctionImplementation(getFunction(snapshot, entry.object));
+          return { object: entry.object, expected: entry.sha256, actual,
+            matches: actual !== null && actual === entry.sha256 };
+        });
+        // Any observed part of the new call chain requires the ENTIRE exact
+        // reviewed wrapper/delegate/helper chain, even when old fragments match.
+        return exact(Boolean(value), Boolean(value) && proof.length > 0
+          && proof.every(entry => entry.matches), { function: value ?? null, retainedImplementationProof: proof });
+      }
       const definition = normalizeDefinition(value?.definition ?? '');
       const matches = Boolean(value)
         && (condition.owner === undefined || value.owner === condition.owner)

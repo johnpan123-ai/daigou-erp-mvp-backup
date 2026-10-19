@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { ERP2_MIGRATION_SOURCE_ORDER_V3 } from '../../supabase/canonicalFreshInstallV3.mjs';
+import { fingerprintFunctionImplementation } from './functionImplementation.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -69,6 +70,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
       publicExecute: false, anonExecute: false, authenticatedExecute: true,
       requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      retainedImplementation: 'WACA_075',
       definitionIncludes: ["where id='00000000-0000-4000-8000-000000000001'::uuid and revision=v_revision+1",
         'get diagnostics v_state_rows = row_count', 'WACA_COUNTED_STATE_UPDATE_MISMATCH',
         'WACA_OWNER_REQUIRED', 'WACA_STALE_REVISION', 'WACA_RESTORE_EPOCH_CHANGED',
@@ -85,6 +87,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       owner: 'postgres', securityDefiner: true, returnType: 'jsonb',
       publicExecute: false, anonExecute: false, authenticatedExecute: true,
       requiredConfig: ['search_path=pg_catalog, public, extensions', 'statement_timeout=120s'],
+      retainedImplementation: 'WACA_075',
       definitionIncludes: ['erp_commit_waca_snapshot(p_snapshot, p_expected_revision, false)', 'WACA_RESTORE_EPOCH_CHANGED',
         'WACA_COUNTED_PREVIEW_MISMATCH', 'WACA_COUNTED_NEGATIVE_DISPLAY', 'WACA_OVERWRITE_NOT_FULLY_COUNTED'],
     })],
@@ -623,6 +626,7 @@ export const MIGRATION_EFFECT_SPECS = Object.freeze({
       fn('erp_read_waca_snapshot()', { securityDefiner: true, authenticatedExecute: true, anonExecute: false }),
       fn('erp_commit_waca_snapshot(jsonb,bigint,boolean)', {
         securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+        retainedImplementation: 'WACA_075',
         definitionIncludes: ['waca_auto_quantity'],
       }),
     ],
@@ -913,6 +917,24 @@ export function extractSqlEffects(sql) {
 }
 
 export async function buildMigrationEffectRegistry() {
+  const canonical075 = JSON.parse(await readFile(new URL('../../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json', import.meta.url), 'utf8'));
+  const signatures075 = [
+    'erp_commit_waca_snapshot(jsonb,bigint,boolean)', 'erp_commit_waca_snapshot_v044(jsonb,bigint,boolean)',
+    'erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)', 'erp_commit_waca_counted_snapshot_v074(jsonb,bigint,jsonb)',
+    'erp_waca_reversal_keys(uuid,bigint)', 'erp_waca_reversal_proven(uuid,bigint,text)',
+    'erp_store_waca_recognition_continuity(uuid,bigint,jsonb)', 'erp_assert_waca_recognition_preserved(jsonb)',
+    'erp_plan_waca_recognition(jsonb)', 'erp_preview_waca_recognition(jsonb)',
+    'erp_commit_waca_recognition(jsonb,jsonb)', 'erp_prune_waca_recognition_evidence(jsonb)',
+  ];
+  const retained075 = { contract: 'WACA_075_EXACT_RETAINED_IMPLEMENTATIONS',
+    activationObjects: signatures075.filter(signature => !['erp_commit_waca_snapshot(jsonb,bigint,boolean)',
+      'erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)'].includes(signature)).map(signature => `public.${signature}`),
+    functions: signatures075.map(signature => {
+    const object = `public.${signature}`;
+    const sha256 = fingerprintFunctionImplementation(canonical075.functions[object]);
+    if (!sha256) throw new Error(`RETAINED_IMPLEMENTATION_CANONICAL_MISSING:${object}`);
+    return { object, sha256 };
+  }) };
   const order = new Map(ERP2_MIGRATION_SOURCE_ORDER_V3.map((file, index) => [file, index]));
   const result = {};
   for (const [migrationId, spec] of Object.entries(MIGRATION_EFFECT_SPECS)) {
@@ -928,7 +950,8 @@ export async function buildMigrationEffectRegistry() {
       ...created.uniques.map(value => q('unique', `public.${created.name}`, value)),
       ...created.foreignKeys.map(value => q('foreignKey', `public.${created.name}`, true, value)),
     ]);
-    const postconditions = [...spec.postconditions, ...derivedConditions]
+    const postconditions = [...spec.postconditions, ...derivedConditions].map(condition =>
+      condition.retainedImplementation === 'WACA_075' ? { ...condition, retainedImplementation: retained075 } : condition)
       .filter((value, index, values) => values.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(value)) === index);
     const dependencySources = [];
     for (const dependency of spec.dependencies) {

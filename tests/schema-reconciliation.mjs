@@ -143,6 +143,13 @@ for (const signature of ['public.is_owner(uuid)','public.is_editor(uuid)']) cano
   config: [], definition: signature, securityDefiner: true, authenticatedExecute: false, anonExecute: false,
 };
 for (const effect of Object.values(registry)) for (const condition of effect.postconditions) applyCondition(canonical, condition);
+// Retained implementations are exact SQL/ACL contracts, not concatenated
+// keyword fragments. Use real source-reviewed function facts for this chain;
+// keep the existing drift/partial/unknown assertions below unchanged.
+const retainedCanonical = JSON.parse(await readFile(new URL('../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json', import.meta.url), 'utf8'));
+for (const entry of registry['074'].postconditions[0].retainedImplementation.functions) {
+  canonical.functions[entry.object] = structuredClone(retainedCanonical.functions[entry.object]);
+}
 
 const reordered = structuredClone(canonical);
 reordered.schemas.reverse();
