@@ -157,9 +157,11 @@
 .waca-review-summary .up strong { color: #047857; }
 .waca-review-summary .down strong { color: #be123c; }
 .waca-review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; margin: 0 0 10px; }
-.waca-review-filter { grid-template-columns: repeat(3, minmax(96px, auto)); }
-.waca-review-filter .waca-count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 12px; }
-.waca-review-filter button.active .waca-count { background: rgba(255,255,255,.25); color: #fff; }
+.waca-spec-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.waca-spec-filters label { display: inline-flex; align-items: center; gap: 7px; color: #334155; font-size: 14px; cursor: pointer; }
+.waca-spec-filters input { width: 16px; height: 16px; accent-color: #0369a1; }
+.waca-spec-filters small, .waca-filter-note { color: #64748b; font-size: 12px; }
+.waca-filter-note { margin: 0 0 12px; }
 .waca-mode-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; color: #64748b; font-size: 12px; }
 .waca-mode-legend b { color: #334155; }
 .waca-review-group.needs-review { border-left: 3px solid #f59e0b; }
@@ -199,8 +201,7 @@
   .waca-review-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .waca-review-summary > div { padding: 8px; }
   .waca-review-summary strong { font-size: 20px; }
-  .waca-review-filter { width: 100%; grid-template-columns: repeat(3, 1fr); }
-  .waca-review-filter button { padding: 6px 4px; }
+  .waca-spec-filters { width: 100%; align-items: flex-start; flex-direction: column; }
   .waca-flag { white-space: normal; }
   .waca-arrow::before { display: none; }
 }

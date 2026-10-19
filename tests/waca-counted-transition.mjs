@@ -52,7 +52,7 @@ try {
     const importedKeys = new Set(rows.map(r => `${core.wacaOrderKey(r.orderNumber)}::${core.wacaFeature(r)}`));
     const context = counted.wacaTransitionContext(current.cutoverState, opts.epoch ?? await epoch(), '2026-10-18T00:00:00Z');
     const plan = counted.planWacaCountedImport({ variants: vs, current: currentRepo, candidate, context, importedKeys,
-      modes: opts.modes, defaultMode: opts.defaultMode, overlapChoices: opts.overlap, actor: owner });
+      modes: opts.modes, defaultMode: opts.defaultMode ?? 'OVERWRITE', overlapChoices: opts.overlap, actor: owner });
     counted.applyCountedItems(candidate, plan);
     const batch = { id: importId, fileName: opts.file ?? 'fixture.xlsx', importedAt: '2026-10-18T00:00:00Z', rows: rows.length,
       inserted: result.inserted, updated: result.updated, unchanged: result.unchanged, result, conflictRows: [],
@@ -79,15 +79,16 @@ try {
   const a1 = preview1.plan.variants.get(vid.A);
   assert.equal(a1.mode, 'OVERWRITE'); assert.equal(a1.displayBefore, 10); assert.equal(a1.displayAfter, 1);
   assert.deepEqual(preview1.plan.riskyOverwrites, [vid.A]);
-  // Owner keeps the history (ACCUMULATE): the old-dated order is overlap-uncertain, nothing is added.
-  const r1 = await runImport([row('O1', '2026/10/10 10:00', 'G-A', 1)], { defaultMode: 'ACCUMULATE' });
+  // Explicit Owner hold (not an order-date heuristic) keeps this known review fixture uncounted.
+  const r1 = await runImport([row('O1', '2026/10/10 10:00', 'G-A', 1)], { defaultMode: 'ACCUMULATE',
+    overlap: new Map([[`WACA::O1::${core.wacaFeature(row('O1', '', 'G-A', 1))}`, 'PENDING']]) });
   assert.equal(await display('A'), 10); assert.equal(r1.response.transitionEstablished, true);
   assert.equal(r1.saved.cutoverState.mode, 'ORDER_DRIVEN_ACTIVE');
   assert.equal(r1.saved.cutoverState.transition.restoreEpoch, 7);
   assert.equal(r1.saved.cutoverState.transition.baselineAt, '2026-10-16T02:20:45.000000Z');
   assert.equal(r1.plan.variants.get(vid.A).uncertainItems, 1);
   assert.equal(await display('B'), 5, 'UNTOUCHED_HISTORY_PRESERVED');
-  out.s1 = 'PASS 10 + incomplete 1 -> OVERWRITE flagged (10->1 risky); ACCUMULATE keeps 10, 1 uncertain pending';
+  out.s1 = 'PASS explicit OVERWRITE flagged (10->1 risky); explicit Owner hold keeps 10, 1 pending';
 
   // 2. A confirmed new order (placed after the baseline) accumulates 10 -> 11.
   await runImport([row('O2', '2026/10/17 09:00', 'G-A', 1)], { defaultMode: 'ACCUMULATE' });
@@ -115,8 +116,9 @@ try {
     { modes: new Map([[vid.A, 'ACCUMULATE'], [vid.B, 'OVERWRITE'], [vid.C, 'KEEP']]) });
   assert.equal(await display('A'), 12); assert.equal(await display('B'), 9); assert.equal(await display('C'), 0);
   out.s7 = 'PASS A accumulate 11->12, B overwrite =9 (3+2+4), C keep 0 (3 pending)';
-  // 8. Mixed old/new orders: only the provable new one is added; the old one needs the Owner.
-  const r8 = await runImport([row('O9', '2026/10/12 10:00', 'G-A', 4), row('O10', '2026/10/17 14:00', 'G-A', 1)], { defaultMode: 'ACCUMULATE' });
+  // 8. Mixed normal + explicit Owner-held order: only the normal one is added.
+  const r8 = await runImport([row('O9', '2026/10/12 10:00', 'G-A', 4), row('O10', '2026/10/17 14:00', 'G-A', 1)], { defaultMode: 'ACCUMULATE',
+    overlap: new Map([[`WACA::O9::${core.wacaFeature(row('O9', '', 'G-A', 4))}`, 'PENDING']]) });
   assert.equal(await display('A'), 13); assert.equal(r8.plan.variants.get(vid.A).uncertainItems, 2, 'O1 and O9 uncertain');
   await runImport([row('O9', '2026/10/12 10:00', 'G-A', 4)], { defaultMode: 'ACCUMULATE', overlap: new Map([[`WACA::O9::${core.wacaFeature(row('O9', '', 'G-A', 4))}`, 'BASELINE_INCLUDED']]) });
   assert.equal(await display('A'), 13, 'BASELINE_INCLUDED adds nothing');

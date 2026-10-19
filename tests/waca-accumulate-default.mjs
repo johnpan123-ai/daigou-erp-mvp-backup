@@ -18,7 +18,7 @@ const book = rows => { const b = XLSX.utils.book_new(); XLSX.utils.book_append_s
 const base = [
   ['完成付款', 'W2509300001', '2026/09/30 10:00', 'GP-A', A, '倉田真白', '', 'G10', 1, 100],          // E: ERP1 history, unchanged
   ['完成付款', 'W2610190001', '2026/10/19 10:00', 'GP-A', A, '倉田真白', '', 'G10', 2, 200],          // A: new valid order +2
-  ['完成付款', 'W2510010001', '2026/10/01 12:00', 'GP-A', A, '桐ヶ谷透子', '', 'G11', 1, 100],        // I: pre-takeover, unproven -> pending
+  ['完成付款', 'W2510010001', '2026/10/01 12:00', 'GP-A', A, '桐ヶ谷透子', '', 'G11', 1, 100],        // I: old date alone is not a conflict -> normal +1
   ['完成付款', 'W2610170101', '2026/10/17 09:00', 'GP-A', A, '桐ヶ谷透子', '', 'G11', 1, 100],        // counted by ERP2, unchanged
   ['完成付款', 'W2610190002', '2026/10/19 11:00', 'GP-B', B, 'Cecilia Immergreen', '', 'G20', 3, 300], // G/H: new order for KEEP check
   ['取消', 'W2509250401', '2026/09/25 15:00', 'GP-B', B, 'Gigi Murin', '', 'G21', 1, 100],             // F: ERP1 history cancelled
@@ -41,7 +41,7 @@ try {
     await page.getByLabel('選擇 WACA Excel').setInputFiles({ name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: book(rows) });
     await page.getByRole('heading', { name: `匯入預覽：${name}` }).waitFor();
     await page.getByTestId('waca-review-summary').waitFor();
-    await page.locator('.waca-review-filter').getByRole('button', { name: /^全部商品/u }).click();
+    await page.getByLabel('只顯示有數量變化的規格', { exact: true }).uncheck();
     for (const s of await page.locator('.waca-group:not([open]) > summary').all()) await s.click();
   };
   const row = async sku => { const c = (await page.getByTestId(`waca-counted-row-${sku}`).locator('td').allInnerTexts()).map(norm); return [c[1], c[2], c[3], c[5]]; };
@@ -65,8 +65,8 @@ try {
   result.defaults = await Promise.all(['G10', 'G11', 'G12', 'G20', 'G21', 'G30'].map(sku => page.getByLabel(`更新方式 ${sku}`).count().then(n => n ? mode(sku) : 'NOT_IMPORTED')));
   assert.deepEqual(result.defaults, ['ACCUMULATE', 'ACCUMULATE', 'NOT_IMPORTED', 'ACCUMULATE', 'ACCUMULATE', 'NOT_IMPORTED'], 'every imported spec starts as 累加');
   result.A_E = await row('G10'); assert.deepEqual(result.A_E, ['10', '12', '+2', ''], 'A: 10 -> 12; E: the ERP1-history order is not added again');
-  result.I = await row('G11'); assert.deepEqual(result.I, ['4', '4', '±0', '接管前訂單 1 筆待確認待核對 1 件'], 'I: unproven pre-takeover order stays pending, not added');
-  result.F = await row('G21'); assert.deepEqual(result.F, ['1', '1', '±0', 'ERP1 歷史訂單異動 1 筆'], 'F: ERP1-history cancellation is flagged, never deducted');
+  result.I = await row('G11'); assert.deepEqual(result.I, ['4', '5', '+1', ''], 'I: valid old-dated order counts normally');
+  result.F = await row('G21'); assert.deepEqual(result.F, ['1', '1', '±0', '歷史認列／取消待核對 1 筆'], 'F: ERP1-history cancellation is flagged, never deducted');
   result.G_default = await row('G20'); assert.deepEqual(result.G_default, ['2', '5', '+3', '']);
   await page.getByLabel('更新方式 G20').selectOption('KEEP');
   result.G = await row('G20'); assert.deepEqual(result.G, ['2', '2', '±0', '待核對 3 件本次暫不更新'], 'G: 維持 keeps the quantity although the source added 3');
@@ -79,25 +79,25 @@ try {
   result.choicesKept = [await mode('G10'), await mode('G20')]; assert.deepEqual(result.choicesKept, ['OVERWRITE', 'KEEP']);
   await page.getByLabel('更新方式 G10').selectOption('ACCUMULATE'); // G20 stays 維持 for this import
   const final1 = norm(await page.getByTestId('waca-final-confirm').innerText());
-  assert.match(final1, /本次增加 \+2 件（1 個規格） 本次減少 0 件（0 個規格） 仍待核對 4 件/u);
-  assert.match(final1, /維持 1 個規格：本次暫不更新，訂單會保存；下次匯入仍會重新判斷，不是永久排除。/u); assert.match(final1, /ERP1 歷史訂單異動 1 個規格：不會自動扣除/u);
+  assert.match(final1, /本次增加 \+3 件（2 個規格） 本次減少 0 件（0 個規格） 仍待核對 3 件/u);
+  assert.match(final1, /維持 1 個規格：本次暫不更新，訂單會保存；下次匯入仍會重新判斷，不是永久排除。/u); assert.match(final1, /歷史認列／取消待核對 1 個規格：不會自動扣除/u);
   const c1 = await commit();
   assert.deepEqual(c1.p_plan.overwriteVariantIds, []);
   assert.deepEqual(c1.p_plan.expectedDisplay['variant-G10'], { before: 10, after: 12 });
   const items1 = Object.fromEntries(c1.p_snapshot.items.map(i => [i.orderKey.replace('WACA::', ''), [i.countedQuantity, i.countedReason]]));
   result.items1 = items1;
-  assert.deepEqual(items1.W2610190001, [2, 'NEW_AFTER_BASELINE']); assert.deepEqual(items1.W2510010001, [0, 'PENDING_REVIEW'], 'I: pending kept with its reason');
+  assert.deepEqual(items1.W2610190001, [2, 'NORMAL_IMPORT']); assert.deepEqual(items1.W2510010001, [1, 'NORMAL_IMPORT'], 'I: valid source recorded with its origin');
   assert.deepEqual(items1.W2509250401, [0, 'BASELINE_INCLUDED']);
   assert.deepEqual(items1.W2509300001, [0, 'BASELINE_INCLUDED'], 'E: ERP1-history mark kept');
   assert.deepEqual(items1.W2610190002, [0, 'KEPT'], 'G: 維持 saves the order without counting it');
   result.afterCommit1 = await page.evaluate(() => Object.fromEntries(window.wacaUiFixture.variants().map(v => [v.myacg_item_code, v.waca_auto_quantity + v.waca_manual_adjustment])));
-  assert.equal(result.afterCommit1.G10, 12); assert.equal(result.afterCommit1.G11, 4); assert.equal(result.afterCommit1.G21, 1); assert.equal(result.afterCommit1.G20, 2);
+  assert.equal(result.afterCommit1.G10, 12); assert.equal(result.afterCommit1.G11, 5); assert.equal(result.afterCommit1.G21, 1); assert.equal(result.afterCommit1.G20, 2);
 
   // ---- B: the same file again -> nothing is added twice ----
   await upload('waca-1-again.xlsx', base);
   result.B = await row('G10'); assert.deepEqual(result.B.slice(0, 3), ['12', '12', '±0'], 'B: re-import does not add the same order again');
   result.B_G = await row('G20'); assert.deepEqual(result.B_G.slice(0, 3), ['2', '5', '+3'], 'G: 維持 is not permanent - the next import (default 累加) re-judges the kept order');
-  result.B_I = await row('G11'); assert.deepEqual(result.B_I.slice(0, 3), ['4', '4', '±0'], 'I: still pending, still not added');
+  result.B_I = await row('G11'); assert.deepEqual(result.B_I.slice(0, 3), ['5', '5', '±0'], 'I: recognized once, no double count');
 
   // ---- C: the counted order is reduced by 1 (2 -> 1) ----
   const reduced = base.map(r => r[1] === 'W2610190001' ? [...r.slice(0, 8), 1, 100] : r);
@@ -105,7 +105,7 @@ try {
   result.C = await row('G10'); assert.deepEqual(result.C, ['12', '11', '−1', '取消回沖 −1'], 'C: traceable reduction rolls back exactly 1');
   await page.getByLabel('查看 G10 來源訂單').click();
   result.C_trace = norm(await page.locator('.waca-trace-table tr', { hasText: 'W2610190001' }).first().innerText());
-  assert.match(result.C_trace, /^W2610190001 2026\/10\/19 10:00 1 1 新訂單 已計入 來源數量／狀態變更已套用 原已認列 2 件，自動回沖 −1/u);
+  assert.match(result.C_trace, /^W2610190001 2026\/10\/19 10:00 1 1 已認列訂單 已計入 來源數量／狀態變更已套用 原已認列 2 件，自動回沖 −1/u);
   const c2 = await commit();
   assert.deepEqual(c2.p_plan.expectedDisplay['variant-G10'], { before: 12, after: 11 });
   const item2 = c2.p_snapshot.items.find(i => i.orderKey === 'WACA::W2610190001');

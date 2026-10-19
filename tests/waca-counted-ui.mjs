@@ -1,6 +1,6 @@
 // WACA transition import UI (073 counted contract) on the real WacaIntegration page with an isolated
 // synthetic Cloud transport (no network). ERP1-style history: G10 = 10, G2 = 3, ORDER_REBASELINE_REQUIRED,
-// Restore epoch 5 at 2026-10-16T02:20:45Z. Verifies default OVERWRITE is flagged and blocks confirmation,
+// Restore epoch 5 at 2026-10-16T02:20:45Z. Verifies normal ACCUMULATE across both dates; explicit OVERWRITE blocks until acknowledged,
 // per-variant / per-order choices change the projection, and the RPC receives exactly the reviewed plan.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -51,13 +51,13 @@ try {
   assert.equal(await page.locator('.waca-group[open]').count(), 1, 'UI v3: a needs-review group opens on a new preview');
   const cells = async sku => (await page.getByTestId(`waca-counted-row-${sku}`).locator('td').allInnerTexts()).map(t => t.replace(/\s+/gu, ' ').trim());
   // UI v3 row: [規格, 目前, 更新後, 差異, 更新方式, 需確認, 來源訂單]; source / counted detail lives in the expansion.
-  // Default 累加 (Owner decision 2026-10-18): the old-dated order is uncertain (not counted), the new one adds 2.
+  // Owner policy 2026-10-19: both valid orders count normally, regardless of Restore time.
   let g10 = await cells('G10'), g2 = await cells('G2');
   assert.equal(await page.getByLabel('更新方式 G10').inputValue(), 'ACCUMULATE'); assert.equal(await page.getByLabel('更新方式 G2').inputValue(), 'ACCUMULATE');
-  assert.deepEqual([g10[1], g10[2], g10[3]], ['10', '10', '±0']); assert.match(g10[5], /接管前訂單 1 筆待確認/u); assert.match(g10[5], /待核對 2 件/u);
+  assert.deepEqual([g10[1], g10[2], g10[3], g10[5]], ['10', '12', '+2', '']);
   assert.deepEqual([g2[1], g2[2], g2[3]], ['3', '5', '+2']);
   await page.getByLabel('查看 G2 來源訂單').click();
-  assert.match((await page.getByTestId('waca-calc-G2').innerText()).replace(/\s+/gu, ' '), /目前 3 來源訂單合計 2 件 本次實際計入 \+2 接管後新訂單 2 件 累加後 5（\+2）/u);
+  assert.match((await page.getByTestId('waca-calc-G2').innerText()).replace(/\s+/gu, ' '), /目前 3 來源訂單合計 2 件 本次實際計入 \+2 正常新認列 2 件 累加後 5（\+2）/u);
   await page.getByLabel('收合 G2 來源訂單').click();
   assert.equal(await page.getByTestId('waca-overwrite-ack').count(), 0, 'no risky overwrite by default');
   assert.equal(await page.getByRole('button', { name: '確認更新' }).isDisabled(), false, 'default accumulate needs no overwrite acknowledgement');
@@ -73,7 +73,7 @@ try {
   await page.getByLabel('更新方式 G10').selectOption('ACCUMULATE');
   await page.getByLabel('更新方式 G2').selectOption('ACCUMULATE');
   g10 = await cells('G10'); g2 = await cells('G2');
-  assert.equal(g10[2], '10'); assert.equal(g2[2], '5'); assert.equal(g2[3], '+2');
+  assert.equal(g10[2], '12'); assert.equal(g2[2], '5'); assert.equal(g2[3], '+2');
   assert.equal(await page.getByRole('button', { name: '確認更新' }).isDisabled(), false, 'no risky overwrite left');
   // Per-order decision: the old-dated order is confirmed as a new order -> 12.
   await page.getByLabel('查看 G10 來源訂單').click();
@@ -97,7 +97,7 @@ try {
   assert.equal(plan.contract, 'waca-counted-import-v1'); assert.equal(plan.restoreEpoch, 5); assert.deepEqual(plan.overwriteVariantIds, []);
   assert.deepEqual(plan.expectedDisplay, { 'variant-10': { before: 10, after: 12 }, 'variant-2': { before: 3, after: 5 } });
   const items = Object.fromEntries(calls.lastCounted.p_snapshot.items.map(i => [i.orderKey, [i.countedQuantity, i.countedReason]]));
-  assert.deepEqual(items, { 'WACA::ORDER-OLD': [2, 'OWNER_CONFIRMED_NEW'], 'WACA::ORDER-NEW': [2, 'NEW_AFTER_BASELINE'] });
+  assert.deepEqual(items, { 'WACA::ORDER-OLD': [2, 'OWNER_CONFIRMED_NEW'], 'WACA::ORDER-NEW': [2, 'NORMAL_IMPORT'] });
   await page.waitForFunction(() => /本次新計入 4 件/u.test(document.body.innerText) || document.querySelector('.waca-error'), null, { timeout: 15000 }).catch(() => {});
   // The fixture has no realtime sync provider: the existing post-commit targeted refresh is the only step it
   // cannot run. Everything before it (commit, receipt, reconciliation, preview equality) must have passed.
@@ -112,6 +112,6 @@ try {
   await page.getByTestId('waca-transition-baseline').waitFor();
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'PASS', defaultAccumulate: true, manualOverwriteFlagged: true, confirmBlockedUntilAck: true,
-    accumulate: 'G10 10 (1 uncertain pending), G2 3->5', ownerConfirmedOrder: 'G10 -> 12', keepPreview: 'G2 stays 3',
+    accumulate: 'G10 10->12, G2 3->5; no date-based review', ownerConfirmedOrder: 'G10 -> 12', keepPreview: 'G2 stays 3',
     rpcPlan: plan.expectedDisplay, countedItems: items, noOverflow: [1366, 390] }));
 } finally { await browser?.close(); vite.kill(); }

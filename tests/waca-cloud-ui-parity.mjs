@@ -102,15 +102,16 @@ try {
   assert.equal(await page.locator('.waca-group').count(), 1, await page.locator('.waca-page').innerText());
   assert.equal(await page.locator('.waca-group').count(), 1);
   assert.equal(await page.locator('.waca-group summary strong').innerText(), '代理版 GSC 換裝玩偶 BanG Dream! Morfonica');
-  // UI v3 (Owner decision): a needs-review group opens on a new preview and shows ALL its specs (natural SKU order).
+  // Default spec filters retain pending imported specs, not unrelated zero-change siblings.
   assert.equal(await page.locator('.waca-group[open]').count(), 1);
-  assert.deepEqual(await page.locator('.waca-group tbody td small:first-of-type').allTextContents(), ['SKU G1', 'SKU G2', 'SKU G10']);
+  assert.deepEqual(await page.locator('.waca-group [data-testid^="waca-counted-row-"] .waca-sku').allTextContents(), ['SKU G2', 'SKU G10']);
   await page.getByLabel('查看 G2 來源訂單').click(); await page.getByLabel('查看 G10 來源訂單').click();
   assert.equal(await page.getByText('配對：規格編號精確配對', { exact: true }).count(), 2);
-  await page.locator('.waca-review-filter').getByRole('button', { name: /^無需處理/u }).click();
-  assert.equal(await page.locator('.waca-group').count(), 0, 'filter hides only on the Owner click');
-  await page.locator('.waca-review-filter').getByRole('button', { name: /^全部商品/u }).click();
+  await page.getByLabel('同時顯示需要核對的規格', { exact: true }).uncheck();
+  assert.equal(await page.locator('.waca-group').count(), 1, 'normal quantity changes stay visible even when review rows are hidden');
+  await page.getByLabel('只顯示有數量變化的規格', { exact: true }).uncheck();
   assert.equal(await page.locator('.waca-group').count(), 1);
+  assert.deepEqual(await page.locator('.waca-group [data-testid^="waca-counted-row-"] .waca-sku').allTextContents(), ['SKU G1', 'SKU G2', 'SKU G10'], 'all specs retain natural SKU order');
   assert.equal((await page.evaluate(() => window.wacaUiFixture.calls())).commits, 0, 'preview is readonly');
   for (const width of [1366, 1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -128,7 +129,7 @@ try {
   assert.match(readFileSync('src/App.tsx', 'utf8'), /path="\/waca"/);
   console.log(JSON.stringify({ result: 'PASS', modes: ['cloud', 'fallback'], providerTransport: 'real routing / isolated synthetic transport',
     tabSwitchReads: 0, tabSwitchWrites: 0, tabSwitchP95Ms: Math.round(timings.sort((a, b) => a - b)[Math.floor(timings.length * .95)]),
-    allSpecsInOpenGroup: true, skuNaturalSort: true, canonicalTitle: true, gpEvidenceFirstLoad: true,
+    defaultMeaningfulSpecsOnly: true, allSpecsOnFilterOff: true, skuNaturalSort: true, canonicalTitle: true, gpEvidenceFirstLoad: true,
     dimensions: [1366, 1280, 390], errorRecovery: true, permissionsPreserved: true }));
 } finally {
   await browser?.close();

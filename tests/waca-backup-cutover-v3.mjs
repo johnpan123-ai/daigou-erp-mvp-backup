@@ -55,6 +55,15 @@ try {
     const variantAfter = (await provider.getProductVariants({ raw: true })).find(row => row.id === id);
     await provider.commitNextWacaSnapshot(after, after.revision, true);
     const repeat = (await provider.getProductVariants({ raw: true })).find(row => row.id === id);
+    // Current counted payload evidence is business-durable within the same existing resource.
+    const countedSnapshot = await provider.getNextWacaSnapshot();
+    const reviewOrder = 'WACA::HISTORY-CANCEL-REVIEW';
+    await provider.commitNextWacaSnapshot({ ...countedSnapshot,
+      orders: [...countedSnapshot.orders, { key: reviewOrder, orderNumber: 'HISTORY-CANCEL-REVIEW', status: '取消', purchasedAt: '2026-09-27' }],
+      items: [...countedSnapshot.items.map(item => ({ ...item, countedQuantity: 11, countedReason: 'NORMAL_IMPORT', countedBy: 'owner' })),
+        { ...countedSnapshot.items[0], key: `${reviewOrder}::${feature}`, orderKey: reviewOrder, quantity: 1,
+          countedQuantity: 0, countedReason: 'PENDING_REVIEW', countedBy: 'owner', countedReview: 'UNPROVEN_CANCELLATION' }],
+    }, countedSnapshot.revision, false);
     const { saveDashboardCategoryImage } = await import('/src/lib/dashboardImageStore.ts');
     await saveDashboardCategoryImage('hololive', 'data:image/png;base64,AAAA');
     const { restoreDeadlineDurableBackup } = await import('/src/lib/closingDateSidecarBackup.ts');
@@ -150,6 +159,7 @@ try {
     const { readDeadlineDurableBackup } = await import('/src/lib/closingDateSidecarBackup.ts');
     const deadline = await readDeadlineDurableBackup('next');
     return { restored, orders: snapshot.orders.length, items: snapshot.items.length,
+      countedEvidence: snapshot.items.map(item => ({ reason: item.countedReason, counted: item.countedQuantity, review: item.countedReview ?? null })),
       mappings: snapshot.mappings.length, state: snapshot.cutoverState?.mode,
       auto: variant.waca_auto_quantity, manual: variant.waca_manual_adjustment,
       dashboardImage: await getDashboardCategoryImage('hololive'),
@@ -157,7 +167,9 @@ try {
       deadlineApplyBatches: deadline.deadlineApplyBatches.length,
       deadlineApplyItems: deadline.deadlineApplyItems.length };
   }, { backup: legacy.modern, id: targetId });
-  assert.deepEqual(modern, { restored: true, orders: 1, items: 1, mappings: 1,
+  assert.deepEqual(modern, { restored: true, orders: 2, items: 2, mappings: 1,
+    countedEvidence: [{ reason: 'NORMAL_IMPORT', counted: 11, review: null },
+      { reason: 'PENDING_REVIEW', counted: 0, review: 'UNPROVEN_CANCELLATION' }],
     state: 'ORDER_DRIVEN_ACTIVE', auto: 11, manual: 0, dashboardImage: 'data:image/png;base64,AAAA',
     deadlineMappings: 1, deadlineApplyBatches: 1, deadlineApplyItems: 1 });
   const stageId = '00000000-0000-4000-8000-000000000077';

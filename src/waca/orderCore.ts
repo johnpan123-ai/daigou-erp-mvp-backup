@@ -77,9 +77,11 @@ export interface WacaItem {
   countedQuantity?: number;
   countedReason?: WacaCountedReason;
   countedBy?: string;
+  /** Durable review evidence in the existing item payload; never inferred just from Restore time. */
+  countedReview?: 'BASELINE_SOURCE_CHANGED' | 'UNPROVEN_CANCELLATION' | 'OWNER_HOLD';
 }
 
-export type WacaCountedReason = 'LEGACY_COUNTED' | 'NEW_AFTER_BASELINE' | 'OWNER_CONFIRMED_NEW'
+export type WacaCountedReason = 'LEGACY_COUNTED' | 'NEW_AFTER_BASELINE' | 'NORMAL_IMPORT' | 'OWNER_CONFIRMED_NEW'
   | 'SOURCE_CHANGE_APPLIED' | 'OVERWRITE' | 'BASELINE_INCLUDED' | 'PENDING_REVIEW' | 'KEPT';
 
 export interface WacaRepository {
@@ -665,6 +667,7 @@ export function importWacaRows(
         item.countedQuantity = prior.countedQuantity;
         item.countedReason = prior.countedReason;
         item.countedBy = prior.countedBy;
+        item.countedReview = prior.countedReview;
       }
       if (!prior) inserted += 1;
       else if (JSON.stringify(prior) !== JSON.stringify(item) || oldOrder?.status !== status) updated += 1;

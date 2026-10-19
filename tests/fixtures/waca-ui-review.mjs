@@ -4,6 +4,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import '/src/index.css';
+import { incidentGroups, incidentEpoch } from './waca-preview-incident.mjs';
 
 const params = new URLSearchParams(location.search);
 const mode = params.get('mode') || 'cloud';
@@ -17,7 +18,8 @@ const [{ supabase }, { dataProvider }, { AuthContext }, { ViewportProvider }, { 
 ]);
 const clone = value => structuredClone(value);
 // Owner UI review fixture (test-only): three product groups with ERP1 history, isolated synthetic Cloud transport.
-const groupDefs = [
+const incident = params.get('incident') === '1';
+const groupDefs = incident ? incidentGroups : [
   { id: 'group-a', title: '【小河馬日本代購】 預購 27年02月 代理版 GSC 換裝玩偶 BanG Dream! Morfonica', display: '代理版 GSC 換裝玩偶 BanG Dream! Morfonica', code: 'GP-A',
     rows: [['G10', '倉田真白', 10], ['G11', '桐ヶ谷透子', 4], ['G12', '広町七深', 0]] },
   { id: 'group-b', title: '【小河馬日本代購】 預購 26年12月 Hololive English 活動2周年記念 旋轉壓克力立牌', display: 'Hololive English 活動2周年記念 旋轉壓克力立牌', code: 'GP-B',
@@ -26,10 +28,12 @@ const groupDefs = [
     rows: [['G30', '標準版', 6]] },
 ];
 const title = groupDefs[0].title;
+if (params.get('offFilePending') === '1') groupDefs.push({ id: 'off-file-group', title: '隔離：本次未匯入的歷史待核對商品',
+  display: '隔離：本次未匯入的歷史待核對商品', code: 'OFF-FILE', rows: [['OFF-FILE-SKU', '歷史待核對規格', 3]] });
 const populated = params.get('populated') === '1';
 // daily=1: everyday import after the takeover (ORDER_DRIVEN_ACTIVE, baseline = Restore 5). Display = auto + manual.
 const daily = params.get('daily') === '1';
-const hasHistory = params.get('history') === '1' || daily;
+const hasHistory = params.get('history') === '1' || daily || incident;
 const dailyQuantity = { G10: [1, 9], G11: [1, 3], G12: [0, 0], G20: [0, 2], G21: [1, 0], G30: [6, 0] };
 const groups = populated ? groupDefs.map(g => ({ id: g.id, title: g.title, normalized_title: g.display,
   purchase_date: '', priority: 'Low', closing_date: '', release_month: '', has_official_site: false,
@@ -37,13 +41,13 @@ const groups = populated ? groupDefs.map(g => ({ id: g.id, title: g.title, norma
 const variants = populated ? groupDefs.flatMap(g => g.rows.map(([code, name, history], index) => ({ id: `variant-${code}`, product_group_id: g.id,
   myacg_item_code: code, product_title: g.title, variant_name: name, raw_variant_name: name,
   note: '', sort_order: index, waca_auto_quantity: daily ? dailyQuantity[code][0] : 0,
-  waca_manual_adjustment: daily ? dailyQuantity[code][1] : params.get('history') === '1' ? history : 0, groupCode: g.code }))) : [];
+  waca_manual_adjustment: daily ? dailyQuantity[code][1] : params.get('history') === '1' || incident ? history : 0, groupCode: g.code }))) : [];
 const inventory = variants.map(row => ({ id: row.id, inventory_key: row.id,
   myacg_item_code: row.myacg_item_code, myacg_parent_code: row.groupCode, product_title: row.product_title,
   raw_variant_name: row.variant_name, listing_type: '', final_price: 100, myacg_sold_quantity: 0 }));
 for (const row of variants) delete row.groupCode;
 let snapshot = { revision: 0, orders: [], items: [], mappings: [], batches: [], masterLinks: [], cutoverAudit: [],
-  ...(params.get('history') === '1' ? { cutoverState: { mode: 'ORDER_REBASELINE_REQUIRED', updatedAt: '1970-01-01T00:00:00.000Z', sourceBackupFormatVersion: 1 } } : {}) };
+  ...(params.get('history') === '1' || incident ? { cutoverState: { mode: 'ORDER_REBASELINE_REQUIRED', updatedAt: '1970-01-01T00:00:00.000Z', sourceBackupFormatVersion: 1 } } : {}) };
 if (daily) {
   // Stored ledger before today's file: one ERP2-recognized order (later cancelled in the file -> automatic rollback)
   // and ERP1-history orders (one changes quantity, one is cancelled -> manual review, never auto-deducted).
@@ -66,6 +70,15 @@ if (daily) {
     cutoverState: { mode: 'ORDER_DRIVEN_ACTIVE', updatedAt: '2026-10-16T03:00:00Z', sourceBackupFormatVersion: null,
       transition: { contract: 'waca-counted-import-v1', restoreEpoch: 5, baselineAt: '2026-10-16T02:20:45.000000Z', establishedAt: '2026-10-16T03:00:00Z' } },
     cutoverAudit: variants.map(v => ({ productVariantId: v.id, sku: v.myacg_item_code, legacyWacaQuantity: 0, newOrderDerivedQuantity: v.waca_auto_quantity })) };
+}
+if (params.get('offFilePending') === '1') {
+  const row = { productCode: 'OFF-FILE', productTitle: '隔離：本次未匯入的歷史待核對商品',
+    spec1: '歷史待核對規格', spec2: '', specCode: 'OFF-FILE-SKU' };
+  const key = wacaOrderKey('AUDIT-STORED-PENDING');
+  snapshot.orders.push({ key, orderNumber: 'AUDIT-STORED-PENDING', purchasedAt: '2026-10-01 10:00:00', status: '完成付款' });
+  snapshot.items.push({ ...row, key: `${key}::${wacaFeature(row)}`, orderKey: key, feature: wacaFeature(row), quantity: 3,
+    subtotal: 300, productVariantId: 'variant-OFF-FILE-SKU', match: 'AUTO_MATCH', resolution: 'SPEC_CODE_EXACT',
+    countedQuantity: 0, countedReason: 'PENDING_REVIEW', countedBy: 'owner' });
 }
 if (params.get('pending') === '1') {
   const items = Array.from({length:84},(_,n)=>{
@@ -103,7 +116,7 @@ supabase.from = table => {
   const builder = {
     select() { return builder; }, is() { return builder; }, order() { return builder; },
     eq() { return builder; }, limit() { return builder; },
-    async single() { return table === 'erp_cloud_restore_epoch' ? { data: hasHistory
+    async single() { return table === 'erp_cloud_restore_epoch' ? { data: incident ? clone(incidentEpoch) : hasHistory
         ? { epoch: 5, restored_at: '2026-10-16T02:20:45+00:00' } : { epoch: 0, restored_at: null }, error: null }
       : { data: { role: params.get('role') || 'owner' }, error: null }; },
     async range() {
@@ -125,6 +138,7 @@ supabase.rpc = async (name, args) => {
       : { data: clone(snapshot), error: null };
   }
   if (name === 'erp_commit_waca_snapshot' || name === 'erp_commit_waca_counted_snapshot') {
+    if (params.get('previewOnly') === '1') { calls.unexpectedWrites++; throw new Error('ISOLATED_PREVIEW_ONLY_NO_COMMIT'); }
     if (name === 'erp_commit_waca_counted_snapshot') calls.countedCommits = (calls.countedCommits || 0) + 1;
     calls.commits++;
     if (args.p_expected_revision !== snapshot.revision) return { data: null, error: { message: 'stale revision' } };
@@ -180,8 +194,11 @@ const auth = { user, profile: { role: params.get('role') || 'owner', display_nam
   loading: false, profileLoading: false, authFlow: 'normal', signOut: async () => {},
   signInWithPassword: async () => {}, requestPasswordReset: async () => {}, setNewPassword: async () => {} };
 createRoot(document.getElementById('root')).render(
-  React.createElement(AuthContext.Provider, { value: auth },
+  React.createElement(React.Fragment, null,
+    incident && React.createElement('p', { role: 'status', style: { margin: 0, padding: '8px 20px', background: '#e0f2fe', color: '#075985' } },
+      '隔離重現：實際商品／數量，訂單編號已代碼化；不連線雲端、不會寫入正式資料。'),
+    React.createElement(AuthContext.Provider, { value: auth },
     React.createElement(ViewportProvider, null,
       React.createElement(BrowserRouter, null, React.createElement(AppLayout, null,
         React.createElement(Routes, null,
-          React.createElement(Route, { path: '*', element: React.createElement(WacaIntegration) })))))));
+          React.createElement(Route, { path: '*', element: React.createElement(WacaIntegration) }))))))));

@@ -56,20 +56,20 @@ try {
   await open('populated=1&daily=1');
   const order0 = await titles(); result.order = order0;
   result.summary = await summary();
-  result.filterButtons = (await page.locator('.waca-review-filter button').allInnerTexts()).map(norm);
-  result.filterPressed = norm(await page.locator('.waca-review-filter button[aria-pressed="true"]').innerText());
+  result.filterDefaults = [await page.getByLabel('只顯示有數量變化的規格', { exact: true }).isChecked(),
+    await page.getByLabel('同時顯示需要核對的規格', { exact: true }).isChecked()];
   result.openGroups = await page.locator('.waca-group[open] .waca-group-title').allInnerTexts();
   result.groupARows = await group('Morfonica').locator('[data-testid^="waca-counted-row-"]').count();
   result.default = { G10: await brief('G10'), G11: await brief('G11'), G12: await brief('G12'), G21: await brief('G21') };
   result.defaultStates = [await state('Morfonica'), await state('Hololive')];
-  assert.deepEqual(order0.length, 2, 'TODO filter shows the two needs-review groups');
-  assert.match(result.summary, /^2 需要確認（項） \+4 預計增加（件） −1 預計減少（件）$/u);
-  assert.deepEqual(result.filterButtons, ['待處理 2', '全部商品 3', '無需處理 1']); assert.equal(result.filterPressed, '待處理 2');
+  assert.deepEqual(order0.length, 2, 'default filters show changed and review groups');
+  assert.match(result.summary, /^3 需要確認（項） \+4 預計增加（件） −1 預計減少（件）$/u);
+  assert.deepEqual(result.filterDefaults, [true, true]);
   assert.equal(result.openGroups.length, 2, 'needs-review groups open on a new preview'); assert.equal(result.groupARows, 3, 'all specs of an open group');
   // Default 累加 (Owner decision 2026-10-18).
-  assert.deepEqual(result.default.G10, ['10', '10', '±0', 'ERP1 歷史訂單異動 1 筆']);
+  assert.deepEqual(result.default.G10, ['10', '10', '±0', '歷史認列／取消待核對 1 筆']);
   assert.deepEqual(result.default.G11, ['4', '3', '−1', '取消回沖 −1'], 'recognized cancelled order rolls back exactly once');
-  assert.deepEqual(result.default.G12, ['0', '1', '+1', '']); assert.deepEqual(result.default.G21, ['1', '2', '+1', 'ERP1 歷史訂單異動 1 筆']);
+  assert.deepEqual(result.default.G12, ['0', '1', '+1', '']); assert.deepEqual(result.default.G21, ['1', '2', '+1', '歷史認列／取消待核對 1 筆']);
   assert.deepEqual(result.defaultStates, ['目前：累加', '目前：累加']);
   assert.equal(await page.getByRole('button', { name: '確認更新' }).isDisabled(), false, 'default accumulate has no risky overwrite');
   await shot(page, '01-desktop-default.png');
@@ -107,20 +107,21 @@ try {
   result.detail = { calcG11: norm(await page.getByTestId('waca-calc-G11').innerText()), W2610170101: await traceRow('W2610170101'),
     W2509250401: await traceRow('W2509250401'), W2610180202: await traceRow('W2610180202'), G21: await brief('G21') };
   assert.match(result.detail.calcG11, /目前 4 來源訂單合計 0 件 本次實際計入 -1 已認列訂單取消回沖 −1 件 累加後 3（−1）/u);
-  assert.deepEqual(result.detail.W2610170101.slice(1, 6), ['2026/10/17 09:00', '1', '0', '新訂單', '已取消｜不計入數量 原已認列 1 件，自動回沖 −1']);
-  assert.deepEqual(result.detail.W2509250401.slice(2, 6), ['1', '0', 'ERP1 歷史／接管前', '已取消｜不計入數量 含在 ERP1 歷史，未自動扣除，需人工核對']);
-  assert.match(result.detail.W2610180202[5], /^已計入 接管後新訂單$/u); assert.deepEqual(result.detail.G21, ['1', '2', '+1', 'ERP1 歷史訂單異動 1 筆']);
+  assert.deepEqual(result.detail.W2610170101.slice(1, 6), ['2026/10/17 09:00', '1', '0', '取消／失敗來源', '已取消｜不計入數量 原已認列 1 件，自動回沖 −1']);
+  assert.deepEqual(result.detail.W2509250401.slice(2, 6), ['1', '0', '歷史認列待核對', '已取消｜不計入數量 含在 ERP1 歷史，未自動扣除，需人工核對']);
+  assert.match(result.detail.W2610180202[5], /^已計入 有效來源正常認列$/u); assert.deepEqual(result.detail.G21, ['1', '2', '+1', '歷史認列／取消待核對 1 筆']);
   assert.doesNotMatch(result.detail.W2610170101.join(' '), /已計入|覆蓋計入/u, 'no "counted" wording on a cancelled order');
   await group('Hololive').scrollIntoViewIfNeeded(); await page.waitForTimeout(150);
   await shot(page, '04-desktop-order-detail-cancelled.png', {});
 
   // Filters only change on the Owner's click; open state is kept across filters.
-  await page.locator('.waca-review-filter').getByRole('button', { name: /^無需處理/u }).click();
-  result.filterDone = await titles();
-  await page.locator('.waca-review-filter').getByRole('button', { name: /^全部商品/u }).click();
+  const summaryBeforeFilters = await summary();
+  await page.getByLabel('只顯示有數量變化的規格', { exact: true }).uncheck();
   result.filterAll = (await titles()).length; result.openInAll = await page.locator('.waca-group[open]').count();
-  await page.locator('.waca-review-filter').getByRole('button', { name: /^待處理/u }).click();
-  assert.deepEqual(result.filterDone, ['GSC 黏土人 Hakos Baelz']); assert.equal(result.filterAll, 3); assert.equal(result.openInAll, 2, 'others stay collapsed');
+  assert.equal(await page.getByTestId('waca-counted-row-G30').count(), 1, 'all includes the unchanged history row');
+  await page.getByLabel('只顯示有數量變化的規格', { exact: true }).check();
+  assert.equal(result.filterAll, 3); assert.equal(result.openInAll, 2, 'others stay collapsed');
+  assert.equal(await summary(), summaryBeforeFilters, 'presentation filters never change quantities or risk totals');
   assert.deepEqual(await titles(), order0);
 
   // Final confirmation (not submitted): G10 back to 覆蓋 -> decrease must be acknowledged.
@@ -129,7 +130,7 @@ try {
   result.final = norm(await final.innerText());
   result.finalDisabled = await page.getByRole('button', { name: '確認更新' }).isDisabled();
   assert.match(result.final, /本次增加 \+4 件（3 個規格） 本次減少 −9 件（2 個規格）/u);
-  assert.match(result.final, /ERP1 歷史訂單異動 1 個規格：不會自動扣除/u);
+  assert.match(result.final, /歷史認列／取消待核對 2 個規格：不會自動扣除/u);
   assert.match(result.final, /以下數量會減少（含 ERP1 歷史數量） 代理版 GSC 換裝玩偶 BanG Dream! Morfonica｜倉田真白 10 → 2（−8）覆蓋 .*桐ヶ谷透子 4 → 3（−1）累加/u);
   assert.match(result.final, /整批一次寫入，不會只寫一部分/u); assert.ok(result.finalDisabled, 'acknowledgement still required');
   await page.evaluate(() => scrollBy(0, 200));
@@ -149,7 +150,7 @@ try {
   await open('populated=1&history=1');
   result.firstSummary = await summary();
   result.firstG30Default = await brief('G30');
-  assert.deepEqual(result.firstG30Default, ['6', '6', '±0', '接管前訂單 1 筆待確認待核對 6 件'], 'first takeover, default 累加: unproven history stays pending');
+  assert.deepEqual(result.firstG30Default, ['6', '12', '+6', ''], 'empty ledger: normal historical-date import accumulates with batch risk disclosure');
   assert.equal(await page.getByTestId('waca-overwrite-ack').count(), 0);
   // Owner chooses 覆蓋 for every group -> first-takeover protection is unchanged.
   for (const g of await page.locator('.waca-group').all()) await g.getByRole('button', { name: '覆蓋', exact: true }).click();

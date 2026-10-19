@@ -5,7 +5,7 @@
  * Records WACA quantity. The server keeps waca_auto_quantity = ledger total and moves the
  * difference into waca_manual_adjustment so that, per variant,
  *   OVERWRITE : display = ledger total (all items fully counted, manual = 0)
- *   ACCUMULATE: display = before + newly counted quantity (confirmed-new orders only)
+ *   ACCUMULATE: display = before + net newly recognized quantity (valid imports, no conflict)
  *   KEEP      : display = before (new orders stay pending, nothing is lost)
  * The same order can never be counted twice because countedQuantity survives re-imports.
  * Pure module: no provider, no persistence.
@@ -22,7 +22,7 @@ export const WACA_COUNTED_CONTRACT = 'waca-counted-import-v1' as const;
 export interface WacaTransitionContext {
   /** Current Restore epoch (erp_cloud_restore_epoch.epoch); the plan is bound to it. */
   restoreEpoch: number;
-  /** Orders placed after this instant cannot be part of the ERP1 historical baseline. */
+  /** Historical audit timestamp only. NEVER a boundary for normal import recognition. */
   baselineAt: string;
   /** Ledger already ORDER_DRIVEN_ACTIVE (legacy items without countedQuantity count fully). */
   driven: boolean;
@@ -40,7 +40,7 @@ export interface WacaCountedItemPreview {
   countedAfter: number;
   reason: WacaCountedReason;
   state: WacaCountedItemState;
-  /** Ordered before the baseline, never counted before: Owner must decide in ACCUMULATE mode. */
+  /** Concrete unresolved evidence / explicit hold; not an order-date heuristic. */
   overlapUncertain: boolean;
   /** An order already contained in the ERP1 baseline changed quantity/status. */
   baselineChanged: boolean;
@@ -66,7 +66,7 @@ export interface WacaVariantCountedPreview {
   pendingQuantity: number;
   uncertainItems: number;
   baselineChangedItems: number;
-  /** In-file orders provably placed after the baseline and not yet counted (what ACCUMULATE adds automatically). */
+  /** In-file normal orders newly recognized by ACCUMULATE (independent of Restore date). */
   newCountableQuantity: number;
   touched: boolean;
   items: WacaCountedItemPreview[];
@@ -87,7 +87,7 @@ export interface WacaCountedImportResult {
   riskyOverwrites: string[];
 }
 
-const COUNTED_REASONS = new Set<WacaCountedReason>(['LEGACY_COUNTED', 'NEW_AFTER_BASELINE', 'OWNER_CONFIRMED_NEW',
+const COUNTED_REASONS = new Set<WacaCountedReason>(['LEGACY_COUNTED', 'NEW_AFTER_BASELINE', 'NORMAL_IMPORT', 'OWNER_CONFIRMED_NEW',
   'SOURCE_CHANGE_APPLIED', 'OVERWRITE']);
 
 const effective = (item: WacaItem | undefined, repo: WacaRepository): number => {
@@ -111,7 +111,7 @@ export const parseWacaOrderTime = (value: string): number => {
   return /[zZ]|[+-]\d{2}:?\d{2}$/u.test(raw) ? Date.parse(raw) : Number.NaN;
 };
 
-// Unknown or unparseable dates are never treated as new: they stay overlap-uncertain.
+// Audit display only: dates are not proof that an order was (or was not) counted.
 const placedAfter = (purchasedAt: string, baselineAt: string): boolean => {
   const placed = parseWacaOrderTime(purchasedAt);
   const baseline = Date.parse(baselineAt);
@@ -131,7 +131,7 @@ export function planWacaCountedImport(options: {
   actor: string;
 }): WacaCountedImportResult {
   const { variants, current, candidate, context, importedKeys, actor } = options;
-  const defaultMode = options.defaultMode ?? 'OVERWRITE';
+  const defaultMode = options.defaultMode ?? 'ACCUMULATE';
   const variantById = new Map(variants.map(row => [row.id, row]));
   const touchedVariants = new Set<string>();
   for (const key of importedKeys) {
@@ -156,45 +156,66 @@ export function planWacaCountedImport(options: {
     let reason: WacaCountedReason = priorReason ?? 'PENDING_REVIEW';
     let overlapUncertain = false;
     let baselineChanged = false;
+    let review = prior?.countedReview;
+    if (priorReason === 'BASELINE_INCLUDED' && q !== priorQ) review = 'BASELINE_SOURCE_CHANGED';
+    const recognized = Boolean(prior) && priorReason !== undefined && COUNTED_REASONS.has(priorReason);
+    // Positive counted evidence with no recognized provenance is contradictory, not a new order.
+    // Likewise losing an already counted SKU must not silently turn into a cancellation.
+    if ((cBefore > 0 && !recognized) || (cBefore > 0 && !item.productVariantId)) {
+      throw new Error(`WACA_COUNTED_HISTORY_CONFLICT:${item.key}`);
+    }
     if (item.productVariantId) {
       const mode = modeFor(item.productVariantId);
-      const recognized = Boolean(prior) && priorReason !== undefined && COUNTED_REASONS.has(priorReason);
       if (!touchedVariants.has(item.productVariantId)) {
         // Variants absent from this file are never re-decided: counted orders follow their source,
         // pending / kept / baseline orders keep their recorded state until a later import or decision.
         const choice = options.overlapChoices?.get(item.key);
-        if (choice === 'COUNT_AS_NEW') { c = q; reason = 'OWNER_CONFIRMED_NEW'; }
-        else if (choice === 'BASELINE_INCLUDED') { c = 0; reason = 'BASELINE_INCLUDED'; }
+        if (choice === 'COUNT_AS_NEW') { c = q; reason = 'OWNER_CONFIRMED_NEW'; review = undefined; }
+        else if (choice === 'BASELINE_INCLUDED') { c = 0; reason = 'BASELINE_INCLUDED'; review = undefined; }
         else if (recognized) { c = q; reason = q === cBefore ? priorReason! : 'SOURCE_CHANGE_APPLIED'; }
-        else { c = cBefore; reason = priorReason ?? 'PENDING_REVIEW'; overlapUncertain = q > c && !afterBaseline && reason !== 'BASELINE_INCLUDED'; }
+        else { c = cBefore; reason = priorReason ?? 'PENDING_REVIEW'; overlapUncertain = q > c && reason !== 'BASELINE_INCLUDED' && reason !== 'KEPT'; }
       } else if (mode === 'OVERWRITE') {
-        c = q; reason = 'OVERWRITE';
+        c = q; reason = 'OVERWRITE'; review = undefined;
       } else if (mode === 'KEEP') {
-        c = cBefore; reason = recognized && c === q ? priorReason! : priorReason === 'BASELINE_INCLUDED' ? 'BASELINE_INCLUDED' : 'KEPT';
+        // KEEP defers a source change, but must not erase the origin of a previously counted item.
+        c = cBefore; reason = recognized || review ? priorReason ?? 'PENDING_REVIEW'
+          : priorReason === 'BASELINE_INCLUDED' ? 'BASELINE_INCLUDED' : 'KEPT';
       } else if (recognized) {
         // Already counted orders follow their source (quantity change / cancellation), exactly once.
         c = q; reason = q === cBefore ? priorReason! : 'SOURCE_CHANGE_APPLIED';
       } else {
         const choice = options.overlapChoices?.get(item.key);
         const inFile = importedKeys.has(item.key);
-        if (choice === 'COUNT_AS_NEW') { c = q; reason = 'OWNER_CONFIRMED_NEW'; }
-        else if (choice === 'BASELINE_INCLUDED') { c = 0; reason = 'BASELINE_INCLUDED'; }
-        else if (priorReason === 'BASELINE_INCLUDED') { c = 0; reason = 'BASELINE_INCLUDED'; baselineChanged = q !== priorQ; }
-        else if (!inFile || choice === 'PENDING') {
+        if (choice === 'COUNT_AS_NEW') { c = q; reason = 'OWNER_CONFIRMED_NEW'; review = undefined; }
+        else if (choice === 'BASELINE_INCLUDED') { c = 0; reason = 'BASELINE_INCLUDED'; review = undefined; }
+        else if (priorReason === 'BASELINE_INCLUDED') {
+          c = 0; reason = 'BASELINE_INCLUDED';
+          if (q !== priorQ) review = 'BASELINE_SOURCE_CHANGED';
+        } else if (!inFile || choice === 'PENDING' || review) {
           // Pending / kept orders absent from this file keep their recorded state.
-          c = cBefore; reason = priorReason ?? 'PENDING_REVIEW'; overlapUncertain = q > c && !afterBaseline;
-        } else if (afterBaseline) { c = q; reason = 'NEW_AFTER_BASELINE'; }
-        else { c = cBefore; reason = 'PENDING_REVIEW'; overlapUncertain = q > 0; }
+          c = cBefore; reason = priorReason ?? 'PENDING_REVIEW'; overlapUncertain = q > c && reason !== 'KEPT';
+          if (choice === 'PENDING') review = 'OWNER_HOLD';
+        } else if (q === 0 && ((prior && priorQ > 0)
+          || Number(variantById.get(item.productVariantId)?.waca_manual_adjustment ?? 0) > 0)) {
+          // A cancellation with historical quantity but no receipt is not evidence for a deduction.
+          c = cBefore; reason = 'PENDING_REVIEW'; review = 'UNPROVEN_CANCELLATION';
+        } else {
+          // Owner policy 2026-10-19: valid, uniquely mapped in-file orders count normally.
+          // Empty ledger and Restore/order timestamps prove neither inclusion nor exclusion.
+          c = q; reason = 'NORMAL_IMPORT';
+        }
       }
+      baselineChanged = review === 'BASELINE_SOURCE_CHANGED' || review === 'UNPROVEN_CANCELLATION';
     }
     const next: WacaItem = { ...item, countedQuantity: c, countedReason: reason,
+      countedReview: review,
       countedBy: c !== cBefore || reason !== priorReason ? actor : item.countedBy ?? prior?.countedBy ?? actor };
     items.set(item.key, next);
     previews.push({
       key: item.key, orderNumber: order?.orderNumber ?? item.orderKey.replace(/^WACA::/u, ''),
       purchasedAt: order?.purchasedAt ?? '', variantId: item.productVariantId, effectiveQuantity: q,
       countedBefore: cBefore, countedAfter: c, reason,
-      state: !item.productVariantId ? 'UNMATCHED' : reason === 'BASELINE_INCLUDED' ? 'BASELINE' : c === q ? 'COUNTED' : 'PENDING',
+      state: !item.productVariantId ? 'UNMATCHED' : reason === 'BASELINE_INCLUDED' ? 'BASELINE' : review || c !== q ? 'PENDING' : 'COUNTED',
       overlapUncertain, baselineChanged, isNew: !prior, afterBaseline, inFile: importedKeys.has(item.key),
     });
   }
@@ -239,7 +260,7 @@ export function planWacaCountedImport(options: {
         - a.items.filter(row => row.state === 'BASELINE').reduce((sum, row) => sum + row.effectiveQuantity, 0),
       uncertainItems: a.items.filter(row => row.overlapUncertain && row.state === 'PENDING').length,
       baselineChangedItems: a.items.filter(row => row.baselineChanged).length,
-      newCountableQuantity: a.items.filter(row => row.inFile && row.afterBaseline && row.state !== 'BASELINE')
+      newCountableQuantity: a.items.filter(row => row.inFile && row.reason === 'NORMAL_IMPORT' && row.state === 'COUNTED')
         .reduce((sum, row) => sum + Math.max(0, row.effectiveQuantity - row.countedBefore), 0),
       touched: touchedVariants.has(id), items: a.items,
     };
@@ -275,8 +296,7 @@ export function wacaTransitionContext(
   const established = cutoverState?.transition;
   return {
     restoreEpoch: epoch.epoch,
-    // Before the first counted import the baseline is the Restore that produced the current data
-    // (conservative: everything ordered up to the Restore may already be in the ERP1 quantity).
+    // Preserve historical audit metadata. Recognition never infers inclusion from this timestamp.
     baselineAt: established?.baselineAt ?? epoch.restoredAt ?? now,
     driven,
   };
