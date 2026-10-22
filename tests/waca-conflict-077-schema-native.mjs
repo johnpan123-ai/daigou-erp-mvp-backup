@@ -28,7 +28,10 @@ try{
   assert.equal(d1,reviewedWacaConflictDefinition(sig,d0),sig+' only ten exact SQLSTATE literals');
  }
  assert.equal(fingerprintStructuralSnapshot(after),fingerprintStructuralSnapshot(canonical));
- const registry=await buildMigrationEffectRegistry();
+ // This test proves the historical v31 -> v32 (077) boundary. The full v33
+ // source registry remains strict and is tested by r5-release-reconciliation.
+ const fullRegistry=await buildMigrationEffectRegistry();
+ const registry=Object.fromEntries(Object.entries(fullRegistry).filter(([,effect])=>effect.canonicalOrder<=fullRegistry['077'].canonicalOrder));
  const pre=planSchemaDelta(before,registry,{expectedSnapshot:after});
  assert.equal(pre.readyForApply,true,JSON.stringify(pre.blockers));assert.deepEqual(pre.applyPlan.map(p=>p.migrationId),['077']);
  const post=planSchemaDelta(after,registry,{expectedSnapshot:after});
