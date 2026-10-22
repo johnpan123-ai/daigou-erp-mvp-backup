@@ -2131,6 +2131,7 @@ export default function PurchaseManagement() {
                   {...basicInfoProps('product_url', { ...basicInfoField, width: '100%', maxWidth: '520px' })} />
               </label>
             </div>
+            {group && basicInfo.previewOf(group.id, 'closing_date') && <div data-testid="purchase-group-closing-date-preview" style={{ color: '#475569', fontSize: '12px', marginTop: '6px' }}>官方結單日{basicInfo.previewOf(group.id, 'closing_date')}</div>}
             {basicInfoErrors.length > 0 && <div data-testid="purchase-group-closing-date-error" role="alert" style={{ color: '#dc2626', fontSize: '12px', marginTop: '6px' }}>{basicInfoErrors.join('；')}</div>}
           </div>
         )}

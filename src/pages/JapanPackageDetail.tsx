@@ -24,6 +24,7 @@ import {
 } from '../lib/japanPackageReceivingDisplay';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import {
+  JAPAN_PACKAGE_RECEIVING_NO_CHANGE,
   isJapanPackageSubmitBoundaryError,
   japanPackageIntentCoordinator,
   type JapanPackageTransactionSuccess,
@@ -363,7 +364,15 @@ export default function JapanPackageDetail() {
   // Bulk operation updates restricted to checked, checked_at, and updated_at fields
   const handleBulkToggleCheck = async (itemIds: string[], checkedVal: boolean) => {
     if (!id || !pkg || itemIds.length === 0) return;
-    const itemIdsSet = new Set(itemIds);
+    // Submit only the items whose checked state actually changes; already checked (or already
+    // unchecked) items are never re-sent, so their original checked_at is kept and nothing is rewritten.
+    const currentById = new Map(packageItems.map(item => [item.id, item]));
+    const changingIds = itemIds.filter(itemId => {
+      const current = currentById.get(itemId);
+      return !current || Boolean(current.checked) !== checkedVal;
+    });
+    if (changingIds.length === 0) return;
+    const itemIdsSet = new Set(changingIds);
     const now = new Date().toISOString();
     const scope = `japan-package-receiving:${id}:${[...itemIdsSet].sort().join(',')}`;
     if (transactionInFlightRef.current.has(scope)) return;
@@ -386,7 +395,12 @@ export default function JapanPackageDetail() {
       japanPackageIntentCoordinator.complete(scope, command.idempotencyKey);
       if (result.syncPending) alert('日本包裹操作已提交，畫面同步尚未完成，請勿重複操作。');
     } catch (error) {
-      if (error instanceof StaleDataError) alert(error.message);
+      if (error instanceof Error && error.message === JAPAN_PACKAGE_RECEIVING_NO_CHANGE) {
+        // The saved state already matches (e.g. updated on another device): nothing was written.
+        japanPackageIntentCoordinator.complete(scope, command.idempotencyKey);
+        await loadData(id);
+      }
+      else if (error instanceof StaleDataError) alert(error.message);
       else if (isJapanPackageSubmitBoundaryError(error)) {
         if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(scope);
         alert(error.message);
@@ -399,22 +413,28 @@ export default function JapanPackageDetail() {
   };
 
   // Group bulk operations with confirm check
+  const bulkConfirmSuffix = (unchangedCount: number, actionText: string) => (
+    unchangedCount > 0 ? `（其餘 ${unchangedCount} 項已是【${actionText}】，不會變更）` : ''
+  );
+
   const handleGroupBulkCheck = async (groupTitle: string, items: JapanPackageItem[], checkedVal: boolean) => {
-    if (items.length === 0) return;
+    const changing = items.filter(item => Boolean(item.checked) !== checkedVal);
+    if (changing.length === 0) return; // already in the requested state: no confirmation, no write
     const actionText = checkedVal ? '已點收' : '未點收';
-    const confirmMsg = `確定要將此群組 "${groupTitle}" ${items.length} 項商品全部標記為【${actionText}】嗎？`;
+    const confirmMsg = `確定要將此群組 "${groupTitle}" ${changing.length} 項商品標記為【${actionText}】嗎？${bulkConfirmSuffix(items.length - changing.length, actionText)}`;
     if (window.confirm(confirmMsg)) {
-      await handleBulkToggleCheck(items.map(x => x.id), checkedVal);
+      await handleBulkToggleCheck(changing.map(x => x.id), checkedVal);
     }
   };
 
   // Whole package/page bulk operations with confirm check
   const handlePageBulkCheck = async (checkedVal: boolean) => {
-    if (packageItems.length === 0) return;
+    const changing = packageItems.filter(item => Boolean(item.checked) !== checkedVal);
+    if (changing.length === 0) return; // already in the requested state: no confirmation, no write
     const actionText = checkedVal ? '已點收' : '未點收';
-    const confirmMsg = `確定要將此包裹內所有 ${packageItems.length} 項商品全部標記為【${actionText}】嗎？`;
+    const confirmMsg = `確定要將此包裹內 ${changing.length} 項商品標記為【${actionText}】嗎？${bulkConfirmSuffix(packageItems.length - changing.length, actionText)}`;
     if (window.confirm(confirmMsg)) {
-      await handleBulkToggleCheck(packageItems.map(x => x.id), checkedVal);
+      await handleBulkToggleCheck(changing.map(x => x.id), checkedVal);
     }
   };
 

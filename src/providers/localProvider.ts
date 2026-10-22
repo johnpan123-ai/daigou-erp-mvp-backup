@@ -3,6 +3,7 @@ import type { PurchaseBatchTransactionCommand } from './cloud/purchaseBatchTrans
 import type { PrivateOrderTransactionCommand } from './cloud/privateOrderTransaction';
 import type { RelatedTransactionCommand } from './cloud/relatedTransaction';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from './cloud/japanPackageTransaction';
+import { JAPAN_PACKAGE_RECEIVING_NO_CHANGE, changedReceivingUpdates } from '../lib/japanPackageReceivingUpdates';
 import type { OutboundShipmentDeleteCommand, OutboundShipmentDeleteSuccess } from './cloud/outboundShipmentTransaction';
 import type {
   CloudRestoreAttemptCommand, CloudRestoreAttemptOutcome, CloudRestoreCommand,
@@ -166,7 +167,11 @@ export class LocalProvider implements IDataProvider {
         ? { ...pkg, status: 'registered', updated_at: new Date().toISOString() }
         : pkg);
     } else {
-      const updates = new Map(command.updates.map(update => [update.itemId, update]));
+      const packageRows = items.filter(item => item.japan_package_id === command.packageId);
+      const effectiveUpdates = changedReceivingUpdates(packageRows, command.updates);
+      if (effectiveUpdates.length === 0) throw new Error(JAPAN_PACKAGE_RECEIVING_NO_CHANGE);
+      const updates = new Map(effectiveUpdates.map(update => [update.itemId, update]));
+      if ([...updates.keys()].some(id => !packageRows.some(item => item.id === id))) throw new Error('JAPAN_PACKAGE_RECEIVING_ITEM_BASE_REQUIRED');
       const allocations = await this.getOutboundShipmentItems();
       for (const item of items) {
         if (updates.get(item.id)?.checked !== false) continue;

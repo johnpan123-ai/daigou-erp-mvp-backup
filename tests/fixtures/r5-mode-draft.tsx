@@ -25,7 +25,7 @@ markCloudReadFresh(1);
 Object.assign(window, {r5:{writes,switchMode:setProviderMode,epoch:()=>raiseCloudCacheEpochBarrier(),
   hold:()=>{hold=true;},release:()=>{hold=false;resume?.();},
   rawSave:()=>dataProvider.saveProductGroups([group])}});
-function Form() {
+export function Form() {
   const draft=useProductGroupBasicInfoDrafts();
   const save=async (_id:string,_field:string,value:string) => {
     await dataProvider.saveProductGroups([{...group,release_month:value}]);return true;

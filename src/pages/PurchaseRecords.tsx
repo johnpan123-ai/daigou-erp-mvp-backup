@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue, useCallback } from 'react';
 import { useProductGroupBasicInfoDrafts, type BasicInfoField } from '../hooks/useProductGroupBasicInfoDrafts';
-import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, cloudCacheDb, localDb } from '../lib/db';
+import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, normalizePurchaseDateInput, cloudCacheDb, localDb } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { CloudRefreshButton } from '../components/CloudRefreshButton';
@@ -1599,9 +1599,6 @@ export default function PurchaseRecords() {
       return;
     }
 
-    const confirmMsg = `您即將批次更新 ${selectedGroupIds.size} 筆商品群組的日期資訊，是否確認？`;
-    if (!window.confirm(confirmMsg)) return;
-
     let finalBatchClosingDate = '';
     if (batchClosingDate.trim()) {
       const normalized = normalizeDateInput(batchClosingDate);
@@ -1611,6 +1608,9 @@ export default function PurchaseRecords() {
       }
       finalBatchClosingDate = normalized.replace(/-/g, '/');
     }
+
+    const confirmMsg = `您即將批次更新 ${selectedGroupIds.size} 筆商品群組的日期資訊，是否確認？${finalBatchClosingDate ? `\n官方結單日將儲存為 ${finalBatchClosingDate}` : ''}`;
+    if (!window.confirm(confirmMsg)) return;
 
     const updatedGroups = groups.map(g => {
       if (selectedGroupIds.has(g.id)) {
@@ -2180,6 +2180,16 @@ export default function PurchaseRecords() {
 
     const listToUpdate = sourceList.slice(startRowIndex, startRowIndex + lines.length);
     if (listToUpdate.length === 0) return;
+    const closingDates = field === 'closing_date'
+      ? listToUpdate.map((_, offset) => normalizeDateInput(lines[offset])) : [];
+    if (closingDates.some(date => date === null)) {
+      alert('官方結單日不存在或格式未完成，整批貼上尚未儲存。');
+      return;
+    }
+    if (field === 'closing_date') {
+      const preview = closingDates.map(date => date!.replace(/-/g, '/'));
+      if (!window.confirm(`官方結單日將儲存為：\n${preview.join('\n')}\n是否確認貼上？`)) return;
+    }
     if (field !== 'purchase_date') basicInfo.clearGroupFields(listToUpdate.map(item => item.id), [field]);
 
     const groupMap = new Map(groups.map(g => [g.id, g]));
@@ -2188,7 +2198,7 @@ export default function PurchaseRecords() {
       if (dbGroup) {
         let val = lines[offset];
         if (field === 'closing_date' || field === 'purchase_date') {
-          const normalized = normalizeDateInput(val);
+          const normalized = field === 'closing_date' ? closingDates[offset] : normalizePurchaseDateInput(val);
           if (normalized) {
             val = normalized.replace(/-/g, '/');
           } else {
@@ -4094,6 +4104,11 @@ export default function PurchaseRecords() {
                                   {basicInfo.errorOf(g.id, 'closing_date')}
                                 </span>
                               )}
+                              {basicInfo.previewOf(g.id, 'closing_date') && (
+                                <span data-testid="closing-date-save-preview" style={{ color: '#475569', fontSize: '11px', order: 3, flexBasis: '100%', textAlign: 'left', whiteSpace: 'normal' }}>
+                                  {basicInfo.previewOf(g.id, 'closing_date')}
+                                </span>
+                              )}
                               <Calendar
                                 size={14}
                                 style={{ flexShrink: 0, color: '#64748b', cursor: 'pointer' }}
@@ -4528,6 +4543,11 @@ export default function PurchaseRecords() {
                               {basicInfo.errorOf(g.id, 'closing_date') && (
                                 <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', order: 3, flexBasis: '100%', textAlign: 'left', whiteSpace: 'normal' }}>
                                   {basicInfo.errorOf(g.id, 'closing_date')}
+                                </span>
+                              )}
+                              {basicInfo.previewOf(g.id, 'closing_date') && (
+                                <span data-testid="closing-date-save-preview" style={{ color: '#475569', fontSize: '11px', order: 3, flexBasis: '100%', textAlign: 'left', whiteSpace: 'normal' }}>
+                                  {basicInfo.previewOf(g.id, 'closing_date')}
                                 </span>
                               )}
                               <Calendar

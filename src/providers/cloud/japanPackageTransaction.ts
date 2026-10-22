@@ -1,6 +1,8 @@
 import type { JapanPackage, JapanPackageItem } from '../../lib/db';
 import { buildCloudCollectionMutationPlan, type CloudFieldMutationOperation } from './cloudFieldCas';
 import { toCloudFieldRow } from './cloudEntityPayload';
+import { JAPAN_PACKAGE_RECEIVING_NO_CHANGE, changedReceivingUpdates } from '../../lib/japanPackageReceivingUpdates';
+export { JAPAN_PACKAGE_RECEIVING_NO_CHANGE, changedReceivingUpdates };
 
 export const JAPAN_PACKAGE_TRANSACTION_RPC = 'erp_apply_japan_package_transaction';
 const PENDING_INTENT_PREFIX = 'erp_japan_package_pending_intent_v1:';
@@ -149,7 +151,11 @@ export const buildJapanPackageTransactionRequest = (
       expectedPackageVersion,
     };
   }
-  const updates = new Map(command.updates.map(update => [update.itemId, update]));
+  // Only items whose checked state really changes are submitted: re-sending an already checked item would
+  // only rewrite checked_at (rejected by the RPC as F3_RECEIVING_FIELDS_INVALID) and lose its original time.
+  const effectiveUpdates = changedReceivingUpdates(currentItems, command.updates);
+  if (effectiveUpdates.length === 0) throw new Error(JAPAN_PACKAGE_RECEIVING_NO_CHANGE);
+  const updates = new Map(effectiveUpdates.map(update => [update.itemId, update]));
   const base = currentItems.filter(item => updates.has(item.id));
   if (base.length !== updates.size) throw new Error('JAPAN_PACKAGE_RECEIVING_ITEM_BASE_REQUIRED');
   const next = base.map(item => {

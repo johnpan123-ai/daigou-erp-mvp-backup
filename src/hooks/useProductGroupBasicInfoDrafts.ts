@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { normalizeDateInput } from '../lib/db';
+import { parseDateInput } from '../lib/closingDateInput';
 import { cloudReadPassesEpochBarrier, takeCloudReadToken } from '../providers/cloud/cloudCacheWriteFence';
 import { assertProviderBinding, bindProviderMode, ProviderModeChangedError, type ProviderBinding } from '../providers/providerMode';
 
@@ -19,23 +19,37 @@ export type BasicInfoField = 'closing_date' | 'release_month' | 'product_url';
 export type BasicInfoCommitSource = 'blur' | 'enter';
 
 interface BasicInfoGroupLike { id: string; closing_date?: string | null; release_month?: string | null; product_url?: string | null }
-interface Draft { value: string; base: string; readToken: number; conflict: boolean; provider: ProviderBinding }
+interface Draft { value: string; base: string; readToken: number; conflict: boolean; provider: ProviderBinding; dateAt: Date; dateConfirmation?: boolean }
 
 export const basicInfoDraftKey = (groupId: string, field: BasicInfoField) => `${groupId}|${field}`;
 
 /** Normalized value to store, or null when the input is not complete yet (kept as a draft, never saved). */
-export const normalizeBasicInfoInput = (field: BasicInfoField, raw: string): string | null => {
+export const normalizeBasicInfoInput = (field: BasicInfoField, raw: string, now?: Date): string | null => {
   const trimmed = raw.trim();
   if (field !== 'closing_date') return trimmed;
   if (trimmed === '') return '';
-  const normalized = normalizeDateInput(trimmed);
-  return normalized === null ? null : normalized.replace(/-/g, '/');
+  const parsed = parseDateInput(trimmed, now);
+  return parsed.kind === 'valid' ? parsed.value.replace(/-/g, '/') : null;
+};
+
+export const basicInfoInputProblem = (field: BasicInfoField, raw: string, now?: Date): 'nonexistent' | 'incomplete' | null => {
+  if (field !== 'closing_date' || raw.trim() === '') return null;
+  const parsed = parseDateInput(raw, now);
+  return parsed.kind === 'valid' ? null : parsed.kind === 'nonexistent' ? 'nonexistent' : 'incomplete';
+};
+export const basicInfoSavePreview = (field: BasicInfoField, raw: string, now?: Date): string | null => {
+  if (field !== 'closing_date') return null;
+  const normalized = normalizeBasicInfoInput(field, raw, now);
+  return normalized && normalized !== raw.trim() ? normalized : null;
 };
 
 const authoritative = (group: BasicInfoGroupLike, field: BasicInfoField) => (group[field] ?? '').trim();
 
 export const BASIC_INFO_MESSAGES = {
   incomplete: '日期格式未完成，尚未儲存（Esc 取消）',
+  nonexistent: '日期不存在，尚未儲存（Esc 取消）',
+  preview: (value: string) => `將儲存為 ${value}`,
+  dateChanged: '台北日期已變更，完整日期預覽已更新，尚未儲存；請確認後再按 Enter',
   conflict: (latest: string) => `此欄位已在其他地方更新為「${latest || '未設定'}」，草稿未儲存；按 Esc 放棄，或再按 Enter 以草稿取代`,
   restored: '資料已重新同步（還原），此草稿未儲存；請按 Esc 放棄後重新輸入',
   notSaved: '儲存未完成，請重新載入後再試',
@@ -77,10 +91,11 @@ export function useProductGroupBasicInfoDrafts() {
     const existing = draftsRef.current[key];
     writeDrafts(prev => ({
       ...prev,
-      [key]: existing ? { ...existing, value } : { value, base: authoritative(group, field), readToken: takeCloudReadToken(), conflict: false, provider: bindProviderMode() },
+      // Keep the preview and saved date identical even when this draft spans Taipei midnight.
+      [key]: existing ? { ...existing, value } : { value, base: authoritative(group, field), readToken: takeCloudReadToken(), conflict: false, provider: bindProviderMode(), dateAt: new Date() },
     }));
     setErrors(prev => {
-      if (prev[key] !== BASIC_INFO_MESSAGES.incomplete) return prev;
+      if (prev[key] !== BASIC_INFO_MESSAGES.incomplete && prev[key] !== BASIC_INFO_MESSAGES.nonexistent) return prev;
       const next = { ...prev }; delete next[key]; return next;
     });
   };
@@ -100,8 +115,20 @@ export function useProductGroupBasicInfoDrafts() {
       setError(key, (error as Error).message); return;
     }
     if (!cloudReadPassesEpochBarrier(draft.readToken)) { setError(key, BASIC_INFO_MESSAGES.restored); return; }
-    const normalized = normalizeBasicInfoInput(field, draft.value);
-    if (normalized === null) { if (source === 'enter') setError(key, BASIC_INFO_MESSAGES.incomplete); return; }
+    const normalized = normalizeBasicInfoInput(field, draft.value, draft.dateAt);
+    const dateNow = new Date();
+    if (field === 'closing_date' && normalized !== normalizeBasicInfoInput(field, draft.value, dateNow)) {
+      writeDrafts(prev => ({ ...prev, [key]: { ...draft, dateAt: dateNow, dateConfirmation: true } }));
+      setError(key, BASIC_INFO_MESSAGES.dateChanged);
+      return;
+    }
+    if (draft.dateConfirmation && source === 'blur') return;
+    if (normalized === null) {
+      const problem = basicInfoInputProblem(field, draft.value, draft.dateAt);
+      if (problem === 'nonexistent') setError(key, BASIC_INFO_MESSAGES.nonexistent);
+      else if (source === 'enter') setError(key, BASIC_INFO_MESSAGES.incomplete);
+      return;
+    }
     const latest = authoritative(group, field);
     if (normalized === latest) { dropDraft(key); setError(key, null); return; } // nothing changed: zero writes
     if (latest !== draft.base) {
@@ -147,6 +174,11 @@ export function useProductGroupBasicInfoDrafts() {
   return {
     valueOf, change, cancel, commit, discardUnsaved, clearGroupFields,
     errorOf: (groupId: string, field: BasicInfoField) => errors[basicInfoDraftKey(groupId, field)],
+    previewOf: (groupId: string, field: BasicInfoField) => {
+      const draft = drafts[basicInfoDraftKey(groupId, field)];
+      const value = draft ? basicInfoSavePreview(field, draft.value, draft.dateAt) : null;
+      return value ? BASIC_INFO_MESSAGES.preview(value) : null;
+    },
     isSaving: (groupId: string, field: BasicInfoField) => Boolean(saving[basicInfoDraftKey(groupId, field)]),
     hasDrafts: Object.keys(drafts).length > 0,
     hasUnsavedDrafts: unsavedKeys.length > 0,
