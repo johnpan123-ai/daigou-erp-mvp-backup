@@ -2760,6 +2760,10 @@ export class SupabaseProvider implements IDataProvider {
     if (error) {
       clearLocalCloudWrites('japan_packages', packageIds);
       clearLocalCloudWrites('japan_package_items', itemIds);
+      if (typeof (error as { message?: unknown }).message === 'string'
+        && String((error as { message: string }).message).startsWith('CORE_')) {
+        throw new SaveabilityError(cloudMutationFailureMessage(error));
+      }
       markCloudRequestFailed(error);
       throw new JapanPackageSubmitBoundaryError('server-rejected');
     }

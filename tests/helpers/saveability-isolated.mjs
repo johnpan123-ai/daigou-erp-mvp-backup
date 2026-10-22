@@ -51,7 +51,14 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3, s
           (nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid) $$;
       grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;
       create publication supabase_realtime;`);
-    for(const file of migrations) await sql.query(readFileSync('supabase/sql/'+file,'utf8'));
+    // PostgreSQL fixture transport uses canonical LF. Windows CRLF checkout must
+    // not turn dollar-quoted replacement anchors into a different string from
+    // pg_get_functiondef's normalized body (076). Files/checksums stay untouched.
+    for(const file of migrations) await sql.query(readFileSync('supabase/sql/'+file,'utf8').replace(/\r\n?/g,'\n'));
+    if(process.env.ERP2_CORE_FIX_TEST_CANDIDATE==='1') {
+      assert.ok(migrations.includes('077_waca_custom_conflict_http409.sql'),'Core candidate requires the v32 base');
+      await sql.query(readFileSync('supabase/sql/078_core_source_capacity_and_receiving.sql','utf8'));
+    }
     await sql.query("insert into auth.users(id,email,raw_user_meta_data) values($1,'owner@example.invalid','{}'),($2,'viewer@example.invalid','{}')",[owner,viewer]);
     await sql.query("update public.profiles set role='owner' where user_id=$1",[owner]);
     await sql.query("select set_config('request.jwt.claim.sub',$1,false)",[owner]);

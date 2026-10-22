@@ -23,7 +23,7 @@ export const getAvailableJapanPackageItems = (
     if (!shipmentItem.japan_package_item_id || shipmentItem.outbound_shipment_id === currentShipmentId) continue;
     shippedByPackageItem.set(
       shipmentItem.japan_package_item_id,
-      (shippedByPackageItem.get(shipmentItem.japan_package_item_id) ?? 0) + shipmentItem.quantity,
+      (shippedByPackageItem.get(shipmentItem.japan_package_item_id) ?? 0) + Math.max(shipmentItem.quantity,0),
     );
   }
 

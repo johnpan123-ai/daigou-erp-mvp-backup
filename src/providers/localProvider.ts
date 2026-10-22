@@ -10,7 +10,7 @@ import type {
 } from './cloud/cloudAtomicRestore';
 import type { CloudRestoreTargetCompatibilityResult } from './cloud/cloudRestorePortability';
 import { db, calculateFinalMyacgDemand } from '../lib/db';
-import { sanitizeCloudBusinessPatch } from './cloud/cloudFieldCas';
+import { sanitizeCloudBusinessPatch, SaveabilityError } from './cloud/cloudFieldCas';
 import type { 
   InventoryItem, 
   SalesOrder, 
@@ -132,6 +132,19 @@ export class LocalProvider implements IDataProvider {
     return db.getJapanPackages();
   }
   async saveJapanPackages(packages: JapanPackage[]): Promise<void> {
+    const [current, items] = await Promise.all([this.getJapanPackages(), this.getJapanPackageItems()]);
+    for (const pkg of packages) {
+      const old = current.find(row => row.id === pkg.id);
+      if (old?.status === pkg.status || !['registered','confirmed'].includes(pkg.status)) continue;
+      const rows = items.filter(item => item.japan_package_id === pkg.id);
+      const remaining = rows.filter(item => !item.checked).length;
+      const allChecked = rows.length > 0 && remaining === 0;
+      if ((pkg.status === 'confirmed') !== allChecked) {
+        if(allChecked) throw new SaveabilityError('全部商品已點收，包裹狀態應為已點收。');
+        if(rows.length===0) throw new SaveabilityError('包裹沒有可點收的商品，不能標記已點收。');
+        throw new SaveabilityError(`尚有 ${remaining} 筆未點收，包裹狀態必須符合實際進度。`);
+      }
+    }
     return db.saveJapanPackages(packages);
   }
   async getJapanPackageItems(): Promise<JapanPackageItem[]> {
@@ -154,6 +167,13 @@ export class LocalProvider implements IDataProvider {
         : pkg);
     } else {
       const updates = new Map(command.updates.map(update => [update.itemId, update]));
+      const allocations = await this.getOutboundShipmentItems();
+      for (const item of items) {
+        if (updates.get(item.id)?.checked !== false) continue;
+        const allocated = allocations.filter(row => row.japan_package_item_id === item.id)
+          .reduce((sum, row) => sum + Math.max(row.quantity,0), 0);
+        if (allocated > 0) throw new SaveabilityError(`此來源已配置 ${allocated} 件，未配置 ${Math.max(item.quantity-allocated,0)} 件；不可整列取消點收。部分取消需另案設計。`);
+      }
       nextItems = items.map(item => {
         const update = updates.get(item.id);
         return update ? {
@@ -169,7 +189,7 @@ export class LocalProvider implements IDataProvider {
       // Same rule as the Cloud RPC (076): all checked -> confirmed; un-checking a confirmed package -> registered;
       // partial receiving keeps the status (historical 'arrived' is never produced or converted) but stamps arrived_at once.
       nextPackages = packages.map(pkg => {
-        if (pkg.id !== command.packageId || pkg.status === 'problem') return pkg;
+        if (pkg.id !== command.packageId || pkg.status === 'problem' || pkg.status === 'arrived') return pkg;
         const status = allChecked ? 'confirmed' : pkg.status === 'confirmed' ? 'registered' : pkg.status;
         const arrivedAt = pkg.arrived_at || (status === 'arrived' || status === 'confirmed' || anyChecked ? new Date().toISOString().slice(0, 10) : undefined);
         return status === pkg.status && arrivedAt === pkg.arrived_at ? pkg : {

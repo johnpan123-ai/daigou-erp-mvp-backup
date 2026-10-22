@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/authContext';
-import { getProviderMode, setProviderMode } from '../providers/providerMode';
+import { getProviderMode, setProviderMode, providerModeNeedsReload } from '../providers/providerMode';
 import { formatLoginError, formatPasswordResetRequestError } from '../auth/authErrors';
 import { Box, Lock, Mail } from 'lucide-react';
 
@@ -33,6 +33,7 @@ export default function Login() {
   useEffect(() => {
     if (!loading && user && authFlow === 'normal') {
       setProviderMode('cloud');
+      if (providerModeNeedsReload()) { window.location.replace('/'); return; }
       navigate('/', { replace: true });
     }
   }, [user, loading, authFlow, navigate]);
@@ -56,6 +57,7 @@ export default function Login() {
       }
 
       // Redirect on success
+      if (providerModeNeedsReload()) { window.location.replace('/'); return; }
       navigate('/', { replace: true });
     } catch (err: unknown) {
       setError(formatLoginError(err));

@@ -197,6 +197,26 @@ export class SaveabilityError extends Error {
   constructor(message:string){super(message);this.name='SaveabilityError';}
 }
 export function cloudMutationFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.name === 'ProviderModeChangedError') return error.message;
+  const server = error as { message?: string; details?: string } | null;
+  if (server?.message === 'CORE_SOURCE_CAPACITY') {
+    try {
+      const detail = JSON.parse(server.details ?? '{}');
+      if (Number.isSafeInteger(detail.allocated) && Number.isSafeInteger(detail.cancelable)) {
+        return `此來源已配置 ${detail.allocated} 件，未配置 ${detail.cancelable} 件；不可超額配置或整列取消點收。部分取消需另案設計。`;
+      }
+    } catch { /* only bounded server values are displayed */ }
+    return '來源數量不足或已有出庫配置，操作未完成；請同步後確認。';
+  }
+  if (server?.message === 'CORE_PACKAGE_PROGRESS_MISMATCH') {
+    try {
+      const detail = JSON.parse(server.details ?? '{}');
+      if (detail.allChecked === true) return '全部商品已點收，包裹狀態應為已點收。';
+      if (detail.remainingRows === 0) return '包裹沒有可點收的商品，不能標記已點收。';
+      if (Number.isSafeInteger(detail.remainingRows)) return `尚有 ${detail.remainingRows} 筆未點收，包裹狀態必須符合實際進度。`;
+    } catch { /* use fixed fallback */ }
+    return '包裹狀態與實際點收進度不一致，請先完成點收。';
+  }
   if(error instanceof SaveabilityError || error instanceof CloudFieldMutationError)return error.message;
   if (error instanceof CloudMutationBoundaryError) {
     return error.state === 'committed-readback-pending'

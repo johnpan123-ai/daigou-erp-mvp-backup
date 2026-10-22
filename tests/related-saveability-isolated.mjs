@@ -32,7 +32,9 @@ try{
   assert.equal((await call(command)).ok,true);assert.equal((await call(command)).replayed,true);
   assert.equal((await active('purchase_batch_items')).length,0);assert.equal((await active('purchase_batches')).length,0);
   await sql.query("insert into public.japan_packages(id,title,status) values($1,'Synthetic package','arrived')",[uuid(50)]);
-  await sql.query("insert into public.japan_package_items(id,japan_package_id,product_title,variant_name,sku,quantity,checked,note) values($1,$2,'Old','A','S-1',3,false,'')",[uuid(51),uuid(50)]);
+  // A legitimate outbound mirror source must already be received. The previous
+  // unchecked fixture is now separately rejected by r5-core-source-safety.
+  await sql.query("insert into public.japan_package_items(id,japan_package_id,product_title,variant_name,sku,quantity,checked,note) values($1,$2,'Old','A','S-1',3,true,'')",[uuid(51),uuid(50)]);
   await sql.query("insert into public.outbound_shipments(id,title,status) values($1,'Synthetic outbound','draft')",[uuid(52)]);
   await sql.query("insert into public.outbound_shipment_items(id,outbound_shipment_id,japan_package_item_id,product_title,variant_name,sku,quantity,note) values($1,$2,$3,'Old','A','S-1',1,'')",[uuid(53),uuid(52),uuid(51)]);
   const scoped={j:await active('japan_package_items'),o:await active('outbound_shipment_items')};

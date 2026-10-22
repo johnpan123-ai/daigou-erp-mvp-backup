@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { classifyReviewedFile, reviewForCandidate, sourceHash, verifyImpactEvidence } from './reviewed-change-impact.mjs';
+import { restoreReviewedR5CoreProvider } from './r5-core-provider-review.mjs';
 
 const policy = JSON.parse(readFileSync(new URL('../config/erp2-non-schema-release-policy.json', import.meta.url), 'utf8'));
 const fail = message => { throw new Error(`DEPLOYMENT_GUARD_FAILED_CLOSED: ${message}`); };
@@ -970,6 +971,7 @@ export function assertP02FreshHoldCallers(files) {
 // ---- END p02-1a realtime context contract function ----
 
 export function assertReviewedProviderContract(file, before, after) {
+  after = restoreReviewedR5CoreProvider(file, after);
   if (wacaRecognitionReviewApplies(file, after)) {
     assertWacaRecognitionProviderContract(file, before, after);
     return;

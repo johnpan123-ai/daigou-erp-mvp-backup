@@ -39,7 +39,9 @@ page.on('request', request => {
 });
 
 try {
-  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  // This is a provider/IndexedDB test. Do not mount App's background Realtime
+  // coordinator, which otherwise races this explicit offline/online fixture.
+  await page.goto(BASE_URL+'/tests/fixtures/r5-provider-module.html', { waitUntil: 'networkidle' });
   const result = await page.evaluate(async () => {
     const {
       localDb,
@@ -53,7 +55,10 @@ try {
       markCloudReadFresh,
       markCloudReachable,
     } = await import('/src/providers/cloud/cloudConnectivity.ts');
-    const { dataProvider } = await import('/src/providers/dataProvider.ts');
+    const { dataProvider: singletonProvider } = await import('/src/providers/dataProvider.ts');
+    // Each persistence scenario gets a fresh provider lifecycle. Reusing a loaded
+    // page across a mode switch is now intentionally rejected (r5-mode-draft-react).
+    let dataProvider;
     const { supabase } = await import('/src/providers/cloud/supabaseClient.ts');
 
     const localGroup = {
@@ -104,12 +109,14 @@ try {
     // Local mutation never calls Supabase and never changes Cloud cache.
     localStorage.setItem('erp_provider_mode', 'local');
     const cloudHashBeforeLocalWrite = JSON.stringify(await cloudCacheDb.getProductGroups());
+    dataProvider = new singletonProvider.constructor();
     await dataProvider.saveProductGroups([{ ...localGroup, title: 'Local edited' }]);
     const localAfterLocalWrite = await localDb.getProductGroups();
     const cloudAfterLocalWrite = JSON.stringify(await cloudCacheDb.getProductGroups());
 
     // Central Cloud gate refuses every mutation class while offline/checking.
     localStorage.setItem('erp_provider_mode', 'cloud');
+    dataProvider = new singletonProvider.constructor();
     window.dispatchEvent(new Event('offline'));
     const rejected = {};
     for (const [name, operation] of Object.entries({
@@ -143,12 +150,15 @@ try {
     const localBeforeCloudMutation = JSON.stringify(await localDb.getProductGroups());
     const cloudMutationGroup = {
       id: '30000000-0000-4000-8000-000000000001',
-      title: 'Client draft title',
+      // Strict CAS readback must match the requested business fields. Server-only
+      // metadata below still proves cache uses canonical readback, not the draft.
+      title: 'Server canonical title after save',
       priority: 'Medium',
     };
     const serverCanonicalGroup = {
       ...cloudMutationGroup,
       title: 'Server canonical title after save',
+      updated_by: '00000000-0000-4000-8000-000000000099',
       version: 4,
       updated_at: '2026-09-07T00:00:01.000Z',
     };
@@ -159,6 +169,7 @@ try {
     supabase.rpc = async (name, args) => {
       mutationRequests += 1;
       if (rejectMutation) return { data: null, error: { message: 'fixture server rejected write', code: 'FIXTURE_REJECT' } };
+      Object.assign(serverCanonicalGroup, args.p_operations[0].values ?? args.p_operations[0].changes);
       return { data: { ok: true, entity: args.p_entity, rows: [serverCanonicalGroup] }, error: null };
     };
     supabase.from = table => {
@@ -166,6 +177,12 @@ try {
         select() { return builder; },
         eq() { return builder; },
         in() { return builder; },
+        is() { return builder; },
+        gt() { return builder; },
+        order() { return builder; },
+        limit() { return builder; },
+        range() { return builder; },
+        abortSignal() { return builder; },
         single: async () => table === 'profiles'
           ? ({ data: { role: 'owner' }, error: null })
           : ({ data: null, error: null }),
@@ -193,7 +210,8 @@ try {
     rejectMutation = false;
     markCloudReachable();
     markCloudReadFresh(1);
-    await dataProvider.saveProductGroups([cloudMutationGroup]);
+    try { await dataProvider.saveProductGroups([cloudMutationGroup]); }
+    catch(error) { throw new Error(`Fixture readback failed: ${error.detail?.message ?? error.message}`); }
     const cacheAfterAcknowledgedSave = await cloudCacheDb.getProductGroups();
     const localAfterCloudMutation = JSON.stringify(await localDb.getProductGroups());
     markCloudReachable();
@@ -255,6 +273,7 @@ try {
   assert.equal(result.cacheAfterRejectedOnlineSave, '[]', 'Rejected Cloud save mutated Cloud cache');
   assert.equal(result.cacheAfterAcknowledgedSave[0].title, 'Server canonical title after save');
   assert.equal(result.cacheAfterAcknowledgedSave[0].version, 4);
+  assert.equal(result.cacheAfterAcknowledgedSave[0].updated_by, '00000000-0000-4000-8000-000000000099');
   assert.equal(result.localAfterCloudMutation, result.localBeforeCloudMutation, 'Cloud mutation wrote Local authoritative DB');
   assert.ok(result.mutationRequests >= 2, 'Cloud mutation fixture did not exercise failure and success');
   assert.equal(result.canonicalReads, 1, 'Successful Cloud mutation did not use exactly one targeted canonical readback');
@@ -270,10 +289,15 @@ try {
   assert.match(providerSource, /cloudCacheDb as db/);
   assert.doesNotMatch(providerSource, /from ['"]\.\.\/\.\.\/lib\/db['"];?\s*\/\/.*local/u);
   assert.match(providerSource, /supabase\.rpc\('erp_apply_field_mutations'/, 'Cloud save does not use the field-CAS RPC');
-  assert.match(providerSource, /applyCloudCollection\('inventory_items'/u);
+  // The deployed v32 inventory path plans against authoritative identities and
+  // submits the same field-CAS boundary directly, rather than the old collection helper.
+  assert.match(providerSource, /plan = planCloudInventoryImport\(rows, items\)/u);
+  assert.match(providerSource, /applyCloudFieldMutations\('inventory_items', plan\.operations\)/u);
   assert.match(targetedSource, /cloudCacheDb as db/);
   assert.match(modeSource, /assertCloudWriteAllowed\(\)/);
-  assert.match(realtimeContextSource, /Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用/);
+  const presentationSource=await readFile(new URL('../src/contexts/globalSyncPresentation.ts',import.meta.url),'utf8');
+  assert.match(presentationSource, /Offline｜顯示最後雲端快取，所有新增、修改、刪除與匯入已停用/);
+  assert.match(realtimeContextSource, /resolveGlobalSyncPresentation\(/u);
   assert.match(realtimeContextSource, /fallback\('reconnect'/, 'Reconnect does not use the existing read-only targeted refresh path');
 
   const methodBody = name => {
@@ -294,7 +318,11 @@ try {
     'deleteProductGroups',
   ]) {
     const body = methodBody(name);
-    assert.match(body, /applyCloudCollection|applyCloudFieldMutations|deleteCloudProductGroupTrees/, `${name} does not use the field-CAS boundary`);
+    if(name==='deleteProductVariant') {
+      assert.match(body,/submitRelatedIntent\(\{family:'variant-delete'/u);
+      assert.match(body,/command=>this\.applyRelatedTransaction\(command\)/u);
+      assert.match(methodBody('applyRelatedTransaction'),/supabase\.rpc\(RELATED_RPC/u);
+    } else assert.match(body, /applyCloudCollection|applyCloudFieldMutations|deleteCloudProductGroupTrees/, `${name} does not use the field-CAS boundary`);
     assert.doesNotMatch(body, /await db\.(?:save|update|delete)/, `${name} writes optimistic input directly to Cloud cache`);
   }
   for (const name of [
@@ -302,7 +330,16 @@ try {
     'createPurchaseRecordFromInventory', 'reparseProductVariants',
     'reparseProductTitles', 'syncProductGroupsWithInventory', 'restoreBackup',
   ]) {
-    assert.match(methodBody(name), /throw new /, `${name} is not fail-closed in Cloud Mode`);
+    const catalogModes={createPurchaseRecordFromInventory:'create',reparseProductVariants:'reparse',syncProductGroupsWithInventory:'sync'};
+    if(name in catalogModes) {
+      assert.ok(methodBody(name).includes(`this.commitCatalog('${catalogModes[name]}'`));
+      const start=providerSource.indexOf('  private async commitCatalog(');
+      assert.ok(start>=0);
+      const catalogBody=providerSource.slice(start,providerSource.indexOf('\n  async ',start));
+      assert.match(catalogBody,/await this\.requireCloudWritePermission\(\)/u);
+      assert.match(catalogBody,/supabase\.rpc\(CATALOG_RPC/u);
+      assert.doesNotMatch(catalogBody,/await db\.(?:save|update|delete)/u);
+    } else assert.match(methodBody(name), /throw new /, `${name} is not fail-closed in Cloud Mode`);
   }
 
   console.log('PASS Local authoritative and Cloud cache IndexedDB namespaces are distinct');

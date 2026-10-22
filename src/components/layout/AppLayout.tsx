@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { PackageSearch, Settings, Box, FileText, FileSpreadsheet, Receipt, Menu, X, Monitor, Smartphone, LayoutDashboard, Layout, Truck, ChevronLeft, ChevronRight, Archive, Layers, PackageOpen, History } from 'lucide-react';
 import { useViewport } from '../../contexts/ViewportContext';
-import { getProviderMode, markManualLocalEntry, setProviderMode } from '../../providers/providerMode';
+import { getProviderMode, markManualLocalEntry, setProviderMode, PROVIDER_MODE_CHANGED_EVENT } from '../../providers/providerMode';
 import { useAuth } from '../../auth/authContext';
 import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
@@ -66,6 +66,12 @@ function SidebarItem({ to, icon, label, onClick, state }: SidebarItemProps) {
 
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
+  const [providerChanged, setProviderChanged] = useState(false);
+  useEffect(() => {
+    const changed = () => setProviderChanged(true);
+    window.addEventListener(PROVIDER_MODE_CHANGED_EVENT, changed);
+    return () => window.removeEventListener(PROVIDER_MODE_CHANGED_EVENT, changed);
+  }, []);
   const { mode, setMode, isMobile } = useViewport();
   const { user, loading, authFlow, signOut } = useAuth();
   const { role, displayName, isProfileLoading, canViewPage } = useRole();
@@ -712,6 +718,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           )}
           <div className={(mode === 'mobile' && !isMobile) ? 'mobile-preview-frame' : ''}>
+            {providerChanged && <div role="alert" style={{padding:12,background:'#fff3cd',color:'#624b00'}}>
+              資料模式已變更，此頁面的舊草稿已停止儲存。請放棄草稿後重新載入；正在儲存的操作請回原模式同步確認。
+              <button type="button" onClick={() => window.location.reload()}>放棄草稿並重新載入</button>
+            </div>}
             {children}
           </div>
         </div>

@@ -391,7 +391,7 @@ export default function JapanPackageDetail() {
         if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(scope);
         alert(error.message);
       }
-      else alert('批量修改點收狀態失敗，請重新讀取資料後再確認。');
+      else alert(cloudMutationFailureMessage(error));
     } finally {
       transactionInFlightRef.current.delete(scope);
       setIsReceivingPending(false);

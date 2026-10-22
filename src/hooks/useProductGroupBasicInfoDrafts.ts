@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { normalizeDateInput } from '../lib/db';
 import { cloudReadPassesEpochBarrier, takeCloudReadToken } from '../providers/cloud/cloudCacheWriteFence';
+import { assertProviderBinding, bindProviderMode, ProviderModeChangedError, type ProviderBinding } from '../providers/providerMode';
 
 /**
  * Purchase Records level 1 (list) and level 2 (product detail) share one save rule for
@@ -18,7 +19,7 @@ export type BasicInfoField = 'closing_date' | 'release_month' | 'product_url';
 export type BasicInfoCommitSource = 'blur' | 'enter';
 
 interface BasicInfoGroupLike { id: string; closing_date?: string | null; release_month?: string | null; product_url?: string | null }
-interface Draft { value: string; base: string; readToken: number; conflict: boolean }
+interface Draft { value: string; base: string; readToken: number; conflict: boolean; provider: ProviderBinding }
 
 export const basicInfoDraftKey = (groupId: string, field: BasicInfoField) => `${groupId}|${field}`;
 
@@ -76,7 +77,7 @@ export function useProductGroupBasicInfoDrafts() {
     const existing = draftsRef.current[key];
     writeDrafts(prev => ({
       ...prev,
-      [key]: existing ? { ...existing, value } : { value, base: authoritative(group, field), readToken: takeCloudReadToken(), conflict: false },
+      [key]: existing ? { ...existing, value } : { value, base: authoritative(group, field), readToken: takeCloudReadToken(), conflict: false, provider: bindProviderMode() },
     }));
     setErrors(prev => {
       if (prev[key] !== BASIC_INFO_MESSAGES.incomplete) return prev;
@@ -95,6 +96,9 @@ export function useProductGroupBasicInfoDrafts() {
     if (inFlightRef.current.has(key)) return; // Enter + Blur of the same edit
     const draft = draftsRef.current[key];
     if (!draft) return;
+    try { assertProviderBinding(draft.provider); } catch (error) {
+      setError(key, (error as Error).message); return;
+    }
     if (!cloudReadPassesEpochBarrier(draft.readToken)) { setError(key, BASIC_INFO_MESSAGES.restored); return; }
     const normalized = normalizeBasicInfoInput(field, draft.value);
     if (normalized === null) { if (source === 'enter') setError(key, BASIC_INFO_MESSAGES.incomplete); return; }
@@ -113,6 +117,7 @@ export function useProductGroupBasicInfoDrafts() {
     setError(key, null);
     try {
       const saved = await save(group.id, field, normalized);
+      assertProviderBinding(draft.provider);
       if (saved) {
         // Keep anything typed while the save was running.
         if (draftsRef.current[key]?.value === draft.value) dropDraft(key);
@@ -121,7 +126,7 @@ export function useProductGroupBasicInfoDrafts() {
       }
     } catch (error) {
       console.error('[BasicInfo] save failed:', error);
-      setError(key, BASIC_INFO_MESSAGES.failed);
+      setError(key, error instanceof ProviderModeChangedError ? error.message : BASIC_INFO_MESSAGES.failed);
     } finally {
       inFlightRef.current.delete(key);
       setSaving(prev => { const next = { ...prev }; delete next[key]; return next; });

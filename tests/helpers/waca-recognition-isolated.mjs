@@ -21,7 +21,7 @@ export async function recognitionDatabase() {
   try {
     const before=await state(); await q(readFileSync('supabase/sql/'+migration,'utf8')); assert.deepEqual(await state(),before,'075 migration has zero business mutation');
     for(const file of CANONICAL_FRESH_INSTALL_V3.slice(CANONICAL_FRESH_INSTALL_V3.indexOf(migration)+1)) {
-      const baseline=await state(); await q(readFileSync('supabase/sql/'+file,'utf8'));
+      const baseline=await state(); await q(readFileSync('supabase/sql/'+file,'utf8').replace(/\r\n?/g,'\n'));
       assert.deepEqual(await state(),baseline,file+' has zero business mutation');
     }
     await q("update public.product_variants set waca_manual_adjustment=10 where id=$1",[uuid(2)]);

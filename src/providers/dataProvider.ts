@@ -2,7 +2,7 @@ import type { IDataProvider } from './types';
 import { LocalProvider } from './localProvider';
 import { supabaseProvider } from './cloud/supabaseProvider';
 import { testSandboxProvider } from './testSandboxProvider';
-import { getProviderMode } from './providerMode';
+import { getProviderMode, bindProviderMode, assertProviderBinding, type ProviderBinding } from './providerMode';
 import type {
   InventoryItem, 
   SalesOrder, 
@@ -61,6 +61,11 @@ export class StaleDataError extends Error {
 }
 
 class DynamicDataProvider implements IDataProvider {
+  private binding?: ProviderBinding;
+  private assertMode(): void {
+    this.binding ??= bindProviderMode();
+    assertProviderBinding(this.binding);
+  }
   private localProvider = new LocalProvider();
   private supabaseProvider = supabaseProvider;
   private testSandboxProvider = testSandboxProvider;
@@ -167,11 +172,13 @@ class DynamicDataProvider implements IDataProvider {
   }
 
   private async guardedWrite<T>(write: () => Promise<T>): Promise<T> {
+    this.assertMode();
     this.guardStale();
     const mode = getProviderMode();
     if (mode === 'cloud' || mode === 'fallback') assertCloudWriteAllowed();
     try {
       const result = await write();
+      this.assertMode();
       this.registerWrite();
       return result;
     } catch (error) {
@@ -185,10 +192,12 @@ class DynamicDataProvider implements IDataProvider {
   }
 
   private async committedRestoreWrite<T>(write: () => Promise<T>): Promise<T> {
+    this.assertMode();
     // PREPARE has already committed a durable OWNER-only envelope. A later
     // Realtime/focus/connectivity transition must not suppress EXECUTE before
     // it reaches fetch; transport uncertainty is closed by durable reconcile.
     const result = await write();
+    this.assertMode();
     this.registerWrite();
     return result;
   }
@@ -554,6 +563,7 @@ class DynamicDataProvider implements IDataProvider {
   }
 
   private getActiveProvider(): IDataProvider {
+    this.assertMode();
     const mode = getProviderMode();
     if (mode === 'test' || mode === 'next' || mode === 'experimental') {
       return this.testSandboxProvider;

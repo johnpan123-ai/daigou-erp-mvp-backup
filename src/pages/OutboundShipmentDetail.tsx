@@ -193,7 +193,8 @@ export default function OutboundShipmentDetail() {
         dataProvider.getBundleComponents(),
       ]), ([shipments, items, jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems]) => {
       allShipmentItemsRef.current = items;
-      setAllShipmentItems(items);
+      const activeShipmentIds = new Set(shipments.map(s => s.id));
+      setAllShipmentItems(items.filter(item => activeShipmentIds.has(item.outbound_shipment_id)));
       setJapanPackages(jp);
       setJapanPackageItems(jpi);
       setInventoryItems(inv);
