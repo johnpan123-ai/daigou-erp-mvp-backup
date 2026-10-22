@@ -61,7 +61,9 @@ if (liveIndex >= 0 && sourceIndex >= 0) {
   assert.equal(fingerprintStructuralSnapshot(source), fingerprintStructuralSnapshot(live));
   assert.equal(fingerprintStructuralSnapshotV2(source), '64d84a4fe60bc9b73c1ba29e6392e7d2c254dcbb5faba8fb2aba9897cbd7e076');
   assert.equal(fingerprintStructuralSnapshotV2(live), '5962a7a5c54668408802e8061b8f393bd6d6ca0295adeee81cf5a993e8769640');
-  const registry = await buildMigrationEffectRegistry();
+  // This golden pair is the frozen pre-078 v32 target. The v33 full-chain
+  // and partial-core negatives are covered by r5-release-reconciliation.
+  const registry = Object.fromEntries(Object.entries(await buildMigrationEffectRegistry()).filter(([id])=>id!=='078'));
   const baseline = planSchemaDelta(source, registry, { expectedSnapshot: source });
   assert.equal(baseline.readyForApply, true);
   const signature = 'public.erp_commit_waca_snapshot(jsonb,bigint,boolean)';

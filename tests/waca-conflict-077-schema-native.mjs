@@ -8,7 +8,7 @@ import {buildMigrationEffectRegistry} from '../tools/schema-reconciliation/migra
 import {planSchemaDelta,reconcileMigration} from '../tools/schema-reconciliation/reconcile.mjs';
 import {WACA_TRANSPORT_REASONS,reviewedWacaConflictDefinition} from '../tools/schema-reconciliation/wacaConflictTransport.mjs';
 const file='077_waca_custom_conflict_http409.sql',source=readFileSync('supabase/sql/'+file,'utf8');
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.slice(0,-1)});
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.slice(0,CANONICAL_FRESH_INSTALL_V3.indexOf(file))});
 const canonical=JSON.parse(readFileSync('docs/schema-candidates/erp2-v32-waca-conflict-http409.snapshot.json'));
 const capture=async()=>{const s=(await db.sql.query(readFileSync('tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql','utf8'))).rows[0].erp_schema_snapshot;
  s.integrity.inventoryItems=(await db.sql.query(readFileSync('tools/schema-reconciliation/sql/026b-inventory-preconditions-readonly.sql','utf8'))).rows[0].inventory_items_integrity;

@@ -76,6 +76,7 @@ export const CANONICAL_FRESH_INSTALL_V3 = Object.freeze([
   '075_waca_order_recognition_management.sql',
   '076_japan_package_daily_status_transitions.sql',
   '077_waca_custom_conflict_http409.sql',
+  '078_core_source_capacity_and_receiving.sql',
 ]);
 
 // Checksum-bearing source history. These artifacts remain reviewable and are
@@ -120,6 +121,7 @@ export const ERP2_MIGRATION_SOURCE_ORDER_V3 = Object.freeze([
   '075_waca_order_recognition_management.sql',
   '076_japan_package_daily_status_transitions.sql',
   '077_waca_custom_conflict_http409.sql',
+  '078_core_source_capacity_and_receiving.sql',
 ]);
 
 // These historical SQL Editor artifacts are alternative/superseded routes,

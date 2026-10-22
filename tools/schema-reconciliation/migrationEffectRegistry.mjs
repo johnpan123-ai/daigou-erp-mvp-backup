@@ -45,6 +45,27 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '078': {
+    sourceFile: '078_core_source_capacity_and_receiving.sql', dependencies: ['051', '076', '077'],
+    risk: 'CORE_SOURCE_CAPACITY_RECEIVING_PROGRESS', idempotency: 'TRANSACTIONAL_CREATE_AND_SOURCE_ANCHOR_PATCH',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [
+      fn('erp_apply_japan_package_transaction(uuid,jsonb)', { owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""'] }),
+      fn('erp_apply_related_transaction(uuid,jsonb)', { owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""'] }),
+      ...['japan_packages','japan_package_items','outbound_shipments','outbound_shipment_items'].map(name=>table(name)),
+    ],
+    postconditions: [
+      ...['erp_core_restore_in_progress()','erp_core_write_lock()','erp_core_source_guard()','erp_core_package_progress()','erp_core_shipment_guard()']
+        .map(signature=>fn(signature,{mismatchIsMissing:false,owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""'],retainedImplementation:'R5_078'})),
+      fn('erp_apply_japan_package_transaction(uuid,jsonb)',{owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""'],definitionIncludes:["IF v_current_package.status NOT IN ('arrived','problem') THEN"],retainedImplementation:'R5_078'}),
+      fn('erp_apply_related_transaction(uuid,jsonb)',{owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""'],definitionIncludes:["p.status NOT IN ('arrived','problem')"],retainedImplementation:'R5_078'}),
+      ...[
+        ...['japan_packages','japan_package_items','outbound_shipments','outbound_shipment_items'].map(name=>[name,'erp_core_write_lock']),
+        ['outbound_shipment_items','erp_core_capacity'],['japan_package_items','erp_core_capacity'],
+        ['japan_package_items','erp_core_progress'],['japan_packages','erp_core_progress'],['outbound_shipments','erp_core_reactivate'],
+      ].map(([name,trigger])=>q('trigger','public.'+name+'.'+trigger)),
+    ],
+  },
   '077': {
     sourceFile: '077_waca_custom_conflict_http409.sql', dependencies: ['075'],
     risk: 'WACA_CUSTOM_CONFLICT_TRANSPORT_ONLY', idempotency: 'EXACT_SOURCE_GUARDED_FUNCTION_PATCH',
@@ -947,6 +968,15 @@ export function extractSqlEffects(sql) {
 
 export async function buildMigrationEffectRegistry() {
   const readMigration = createMigrationSourceReader(ROOT);
+  const canonical078=JSON.parse(await readFile(new URL('../../docs/schema-candidates/erp2-v33-r5-source-capacity-receiving.snapshot.json',import.meta.url),'utf8'));
+  const core078=[
+    'public.erp_core_restore_in_progress()','public.erp_core_write_lock()','public.erp_core_source_guard()',
+    'public.erp_core_package_progress()','public.erp_core_shipment_guard()',
+    'public.erp_apply_japan_package_transaction(uuid,jsonb)','public.erp_apply_related_transaction(uuid,jsonb)',
+  ];
+  const retained078={contract:'R5_078_EXACT_CORE_IMPLEMENTATIONS',activationObjects:core078.slice(0,5),
+    functions:core078.map(object=>{const sha256=fingerprintFunctionImplementation(canonical078.functions[object]);
+      if(!sha256)throw new Error('R5_078_CANONICAL_MISSING:'+object);return {object,sha256};})};
   const canonical075 = JSON.parse(await readFile(new URL('../../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json', import.meta.url), 'utf8'));
   const signatures075 = [
     'erp_commit_waca_snapshot(jsonb,bigint,boolean)', 'erp_commit_waca_snapshot_v044(jsonb,bigint,boolean)',
@@ -992,7 +1022,8 @@ export async function buildMigrationEffectRegistry() {
     ]);
     const retainedCondition = condition => condition.retainedImplementation === 'WACA_075'
       ? { ...condition, retainedImplementation: retained075 }
-      : condition.retainedImplementation === 'WACA_077' ? { ...condition, retainedImplementation: retained077 } : condition;
+      : condition.retainedImplementation === 'WACA_077' ? { ...condition, retainedImplementation: retained077 }
+      : condition.retainedImplementation === 'R5_078' ? { ...condition, retainedImplementation: retained078 } : condition;
     const postconditions = [...spec.postconditions, ...derivedConditions].map(retainedCondition)
       .filter((value, index, values) => values.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(value)) === index);
     const dependencySources = [];

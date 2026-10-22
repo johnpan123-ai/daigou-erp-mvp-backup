@@ -21,6 +21,7 @@ export const gates=[
  'r5-schema-rollback-isolated','r5-authoritative-backup-restore-isolated',
  'schema-reconciliation','schema-canonical-v3','schema-canonical-native-v3',
  'erp2-pre-adoption-guard','staging-build-identity','erp2-promotion-guard',
+ 'r5-release-reconciliation','migration-source-checksum-windows','waca-conflict-077-schema-native',
 ];
 const names=process.argv.slice(2);const results=[];
 env.ERP1_V1_WACA_SNAPSHOT='C:/Users/小河馬/Downloads/cloud-erp-snapshot-2026-10-16-021720.json';

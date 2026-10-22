@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
-import {buildMigrationEffectRegistry,extractSqlEffects} from '../schema-reconciliation/migrationEffectRegistry.mjs';
+import {buildMigrationEffectRegistry} from '../schema-reconciliation/migrationEffectRegistry.mjs';
 export const baseFingerprint='a65bc8ee78b8c135d26c88f9a89b2ccfb522c8a47899caac811555c5f28f72e7';
 export const sourceFile='078_core_source_capacity_and_receiving.sql';
 export const sourceSha256='95607b46e7ebcf9b9b16cd23d9c73472070ca94ec32950547470de600e339f35';
@@ -17,17 +17,8 @@ export const triggers=[
 export const source=()=>{const b=readFileSync(new URL('../../supabase/sql/'+sourceFile,import.meta.url));assert.equal(sha(b),sourceSha256,'078 immutable candidate source');return b.toString('utf8');};
 export async function candidateEffectRegistry(){
  const registry=await buildMigrationEffectRegistry();
- return {...registry,'078':{
-  migrationId:'078',sourceFile,sourceChecksum:sourceSha256,canonicalOrder:Math.max(...Object.values(registry).map(r=>r.canonicalOrder))+1,
-  dependencies:['051','052','076','077'],risk:'CORE_SOURCE_CAPACITY_RECEIVING_PROGRESS',classification:'NO_NEW_DURABLE_RESOURCE',
-  idempotency:'TRANSACTIONAL_CREATE_AND_EXACT_ANCHOR_PATCH_NOT_REAPPLY',
-  sourceEffects:{...extractSqlEffects(source()),triggers:triggers.map(([t,n])=>t+'.'+n),changedFunctions},
-  preconditions:changedFunctions.map(object=>({kind:'function',object,expected:true,owner:'postgres',securityDefiner:true,authenticatedExecute:true,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""']})),
-  postconditions:[
-   ...newFunctions.map(object=>({kind:'function',object,expected:true,owner:'postgres',securityDefiner:true,authenticatedExecute:false,anonExecute:false,publicExecute:false,requiredConfig:['search_path=""']})),
-   ...triggers.map(([t,n])=>({kind:'trigger',object:'public.'+t+'.'+n,expected:true})),
-  ],
- }};
+ assert.equal(registry['078'].sourceChecksum,sourceSha256);
+ return registry;
 }
 export function exactFunctionDelta(before,after){
  const added=Object.keys(after.functions).filter(k=>!before.functions[k]).sort();

@@ -5,14 +5,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
-import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
+import { isolatedDatabase, owner, R5_V32_MIGRATIONS } from './helpers/saveability-isolated.mjs';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 
 const safeupdateLibrary = process.env.WACA_TEST_SAFEUPDATE_LIBRARY || undefined;
 assert.ok(safeupdateLibrary, 'safeupdate is mandatory for the integration gate');
 assert.ok(process.env.WACA_TEST_POSTGREST_BINARY, 'native PostgREST required');
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom', optimizeDeps: { noDiscovery: true } });
-const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3, safeupdateLibrary, postgrestBinary: process.env.WACA_TEST_POSTGREST_BINARY });
+const db = await isolatedDatabase({ migrations: R5_V32_MIGRATIONS, safeupdateLibrary, postgrestBinary: process.env.WACA_TEST_POSTGREST_BINARY });
 const ref = 'rhfdjsklfrgpoqsaqpkn';
 const id = (n, s) => `${String(s).padStart(8, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const q = (s, a) => db.sql.query(s, a);

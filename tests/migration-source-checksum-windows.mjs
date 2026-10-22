@@ -32,7 +32,7 @@ const registry=await buildMigrationEffectRegistry();assert.equal(registry['045']
 assert.equal(registry['074'].sourceChecksum,'4d3833ff1fe98b8276eeb22c7f6052e40c747f1cf614b6f3c78eb2a184f8b268');checks++;
 for(const path of ['../045.sql','/tmp/045.sql','045.sql'])await assert.rejects(()=>read(path),/PATH_INVALID/u);checks+=3;
 const current=JSON.parse(readFileSync(new URL('../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json',import.meta.url)));
-const expected=JSON.parse(readFileSync(new URL('../docs/schema-candidates/erp2-v32-waca-conflict-http409.snapshot.json',import.meta.url)));
+const expected=JSON.parse(readFileSync(new URL('../docs/schema-candidates/erp2-v33-r5-source-capacity-receiving.snapshot.json',import.meta.url)));
 const contract=JSON.parse(readFileSync(new URL('../config/erp-environment-identity.json',import.meta.url)));
 current.identity={...current.identity,projectRef:'rhfdjsklfrgpoqsaqpkn',environmentRole:'PRODUCTION'};
 const candidate={head:'03fd94b0ddd380e2746e6dd26f9524488ebbc908',checkpointTag:'checkpoint-unit-checksum-only'};

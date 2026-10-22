@@ -16,18 +16,30 @@ const allowed=[
  'tests/r5-owner-preview-ui.mjs','tests/fixtures/r5-mode-draft.tsx','tests/fixtures/r5-owner-preview.html','tests/fixtures/r5-owner-preview.mjs',
  'tests/waca-counted-restore-e2e.mjs','scripts/r5-seven-integration-gates.mjs','scripts/r5-seven-owner-preview.mjs','scripts/r5-seven-change-impact.mjs',
  'tests/r5-schema-rollback-isolated.mjs','tests/r5-authoritative-backup-restore-isolated.mjs','tools/r5-release/contract.mjs',
+ 'tests/r5-release-reconciliation.mjs','tests/helpers/saveability-isolated.mjs','tests/waca-counted-transition.mjs',
+ 'tests/schema-canonical-native-v3.mjs','tests/schema-canonical-v3.mjs','tests/schema-reconciliation.mjs',
+ 'tests/migration-source-checksum-windows.mjs','tests/waca-conflict-077-schema-native.mjs',
+ 'tools/schema-reconciliation/migrationEffectRegistry.mjs','supabase/canonicalFreshInstallV3.mjs','config/erp-environment-identity.json',
+ 'docs/schema-candidates/erp2-v33-r5-source-capacity-receiving.snapshot.json',
 ];
 const changed=git('diff','--name-only',core,head).split(/\r?\n/).filter(Boolean).sort();
 assert.deepEqual(changed.filter(file=>!allowed.includes(file)),[],'Unreviewed integration file');
 const protectedFiles=[
- 'supabase/sql/078_core_source_capacity_and_receiving.sql','supabase/canonicalFreshInstallV3.mjs',
+ 'supabase/sql/078_core_source_capacity_and_receiving.sql','docs/schema-candidates/erp2-v32-waca-conflict-http409.snapshot.json',
  'scripts/post-adoption-descendant.mjs','scripts/r5-core-provider-review.mjs',
  'src/providers/providerMode.ts','src/providers/dataProvider.ts','src/providers/cloud/supabaseProvider.ts',
  'src/providers/cloud/cloudCacheWriteFence.ts',
  'src/contexts/CloudRealtimeSyncContext.tsx','src/providers/cloud/cloudAtomicRestore.ts',
- 'src/auth/AuthProvider.tsx','config/erp-environment-identity.json',
+ 'src/auth/AuthProvider.tsx',
 ];
 for(const file of protectedFiles)assert.equal(git('rev-parse',core+':'+file),git('rev-parse',head+':'+file),file+' must retain core protection');
+const textAt=(ref,file)=>execFileSync('git',['show',ref+':'+file],{encoding:'utf8'}).replace(/\r\n?/g,'\n');
+const fresh='supabase/canonicalFreshInstallV3.mjs';
+assert.equal(textAt(head,fresh),textAt(core,fresh).replaceAll("  '077_waca_custom_conflict_http409.sql',","  '077_waca_custom_conflict_http409.sql',\n  '078_core_source_capacity_and_receiving.sql',"));
+const cfg='config/erp-environment-identity.json',expectedCfg=JSON.parse(textAt(core,cfg));
+expectedCfg.schemaBaseline.requiredBaselineId='erp2-canonical-schema-v33-r5-source-capacity-receiving';
+expectedCfg.schemaBaseline.canonicalFingerprint='a5387d8513f2f1aab7eba16ab2f0b10a43a21fdbfeb85d8ac0686a6fc7878ac5';
+assert.deepEqual(JSON.parse(textAt(head,cfg)),expectedCfg,'Only the candidate schema target identity changes; guards stay exact');
 // Exactly two user-facing string replacements; every other CAS/error statement stays pinned.
 const cas='src/providers/cloud/cloudFieldCas.ts';
 const originalCas=execFileSync('git',['show',core+':'+cas],{encoding:'utf8'}).replace(/\r\n?/g,'\n');

@@ -9,7 +9,11 @@ import { CANONICAL_FRESH_INSTALL_V3 } from '../../supabase/canonicalFreshInstall
 export const uuid=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 export const owner='00000000-0000-4000-8000-000000000099';
 export const viewer='00000000-0000-4000-8000-000000000098';
-export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3, safeupdateLibrary, postgrestBinary}={}) {
+// Tests of the migration boundary start at the current live v32 by default.
+// Latest-target tests pass the full source chain explicitly. Candidate-flag
+// tests append 078 once; nothing here is a production migration runner.
+export const R5_V32_MIGRATIONS=Object.freeze(CANONICAL_FRESH_INSTALL_V3.filter(f=>f!=='078_core_source_capacity_and_receiving.sql'));
+export async function isolatedDatabase({migrations=R5_V32_MIGRATIONS, safeupdateLibrary, postgrestBinary}={}) {
   if(safeupdateLibrary !== undefined) assert.match(safeupdateLibrary,
     /^\/tmp\/erp2-waca-21000-safeupdate\.[A-Za-z0-9]+\/safeupdate\.so$/u,
     'Only the disposable, locally built safeupdate library is allowed');
@@ -55,7 +59,7 @@ export async function isolatedDatabase({migrations=CANONICAL_FRESH_INSTALL_V3, s
     // not turn dollar-quoted replacement anchors into a different string from
     // pg_get_functiondef's normalized body (076). Files/checksums stay untouched.
     for(const file of migrations) await sql.query(readFileSync('supabase/sql/'+file,'utf8').replace(/\r\n?/g,'\n'));
-    if(process.env.ERP2_CORE_FIX_TEST_CANDIDATE==='1') {
+    if(process.env.ERP2_CORE_FIX_TEST_CANDIDATE==='1' && !migrations.includes('078_core_source_capacity_and_receiving.sql')) {
       assert.ok(migrations.includes('077_waca_custom_conflict_http409.sql'),'Core candidate requires the v32 base');
       await sql.query(readFileSync('supabase/sql/078_core_source_capacity_and_receiving.sql','utf8'));
     }

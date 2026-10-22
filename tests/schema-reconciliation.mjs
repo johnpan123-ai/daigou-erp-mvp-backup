@@ -19,7 +19,7 @@ const contract = JSON.parse(await readFile(new URL('../config/erp-environment-id
 assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
 assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051','052','053','054','055','056','057',
-  '058','059','060','061','062','063','064','065','066','067','068','069','070','071','072','073','074','075','076','077'].sort());
+  '058','059','060','061','062','063','064','065','066','067','068','069','070','071','072','073','074','075','076','077','078'].sort());
 assert.deepEqual(registry['076'].dependencies, ['034', '051']);
 assert.equal(registry['076'].sourceEffects.tables.length, 0);
 assert.deepEqual(registry['076'].postconditions.map(p => p.object), ['public.erp_apply_japan_package_transaction(uuid,jsonb)', 'public.erp_apply_related_transaction(uuid,jsonb)']);
@@ -153,6 +153,9 @@ const retainedCanonical = JSON.parse(await readFile(new URL('../docs/schema-cand
 for (const entry of registry['074'].postconditions[0].retainedImplementation.functions) {
   canonical.functions[entry.object] = structuredClone(retainedCanonical.functions[entry.object]);
 }
+const coreCanonical=JSON.parse(await readFile(new URL('../docs/schema-candidates/erp2-v33-r5-source-capacity-receiving.snapshot.json',import.meta.url),'utf8'));
+for(const entry of registry['078'].postconditions[0].retainedImplementation.functions)
+  canonical.functions[entry.object]=structuredClone(coreCanonical.functions[entry.object]);
 
 const reordered = structuredClone(canonical);
 reordered.schemas.reverse();
