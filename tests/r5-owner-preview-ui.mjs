@@ -31,9 +31,11 @@ try{
  assert.equal(all.items.find(i=>i.id.endsWith('302')).checked_at,before.items.find(i=>i.id.endsWith('302')).checked_at);
  // The actual browser and Provider preserve the CORE error; every row rolls back.
  await page.getByRole('button',{name:'全取消點收',exact:true}).first().click();await page.waitForTimeout(400);
- assert.deepEqual(await snap(),all);assert.ok(dialogs.some(t=>/已配置 3 件.*未配置 2 件.*整列取消點收/.test(t)),JSON.stringify(dialogs));
- const free=page.locator('.checklist-item-row').filter({hasText:'未點收來源'}).locator('input[type="checkbox"]');assert.equal(await free.isChecked(),true);await free.click();
- await page.waitForFunction(()=>[...document.querySelectorAll('.checklist-item-row')].find(el=>el.textContent.includes('未點收來源'))?.querySelector('input[type="checkbox"]').checked===false);
+ assert.deepEqual(await snap(),all);assert.ok(dialogs.includes('本次操作包含已配置出庫的商品，因此無法全部取消點收。所有商品均維持原狀。'),JSON.stringify(dialogs));
+ await page.locator('.checklist-item-row').filter({hasText:'已點收來源'}).locator('input[type="checkbox"]').click();await page.waitForTimeout(400);
+ assert.deepEqual(await snap(),all);assert.ok(dialogs.includes('此商品已有 3 件配置至出庫單，因此無法取消整筆點收。請先解除相關出庫配置。'),JSON.stringify(dialogs));
+ const free=page.locator('.checklist-item-row').filter({hasText:'來源 B'}).locator('input[type="checkbox"]');assert.equal(await free.isChecked(),true);await free.click();
+ await page.waitForFunction(()=>[...document.querySelectorAll('.checklist-item-row')].find(el=>el.textContent.includes('來源 B'))?.querySelector('input[type="checkbox"]').checked===false);
  assert.equal((await snap()).items.filter(i=>i.checked).length,2);assert.equal((await snap()).packages[0].status,'registered');
  // Real field CAS persists the same complete date previewed by L2.
  await page.evaluate(()=>localStorage.setItem('purchase_management_edit_mode','true'));

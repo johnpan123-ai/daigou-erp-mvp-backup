@@ -203,10 +203,10 @@ export function cloudMutationFailureMessage(error: unknown): string {
     try {
       const detail = JSON.parse(server.details ?? '{}');
       if (Number.isSafeInteger(detail.allocated) && Number.isSafeInteger(detail.cancelable)) {
-        return `此來源已配置 ${detail.allocated} 件，未配置 ${detail.cancelable} 件；不可超額配置或整列取消點收。部分取消需另案設計。`;
+        return `來源配置數量超過可用數量（已配置 ${detail.allocated} 件），操作未完成。`;
       }
     } catch { /* only bounded server values are displayed */ }
-    return '來源數量不足或已有出庫配置，操作未完成；請同步後確認。';
+    return '來源可用數量不足，操作未完成；請同步後確認。';
   }
   if (server?.message === 'CORE_PACKAGE_PROGRESS_MISMATCH') {
     try {

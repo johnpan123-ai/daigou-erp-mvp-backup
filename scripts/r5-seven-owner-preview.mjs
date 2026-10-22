@@ -12,7 +12,7 @@ try{
  await db.sql.query(readFileSync('supabase/sql/078_core_source_capacity_and_receiving.sql','utf8'));
  await db.sql.query("update public.product_groups set title='R5 日期與來源示範商品',show_in_purchase_list=true,closing_date='2026/10/25' where id=$1",[uuid(1)]);
  await db.sql.query("insert into public.japan_packages(id,title,status) values($1,'R5 部分點收＋出庫保護示範','registered')",[uuid(301)]);
- await db.sql.query("insert into public.japan_package_items(id,japan_package_id,product_variant_id,sku,product_title,variant_name,quantity,checked,checked_at) values($1,$4,$5,'G-SYNTHETIC','已點收來源 5 件','已點收來源',5,true,'2026-10-20T01:00:00Z'),($2,$4,$5,'G-SYNTHETIC','未點收來源 2 件','未點收來源',2,false,null),($3,$4,$5,'G-SYNTHETIC','另一來源 3 件','另一來源',3,false,null)",[uuid(302),uuid(303),uuid(304),uuid(301),uuid(2)]);
+ await db.sql.query("insert into public.japan_package_items(id,japan_package_id,product_variant_id,sku,product_title,variant_name,quantity,checked,checked_at) values($1,$4,$5,'G-SYNTHETIC','已點收來源 5 件','已點收來源',5,true,'2026-10-20T01:00:00Z'),($2,$4,$5,'G-SYNTHETIC','來源 B 2 件','來源 B',2,false,null),($3,$4,$5,'G-SYNTHETIC','另一來源 3 件','另一來源',3,false,null)",[uuid(302),uuid(303),uuid(304),uuid(301),uuid(2)]);
  await db.sql.query("insert into public.outbound_shipments(id,title,status) values($1,'R5 出庫單 A','draft'),($2,'R5 出庫單 B','draft')",[uuid(310),uuid(311)]);
  await db.sql.query("insert into public.outbound_shipment_items(id,outbound_shipment_id,japan_package_item_id,product_variant_id,sku,product_title,quantity,checked) values($1,$2,$3,$4,'G-SYNTHETIC','已配置來源 3 件',3,false)",[uuid(312),uuid(310),uuid(302),uuid(2)]);
  await db.startPostgrest();

@@ -7,7 +7,7 @@ const out=resolve(process.env.R5_GATE_OUTPUT||'scratch/r5-seven-evidence');mkdir
 const main='C:/Users/小河馬/.gemini/antigravity/scratch/daigou-erp-mvp';
 const env={...process.env,WACA_ISOLATED_PG_URL:'postgresql://postgres@127.0.0.1:55492/waca_v3_base',WACA_TEST_SAFEUPDATE_LIBRARY:'/tmp/erp2-waca-21000-safeupdate.k8oEUd/safeupdate.so',WACA_TEST_POSTGREST_BINARY:'/tmp/erp2-waca-074-postgrest.5dmHGR/postgrest',WACA_TEST_POSTGREST_PORT:'4497',VITE_DEPLOYMENT_ENV:'staging',VITE_SUPABASE_URL:'https://rhfdjsklfrgpoqsaqpkn.supabase.co',VITE_SUPABASE_ANON_KEY:'isolated-test-key-not-a-real-credential',P0_ESLINT_BASELINE:'23a02377044c7cf56a41aabe1ddce79fc0535df5',ERP1_V1_REAL_SNAPSHOT:main+'/scratch/claude-handoff-erp2-20261010/fixtures/ERP1_RAW_V1_READONLY.json',ERP2_CURRENT_REAL_SNAPSHOT:main+'/scratch/claude-handoff-erp2-20261010/fixtures/ERP2_CURRENT_BACKUP.json',ERP2_V2_DUPSKU_SNAPSHOT:'C:/Users/小河馬/Downloads/cloud-authoritative-backup-2026-10-15 (4).json',ERP2_EGRESS_BACKUP:'C:/Users/小河馬/Downloads/cloud-authoritative-backup-2026-10-16.json',OUTBOUND_RACE_SNAPSHOT:'C:/Users/小河馬/Downloads/workbench-backup-2026-08-15.json',OUT:join(out,'ui'),RESTORE_POSTCOMMIT_EVIDENCE_DIR:join(out,'postcommit')};
 export const gates=[
- 'closing-date-input-validation','r5-closing-date-react','r5-owner-preview-ui','japan-package-bulk-receiving-postgrest',
+ 'r5-receiving-message','closing-date-input-validation','r5-closing-date-react','r5-owner-preview-ui','japan-package-bulk-receiving-postgrest',
  'r5-core-source-safety-postgrest','r5-mode-draft-react','r5-core-provider-guard',
  'cloud-outbound-shipment-transaction','cloud-outbound-shipment-provider-integration','related-saveability-isolated',
  'cloud-japan-package-transaction','cloud-japan-package-provider-integration','partial-receiving-outbound-route',
@@ -18,6 +18,9 @@ export const gates=[
  'erp1-v1-restore-compatibility','basic-info-backup-restore-isolated','restore-postcommit-verification',
  'cloud-backup-next-restore-e2e','catalog-atomic-isolated','erp2-reviewed-change-impact',
  'p0-eslint-baseline-delta','typescript','build','r5-seven-change-impact','realtime-full-read-budget',
+ 'r5-schema-rollback-isolated','r5-authoritative-backup-restore-isolated',
+ 'schema-reconciliation','schema-canonical-v3','schema-canonical-native-v3',
+ 'erp2-pre-adoption-guard','staging-build-identity','erp2-promotion-guard',
 ];
 const names=process.argv.slice(2);const results=[];
 env.ERP1_V1_WACA_SNAPSHOT='C:/Users/小河馬/Downloads/cloud-erp-snapshot-2026-10-16-021720.json';

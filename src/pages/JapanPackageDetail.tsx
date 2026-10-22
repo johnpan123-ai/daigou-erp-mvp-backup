@@ -12,6 +12,7 @@ import { sortJapanPackageDisplayGroups, type JapanPackageDisplaySort } from '../
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
+import { receivingCancellationMessage } from '../lib/receivingCancellationMessage';
 import type { JapanPackage, JapanPackageItem, ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, PurchaseBatchItem, BundleComponent } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
@@ -362,7 +363,7 @@ export default function JapanPackageDetail() {
   const [isImportCollapsed, setIsImportCollapsed] = useState<boolean>(true);
 
   // Bulk operation updates restricted to checked, checked_at, and updated_at fields
-  const handleBulkToggleCheck = async (itemIds: string[], checkedVal: boolean) => {
+  const handleBulkToggleCheck = async (itemIds: string[], checkedVal: boolean, batch = true) => {
     if (!id || !pkg || itemIds.length === 0) return;
     // Submit only the items whose checked state actually changes; already checked (or already
     // unchecked) items are never re-sent, so their original checked_at is kept and nothing is rewritten.
@@ -405,7 +406,7 @@ export default function JapanPackageDetail() {
         if (error.kind === 'result-unknown') transactionOutcomeUnknownRef.current.add(scope);
         alert(error.message);
       }
-      else alert(cloudMutationFailureMessage(error));
+      else alert(checkedVal ? cloudMutationFailureMessage(error) : receivingCancellationMessage(error, batch));
     } finally {
       transactionInFlightRef.current.delete(scope);
       setIsReceivingPending(false);
@@ -798,7 +799,7 @@ export default function JapanPackageDetail() {
 
   // Checkbox confirmation toggling
   const handleToggleCheck = async (itemId: string, checkedVal: boolean) => {
-    await handleBulkToggleCheck([itemId], checkedVal);
+    await handleBulkToggleCheck([itemId], checkedVal, false);
   };
 
   const handleDeleteItem = async (itemId: string) => {
