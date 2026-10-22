@@ -85,6 +85,10 @@ try {
     await display.copyJapanPackageReceivingGroupTitle('Hololive 商品群組', async value => {
       copiedGroupTitle = value;
     });
+    const progressNone = display.getJapanPackageReceivingGroupProgress([{ checked: false, quantity: 1 }, { checked: false, quantity: 4 }]);
+    const progressPartial = display.getJapanPackageReceivingGroupProgress([{ checked: false, quantity: 1 }, { checked: true, quantity: 4 }]);
+    const progressComplete = display.getJapanPackageReceivingGroupProgress([{ checked: true, quantity: 1 }, { checked: true, quantity: 4 }]);
+    const progressUnreliable = display.getJapanPackageReceivingGroupProgress([{ checked: true, quantity: Number.NaN }, { checked: false, quantity: 4 }]);
     const variantIds = new Set(variants.map(variant => variant.id));
     const bundleIds = new Set(['bundle-parent']);
 
@@ -116,6 +120,7 @@ try {
       samePackageItemIdentities: sortedPackageItems.every(item => packageItems.includes(item)),
       packageItemsUnchanged: JSON.stringify(packageItems) === originalPackageItems,
       copiedGroupTitle,
+      progressNone, progressPartial, progressComplete, progressUnreliable,
       inputCount: variants.length,
       outputCount: sorted.length,
       sameObjectIdentities: sorted.every(variant => variants.includes(variant)),
@@ -160,6 +165,11 @@ try {
   console.log('PASS package items remain grouped by purchase batch, sort by SKU within each batch, and are not merged or mutated');
 
   assert.equal(result.copiedGroupTitle, 'Hololive 商品群組');
+  assert.deepEqual(result.progressNone, { recordCount: 2, checkedRecordCount: 0, totalQuantity: 5, checkedQuantity: 0, status: 'none' });
+  assert.deepEqual(result.progressPartial, { recordCount: 2, checkedRecordCount: 1, totalQuantity: 5, checkedQuantity: 4, status: 'partial' });
+  assert.deepEqual(result.progressComplete, { recordCount: 2, checkedRecordCount: 2, totalQuantity: 5, checkedQuantity: 5, status: 'complete' });
+  assert.deepEqual(result.progressUnreliable, { recordCount: 2, checkedRecordCount: 1, totalQuantity: null, checkedQuantity: null, status: 'partial' });
+  console.log('PASS receiving status separates records (筆) from quantities (件); unreliable quantities are not displayed');
   console.log('PASS group-title copy uses the exact displayed group name and performs Clipboard-only work');
 
   assert.equal(result.variantsUnchanged, true);
@@ -174,7 +184,14 @@ try {
   assert.equal((pageSource.match(/bundleComps\.map\(renderBundleComponent\)/g) || []).length, 3, 'A receiving layout lost its component rows');
   assert.ok((pageSource.match(/套組內容/g) || []).length >= 6, 'Expand/collapse structure labels were removed');
   assert.ok(pageSource.includes('handleToggleCheck'), 'Receiving check behavior is no longer wired');
-  assert.equal((pageSource.match(/<CopyProductNameButton name={g\.title} groupId={g\.id} \/>/g) || []).length, 2, 'Desktop/mobile group-title copy controls are incomplete');
+  assert.equal((pageSource.match(/<CopyProductNameButton name={g\.title} groupId={g\.id} \/>/g) || []).length, 1, 'Desktop group-title copy control is incomplete');
+  assert.equal((pageSource.match(/<CopyProductNameIconButton name={g\.title} groupId={g\.id} \/>/g) || []).length, 1, 'Mobile group-title copy icon is incomplete');
+  const mobileReceiving = pageSource.slice(pageSource.indexOf('商品點收清單'), pageSource.indexOf('Sticky Mobile Footer Action Bar'));
+  assert.equal(/WebkitLineClamp|ellipsis/.test(mobileReceiving), false, 'Mobile receiving names must not be clamped or truncated');
+  assert.ok(mobileReceiving.includes('text={catAndVariant}'), 'Every mobile source row must keep its full item name');
+  const fitSource = await readFile(new URL('../src/components/AdaptiveFitText.tsx', import.meta.url), 'utf8');
+  assert.equal(/LineClamp|ellipsis|textOverflow/.test(fitSource), false, 'Adaptive text must never truncate');
+  assert.ok(/MOBILE_RECEIVING_TITLE_SIZES = \[16, 15, 14, 13\]/.test(pageSource) && /MOBILE_RECEIVING_ITEM_SIZES = \[15, 14, 13\]/.test(pageSource), 'Adaptive font size floor must stay at 13px');
   assert.ok(pageSource.includes('checklist-group-header-main'), 'Two-row desktop group header main row is missing');
   assert.ok(pageSource.includes('checklist-group-header-secondary'), 'Two-row desktop group header status row is missing');
   console.log('PASS all three receiving layouts keep expand/collapse structure without redundant inner headings');

@@ -112,3 +112,33 @@ export const copyJapanPackageReceivingGroupTitle = (
   title: string,
   writeClipboard: ClipboardWriter = value => navigator.clipboard.writeText(value)
 ): Promise<void> => writeClipboard(title);
+
+export type JapanPackageReceivingGroupStatus = 'none' | 'partial' | 'complete';
+
+export interface JapanPackageReceivingGroupProgress {
+  /** Source records (package items) in the group. */
+  recordCount: number;
+  checkedRecordCount: number;
+  /** Item quantities; null when any record lacks a reliable non-negative quantity. */
+  totalQuantity: number | null;
+  checkedQuantity: number | null;
+  status: JapanPackageReceivingGroupStatus;
+}
+
+// Display-only summary of a receiving group. Records (筆) and item quantities (件) are kept
+// separate; quantities are only reported when every record carries a valid quantity.
+export const getJapanPackageReceivingGroupProgress = (
+  items: readonly Pick<JapanPackageItem, 'checked' | 'quantity'>[]
+): JapanPackageReceivingGroupProgress => {
+  const recordCount = items.length;
+  const checkedRecordCount = items.filter(item => item.checked).length;
+  const quantitiesReliable = items.every(item => Number.isFinite(item.quantity) && item.quantity >= 0);
+  const totalQuantity = quantitiesReliable ? items.reduce((sum, item) => sum + item.quantity, 0) : null;
+  const checkedQuantity = quantitiesReliable
+    ? items.filter(item => item.checked).reduce((sum, item) => sum + item.quantity, 0)
+    : null;
+  const status: JapanPackageReceivingGroupStatus = checkedRecordCount === 0
+    ? 'none'
+    : checkedRecordCount === recordCount ? 'complete' : 'partial';
+  return { recordCount, checkedRecordCount, totalQuantity, checkedQuantity, status };
+};

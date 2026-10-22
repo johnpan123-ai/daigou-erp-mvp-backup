@@ -80,7 +80,8 @@ export function mergeRelatedCollections(current:Record<string,Record<string,unkn
     const complete=items.length>0&&items.every(r=>r.checked);
     next.japan_packages=(next.japan_packages??[]).map(p=>{
       if(p.id!==original?.japan_package_id||p.status==='problem')return p;
-      const status=complete?'confirmed':p.status==='confirmed'?'arrived':p.status;
+      // Same rule as erp_apply_related_transaction after 076: a reopened confirmed package returns to 'registered'.
+      const status=complete?'confirmed':p.status==='confirmed'?'registered':p.status;
       return status===p.status?p:{...p,status,arrived_at:p.arrived_at??new Date().toISOString().slice(0,10)};
     });
   }

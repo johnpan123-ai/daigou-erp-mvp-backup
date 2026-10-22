@@ -161,6 +161,17 @@ if (outboundReceivingScenario) {
   });
 }
 if (partialReceivingScenario) server.outboundShipmentItems = [];
+// Test-only (packageStatus=...): start the Japan package in a given (e.g. historical) status; display / status tests only.
+const packageStatus = fixtureParams.get('packageStatus');
+if (packageStatus) server.japanPackages = server.japanPackages.map(pkg => pkg.id === 'jp-react-1' ? { ...pkg, status: packageStatus } : pkg);
+// Test-only (receivingTitle=...): long Japanese product name for the mobile receiving list review; display data only.
+const receivingTitle = fixtureParams.get('receivingTitle');
+if (receivingTitle) {
+  server.productGroups = server.productGroups.map(group => group.id === 'g-holo'
+    ? { ...group, title: receivingTitle, normalized_title: receivingTitle } : group);
+  server.japanPackageItems = server.japanPackageItems.map((item, index) => ({ ...item, product_title: receivingTitle,
+    quantity: index === 0 ? 4 : 2 }));
+}
 if (uuidFixtures) {
   server.inventory = server.inventory.map(row => ({ ...row, id: fixtureId(row.id || row.inventory_key) }));
   for (const [collection, rows] of Object.entries(server)) server[collection] = mapRows(rows);
@@ -224,6 +235,9 @@ markCloudReadFresh(Object.values(server).reduce((sum, rows) => sum + (Array.isAr
 
 const pageLoads = {};
 let writes = 0;
+// Test-only: per-method write counts and a hold / failure point for product group saves.
+const writesByMethod = {};
+let heldGroupSave = null, releaseGroupSave = null, groupSaveHeld = false, failNextGroupSave = null;
 let heldPageRead, releasePageRead, pageReadHeld = false;
 let holdAllPageReads = false;
 let heldOutboundSave, releaseOutboundSave, outboundSaveHeld = false;
@@ -252,6 +266,20 @@ for (const [collection, [getMethod, saveMethod]] of Object.entries(collectionAda
   };
   dataProvider[saveMethod] = async rows => {
     writes += 1;
+    writesByMethod[saveMethod] = (writesByMethod[saveMethod] || 0) + 1;
+    if (saveMethod === 'saveProductGroups' && heldGroupSave) {
+      const gate = heldGroupSave;
+      heldGroupSave = null;
+      groupSaveHeld = true;
+      await gate;
+      groupSaveHeld = false;
+    }
+    if (saveMethod === 'saveProductGroups' && failNextGroupSave) {
+      const kind = failNextGroupSave;
+      failNextGroupSave = null;
+      if (kind === 'stale') throw new StaleDataError('資料已在其他分頁更新（CAS 衝突模擬），本次未儲存。');
+      throw new Error('simulated product group save failure');
+    }
     if (saveMethod === 'saveOutboundShipmentItems' && heldOutboundSave) {
       const gate = heldOutboundSave;
       heldOutboundSave = null;
@@ -362,13 +390,15 @@ const applyReceivingState = (itemId, checked, checkedAt = new Date().toISOString
   let status = currentPackage.status;
   if (status !== 'problem') {
     if (activeItems.length > 0 && activeItems.every(item => item.checked)) status = 'confirmed';
-    else if (activeItems.some(item => item.checked) || status === 'arrived' || status === 'confirmed') status = 'arrived';
+    // Same rule as the Cloud RPC after 076: partial receiving keeps the status; reopened confirmed -> registered.
+    else if (status === 'confirmed') status = 'registered';
   }
+  const anyChecked = activeItems.some(item => item.checked);
   server.japanPackages = server.japanPackages.map(pkg => pkg.id === packageId ? {
     ...pkg,
     status,
-    arrived_at: status === 'arrived' || status === 'confirmed' ? (pkg.arrived_at || '2026-09-20') : pkg.arrived_at,
-    version: Number(pkg.version || 1) + (status !== pkg.status ? 1 : 0),
+    arrived_at: status === 'arrived' || status === 'confirmed' || (status !== 'problem' && anyChecked) ? (pkg.arrived_at || '2026-09-20') : pkg.arrived_at,
+    version: Number(pkg.version || 1) + (status !== pkg.status || (!pkg.arrived_at && anyChecked && status !== 'problem') ? 1 : 0),
     updated_at: checkedAt,
   } : pkg);
 };
@@ -631,6 +661,9 @@ window.__P0_REACT_HARNESS__ = {
     return activeController.waitForReconnect();
   },
   focus() { window.dispatchEvent(new Event('focus')); },
+  holdNextGroupSave() { heldGroupSave = new Promise(resolve => { releaseGroupSave = resolve; }); },
+  releaseGroupSave() { releaseGroupSave?.(); releaseGroupSave = null; },
+  failNextGroupSave(kind = 'error') { failNextGroupSave = kind; },
   visibility(state) {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -648,6 +681,8 @@ window.__P0_REACT_HARNESS__ = {
       targetedQueriesByTable: clone(targetedQueriesByTable),
       pageLoads: clone(pageLoads),
       writes,
+      writesByMethod: clone(writesByMethod),
+      groupSaveHeld,
       idempotentReplays,
       japanPackageTransactionCalls,
       connectivity: getCloudConnectivitySnapshot(),

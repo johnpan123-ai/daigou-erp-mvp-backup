@@ -1,8 +1,9 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { ERP2_MIGRATION_SOURCE_ORDER_V3 } from '../../supabase/canonicalFreshInstallV3.mjs';
 import { fingerprintFunctionImplementation } from './functionImplementation.mjs';
+import { createMigrationSourceReader } from './migrationSource.mjs';
+import { reviewedWacaConflictDefinition } from './wacaConflictTransport.mjs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -40,9 +41,37 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
   '014': '014_upgrade_inventory_items_composite_key.sql', '020': '020_cloud_field_cas.sql',
   '023': '023_cloud_atomic_json_restore.sql', '025': '025_cloud_atomic_restore_execution_timeout.sql',
   '026': '026_cloud_restore_guarded_full_delete.sql', '040': '040_cloud_restore_owner_builder_proof.sql',
+  '034': '034_japan_package_partial_receiving_state_machine.sql',
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '077': {
+    sourceFile: '077_waca_custom_conflict_http409.sql', dependencies: ['075'],
+    risk: 'WACA_CUSTOM_CONFLICT_TRANSPORT_ONLY', idempotency: 'EXACT_SOURCE_GUARDED_FUNCTION_PATCH',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    // Dependency 075 supplies the private names. SQL pins all four complete
+    // input definitions; no partially changed function can be patched.
+    preconditions: [fn('erp_commit_waca_counted_snapshot(jsonb,bigint,jsonb)'), table('waca_state')],
+    postconditions: [fn('erp_commit_waca_counted_snapshot_v074(jsonb,bigint,jsonb)', { retainedImplementation: 'WACA_077' })],
+  },
+  '076': {
+    sourceFile: '076_japan_package_daily_status_transitions.sql', dependencies: ['034', '051'],
+    risk: 'JAPAN_PACKAGE_DAILY_STATUS_TRANSITIONS', idempotency: 'EXACT_SOURCE_GUARDED_FUNCTION_PATCH',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [fn('erp_apply_japan_package_transaction(uuid,jsonb)'), fn('erp_apply_related_transaction(uuid,jsonb)'),
+      table('japan_packages'), table('japan_package_items'), fn('erp_apply_field_mutations(text,jsonb)')],
+    postconditions: [fn('erp_apply_japan_package_transaction(uuid,jsonb)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb', publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=""'],
+      definitionIncludes: ["ELSIF v_current_package.status = 'confirmed' THEN", "v_target_status := 'registered';",
+        "OR (v_target_status <> 'problem' AND COALESCE(v_any_checked, false))", 'bool_or(item.checked)',
+        'F3_STRUCTURED_ROLLBACK', 'pg_advisory_xact_lock', 'ON CONFLICT (actor_id, idempotency_key) DO NOTHING'],
+    }), fn('erp_apply_related_transaction(uuid,jsonb)', {
+      owner: 'postgres', securityDefiner: true, returnType: 'jsonb', publicExecute: false, anonExecute: false, authenticatedExecute: true,
+      requiredConfig: ['search_path=""'],
+      definitionIncludes: ["ELSE CASE WHEN p.status='confirmed' THEN 'registered' ELSE p.status END END", 'expectedRecords', 'erp_apply_field_mutations'],
+    })],
+  },
   '075': {
     sourceFile: '075_waca_order_recognition_management.sql', dependencies: ['074'],
     risk: 'WACA_OWNER_ORDER_LINE_RECOGNITION', idempotency: 'TRANSACTIONAL_RENAME_ONCE',
@@ -917,6 +946,7 @@ export function extractSqlEffects(sql) {
 }
 
 export async function buildMigrationEffectRegistry() {
+  const readMigration = createMigrationSourceReader(ROOT);
   const canonical075 = JSON.parse(await readFile(new URL('../../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json', import.meta.url), 'utf8'));
   const signatures075 = [
     'erp_commit_waca_snapshot(jsonb,bigint,boolean)', 'erp_commit_waca_snapshot_v044(jsonb,bigint,boolean)',
@@ -935,11 +965,21 @@ export async function buildMigrationEffectRegistry() {
     if (!sha256) throw new Error(`RETAINED_IMPLEMENTATION_CANONICAL_MISSING:${object}`);
     return { object, sha256 };
   }) };
+  const retained077 = { ...retained075, contract: 'WACA_077_EXACT_CONFLICT_TRANSPORT_IMPLEMENTATIONS',
+    functions: signatures075.map(signature => {
+      const object = `public.${signature}`, original = canonical075.functions[object];
+      const sha256 = fingerprintFunctionImplementation({ ...original,
+        definition: reviewedWacaConflictDefinition(object, original.definition) });
+      if (!sha256) throw new Error(`WACA_TRANSPORT_CANONICAL_MISSING:${object}`);
+      return { object, sha256 };
+    }) };
+  // Whole-chain alternatives, never per-function mix-and-match. Both are exact
+  // reviewed implementations, including ACL/config and every business predicate.
+  retained075.reviewedSuccessors = [retained077];
   const order = new Map(ERP2_MIGRATION_SOURCE_ORDER_V3.map((file, index) => [file, index]));
   const result = {};
   for (const [migrationId, spec] of Object.entries(MIGRATION_EFFECT_SPECS)) {
-    const path = new URL(`../../supabase/sql/${spec.sourceFile}`, import.meta.url);
-    const sql = await readFile(path, 'utf8');
+    const { sql, sourceChecksum } = await readMigration(spec.sourceFile);
     if (!order.has(spec.sourceFile)) throw new Error(`MIGRATION_NOT_IN_CANONICAL_CHAIN:${spec.sourceFile}`);
     const extracted = extractSqlEffects(sql);
     if (!extracted.transactionWrapped) throw new Error(`MIGRATION_NOT_TRANSACTION_WRAPPED:${migrationId}`);
@@ -950,20 +990,23 @@ export async function buildMigrationEffectRegistry() {
       ...created.uniques.map(value => q('unique', `public.${created.name}`, value)),
       ...created.foreignKeys.map(value => q('foreignKey', `public.${created.name}`, true, value)),
     ]);
-    const postconditions = [...spec.postconditions, ...derivedConditions].map(condition =>
-      condition.retainedImplementation === 'WACA_075' ? { ...condition, retainedImplementation: retained075 } : condition)
+    const retainedCondition = condition => condition.retainedImplementation === 'WACA_075'
+      ? { ...condition, retainedImplementation: retained075 }
+      : condition.retainedImplementation === 'WACA_077' ? { ...condition, retainedImplementation: retained077 } : condition;
+    const postconditions = [...spec.postconditions, ...derivedConditions].map(retainedCondition)
       .filter((value, index, values) => values.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(value)) === index);
     const dependencySources = [];
     for (const dependency of spec.dependencies) {
       const dependencyFile = MIGRATION_EFFECT_SPECS[dependency]?.sourceFile ?? DEPENDENCY_SOURCE_FILES[dependency];
       if (!dependencyFile || !order.has(dependencyFile)) throw new Error(`MIGRATION_DEPENDENCY_SOURCE_UNKNOWN:${migrationId}:${dependency}`);
-      const dependencySql = await readFile(new URL(`../../supabase/sql/${dependencyFile}`, import.meta.url), 'utf8');
+      const dependencySource = await readMigration(dependencyFile);
       dependencySources.push({ migrationId: dependency, sourceFile: dependencyFile,
-        sourceChecksum: createHash('sha256').update(dependencySql).digest('hex') });
+        sourceChecksum: dependencySource.sourceChecksum });
     }
     result[migrationId] = Object.freeze({
       migrationId, ...spec,
-      sourceChecksum: createHash('sha256').update(sql).digest('hex'),
+      preconditions: spec.preconditions.map(retainedCondition),
+      sourceChecksum,
       canonicalOrder: order.get(spec.sourceFile),
       sourceEffects: extracted,
       dependencySources,

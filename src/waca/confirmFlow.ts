@@ -3,6 +3,7 @@ import type { WacaCountedPlan } from './countedImport';
 import type { NextWacaSnapshot } from './nextStorage';
 import { reconcileWacaReadback } from './reconciliation';
 import type { WacaStage } from './importErrors';
+import { isWacaBusinessConflict } from './importErrors';
 
 // Compare wire values, not object insertion order (Postgres JSONB reorders keys).
 const canonical = (value: unknown): string => JSON.stringify(value, (key, item: unknown) =>
@@ -79,6 +80,7 @@ export async function commitAndVerifyWaca(options: {
   try {
     await provider.commitNextWacaSnapshot(payload, current.revision, true);
   } catch (error) {
+    if (isWacaBusinessConflict(error)) throw error;
     // Includes response loss and HTTP ambiguity. Absence of a receipt is NOT
     // proof that a still-running request rolled back. Preserve UNKNOWN, no retry.
     try {
@@ -113,6 +115,7 @@ export async function commitAndVerifyWacaRematch(options: {
   try {
     await provider.commitNextWacaSnapshot(payload, current.revision, true);
   } catch (error) {
+    if (isWacaBusinessConflict(error)) throw error;
     try {
       saved = await provider.getNextWacaSnapshot();
       assertState(saved, candidate, current.revision);
@@ -152,6 +155,7 @@ export async function commitAndVerifyWacaCounted(options: {
   try {
     await provider.commitWacaCountedSnapshot(payload, current.revision, plan);
   } catch (error) {
+    if (isWacaBusinessConflict(error)) throw error;
     try { saved = await provider.getNextWacaSnapshot(); verify(saved); } catch { throw error; }
   }
   onStage('readback');

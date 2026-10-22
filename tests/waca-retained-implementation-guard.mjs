@@ -6,7 +6,8 @@ import {verifySchemaBaselineEvidence} from '../scripts/promotion-safety.mjs';
 import {fingerprintStructuralSnapshot} from '../tools/schema-reconciliation/schemaContract.mjs';
 
 const read = path => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
-const canonical = read('../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json');
+// Current candidate canonical (v31 = v30 + 076; the 075-retained WACA implementations are byte-identical in both).
+const canonical = read('../docs/schema-candidates/erp2-v32-waca-conflict-http409.snapshot.json');
 const contract = read('../config/erp-environment-identity.json');
 const registry = await buildMigrationEffectRegistry();
 const head = '1'.repeat(40), checkpoint = 'checkpoint-isolated-retained-implementation';
@@ -30,11 +31,11 @@ const verify = p => verifySchemaBaselineEvidence({evidence:p,contract,candidate:
   migrationRegistry:registry,liveObservation:{projectRef:'rhfdjsklfrgpoqsaqpkn',fingerprint:p.currentFingerprint,observedAt:capturedAt},now});
 let checks = 0;
 const positive = plan(snapshot);
-assert.equal(positive.migrations.length,44);
+assert.equal(positive.migrations.length,46);
 assert.ok(positive.migrations.every(item=>item.state==='SATISFIED' && item.applyMethod==='NO_APPLY'));
 assert.deepEqual(positive.applyPlan,[]);
 assert.equal(verify(positive).deploymentLineage.mode,'EXACT_BASELINE'); checks++;
-console.log('PASS canonical 075 -> 44/44 -> original strict POST_ADOPTION');
+console.log('PASS canonical v32 -> 46/46 -> original strict POST_ADOPTION');
 
 const chain = registry['074'].postconditions[0].retainedImplementation.functions;
 function reject(name, mutate) {
@@ -70,7 +71,8 @@ formatting.functions[delegate].definition='-- PostgreSQL formatting-only fixture
 assert.ok(plan(formatting).migrations.every(item=>item.state==='SATISFIED')); checks++;
 // Unit fixture: reverse only 075's reviewed renames/ACL and new functions.
 // The separate native test verifies the actual SQL-generated pre-075 schema.
-const prior=structuredClone(canonical);
+// The pre-075 (v29) reconstruction starts from the adopted v30 canonical, not from the later v31 candidate.
+const prior=structuredClone(read('../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json'));
 for(const [name,delegateName,args] of [
   ['erp_commit_waca_snapshot','erp_commit_waca_snapshot_v044','jsonb,bigint,boolean'],
   ['erp_commit_waca_counted_snapshot','erp_commit_waca_counted_snapshot_v074','jsonb,bigint,jsonb'],
@@ -84,7 +86,7 @@ assert.equal(fingerprintStructuralSnapshot(prior),'8410d8090f11ac1441c803b01d2d3
 prior.integrity=snapshot.integrity;prior.completeness.inventoryIntegrity=true;
 for(const id of ['044','073','074'])assert.equal(reconcileMigration(prior,registry[id]).state,'SATISFIED'); checks++;
 const pre=planSchemaDelta(prior,registry,{expectedSnapshot:canonical});
-assert.equal(pre.readyForApply,true);assert.deepEqual(pre.applyPlan.map(item=>item.migrationId),['075']); checks++;
+assert.equal(pre.readyForApply,true);assert.deepEqual(pre.applyPlan.map(item=>item.migrationId),['075','076','077']); checks++;
 assert.equal(fingerprintStructuralSnapshot(snapshot),contract.schemaBaseline.canonicalFingerprint);
-console.log(JSON.stringify({result:'PASS',checks,migrations:'44/44 SATISFIED',strictPostAdoption:'PASS',
+console.log(JSON.stringify({result:'PASS',checks,migrations:'46/46 SATISFIED',strictPostAdoption:'PASS',
   schema:contract.schemaBaseline.canonicalFingerprint,cloudWrites:0,ledgerWrites:0,delegateContracts:chain.length}));

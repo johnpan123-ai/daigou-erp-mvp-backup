@@ -21,6 +21,8 @@ import { getProviderMode } from '../providers/providerMode';
 import { CloudMutationBoundaryError, cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 import { stableFormIntent, readFormIntent, clearFormIntent, type PrivateOrderTransactionCommand } from '../providers/cloud/privateOrderTransaction';
 import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
+import { useProductGroupBasicInfoDrafts, type BasicInfoField } from '../hooks/useProductGroupBasicInfoDrafts';
+import { safeOfficialUrl } from '../lib/productGroupBasicInfo';
 
 
 // P0-2: the legacy browser-only default-cost maps (localStorage) predate the
@@ -502,8 +504,9 @@ export default function PurchaseManagement() {
   const toggleEditMode = () => {
     const nextVal = !editMode;
     if (!nextVal && (Object.keys(platformDemandDrafts).length > 0
-      || Object.keys(tempJpyCosts).length > 0 || Object.keys(tempTwdCosts).length > 0)) {
+      || Object.keys(tempJpyCosts).length > 0 || Object.keys(tempTwdCosts).length > 0 || basicInfo.hasUnsavedDrafts)) {
       if (!window.confirm('鎖定將放棄未儲存的數量與成本草稿，並讀取最新資料。確定繼續？')) return;
+      basicInfo.discardUnsaved();
       setPlatformDemandDrafts({});
       setTempJpyCosts({});
       setTempTwdCosts({});
@@ -515,6 +518,10 @@ export default function PurchaseManagement() {
   };
 
   const [group, setGroup] = useState<ProductGroup | null>(null);
+  // Title-row basic info (official closing date / release month / official URL): the same ProductGroup fields, save path
+  // and rules as Purchase Records level 1 (closing date = draft committed on blur / Enter; the other two save on change).
+  // 官方結單日 / 發售月份 / 官網網址: same shared rule as level 1 (local draft; save once on Blur / Enter).
+  const basicInfo = useProductGroupBasicInfoDrafts();
   const [notFoundId, setNotFoundId] = useState<string | null>(null);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -1033,7 +1040,8 @@ export default function PurchaseManagement() {
     `purchase-management:${id || 'unknown'}`,
     ['products', 'purchases', 'privateOrders', 'inventory', 'bundles', 'salesOrders'],
     Object.keys(platformDemandDrafts).length > 0 || Object.keys(tempJpyCosts).length > 0
-      || Object.keys(tempTwdCosts).length > 0 || showBatchModal || showPrivateOrderModal || isBundleDialogOpen,
+      || Object.keys(tempTwdCosts).length > 0 || showBatchModal || showPrivateOrderModal || isBundleDialogOpen
+      || basicInfo.hasDrafts,
     () => loadData({ readOnly: true }),
     undefined,
     { rereadProtectedCacheWhileEditing: true },
@@ -1324,6 +1332,39 @@ export default function PurchaseManagement() {
       platformDemandCommitInFlightRef.current.delete(key);
     }
   };
+
+  // Same rules as PurchaseRecords.handleUpdateGroupField (level 1): stale guard, allowed fields only, closing date stored as
+  // YYYY/MM/DD, whole product group list saved through dataProvider.saveProductGroups (provider CAS / revision checks).
+  const handleUpdateGroupField = async (groupId: string, field: BasicInfoField, value: string) => {
+    if (!id || groupId !== id || !canEditData) return false;
+    if (isStale || dataProvider.checkIsStaleLive()) {
+      alert('資料已在其他分頁更新，請重新載入最新資料後再編輯。');
+      return false;
+    }
+    const processedValue = field === 'closing_date' ? value.replace(/-/g, '/') : value;
+    const updatedGroups = groups.map(g => g.id === id ? { ...g, [field]: processedValue } as ProductGroup : g);
+    setGroups(updatedGroups);
+    setGroup(updatedGroups.find(g => g.id === id) ?? null);
+    try {
+      await dataProvider.saveProductGroups(updatedGroups);
+    } catch (err) {
+      if (err instanceof StaleDataError) {
+        alert(err.message);
+        setIsStale(true);
+        await loadData();
+        return false;
+      }
+      // A failed save must not keep showing the unsaved value as if it were stored.
+      const previous = groups.find(g => g.id === id);
+      if (previous) {
+        setGroups(current => current.map(g => g.id === id ? previous : g));
+        setGroup(current => (current?.id === id ? previous : current));
+      }
+      throw err;
+    }
+    return true;
+  };
+
 
   const handleCopyAllGroupPurchasedLedger = async () => {
     if (purchaseBatchItems.length === 0) {
@@ -1987,6 +2028,37 @@ export default function PurchaseManagement() {
 
 
 
+  const officialUrl = safeOfficialUrl(group.product_url);
+  const basicInfoEditable = canEditData && editMode;
+  // Level-2 inputs follow the shared level-1 rule (local draft; save once on Blur / Enter; Esc restores).
+  const basicInfoFieldOf = (target: HTMLInputElement) => target.dataset.basicInfoField as BasicInfoField;
+  const handleBasicInfoChange = (e: React.ChangeEvent<HTMLInputElement>) => basicInfo.change(group, basicInfoFieldOf(e.currentTarget), e.target.value);
+  const handleBasicInfoBlur = (e: React.FocusEvent<HTMLInputElement>) => { void basicInfo.commit(group, basicInfoFieldOf(e.currentTarget), 'blur', handleUpdateGroupField); };
+  const handleBasicInfoKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const field = basicInfoFieldOf(e.currentTarget);
+    if (e.key === 'Enter') void basicInfo.commit(group, field, 'enter', handleUpdateGroupField);
+    else if (e.key === 'Escape') { basicInfo.cancel(group.id, field); e.currentTarget.blur(); }
+  };
+  const basicInfoProps = (field: BasicInfoField, baseStyle: React.CSSProperties) => {
+    const error = basicInfo.errorOf(group.id, field);
+    const saving = basicInfo.isSaving(group.id, field);
+    return {
+      value: basicInfo.valueOf(group, field),
+      'data-basic-info-field': field,
+      'data-saving': saving ? 'true' : undefined,
+      'aria-busy': saving || undefined,
+      'aria-invalid': error ? 'true' as const : undefined,
+      title: error || undefined,
+      // Saving / error feedback changes colour only (no layout shift).
+      style: { ...baseStyle, ...(saving ? { borderColor: '#93c5fd', backgroundColor: '#f5f9ff' } : {}), ...(error ? { borderColor: '#dc2626' } : {}) },
+    };
+  };
+  const basicInfoErrors = (['closing_date', 'release_month', 'product_url'] as const)
+    .map(field => basicInfo.errorOf(group.id, field)).filter((message): message is string => Boolean(message));
+  const releaseMonthText = (group.release_month || '').trim().replace(/-/gu, '/');
+  const basicInfoField = { height: '34px', padding: '0 10px', fontSize: '14px', minWidth: 0 } as const;
+  const basicInfoLabel = { display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#64748b', fontWeight: 600 } as const;
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f4f5f7', display: 'flex', flexDirection: 'column' }}>
       
@@ -2001,37 +2073,67 @@ export default function PurchaseManagement() {
           <span className="text-primary font-medium">{group.normalized_title || cleanDailiTitle(group.title) || group.title}</span>
         </div>
         
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h1 data-testid="purchase-group-detail-title" style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            {isDaili ? cleanDailiTitle(group.normalized_title || group.title) : (group.normalized_title || group.title)}
-            {group.listing_type && (
-              <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500 }}>
-                {group.listing_type}
+        <h1 data-testid="purchase-group-detail-title" style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: '#111827', overflowWrap: 'anywhere' }}>
+          {isDaili ? cleanDailiTitle(group.normalized_title || group.title) : (group.normalized_title || group.title)}
+        </h1>
+        {/* Info line under the title: 日本代購｜官網 always; 結單日／發售月份 as plain text in 鎖定模式 */}
+        <div data-testid="purchase-group-info-line" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px 14px', marginTop: '8px', fontSize: '13px', color: '#475569' }}>
+          {group.listing_type && (
+            <span style={{ backgroundColor: '#e2e8f0', color: '#475569', fontSize: '12px', padding: '2px 8px', borderRadius: '4px', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              {group.listing_type}
+            </span>
+          )}
+          {officialUrl ? (
+            <a
+              data-testid="purchase-group-official-link"
+              href={officialUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="開啟商品官網"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#2563eb', fontSize: '13px', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+            >
+              <ExternalLink size={14} />
+              官網
+            </a>
+          ) : !basicInfoEditable && (
+            <span data-testid="purchase-group-official-link-unset" style={{ color: '#94a3b8', whiteSpace: 'nowrap' }}>官網：未設定</span>
+          )}
+          {!basicInfoEditable && (
+            <>
+              <span data-testid="purchase-group-closing-date-text" style={{ whiteSpace: 'nowrap' }}>
+                結單日：<span style={{ color: group.closing_date ? '#111827' : '#94a3b8', fontWeight: group.closing_date ? 600 : 400 }}>{group.closing_date || '未設定'}</span>
               </span>
-            )}
-            {group.product_url && (
-              <a
-                href={group.product_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="開啟商品官網"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  color: '#2563eb',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <ExternalLink size={14} />
-                官網
-              </a>
-            )}
-          </h1>
+              <span data-testid="purchase-group-release-month-text" style={{ whiteSpace: 'nowrap' }}>
+                發售月份：<span style={{ color: releaseMonthText ? '#111827' : '#94a3b8', fontWeight: releaseMonthText ? 600 : 400 }}>{releaseMonthText || '未設定'}</span>
+              </span>
+            </>
+          )}
         </div>
+        {/* 編輯模式 only: 商品基本資訊 card, saved through the same level-1 field rules (no separate save/cancel) */}
+        {basicInfoEditable && (
+          <div data-testid="purchase-group-basic-info" aria-label="商品基本資訊"
+            style={{ marginTop: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#f8fafc', padding: '12px 14px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '10px' }}>商品基本資訊</div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '10px 16px' }}>
+              <label style={basicInfoLabel}>官方結單日
+                <input className="input" data-testid="purchase-group-closing-date" type="text" placeholder="YYYY/MM/DD"
+                  onChange={handleBasicInfoChange} onBlur={handleBasicInfoBlur} onKeyDown={handleBasicInfoKeyDown}
+                  {...basicInfoProps('closing_date', { ...basicInfoField, width: '140px' })} />
+              </label>
+              <label style={basicInfoLabel}>發售月份
+                <input className="input" data-testid="purchase-group-release-month" type="text" placeholder="例如 2027-02"
+                  onChange={handleBasicInfoChange} onBlur={handleBasicInfoBlur} onKeyDown={handleBasicInfoKeyDown}
+                  {...basicInfoProps('release_month', { ...basicInfoField, width: '120px' })} />
+              </label>
+              <label style={{ ...basicInfoLabel, flex: '1 1 260px', minWidth: 0 }}>官網網址
+                <input className="input" data-testid="purchase-group-product-url" type="url" placeholder="https://"
+                  onChange={handleBasicInfoChange} onBlur={handleBasicInfoBlur} onKeyDown={handleBasicInfoKeyDown}
+                  {...basicInfoProps('product_url', { ...basicInfoField, width: '100%', maxWidth: '520px' })} />
+              </label>
+            </div>
+            {basicInfoErrors.length > 0 && <div data-testid="purchase-group-closing-date-error" role="alert" style={{ color: '#dc2626', fontSize: '12px', marginTop: '6px' }}>{basicInfoErrors.join('；')}</div>}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: '24px', paddingBottom: isMobile ? '80px' : '24px', flex: 1, display: 'flex', flexDirection: 'column', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>

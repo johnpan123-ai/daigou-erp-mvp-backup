@@ -1,13 +1,13 @@
 // Owner policy 2026-10-19. Real planner -> authoritative re-plan -> unchanged 073 RPC -> receipt/readback.
 // Only the loopback disposable database helper can be used; no production credentials or writes.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { createServer } from 'vite';
 import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
 import { incidentGroups, incidentRows, incidentEpoch } from './fixtures/waca-preview-incident.mjs';
+import {createMigrationSourceReader} from '../tools/schema-reconciliation/migrationSource.mjs';
+import {fileURLToPath} from 'node:url';
 
-const migrationHash = createHash('sha256').update(readFileSync('supabase/sql/073_waca_counted_transition_import.sql')).digest('hex');
+const migrationHash = (await createMigrationSourceReader(fileURLToPath(new URL('..',import.meta.url)))('073_waca_counted_transition_import.sql')).sourceChecksum;
 assert.equal(migrationHash, 'f96b253bacaa129d5d3757d9055a40619f6e83339502c21c5abcda2b8b5c42a6');
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
 const db = await isolatedDatabase();
@@ -151,10 +151,13 @@ try {
   assert.equal(writes, writeBefore + 1); assert.equal(await display('G-N3'), 3);
   await assert.rejects(q('select public.erp_commit_waca_counted_snapshot($1,$2,$3)',
     [JSON.stringify(flow.wacaAtomicDelta(loss.current, loss.candidate)), loss.current.revision, JSON.stringify(loss.planned.plan)]), /WACA_STALE_REVISION/);
-  // The client can reconcile that rejected duplicate to the exact original durable receipt.
-  await commit(loss);
+  // 077 contract: definite 409 must remain a rejection, even if an older exact
+  // receipt exists. Response loss above still reconciles read-only with 1 write.
+  const duplicateBefore = await snapshot();
+  await assert.rejects(commit(loss), cause => cause.code === 'PT409' && cause.message === 'WACA_STALE_REVISION');
+  assert.deepEqual(await snapshot(), duplicateBefore, 'Rejected duplicate cannot change ledger / revision');
   assert.equal(await display('G-N3'), 3);
-  checks.responseLossAndDoubleSubmit = 'receipt reconciles; no replay; same request stale, quantity unchanged';
+  checks.responseLossAndDoubleSubmit = 'lost response reconciles with 1 write; definite 409 duplicate remains rejected; quantity / ledger unchanged';
   const exportedValue = (await q('select public.erp_export_cloud_restore_snapshot_json() s')).rows[0].s;
   const exported = typeof exportedValue === 'string' ? JSON.parse(exportedValue) : exportedValue;
   assert.equal(Object.keys(exported).length, 24);

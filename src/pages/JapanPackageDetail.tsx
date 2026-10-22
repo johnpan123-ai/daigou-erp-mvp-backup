@@ -2,7 +2,12 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, CheckCircle2, Clock, Truck, ExternalLink, Package, Save, CheckSquare, Square, Info, Edit3 } from 'lucide-react';
 import { productGroupDisplayName } from '../lib/productGroupDisplayName';
-import { CopyProductNameButton } from '../components/CopyProductNameButton';
+import { CopyProductNameButton, CopyProductNameIconButton } from '../components/CopyProductNameButton';
+import { AdaptiveFitText } from '../components/AdaptiveFitText';
+import {
+  DAILY_JAPAN_PACKAGE_STATUSES, isLegacyJapanPackageStatus, japanPackageLegacyStatusChangeMessage,
+  japanPackageStatusChangeNeedsConfirm, japanPackageStatusChoices,
+} from '../lib/japanPackageStatusOptions';
 import { sortJapanPackageDisplayGroups, type JapanPackageDisplaySort } from '../components/japanPackageDisplaySort';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
@@ -12,6 +17,7 @@ import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
 import {
   getJapanPackageReceivingBundleComponentName,
+  getJapanPackageReceivingGroupProgress,
   normalizeJapanPackageReceivingName,
   sortJapanPackageReceivingBundleComponentsBySku,
   sortJapanPackageReceivingItemsByBatchThenSku
@@ -22,6 +28,11 @@ import {
   japanPackageIntentCoordinator,
   type JapanPackageTransactionSuccess,
 } from '../providers/cloud/japanPackageTransaction';
+
+// Mobile receiving list adaptive font sizes (px, descending). One-line names use the largest size that
+// fits; names that must wrap use at most 14px; 13px is the floor, then natural wrapping.
+const MOBILE_RECEIVING_TITLE_SIZES = [16, 15, 14, 13] as const;
+const MOBILE_RECEIVING_ITEM_SIZES = [15, 14, 13] as const;
 
 const cleanDisplayProductTitle = (title: string): string => {
   if (!title) return '';
@@ -271,6 +282,9 @@ export default function JapanPackageDetail() {
 
   const handleQuickUpdateStatus = async (newStatus: string) => {
     if (!pkg) return;
+    if (newStatus === pkg.status) return;
+    if (japanPackageStatusChangeNeedsConfirm(pkg.status, newStatus)
+      && !window.confirm(japanPackageLegacyStatusChangeMessage(pkg.status, newStatus))) return;
     setIsSaving(true);
     let arrivedAtVal = pkg.arrived_at;
     if (newStatus === 'arrived' && !arrivedAtVal) {
@@ -712,6 +726,8 @@ export default function JapanPackageDetail() {
 
   // Status handler to auto-fill arrived_at today
   const handleFormStatusChange = (statusVal: string) => {
+    if (japanPackageStatusChangeNeedsConfirm(pkgForm.status, statusVal)
+      && !window.confirm(japanPackageLegacyStatusChangeMessage(pkgForm.status, statusVal))) return;
     let arrivedAtVal = pkgForm.arrived_at;
     if ((statusVal === 'arrived' || statusVal === 'confirmed') && !arrivedAtVal) {
       const today = new Date();
@@ -1224,6 +1240,14 @@ export default function JapanPackageDetail() {
     return batch.date ? `${batch.date} ${batch.name}` : batch.name;
   };
 
+  // Mobile receiving list: same batch lookup as getBatchName, shown as "date・name".
+  const getMobileReceivingSourceLabel = (batchId?: string) => {
+    if (!batchId) return '-';
+    const batch = batches.find(b => b.id === batchId);
+    if (!batch) return '-';
+    return [batch.date, batch.name].filter(Boolean).join('・');
+  };
+
   const getBatchItemLabel = (vId: string) => {
     const v = variants.find(x => x.id === vId);
     if (!v) return '未知商品';
@@ -1453,7 +1477,7 @@ export default function JapanPackageDetail() {
                 {/* Quick Status Buttons */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '6px', width: '100%' }}>
                   <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>快速切換：</span>
-                  {['registered', 'arrived', 'confirmed', 'problem'].map(st => {
+                  {DAILY_JAPAN_PACKAGE_STATUSES.map(st => {
                     const active = pkg.status === st;
                     return (
                       <button
@@ -1480,6 +1504,11 @@ export default function JapanPackageDetail() {
                       </button>
                     );
                   })}
+                  {isLegacyJapanPackageStatus(pkg.status) && (
+                    <span data-testid="japan-package-legacy-status-hint" style={{ fontSize: '11px', color: '#b45309', width: '100%' }}>
+                      目前為舊狀態「{getStatusName(pkg.status)}」，請依實際情況改為已登記或已點收。
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1533,10 +1562,7 @@ export default function JapanPackageDetail() {
                       value={pkgForm.status}
                       onChange={e => handleFormStatusChange(e.target.value)}
                     >
-                      <option value="registered">已登記 (registered)</option>
-                      <option value="arrived">已到小幫手家 (arrived)</option>
-                      <option value="confirmed">已點收 (confirmed)</option>
-                      <option value="problem">有問題 (problem)</option>
+                      {japanPackageStatusChoices(pkg?.status).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </div>
 
@@ -1653,61 +1679,47 @@ export default function JapanPackageDetail() {
             ) : (
               groupedItems.map(g => {
                 const isExpanded = mobileExpandedGroups.has(g.id);
-                const totalGroupQty = g.items.reduce((sum, item) => sum + item.quantity, 0);
-                const checkedGroupQty = g.items.filter(item => item.checked).reduce((sum, item) => sum + item.quantity, 0);
-                const percent = totalGroupQty > 0 ? Math.round((checkedGroupQty / totalGroupQty) * 100) : 0;
+                const progress = getJapanPackageReceivingGroupProgress(g.items);
+                const statusLabel = progress.status === 'complete' ? '已完成' : progress.status === 'partial' ? '部分完成' : '未點收';
+                const statusColor = progress.status === 'complete' ? '#15803d' : progress.status === 'partial' ? '#c2410c' : '#64748b';
 
                 return (
-                  <div key={g.id} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-                    {/* Group Header */}
+                  <div key={g.id} data-testid={`mobile-receiving-group-${g.id}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                    {/* Group Header (layout B): icon column + full-width adaptive title; status left and copy/arrow right below */}
                     <div
-                      style={{ padding: '12px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '6px' }}
+                      style={{ padding: '10px 6px 4px 14px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '2px' }}
                       onClick={() => toggleMobileGroupExpand(g.id)}
+                      aria-expanded={isExpanded}
                     >
-                      {/* First Line: Title + Arrow right-aligned */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                        <span title={g.title} style={{
-                          fontSize: '14px', 
-                          fontWeight: 700, 
-                          color: '#1e293b', 
-                          display: '-webkit-box', 
-                          WebkitLineClamp: 2, 
-                          WebkitBoxOrient: 'vertical', 
-                          overflow: 'hidden', 
-                          textOverflow: 'ellipsis', 
-                          whiteSpace: 'normal', 
-                          wordBreak: 'break-all', 
-                          flex: 1 
-                        }}>
-                          📦 {g.title}
-                        </span>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          <span style={{
-                            fontSize: '12px',
-                            color: '#64748b',
-                            transition: 'transform 0.2s',
-                            transform: isExpanded ? 'rotate(90deg)' : 'none',
-                            display: 'inline-block',
-                            marginTop: '4px'
-                          }}>
-                            ▶
-                          </span>
-                        </div>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0, paddingRight: '8px' }}>
+                        <span aria-hidden="true" style={{ flexShrink: 0, width: '20px', fontSize: '15px', lineHeight: '21px', textAlign: 'center' }}>📦</span>
+                        <AdaptiveFitText
+                          text={g.title}
+                          sizes={MOBILE_RECEIVING_TITLE_SIZES}
+                          multiLineMax={14}
+                          testId="mobile-receiving-group-title"
+                          style={{ flex: '1 1 0', fontWeight: 700, color: '#1e293b' }}
+                        />
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>
-                          <span style={{ display: 'block', marginBottom: 8 }}>
-                            <CopyProductNameButton name={g.title} groupId={g.id} />
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', paddingLeft: '28px', minWidth: 0 }}>
+                        <div data-testid="mobile-receiving-group-status" data-status={progress.status} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: '6px', rowGap: '2px', minWidth: 0, fontSize: '12.5px', fontWeight: 600, color: '#475569' }}>
+                          {progress.status === 'complete' ? (
+                            <CheckCircle2 size={15} style={{ color: '#16a34a', flexShrink: 0 }} aria-hidden="true" />
+                          ) : (
+                            <span aria-hidden="true" style={{ width: '13px', height: '13px', borderRadius: '50%', flexShrink: 0, boxSizing: 'border-box', border: `2px solid ${progress.status === 'partial' ? '#f97316' : '#cbd5e1'}`, background: progress.status === 'partial' ? 'linear-gradient(90deg, #f97316 50%, transparent 50%)' : 'transparent' }} />
+                          )}
+                          <span style={{ whiteSpace: 'nowrap' }}>
+                            {progress.checkedRecordCount}/{progress.recordCount} 筆
+                            {progress.totalQuantity !== null && progress.checkedQuantity !== null && <>｜{progress.checkedQuantity}/{progress.totalQuantity} 件</>}
                           </span>
-                          共 {g.items.length} 項・完成 {g.items.filter(item => item.checked).length} / {g.items.length}（{percent}%）
-                        </span>
-                        <div style={{ flex: '1 1 80px', minWidth: '64px', height: '5px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
-                          <div style={{ width: `${percent}%`, height: '100%', background: '#10b981', borderRadius: '999px' }} />
+                          <span style={{ whiteSpace: 'nowrap', color: statusColor }}>{statusLabel}</span>
                         </div>
-                        <div style={{ display: 'flex', gap: '6px', width: '100%' }} onClick={event => event.stopPropagation()}>
-                          <button type="button" className="btn btn-outline" disabled={isReceivingPending} style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, true)}>全選已點收</button>
-                          <button type="button" className="btn btn-outline" disabled={isReceivingPending} style={{ minHeight: '40px', flex: 1, padding: '6px 8px', fontSize: '12px' }} onClick={() => handleGroupBulkCheck(g.title, g.items, false)}>全取消點收</button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                          <CopyProductNameIconButton name={g.title} groupId={g.id} />
+                          <span aria-hidden="true" style={{ width: '36px', height: '44px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: '12px' }}>
+                            <span style={{ display: 'inline-block', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'none' }}>▼</span>
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1732,8 +1744,8 @@ export default function JapanPackageDetail() {
                               style={{ 
                                 display: 'flex', 
                                 alignItems: 'flex-start', 
-                                gap: '10px', 
-                                padding: '12px 14px', 
+                                gap: '8px', 
+                                padding: '12px 10px', 
                                 background: item.checked ? '#f0fdf4' : '#ffffff', 
                                 border: '1px solid',
                                 borderColor: item.checked ? '#bbf7d0' : '#e2e8f0',
@@ -1764,17 +1776,21 @@ export default function JapanPackageDetail() {
                               </div>
 
                               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', minWidth: 0, padding: '2px 0' }}>
-                                {/* Main Item spec title + quantity */}
-                                <div style={{ fontWeight: 700, color: item.checked ? '#047857' : '#1e293b', wordBreak: 'break-all', fontSize: '14px', lineHeight: 1.3 }}>
-                                  <span>{catAndVariant}</span>
-                                  <span style={{ marginLeft: '8px', color: '#2563eb', fontWeight: 800 }}>
+                                {/* Priority: full item name > quantity > check state > source date/batch */}
+                                <div data-testid="mobile-receiving-source-row" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0 }}>
+                                  <AdaptiveFitText
+                                    text={catAndVariant}
+                                    sizes={MOBILE_RECEIVING_ITEM_SIZES}
+                                    multiLineMax={14}
+                                    testId="mobile-receiving-item-name"
+                                    style={{ flex: '1 1 0', fontWeight: 600, color: item.checked ? '#047857' : '#1e293b' }}
+                                  />
+                                  <span data-testid="mobile-receiving-item-quantity" style={{ flexShrink: 0, minWidth: '40px', textAlign: 'right', color: '#2563eb', fontWeight: 800, fontSize: '15px', lineHeight: '20px' }}>
                                     ×{item.quantity}
                                   </span>
                                 </div>
-
-                                {/* Source always visible, SKU completely removed */}
-                                <div style={{ color: '#475569', fontSize: '12px', lineHeight: 1.3 }}>
-                                  來源：<strong style={{ color: '#2563eb' }}>{getBatchName(item.purchase_batch_id) || '-'}</strong>
+                                <div data-testid="mobile-receiving-item-source" style={{ color: '#64748b', fontSize: '12px', lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+                                  {getMobileReceivingSourceLabel(item.purchase_batch_id)}
                                 </div>
 
                                 {/* Expand Button */}
@@ -1864,6 +1880,11 @@ export default function JapanPackageDetail() {
                             </div>
                           );
                         })}
+                        {/* Group bulk actions: same handler and pending guard as before; primary vs secondary emphasis */}
+                        <div style={{ display: 'flex', gap: '8px', paddingTop: '10px', borderTop: '1px solid #e2e8f0' }} onClick={event => event.stopPropagation()}>
+                          <button type="button" className="btn btn-primary" disabled={isReceivingPending} style={{ minHeight: '44px', flex: '1.4 1 0', padding: '6px 8px', fontSize: '14px', fontWeight: 700 }} onClick={() => handleGroupBulkCheck(g.title, g.items, true)}>{progress.status === 'partial' ? '點收剩餘' : '全部點收'}</button>
+                          <button type="button" className="btn btn-outline" disabled={isReceivingPending} style={{ minHeight: '44px', flex: '1 1 0', padding: '6px 8px', fontSize: '13px', fontWeight: 500, color: '#475569' }} onClick={() => handleGroupBulkCheck(g.title, g.items, false)}>取消全部</button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2422,7 +2443,7 @@ export default function JapanPackageDetail() {
           {/* Quick Status Buttons */}
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '16px' }}>
             <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>快速切換：</span>
-            {['registered', 'arrived', 'confirmed', 'problem'].map(st => {
+            {DAILY_JAPAN_PACKAGE_STATUSES.map(st => {
               const active = pkg.status === st;
               return (
                 <button
@@ -2445,6 +2466,11 @@ export default function JapanPackageDetail() {
                 </button>
               );
             })}
+            {isLegacyJapanPackageStatus(pkg.status) && (
+              <span data-testid="japan-package-legacy-status-hint" style={{ fontSize: '12px', color: '#b45309' }}>
+                目前為舊狀態「{getStatusName(pkg.status)}」，請依實際情況改為已登記或已點收。
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -2485,10 +2511,7 @@ export default function JapanPackageDetail() {
                 value={pkgForm.status}
                 onChange={e => handleFormStatusChange(e.target.value)}
               >
-                <option value="registered">已登記 (registered)</option>
-                <option value="arrived">已到小幫手家 (arrived)</option>
-                <option value="confirmed">已點收 (confirmed)</option>
-                <option value="problem">有問題 (problem)</option>
+                {japanPackageStatusChoices(pkg?.status).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </div>
 

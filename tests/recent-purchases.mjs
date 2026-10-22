@@ -188,7 +188,7 @@ try {
     localStorage.setItem('erp_provider_mode', 'local');
 
     await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-local-authoritative-v1', 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains('kv')) request.result.createObjectStore('kv');
       };
@@ -242,9 +242,10 @@ try {
   assert.equal((dailyLedger.match(/商品 A-/g) || []).length, 2, 'Same-day merged product must retain both original batch ledgers');
   const dailyLedgerRows = dailyLedger.split('\n');
   assert.equal(dailyLedgerRows.length, 3, 'Three original one-item batches must produce three continuous rows');
-  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 3), 'Every ledger row must contain product name, quantity, and unit price');
+  // Ledger contract (same as purchase-management-actions): name, quantity, a blank third column, unit price.
+  assert.ok(dailyLedgerRows.every(row => row.split('\t').length === 4 && row.split('\t')[2] === ''), 'Every ledger row must contain product name, quantity, a blank third column, and unit price');
   assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[1])), [3, 12, 2], 'Original batch quantities must remain intact in chronological order');
-  assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[2])), [100, 100, 100], 'Ledger price must be the purchase item unit cost, not quantity × cost');
+  assert.deepEqual(dailyLedgerRows.map(row => Number(row.split('\t')[3])), [100, 100, 100], 'Ledger price must be the purchase item unit cost, not quantity × cost');
   await page.waitForTimeout(900);
   await dailyCopyButtons.first().click();
   await page.waitForTimeout(900);
@@ -252,7 +253,7 @@ try {
 
   const persistedPurchaseDataAfterCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-local-authoritative-v1', 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
@@ -315,7 +316,7 @@ try {
 
   const persistedPurchaseDataAfterRowCopy = await page.evaluate(async ({ batchKey, itemKey }) => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-local-authoritative-v1', 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
@@ -399,7 +400,7 @@ try {
 
   const persistedFixtureAfterAllCopyActions = await page.evaluate(async keys => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('daigou-erp-db', 1);
+      const request = indexedDB.open('daigou-erp-local-authoritative-v1', 1);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });

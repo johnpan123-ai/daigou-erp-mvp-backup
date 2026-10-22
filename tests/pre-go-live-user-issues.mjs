@@ -113,10 +113,11 @@ try {
     };
   });
 
+  // Ledger contract (same as purchase-management-actions): name, quantity, a blank third column, unit price.
   assert.deepEqual(domain.ledgerText.split('\n'), [
-    '商品-規格\t2\t100',
-    '商品-規格\t1\t120',
-    '商品-規格\t3\t—',
+    '商品-規格\t2\t\t100',
+    '商品-規格\t1\t\t120',
+    '商品-規格\t3\t\t—',
   ]);
   assert.deepEqual(domain.partial, [{ id: 'a', available: 1 }]);
   assert.equal(domain.unchecked, 0);

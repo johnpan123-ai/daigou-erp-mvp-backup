@@ -19,7 +19,10 @@ const contract = JSON.parse(await readFile(new URL('../config/erp-environment-id
 assert.equal(contract.schemaBaseline.fingerprintContractVersion, SCHEMA_FINGERPRINT_CONTRACT_VERSION);
 const registry = await buildMigrationEffectRegistry();
 assert.deepEqual(Object.keys(registry).sort(), ['018','018b','026b','027','029','030','041','042','043','044','045','045b','045c','046','046b','047','048','049','050','051','052','053','054','055','056','057',
-  '058','059','060','061','062','063','064','065','066','067','068','069','070','071','072','073','074','075'].sort());
+  '058','059','060','061','062','063','064','065','066','067','068','069','070','071','072','073','074','075','076','077'].sort());
+assert.deepEqual(registry['076'].dependencies, ['034', '051']);
+assert.equal(registry['076'].sourceEffects.tables.length, 0);
+assert.deepEqual(registry['076'].postconditions.map(p => p.object), ['public.erp_apply_japan_package_transaction(uuid,jsonb)', 'public.erp_apply_related_transaction(uuid,jsonb)']);
 assert.deepEqual(registry['075'].dependencies, ['074']);
 assert.equal(registry['075'].sourceEffects.tables.length, 0);
 assert.ok(registry['075'].postconditions.some(p => p.object === 'public.erp_commit_waca_recognition(jsonb,jsonb)'));
@@ -146,7 +149,7 @@ for (const effect of Object.values(registry)) for (const condition of effect.pos
 // Retained implementations are exact SQL/ACL contracts, not concatenated
 // keyword fragments. Use real source-reviewed function facts for this chain;
 // keep the existing drift/partial/unknown assertions below unchanged.
-const retainedCanonical = JSON.parse(await readFile(new URL('../docs/schema-candidates/erp2-v30-waca-order-recognition.snapshot.json', import.meta.url), 'utf8'));
+const retainedCanonical = JSON.parse(await readFile(new URL('../docs/schema-candidates/erp2-v32-waca-conflict-http409.snapshot.json', import.meta.url), 'utf8'));
 for (const entry of registry['074'].postconditions[0].retainedImplementation.functions) {
   canonical.functions[entry.object] = structuredClone(retainedCanonical.functions[entry.object]);
 }

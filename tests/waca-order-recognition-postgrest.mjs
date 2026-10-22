@@ -58,13 +58,13 @@ try {
   await db.importRows([db.row('ORDER-D',1)]);
   const stale=await db.makeRequest('ORDER-D',[['G-SYNTHETIC','HOLD']]),stalePlan=await db.preview(stale);
   await db.importRows([db.row('ORDER-B',2)]);
-  await reject('erp_commit_waca_recognition',{p_request:stale,p_expected_plan:stalePlan},'40001','WACA_STALE_REVISION');pass('revision CAS');
+  await reject('erp_commit_waca_recognition',{p_request:stale,p_expected_plan:stalePlan},'PT409','WACA_STALE_REVISION');pass('revision CAS');
   const epochRequest=await db.makeRequest('ORDER-D',[['G-SYNTHETIC','HOLD']]),epochPlan=await db.preview(epochRequest);
   // An authenticated caller must not bypass the client's restored-decision check
   // by rebinding a formerly valid import plan to the new Epoch.
   const restoredDecisionImport=await db.prepareImport([db.row('ORDER-A',6)]);
   await db.q('update public.erp_cloud_restore_epoch set epoch=epoch+1 where singleton');
-  await reject('erp_commit_waca_recognition',{p_request:epochRequest,p_expected_plan:epochPlan},'40001','WACA_RESTORE_EPOCH_CHANGED');
+  await reject('erp_commit_waca_recognition',{p_request:epochRequest,p_expected_plan:epochPlan},'PT409','WACA_RESTORE_EPOCH_CHANGED');
   await reject('erp_preview_waca_recognition',{p_request:await db.makeRequest('ORDER-A',[['G-SYNTHETIC','HOLD']])},'23000','WACA_REVERSAL_PROOF_REQUIRED');pass('epoch old request / old quantity evidence rejected');
   restoredDecisionImport.p_plan.restoreEpoch=(await db.epoch()).epoch;
   await reject('erp_commit_waca_counted_snapshot',restoredDecisionImport,'23000','WACA_MANAGED_RESTORE_REVIEW_REQUIRED');
@@ -80,7 +80,7 @@ try {
   const lock=new pg.Client({connectionString:db.url.toString()});await lock.connect();
   try {await lock.query("select pg_advisory_lock(hashtextextended('erp-cloud-restore-maintenance-lock',0))");await reject('erp_commit_waca_recognition',{p_request:secure,p_expected_plan:securePlan},'55006','CLOUD_RESTORE_MAINTENANCE_LOCKED');} finally{await lock.end();}pass('Restore lock');
   const bad=structuredClone(securePlan);bad.quantities[0].after++;
-  await reject('erp_commit_waca_recognition',{p_request:secure,p_expected_plan:bad},'40001','WACA_RECOGNITION_PREVIEW_CHANGED');pass('exact preview / submit parity');
+  await reject('erp_commit_waca_recognition',{p_request:secure,p_expected_plan:bad},'PT409','WACA_RECOGNITION_PREVIEW_CHANGED');pass('exact preview / submit parity');
   await db.q(`create function public.erp_test_recognition_failure() returns trigger language plpgsql as $$ begin
     if new.payload->'recognition' is not null then raise exception 'FORCED_RECOGNITION_FAILURE' using errcode='23514';end if;return new;end $$;
     create trigger erp_test_recognition_failure before insert on public.waca_import_batches for each row execute function public.erp_test_recognition_failure()`);

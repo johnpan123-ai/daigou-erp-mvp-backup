@@ -614,8 +614,14 @@ export default function WacaIntegration() {
         orders: new Set(pendingImport.rows.map(row => wacaOrderKey(row.orderNumber))).size,
         variants: result.quantityChanges.length, pending: pendingFeatures,
       });
-    } catch (cause) { setMessage(''); setError(classifyWacaError(cause, stage, pendingImport.importId,
-      pendingImport.counted && countedPlan ? 'erp_commit_waca_counted_snapshot' : 'erp_commit_waca_snapshot')); }
+    } catch (cause) {
+      const classified = classifyWacaError(cause, stage, pendingImport.importId,
+        pendingImport.counted && countedPlan ? 'erp_commit_waca_counted_snapshot' : 'erp_commit_waca_snapshot');
+      setMessage(''); setError(classified);
+      // A rejected plan must be rebuilt from fresh authoritative state, not
+      // made into a second write attempt by clicking the same confirmation.
+      if (classified.category === 'STALE_CONFLICT') setPendingImport(null);
+    }
     finally { confirming.current = false; setBusy(false); }
   };
 

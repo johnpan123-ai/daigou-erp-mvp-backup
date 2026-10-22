@@ -9,6 +9,7 @@ import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { isJapanPackageSubmitBoundaryError, japanPackageIntentCoordinator } from '../providers/cloud/japanPackageTransaction';
 import { buildJapanPackageQuantityById } from '../lib/growthSafeSelectors';
 import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
+import { japanPackageStatusChoices } from '../lib/japanPackageStatusOptions';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 
 const CARRIERS_LIST = [
@@ -1306,10 +1307,10 @@ export default function JapanPackagesList() {
             {[
               { key: 'all', label: '全部', count: stats.total },
               { key: 'registered', label: '已登記', count: stats.registered },
-              { key: 'arrived', label: '已到小幫手', count: stats.arrived },
+              { key: 'arrived', label: '已到小幫手（舊）', count: stats.arrived, legacy: true },
               { key: 'confirmed', label: '已點收', count: stats.confirmed },
-              { key: 'problem', label: '有問題', count: stats.problem }
-            ].map(item => (
+              { key: 'problem', label: '有問題（舊）', count: stats.problem, legacy: true }
+            ].filter(item => !item.legacy || item.count > 0 || statusFilter === item.key).map(item => (
               <button 
                 key={item.key}
                 className={`mobile-wrap-chip ${statusFilter === item.key ? 'active' : ''}`}
@@ -1353,15 +1354,15 @@ export default function JapanPackagesList() {
                 <div className="stat-label">已登記</div>
               </div>
             </div>
-            <div className="stat-card" style={{ borderLeft: '4px solid #0284c7' }}>
+            {stats.arrived > 0 && <div className="stat-card" style={{ borderLeft: '4px solid #0284c7' }}>
               <div className="stat-icon-wrapper" style={{ background: '#e0f2fe', color: '#0284c7' }}>
                 <MapPin size={24} />
               </div>
               <div className="stat-info">
                 <div className="stat-number">{stats.arrived}</div>
-                <div className="stat-label">已到小幫手家</div>
+                <div className="stat-label">已到小幫手家（舊狀態）</div>
               </div>
-            </div>
+            </div>}
             <div className="stat-card" style={{ borderLeft: '4px solid #10b981' }}>
               <div className="stat-icon-wrapper" style={{ background: '#ecfdf5', color: '#10b981' }}>
                 <CheckCircle2 size={24} />
@@ -1371,15 +1372,15 @@ export default function JapanPackagesList() {
                 <div className="stat-label">已點收</div>
               </div>
             </div>
-            <div className="stat-card" style={{ borderLeft: '4px solid #ef4444' }}>
+            {stats.problem > 0 && <div className="stat-card" style={{ borderLeft: '4px solid #ef4444' }}>
               <div className="stat-icon-wrapper" style={{ background: '#fef2f2', color: '#ef4444' }}>
                 <AlertTriangle size={24} />
               </div>
               <div className="stat-info">
                 <div className="stat-number">{stats.problem}</div>
-                <div className="stat-label">有問題</div>
+                <div className="stat-label">有問題（舊狀態）</div>
               </div>
-            </div>
+            </div>}
           </div>
 
           {/* Search & Filter Toolbar */}
@@ -1447,24 +1448,24 @@ export default function JapanPackagesList() {
                   >
                     已登記
                   </button>
-                  <button 
+                  {(stats.arrived > 0 || statusFilter === 'arrived') && <button 
                     className={`chip ${statusFilter === 'arrived' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('arrived')}
                   >
-                    已到小幫手家
-                  </button>
+                    已到小幫手家（舊）
+                  </button>}
                   <button 
                     className={`chip ${statusFilter === 'confirmed' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('confirmed')}
                   >
                     已點收
                   </button>
-                  <button 
+                  {(stats.problem > 0 || statusFilter === 'problem') && <button 
                     className={`chip ${statusFilter === 'problem' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('problem')}
                   >
-                    有問題
-                  </button>
+                    有問題（舊）
+                  </button>}
                 </div>
               </div>
             </div>
@@ -1885,10 +1886,7 @@ export default function JapanPackagesList() {
                         setNewPackageForm({ ...newPackageForm, status: statusVal, arrived_at: arrivedAtVal });
                       }}
                     >
-                      <option value="registered">已登記 (registered)</option>
-                      <option value="arrived">已到小幫手家 (arrived)</option>
-                      <option value="confirmed">已點收 (confirmed)</option>
-                      <option value="problem">有問題 (problem)</option>
+                      {japanPackageStatusChoices(newPackageForm.status).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </div>
                 </div>

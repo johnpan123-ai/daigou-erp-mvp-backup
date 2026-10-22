@@ -110,15 +110,18 @@ function evidenceFor(snapshot, condition) {
       const value = getFunction(snapshot, condition.object);
       const retained = condition.retainedImplementation;
       if (retained && retained.activationObjects.some(object => getFunction(snapshot, object))) {
-        const proof = retained.functions.map(entry => {
+        const families = [retained, ...(retained.reviewedSuccessors ?? [])].map(family => ({
+          contract: family.contract, proof: family.functions.map(entry => {
           const actual = fingerprintFunctionImplementation(getFunction(snapshot, entry.object));
           return { object: entry.object, expected: entry.sha256, actual,
             matches: actual !== null && actual === entry.sha256 };
-        });
+          }),
+        }));
         // Any observed part of the new call chain requires the ENTIRE exact
         // reviewed wrapper/delegate/helper chain, even when old fragments match.
-        return exact(Boolean(value), Boolean(value) && proof.length > 0
-          && proof.every(entry => entry.matches), { function: value ?? null, retainedImplementationProof: proof });
+        return exact(Boolean(value), Boolean(value)
+          && families.some(family => family.proof.length > 0 && family.proof.every(entry => entry.matches)),
+        { function: value ?? null, retainedImplementationProof: families });
       }
       const definition = normalizeDefinition(value?.definition ?? '');
       const matches = Boolean(value)

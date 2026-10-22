@@ -7,7 +7,8 @@ import {fingerprintStructuralSnapshot,diffStructuralSnapshots} from '../tools/sc
 import {buildMigrationEffectRegistry} from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import {planSchemaDelta} from '../tools/schema-reconciliation/reconcile.mjs';
 const migration='075_waca_order_recognition_management.sql';
-const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>f!==migration)});
+// Historical 075 gate: v29 (everything before 075) -> v30; later candidates (076) are reconciled separately.
+const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.slice(0,CANONICAL_FRESH_INSTALL_V3.indexOf(migration))});
 try {
   const capture=async()=>{
     const s=(await db.sql.query(readFileSync('tools/schema-reconciliation/sql/live-schema-snapshot-readonly.sql','utf8'))).rows[0].erp_schema_snapshot;
@@ -26,9 +27,10 @@ try {
     'erp_plan_waca_recognition','erp_preview_waca_recognition','erp_commit_waca_recognition','erp_prune_waca_recognition_evidence']);
   for(const [sig,fn] of Object.entries(after.functions))if(!allowed.has(sig.split('.')[1].split('(')[0]))assert.deepEqual(fn,before.functions[sig],sig);
   const registry=await buildMigrationEffectRegistry(),pre=planSchemaDelta(before,registry,{expectedSnapshot:after}),post=planSchemaDelta(after,registry,{expectedSnapshot:after});
-  assert.equal(pre.readyForApply,true,JSON.stringify(pre.blockers));assert.deepEqual(pre.applyPlan.map(x=>x.migrationId),['075']);
-  assert.equal(post.readyForApply,true,JSON.stringify(post.blockers));assert.deepEqual(post.applyPlan,[]);
-  assert.equal(post.migrations.length,44);assert.ok(post.migrations.every(m=>m.state==='SATISFIED' && m.applyMethod==='NO_APPLY'));
+  assert.equal(pre.readyForApply,true,JSON.stringify(pre.blockers));assert.deepEqual(pre.applyPlan.map(x=>x.migrationId),['075','076','077']);
+  assert.equal(post.readyForApply,true,JSON.stringify(post.blockers));assert.deepEqual(post.applyPlan.map(x=>x.migrationId),['076','077']);
+  assert.equal(post.migrations.length,46);assert.ok(post.migrations.every(m=>['076','077'].includes(m.migrationId) ? m.state==='NEEDS_APPLY' : (m.state==='SATISFIED' && m.applyMethod==='NO_APPLY')));
+  assert.equal(fingerprintStructuralSnapshot(after),'5be9d80aeb00f2ab741904181660b46e0f5c2e238422c87dca41aa1fde5537f0');
   const result={result:'PASS',classification:'SCHEMA_RPC_CHANGE_NOT_UI_ONLY',before:fingerprintStructuralSnapshot(before),after:fingerprintStructuralSnapshot(after),
     sourceSha256:createHash('sha256').update(readFileSync('supabase/sql/'+migration)).digest('hex'),businessMutation:0,resources:24,newTable:0,newColumn:0,
     preApplyPlan:pre.applyPlan,postApplyPlan:post.applyPlan,repairDelegatesPrivate:true,historicalMigrationExecutionClaimed:false,cloudApply:0,ledgerWrites:0};

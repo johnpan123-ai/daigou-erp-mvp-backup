@@ -8,7 +8,7 @@ export async function recognitionDatabase() {
   assert.ok(process.env.WACA_TEST_POSTGREST_BINARY,'Use the verified local PostgREST');
   const vite=await createServer({configFile:false,cacheDir:'.vite-cache/waca-recognition-ssr',server:{middlewareMode:true,hmr:false},appType:'custom'});
   const migration='075_waca_order_recognition_management.sql';
-  const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.filter(f=>f!==migration),
+  const db=await isolatedDatabase({migrations:CANONICAL_FRESH_INSTALL_V3.slice(0,CANONICAL_FRESH_INSTALL_V3.indexOf(migration)),
     safeupdateLibrary:process.env.WACA_TEST_SAFEUPDATE_LIBRARY,postgrestBinary:process.env.WACA_TEST_POSTGREST_BINARY});
   const q=(s,a)=>db.sql.query(s,a);
   const snapshot=async()=>(await q('select public.erp_read_waca_snapshot() s')).rows[0].s;
@@ -20,6 +20,10 @@ export async function recognitionDatabase() {
     (select generation from public.erp_restore_business_generation where singleton) generation`)).rows[0];
   try {
     const before=await state(); await q(readFileSync('supabase/sql/'+migration,'utf8')); assert.deepEqual(await state(),before,'075 migration has zero business mutation');
+    for(const file of CANONICAL_FRESH_INSTALL_V3.slice(CANONICAL_FRESH_INSTALL_V3.indexOf(migration)+1)) {
+      const baseline=await state(); await q(readFileSync('supabase/sql/'+file,'utf8'));
+      assert.deepEqual(await state(),baseline,file+' has zero business mutation');
+    }
     await q("update public.product_variants set waca_manual_adjustment=10 where id=$1",[uuid(2)]);
     await q("insert into public.product_variants(id,product_group_id,myacg_item_code,product_title,variant_name,waca_manual_adjustment) values($1,$2,'G-SECOND','Synthetic group','B',20)",[uuid(3),uuid(1)]);
     await q("update public.erp_cloud_restore_epoch set epoch=34,restored_at=now() where singleton");

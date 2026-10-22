@@ -15,7 +15,8 @@ const sha = v => createHash('sha256').update(v).digest('hex');
 const e1Raw = await readFile(e1Path), v2Raw = await readFile(v2Path);
 assert.equal(sha(e1Raw), 'a5683655eefd159730aaba958fff57ff5a63ccfb0b9465c79617361324deacb2', 'EXACT_ERP1_FILE_REQUIRED');
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
-assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '075_waca_order_recognition_management.sql', '075 appends protected Owner line decisions');
+assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '077_waca_custom_conflict_http409.sql', '077 custom conflict transport is the latest append');
+assert.ok(CANONICAL_FRESH_INSTALL_V3.includes('075_waca_order_recognition_management.sql'), '075 appends protected Owner line decisions');
 const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3 });
 const out = {};
 try {

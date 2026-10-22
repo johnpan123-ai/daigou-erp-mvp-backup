@@ -1,6 +1,7 @@
 import type { ProductVariant } from '../lib/db';
 import type { WacaItem } from './orderCore';
 import type { NextWacaSnapshot } from './nextStorage';
+import { isWacaBusinessConflict } from './importErrors';
 
 export type WacaRecognitionMode = 'COUNT' | 'INCLUDED' | 'HOLD';
 export const RECOGNITION_LABELS: Record<WacaRecognitionMode, string> = {
@@ -62,6 +63,9 @@ export async function commitAndVerifyWacaRecognition(provider: WacaRecognitionPr
   onStage?.('commit');
   try { result = await provider.commitWacaRecognition(request, plan); }
   catch (cause) {
+    // A definite business rejection is not a lost response and cannot be
+    // upgraded to success by finding an older receipt. Require a fresh plan.
+    if (isWacaBusinessConflict(cause)) throw cause;
     try { saved = await provider.getNextWacaSnapshot(); result = receipt(saved); }
     catch { throw cause; }
   }

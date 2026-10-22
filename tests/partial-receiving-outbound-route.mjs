@@ -33,7 +33,7 @@ try {
   const page = await context.newPage();
   try {
     await page.goto(
-      `${FIXTURE_URL}?route=${encodeURIComponent('/japan-packages/jp-react-1')}&partialReceiving=1`,
+      `${FIXTURE_URL}?route=${encodeURIComponent('/japan-packages/jp-react-1')}&partialReceiving=1&uuidFixtures=1`,
       { waitUntil: 'domcontentloaded' },
     );
     await page.waitForFunction(() => Boolean(window.__P0_REACT_HARNESS__?.snapshot().metrics));
@@ -46,7 +46,9 @@ try {
     await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().japanPackageTransactionCalls === 1);
     await page.waitForFunction(() => {
       const harness = window.__P0_REACT_HARNESS__;
-      return harness.server.japanPackages[0].status === 'arrived'
+      // 076: partial receiving keeps the Package registered (never auto 'arrived') and stamps arrived_at once.
+      return harness.server.japanPackages[0].status === 'registered'
+        && Boolean(harness.server.japanPackages[0].arrived_at)
         && harness.server.japanPackageItems[0].checked === true
         && harness.server.japanPackageItems[1].checked === false;
     });
@@ -69,13 +71,13 @@ try {
 
     await page.evaluate(() => window.__P0_REACT_HARNESS__.remoteReceiving('jpi-react-1', false));
     await page.getByText('倉庫商品池 (1 項可出庫)', { exact: false }).waitFor();
-    assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.server.japanPackages[0].status), 'arrived');
+    assert.equal(await page.evaluate(() => window.__P0_REACT_HARNESS__.server.japanPackages[0].status), 'registered', 'Cancelling a receipt of a confirmed Package returns it to registered');
     assert.equal(await page.getByText('SKU-HOLO', { exact: true }).count(), 0);
     assert.equal(await page.getByText('SKU-HOLO-B', { exact: true }).count(), 1);
     snapshot = await page.evaluate(() => window.__P0_REACT_HARNESS__.snapshot());
     assert.equal(snapshot.metrics.fullPulls, 0);
 
-    console.log('PASS registered -> partial receiving -> arrived through the real JapanPackageDetail route');
+    console.log('PASS registered -> partial receiving stays registered (arrived_at stamped, outbound pool unchanged) through the real JapanPackageDetail route');
     console.log('PASS mounted OutboundShipmentDetail exposes only checked Package items');
     console.log('PASS targeted Realtime/catch-up adds B, then removes unchecked A without a full pull');
   } finally {

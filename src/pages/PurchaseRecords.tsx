@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useLayoutEffect, useMemo, useRef, useDeferredValue, useCallback } from 'react';
+import { useProductGroupBasicInfoDrafts, type BasicInfoField } from '../hooks/useProductGroupBasicInfoDrafts';
 import { calculateFinalMyacgDemand, getBaseSku, calculateVariantDemandAndPurchased, normalizeDateInput, cloudCacheDb, localDb } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
@@ -397,65 +398,8 @@ export default function PurchaseRecords() {
   const pendingDemandCommitKeysRef = useRef<Set<string>>(new Set());
   const cancelledDemandCommitKeysRef = useRef<Set<string>>(new Set());
 
-  const [draftClosingDates, setDraftClosingDates] = useState<Record<string, string>>({});
-  const [closingDateSaveErrors, setClosingDateSaveErrors] = useState<Record<string, string>>({});
-
-  const getClosingDateInputVal = (g: ProductGroup): string => {
-    if (draftClosingDates[g.id] !== undefined) {
-      return draftClosingDates[g.id];
-    }
-    return g.closing_date || '';
-  };
-
-  const handleCommitClosingDate = async (groupId: string, rawVal: string) => {
-    const group = groups.find(g => g.id === groupId);
-    if (!group) return;
-
-    const currentVal = group.closing_date || '';
-    if (rawVal.trim() === currentVal.trim()) {
-      setClosingDateSaveErrors(prev => {
-        const next = { ...prev };
-        delete next[groupId];
-        return next;
-      });
-      setDraftClosingDates(prev => {
-        const next = { ...prev };
-        delete next[groupId];
-        return next;
-      });
-      return;
-    }
-
-    const normalized = rawVal.trim() === '' ? '' : normalizeDateInput(rawVal);
-    if (normalized === null) {
-      // Keep in draft for incomplete inputs, do not sync, do not alert
-      console.log(`[Date Input] incomplete/invalid input ignored: ${rawVal}`);
-      return;
-    }
-
-    setClosingDateSaveErrors(prev => {
-      const next = { ...prev };
-      delete next[groupId];
-      return next;
-    });
-    try {
-      const saved = await handleUpdateGroupField(groupId, 'closing_date', normalized);
-      if (!saved) {
-        setClosingDateSaveErrors(prev => ({ ...prev, [groupId]: '儲存未完成，請重新載入後再試' }));
-      }
-    } catch (error) {
-      console.error('[PurchaseRecords] Failed to save closing date:', error);
-      setClosingDateSaveErrors(prev => ({ ...prev, [groupId]: '儲存失敗，請重試' }));
-    }
-  };
-
-  const handleCancelClosingDateDraft = (groupId: string) => {
-    setDraftClosingDates(prev => {
-      const next = { ...prev };
-      delete next[groupId];
-      return next;
-    });
-  };
+  // 官方結單日 / 發售月份 / 官網網址: shared level-1 / level-2 rule (local draft; save once on Blur / Enter).
+  const basicInfo = useProductGroupBasicInfoDrafts();
 
   const handleUpdateDraft = (groupId: string, platform: 'myacg' | 'waca' | 'purchased', value: string) => {
     setDraftDemands(prev => ({
@@ -1368,11 +1312,14 @@ export default function PurchaseRecords() {
 
   const toggleEditMode = () => {
     if (editMode) {
+      // Same as level 2: valid drafts were already committed once by their Blur; anything still unsaved
+      // (incomplete / invalid / failed / conflicting) is only discarded after an explicit confirmation.
+      if (basicInfo.hasUnsavedDrafts
+        && !window.confirm('離開編輯模式將放棄未儲存的商品資訊草稿（官方結單日／發售月份／官網網址），並顯示目前已儲存的資料。確定繼續？')) return;
       setEditMode(false);
       setStableEditOrder(null);
       setStableCompletedOrder(null);
-      setDraftClosingDates({});
-      setClosingDateSaveErrors({});
+      basicInfo.discardUnsaved();
       return;
     }
 
@@ -1514,14 +1461,14 @@ export default function PurchaseRecords() {
   const { refreshAuthoritative } = useCloudResourceSync(
     'purchase-records',
     ['products', 'purchases', 'privateOrders', 'inventory', 'salesOrders'],
-    Object.keys(draftDemands).length > 0 || Object.keys(draftClosingDates).length > 0
+    Object.keys(draftDemands).length > 0 || basicInfo.hasDrafts
       || showWacaDialog || showClosingDateWorkbench,
     loadFreshData,
     showWacaDialog || showClosingDateWorkbench ? undefined : {
       kind: 'groups',
       ids: [...new Set([
         ...Object.keys(draftDemands).map(key => key.replace(/_(myacg|waca|purchased)$/, '')),
-        ...Object.keys(draftClosingDates),
+        ...basicInfo.draftGroupIds,
         ...selectedGroupIds,
       ])],
     },
@@ -1609,13 +1556,6 @@ export default function PurchaseRecords() {
     if (!['purchase_date', 'closing_date', 'release_month', 'product_url'].includes(field)) {
       return false;
     }
-    if (field === 'closing_date') {
-      setDraftClosingDates(prev => {
-        const next = { ...prev };
-        delete next[groupId];
-        return next;
-      });
-    }
     let processedValue = value;
     if ((field === 'closing_date' || field === 'purchase_date') && typeof value === 'string') {
       processedValue = value.replace(/-/g, '/');
@@ -1636,6 +1576,8 @@ export default function PurchaseRecords() {
         await loadData();
         return false;
       }
+      // A failed save must not keep showing the unsaved value as if it were stored.
+      setGroups(current => current.map(g => g.id === groupId ? (groups.find(prev => prev.id === groupId) ?? g) : g));
       throw err;
     }
     return true;
@@ -2238,6 +2180,7 @@ export default function PurchaseRecords() {
 
     const listToUpdate = sourceList.slice(startRowIndex, startRowIndex + lines.length);
     if (listToUpdate.length === 0) return;
+    if (field !== 'purchase_date') basicInfo.clearGroupFields(listToUpdate.map(item => item.id), [field]);
 
     const groupMap = new Map(groups.map(g => [g.id, g]));
     listToUpdate.forEach((item, offset) => {
@@ -2289,6 +2232,30 @@ export default function PurchaseRecords() {
       }
     }
   };
+
+  // Saving feedback without layout change (border / background only).
+  const basicInfoSavingStyle = (g: ProductGroup, field: BasicInfoField) =>
+    (basicInfo.isSaving(g.id, field) ? { borderColor: '#93c5fd', backgroundColor: '#f5f9ff' } : {});
+
+  // Level-1 inputs for the shared basic-info rule: local draft, save once on Blur / Enter, Esc restores.
+  const basicInfoInputProps = (g: ProductGroup, field: BasicInfoField, rowIndex: number, tableId: string, list: ProductGroup[]) => ({
+    value: basicInfo.valueOf(g, field),
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => basicInfo.change(g, field, e.target.value),
+    onBlur: () => { void basicInfo.commit(g, field, 'blur', handleUpdateGroupField); },
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') void basicInfo.commit(g, field, 'enter', handleUpdateGroupField);
+      else if (e.key === 'Escape') { basicInfo.cancel(g.id, field); e.currentTarget.blur(); }
+      handleKeyDown(e, rowIndex, field, tableId);
+    },
+    onPaste: (e: React.ClipboardEvent<HTMLInputElement>) => handlePaste(e, rowIndex, field, list),
+    'data-table': tableId,
+    'data-row': rowIndex,
+    'data-field': field,
+    'data-saving': basicInfo.isSaving(g.id, field) ? 'true' : undefined,
+    'aria-busy': basicInfo.isSaving(g.id, field) || undefined,
+    'aria-invalid': basicInfo.errorOf(g.id, field) ? 'true' as const : undefined,
+    title: basicInfo.errorOf(g.id, field) || undefined,
+  });
 
   const formatReleaseMonth = (val: string | undefined | null) => {
     if (!val) return '-';
@@ -2408,11 +2375,7 @@ export default function PurchaseRecords() {
       );
 
       setGroups(plan.nextGroups);
-      setDraftClosingDates(previous => {
-        const next = { ...previous };
-        selectedGroupIds.forEach(id => delete next[id]);
-        return next;
-      });
+      basicInfo.clearGroupFields(selectedGroupIds, ['closing_date']);
       setSelectedGroupIds(new Set());
       alert(`已清除 ${plan.modifiedCount} 筆結單日，${plan.alreadyEmptyCount} 筆原本未設定`);
     } catch (error) {
@@ -4117,35 +4080,18 @@ export default function PurchaseRecords() {
                           )}</td>
                         {editMode && (
                           <td style={{ textAlign: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '2px 6px', position: 'relative' }}>
                               <input
                                 className="input"
                                 type="text"
                                 placeholder="YYYY/MM/DD"
-                                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }}
-                                value={getClosingDateInputVal(g)}
-                                onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))}
+                                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center', ...basicInfoSavingStyle(g, 'closing_date') }}
+                                {...basicInfoInputProps(g, 'closing_date', idx, tableId, list)}
                                 onClick={e => e.stopPropagation()}
-                                onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') {
-                                    handleCommitClosingDate(g.id, getClosingDateInputVal(g));
-                                  } else if (e.key === 'Escape') {
-                                    handleCancelClosingDateDraft(g.id);
-                                    e.currentTarget.blur();
-                                  }
-                                  handleKeyDown(e, idx, 'closing_date', tableId);
-                                }}
-                                onPaste={e => handlePaste(e, idx, 'closing_date', list)}
-                                data-table={tableId}
-                                data-row={idx}
-                                data-field="closing_date"
-                                aria-invalid={closingDateSaveErrors[g.id] ? 'true' : undefined}
-                                title={closingDateSaveErrors[g.id] || undefined}
                               />
-                              {closingDateSaveErrors[g.id] && (
-                                <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                                  {closingDateSaveErrors[g.id]}
+                              {basicInfo.errorOf(g.id, 'closing_date') && (
+                                <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', order: 3, flexBasis: '100%', textAlign: 'left', whiteSpace: 'normal' }}>
+                                  {basicInfo.errorOf(g.id, 'closing_date')}
                                 </span>
                               )}
                               <Calendar
@@ -4161,7 +4107,7 @@ export default function PurchaseRecords() {
                                 ref={el => { datePickerRefs.current[g.id] = el; }}
                                 style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
                                 value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
+                                onChange={e => { basicInfo.cancel(g.id, 'closing_date'); void handleUpdateGroupField(g.id, 'closing_date', e.target.value); }}
                                 onClick={e => e.stopPropagation()}
                               />
                             </div>
@@ -4570,35 +4516,18 @@ export default function PurchaseRecords() {
                         )}
                         {editMode && (
                           <td style={{ textAlign: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '2px 6px', position: 'relative' }}>
                               <input
                                 className="input"
                                 type="text"
                                 placeholder="YYYY/MM/DD"
-                                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center' }}
-                                value={getClosingDateInputVal(g)}
-                                onChange={e => setDraftClosingDates(prev => ({ ...prev, [g.id]: e.target.value }))}
+                                style={{ flex: 1, minWidth: 0, height: '32px', padding: '0 8px', fontSize: '13px', textAlign: 'center', ...basicInfoSavingStyle(g, 'closing_date') }}
+                                {...basicInfoInputProps(g, 'closing_date', idx, tableId, list)}
                                 onClick={e => e.stopPropagation()}
-                                onBlur={() => handleCommitClosingDate(g.id, getClosingDateInputVal(g))}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') {
-                                    handleCommitClosingDate(g.id, getClosingDateInputVal(g));
-                                  } else if (e.key === 'Escape') {
-                                    handleCancelClosingDateDraft(g.id);
-                                    e.currentTarget.blur();
-                                  }
-                                  handleKeyDown(e, idx, 'closing_date', tableId);
-                                }}
-                                onPaste={e => handlePaste(e, idx, 'closing_date', list)}
-                                data-table={tableId}
-                                data-row={idx}
-                                data-field="closing_date"
-                                aria-invalid={closingDateSaveErrors[g.id] ? 'true' : undefined}
-                                title={closingDateSaveErrors[g.id] || undefined}
                               />
-                              {closingDateSaveErrors[g.id] && (
-                                <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                                  {closingDateSaveErrors[g.id]}
+                              {basicInfo.errorOf(g.id, 'closing_date') && (
+                                <span data-testid="closing-date-save-error" style={{ color: '#dc2626', fontSize: '11px', order: 3, flexBasis: '100%', textAlign: 'left', whiteSpace: 'normal' }}>
+                                  {basicInfo.errorOf(g.id, 'closing_date')}
                                 </span>
                               )}
                               <Calendar
@@ -4614,7 +4543,7 @@ export default function PurchaseRecords() {
                                 ref={el => { datePickerRefs.current[g.id] = el; }}
                                 style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
                                 value={g.closing_date ? g.closing_date.replace(/\//g, '-') : ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'closing_date', e.target.value)}
+                                onChange={e => { basicInfo.cancel(g.id, 'closing_date'); void handleUpdateGroupField(g.id, 'closing_date', e.target.value); }}
                                 onClick={e => e.stopPropagation()}
                               />
                             </div>
@@ -4625,31 +4554,25 @@ export default function PurchaseRecords() {
                             <td style={{ textAlign: 'center' }}>
                               <input
                                 className="input"
-                                style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }}
-                                value={g.release_month || ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'release_month', e.target.value)}
+                                style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', ...basicInfoSavingStyle(g, 'release_month') }}
+                                {...basicInfoInputProps(g, 'release_month', idx, tableId, list)}
                                 onClick={e => e.stopPropagation()}
-                                onKeyDown={e => handleKeyDown(e, idx, 'release_month', tableId)}
-                                onPaste={e => handlePaste(e, idx, 'release_month', list)}
-                                data-table={tableId}
-                                data-row={idx}
-                                data-field="release_month"
                                 placeholder="例如：2026-11"
                               />
+                              {basicInfo.errorOf(g.id, 'release_month') && (
+                                <span data-testid="basic-info-save-error" style={{ color: '#dc2626', fontSize: '11px' }}>{basicInfo.errorOf(g.id, 'release_month')}</span>
+                              )}
                             </td>
                             <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                               <input
                                 className="input"
-                                style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px' }}
-                                value={g.product_url || ''}
-                                onChange={e => handleUpdateGroupField(g.id, 'product_url', e.target.value)}
-                                onKeyDown={e => handleKeyDown(e, idx, 'product_url', tableId)}
-                                onPaste={e => handlePaste(e, idx, 'product_url', list)}
-                                data-table={tableId}
-                                data-row={idx}
-                                data-field="product_url"
+                                style={{ width: '100%', height: '32px', padding: '0 8px', fontSize: '13px', ...basicInfoSavingStyle(g, 'product_url') }}
+                                {...basicInfoInputProps(g, 'product_url', idx, tableId, list)}
                                 placeholder="官網網址"
                               />
+                              {basicInfo.errorOf(g.id, 'product_url') && (
+                                <span data-testid="basic-info-save-error" style={{ color: '#dc2626', fontSize: '11px' }}>{basicInfo.errorOf(g.id, 'product_url')}</span>
+                              )}
                             </td>
                           </>
                         )}

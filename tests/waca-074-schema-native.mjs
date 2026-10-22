@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { isolatedDatabase } from './helpers/saveability-isolated.mjs';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 import { fingerprintStructuralSnapshot, diffStructuralSnapshots } from '../tools/schema-reconciliation/schemaContract.mjs';
 import { buildMigrationEffectRegistry } from '../tools/schema-reconciliation/migrationEffectRegistry.mjs';
 import { planSchemaDelta } from '../tools/schema-reconciliation/reconcile.mjs';
+import { createMigrationSourceReader } from '../tools/schema-reconciliation/migrationSource.mjs';
 const file = '074_waca_counted_state_safeupdate.sql';
-const old = readFileSync('supabase/sql/073_waca_counted_transition_import.sql');
-assert.equal(createHash('sha256').update(old).digest('hex'), 'f96b253bacaa129d5d3757d9055a40619f6e83339502c21c5abcda2b8b5c42a6');
+const readMigration = createMigrationSourceReader(fileURLToPath(new URL('..', import.meta.url)));
+const old = await readMigration('073_waca_counted_transition_import.sql');
+assert.equal(old.sourceChecksum, 'f96b253bacaa129d5d3757d9055a40619f6e83339502c21c5abcda2b8b5c42a6');
 const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3.slice(0, CANONICAL_FRESH_INSTALL_V3.indexOf(file)) });
 try {
   const capture = async () => {

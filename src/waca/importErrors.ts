@@ -32,16 +32,24 @@ const labels: Record<WacaErrorCategory, string> = {
 export function wacaNotice(category: WacaErrorCategory, message = messages[category]): WacaUiError {
   return { category, label: labels[category], message };
 }
+export function isWacaBusinessConflict(cause: unknown): boolean {
+  const error = formatStructuredError(cause);
+  return error.code === 'PT409' && [
+    'WACA_STALE_REVISION', 'WACA_RESTORE_EPOCH_CHANGED', 'WACA_COUNTED_PREVIEW_MISMATCH',
+    'WACA_RECOGNITION_PREVIEW_CHANGED', 'WACA_RECOGNITION_VARIANT_CHANGED',
+  ].includes(error.message);
+}
 export function classifyWacaError(cause: unknown, stage: WacaStage, requestId?: string, commitRpc?: WacaCommitRpc): WacaUiError {
   const error = formatStructuredError(cause);
   const timeout = error.code === '57014' || /statement timeout|timed?\s*out|timeout|逾時/iu.test(error.message);
   const permission = ['42501', 'PGRST301', 'PGRST302'].includes(error.code ?? '')
     || /permission denied|authentication_required|owner_required/iu.test(error.message);
   const network = /fetch|network|connection|socket|offline/iu.test(error.message);
+  const businessConflict = isWacaBusinessConflict(cause);
   // Phase always wins: a lost commit response is not proof of rollback, and
   // failure AFTER acknowledgment must not tell the user to resend the import.
   const category: WacaErrorCategory = (stage === 'validation' || stage === 'commit')
-    && (error.code === '40001' || error.message === 'WACA_STALE_REVISION') ? 'STALE_CONFLICT'
+    && (businessConflict || error.code === '40001' || error.message === 'WACA_STALE_REVISION') ? 'STALE_CONFLICT'
     : stage === 'backup' ? timeout ? 'BACKUP_TIMEOUT' : 'BACKUP_FAILED'
     : stage === 'readback' ? 'READBACK_FAILED'
     : stage === 'commit' ? /^[0-9A-Z]{5}$/u.test(error.code ?? '') ? 'WACA_COMMIT_REJECTED' : 'WACA_COMMIT_UNKNOWN'

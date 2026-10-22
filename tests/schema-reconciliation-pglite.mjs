@@ -226,10 +226,10 @@ try {
   const currentSnapshot=await capture(fresh);
   assert.equal(fingerprintStructuralSnapshot(currentSnapshot),currentFingerprint);
   const currentPlan=planSchemaDelta(currentSnapshot,fullRegistry,{expectedSnapshot:currentSnapshot});
-  assert.equal(currentPlan.migrations.length,44);
+  assert.equal(currentPlan.migrations.length,46);
   assert.ok(currentPlan.migrations.every(item=>item.state==='SATISFIED' && item.applyMethod==='NO_APPLY'));
   assert.equal(currentPlan.readyForApply,true);assert.deepEqual(currentPlan.applyPlan,[]);
-  console.log('PASS full current v30 PGlite schema -> 44/44 SATISFIED, empty apply delta');
+  console.log('PASS full current v32 PGlite schema -> 46/46 SATISFIED, empty apply delta');
 } finally {
   await fresh.close(); await upgraded.close(); await partialBridge.close(); await compatibility.close();
 }

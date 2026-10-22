@@ -8,7 +8,8 @@ import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
-assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '075_waca_order_recognition_management.sql', '075 appends protected line recognition');
+assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '077_waca_custom_conflict_http409.sql', '077 custom conflict transport is the latest append');
+assert.ok(CANONICAL_FRESH_INSTALL_V3.includes('075_waca_order_recognition_management.sql'), '075 appends protected line recognition');
 const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3 });
 const out = {};
 const id = n => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;

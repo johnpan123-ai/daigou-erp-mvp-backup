@@ -148,8 +148,9 @@ export class LocalProvider implements IDataProvider {
       nextPackages = [...packages.filter(pkg => pkg.id !== command.package.id), command.package];
     } else if (command.transactionType === 'attach-items') {
       nextItems = [...items, ...command.items];
+      // Same rule as the Cloud RPC (076): new unchecked items reopen a confirmed package as 'registered'.
       nextPackages = packages.map(pkg => pkg.id === command.packageId && pkg.status === 'confirmed'
-        ? { ...pkg, status: 'arrived', updated_at: new Date().toISOString() }
+        ? { ...pkg, status: 'registered', updated_at: new Date().toISOString() }
         : pkg);
     } else {
       const updates = new Map(command.updates.map(update => [update.itemId, update]));
@@ -164,13 +165,17 @@ export class LocalProvider implements IDataProvider {
       });
       const packageItems = nextItems.filter(item => item.japan_package_id === command.packageId);
       const allChecked = packageItems.length > 0 && packageItems.every(item => item.checked);
+      const anyChecked = packageItems.some(item => item.checked);
+      // Same rule as the Cloud RPC (076): all checked -> confirmed; un-checking a confirmed package -> registered;
+      // partial receiving keeps the status (historical 'arrived' is never produced or converted) but stamps arrived_at once.
       nextPackages = packages.map(pkg => {
         if (pkg.id !== command.packageId || pkg.status === 'problem') return pkg;
-        const status = allChecked ? 'confirmed' : pkg.status === 'confirmed' ? 'arrived' : pkg.status;
-        return status === pkg.status ? pkg : {
+        const status = allChecked ? 'confirmed' : pkg.status === 'confirmed' ? 'registered' : pkg.status;
+        const arrivedAt = pkg.arrived_at || (status === 'arrived' || status === 'confirmed' || anyChecked ? new Date().toISOString().slice(0, 10) : undefined);
+        return status === pkg.status && arrivedAt === pkg.arrived_at ? pkg : {
           ...pkg,
           status,
-          arrived_at: pkg.arrived_at || (status === 'arrived' || status === 'confirmed' ? new Date().toISOString().slice(0, 10) : undefined),
+          arrived_at: arrivedAt,
           updated_at: new Date().toISOString(),
         };
       });

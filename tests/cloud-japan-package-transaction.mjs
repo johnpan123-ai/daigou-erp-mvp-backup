@@ -72,7 +72,8 @@ class AtomicJapanPackageServer {
       let status = currentPackage.status;
       if (status !== 'problem') {
         if (active.length > 0 && active.every(item => item.checked)) status = 'confirmed';
-        else if (active.some(item => item.checked) || status === 'arrived' || status === 'confirmed') status = 'arrived';
+        // 076 (Owner 2026-10-21): partial receiving keeps the status; a reopened confirmed package returns to registered.
+        else if (status === 'confirmed') status = 'registered';
       }
       const packageChanged = request.transactionType === 'attach-items' || status !== currentPackage.status;
       stagedPackages.set(request.packageId, {
@@ -237,7 +238,7 @@ try {
   };
   const firstChecked = partialServer.execute(actor, checkFirst.idempotencyKey,
     buildJapanPackageTransactionRequest(partialServer.packages.get(packageId), [...partialServer.items.values()], checkFirst));
-  assert.equal(firstChecked.package.status, 'arrived', 'The first received item advances a registered Package to arrived');
+  assert.equal(firstChecked.package.status, 'registered', 'Partial receiving keeps a registered Package registered (never auto arrived, never confirmed)');
   const checkSecond = {
     idempotencyKey: uuid(24), transactionType: 'set-receiving', packageId,
     updates: [{ itemId: secondItem.id, checked: true, checkedAt: '2026-09-19T03:01:00.000Z' }],
@@ -251,7 +252,7 @@ try {
   };
   const unchecked = partialServer.execute(actor, uncheck.idempotencyKey,
     buildJapanPackageTransactionRequest(allChecked.package, allChecked.items, uncheck));
-  assert.equal(unchecked.package.status, 'arrived');
+  assert.equal(unchecked.package.status, 'registered', 'Cancelling a receipt of a confirmed Package returns it to registered');
   assert.equal(unchecked.items.find(item => item.id === itemId).checked_at, null);
 
   const arrivedPartialServer = new AtomicJapanPackageServer();

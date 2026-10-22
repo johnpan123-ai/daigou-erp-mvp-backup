@@ -531,7 +531,11 @@ try {
     });
     const values = {
       erp_product_groups: groups,
-      erp_product_categories: [], erp_product_variants: [], erp_inventory: [],
+      // Purchase Records lists only groups with a purchase-record variant (product master rule since 6200cf6).
+      erp_product_categories: [],
+      erp_product_variants: groups.map((group, index) => ({ id: `${group.id}-variant`, product_group_id: group.id, product_title: group.title,
+        variant_name: '單品', myacg_item_code: `CDW-UI-${index + 1}`, sort_order: 0, created_at: now, updated_at: now })),
+      erp_inventory: [],
       erp_purchase_batches: [], erp_purchase_batch_items: [], erp_private_orders: [],
       erp_private_order_items: [], erp_bundle_components: [], erp_japan_packages: [],
       erp_japan_package_items: [], erp_outbound_shipments: [], erp_outbound_shipment_items: [],
