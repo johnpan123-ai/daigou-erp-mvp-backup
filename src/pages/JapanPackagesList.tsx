@@ -393,7 +393,7 @@ export default function JapanPackagesList() {
           if (err.kind === 'result-unknown') createOutcomeUnknownRef.current = true;
           alert(err.message);
         } else {
-          alert('儲存失敗，請重試！');
+          alert(cloudMutationFailureMessage(err));
         }
       } finally {
         createInFlightRef.current = false;

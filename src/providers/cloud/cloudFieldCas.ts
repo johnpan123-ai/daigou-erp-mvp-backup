@@ -198,6 +198,10 @@ export class SaveabilityError extends Error {
 }
 export function cloudMutationFailureMessage(error: unknown): string {
   if (error instanceof Error && error.name === 'ProviderModeChangedError') return error.message;
+  const classified = error as { name?: unknown; code?: unknown } | null;
+  if (classified?.name === 'CloudOfflineWriteError' && classified.code === 'CLOUD_OFFLINE_WRITE_BLOCKED') {
+    return '雲端資料目前不是可確認的最新狀態。新增、修改、刪除與匯入已停用；重新連線後會讀取雲端最新資料。';
+  }
   const server = error as { message?: string; details?: string } | null;
   if (server?.message === 'CORE_SOURCE_CAPACITY') {
     try {
