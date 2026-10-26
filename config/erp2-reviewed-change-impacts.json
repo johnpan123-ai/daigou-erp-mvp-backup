@@ -8551,6 +8551,28 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "japan-package-create-one-time-baseline-exception-scope-fix-v1",
+      "beforeHead": "b837b65c1c278df568721cbacfe7c2dc9d50600f",
+      "reviewedHead": "515d16a69f4b0744fceee718b394fb8ab3b5db2a",
+      "patchSha256": "8f73239ec499295389467b83dbe67dcf727033f808dd18c5f5a16a8df76a9b9b",
+      "requiredRegressions": ["baseline-exception-control"],
+      "files": [
+        {
+          "file": "config/erp2-one-time-baseline-exception.json",
+          "beforeHash": "4b150be99db8b9bccfcc1e25ba3195052aa30a9dccd25e10c9258c47cc775e54",
+          "afterHash": "b7e2e23f8b5bd7787535978f3035ee816af15cefa4748dbe4efcc654a7ac5170",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["allowedDescendantFiles exact scope"],
+          "dataFlow": "Adds the already-reviewed verify-erp2-promotion.mjs file to the exact descendant file set after the first formal run correctly failed closed on its omission.",
+          "persistenceBehavior": "Release evidence only; no application persistence.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "No wildcard or directory allowance; one exact Release Control path only.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        }
+      ]
     }
   ]
 }
