@@ -8342,6 +8342,85 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "japan-package-create-page-local-offline-message-v2",
+      "beforeHead": "0b3b5b63b63e67909e6ab61d215d260f53a382c9",
+      "reviewedHead": "84cebf1271a83e446b89c6c192f3092946fe0aca",
+      "patchSha256": "bd58cafe3af8b40a38ea2674b88e658a59c1f1567c85508e83b7be0270ee049a",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "cas",
+        "realtime",
+        "provider-guard",
+        "context-guard",
+        "cloud-next"
+      ],
+      "files": [
+        {
+          "file": "src/pages/JapanPackagesList.tsx",
+          "beforeHash": "9b738a0f9e4853cb61f239ee5db79a8799138d20a451b6513298c5783c609e3e",
+          "afterHash": "7a9ca76301b36c6805c29a0cf71bc6d42b666911351bdd82b4fdf95b93645052",
+          "classification": "PRESENTATION_ONLY",
+          "functions": [
+            "japanPackageCreateFailureMessage",
+            "handleAddSubmit error presentation"
+          ],
+          "dataFlow": "The create form recognizes only the fixed CloudOfflineWriteError/CLOUD_OFFLINE_WRITE_BLOCKED pair and otherwise delegates to the adopted cloudMutationFailureMessage classifier.",
+          "persistenceBehavior": "NONE. Command construction, idempotency, provider dispatch, in-flight guard, success handling and form state are unchanged.",
+          "writePath": "Same dataProvider.applyJapanPackageTransaction call and arguments; no retry or added write.",
+          "providerPath": "The shared provider classifier is no longer changed. Cloud/Local routing and guardedWrite are unchanged.",
+          "externalContract": "Only the fixed create-form alert for an already-blocked pre-RPC write changes.",
+          "schemaExpectation": "No schema, RPC, payload, RLS, CAS, Revision, Epoch, Realtime Guard or Restore change."
+        },
+        {
+          "file": "src/providers/cloud/cloudFieldCas.ts",
+          "beforeHash": "3479b881a6e61899a27a5e10a0f951c43b5ad0d3c42e2133b34534d9f2250a37",
+          "afterHash": "788c88195eb4530159aba9573c442f25287ae3045b4e5b9a35754c83414e2970",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "cloudMutationFailureMessage"
+          ],
+          "dataFlow": "Removes the candidate-only offline message branch so the complete file returns to the adopted v33 blob.",
+          "persistenceBehavior": "NONE. Final provider blob is byte-identical to adopted v33.",
+          "writePath": "No RPC, mutation builder, retry, cache update, transaction or provider call changes.",
+          "providerPath": "Exact adopted v33 provider source restored.",
+          "externalContract": "Shared classifier behavior is the adopted v33 behavior.",
+          "schemaExpectation": "No schema, durable field, RPC, ACL, CAS, Revision, Epoch, Realtime Guard or Restore change."
+        },
+        {
+          "file": "tests/fixtures/japan-package-create-entry.tsx",
+          "beforeHash": "a326102b37abdc9c8ef01e556a482dd628757136049e688466b098e2c8336e5f",
+          "afterHash": "ee9dcb20400c84e82c387cc0f427cc25148d3471446c98f9bf43d8c09751f871",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "classified failure scenario"
+          ],
+          "dataFlow": "Adds one synthetic bounded CORE_SOURCE_CAPACITY error to verify fallback classification.",
+          "persistenceBehavior": "Disposable in-memory fixture only.",
+          "writePath": "No production request.",
+          "providerPath": "Test-only provider fixture.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/japan-package-create-v33-ui.mjs",
+          "beforeHash": "896d9061a6a24a6387eb29df6a26590395a836b0b36f4026ade57a7dccf18be9",
+          "afterHash": "fcc7a3b414babfeebf79f174fef8f5410dd8f1a6e256a04462d9d0757b4e08c5",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "page-local offline and fallback classifier regression"
+          ],
+          "dataFlow": "Asserts the offline fixed alert, zero RPC, retained fields, and continued bounded classification for other errors.",
+          "persistenceBehavior": "Synthetic browser fixture only.",
+          "writePath": "No production request.",
+          "providerPath": "Uses the actual form with isolated provider methods.",
+          "externalContract": "Confirms fixed trusted messages only.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
