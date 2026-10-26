@@ -8204,6 +8204,144 @@
           "schemaExpectation": "No schema change or migration. All source classification, ancestry, evidence freshness, exact-head and regression verification logic unchanged."
         }
       ]
+    },
+    {
+      "id": "japan-package-create-cloud-offline-message-v1",
+      "beforeHead": "ff5555c45ca3937f44fab6411d87e3fa25c6671f",
+      "reviewedHead": "02f82e4d8e9bd12cca0f47bb2e6770618e524fac",
+      "patchSha256": "55774ac798dfefd8e417e0fba7adf564a9dc908f6495ae181c1a352f1b639f8a",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "sync",
+        "cas",
+        "realtime",
+        "provider-guard",
+        "context-guard",
+        "cloud-next"
+      ],
+      "files": [
+        {
+          "file": "docs/diagnostics/ERP2_V33_JAPAN_PACKAGE_CREATE_20261026.md",
+          "beforeHash": null,
+          "afterHash": "4899b3f7523e10f54ff7d90ba7fff90a11b19523551685741898152ad60ef67d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "incident evidence and isolated verification report"
+          ],
+          "dataFlow": "Documents the observed pre-RPC fail-closed path and disposable verification; it is not loaded by the application.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "No runtime code or production write.",
+          "providerPath": "No runtime code.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema, RPC, ACL, Ledger or Migration change."
+        },
+        {
+          "file": "src/pages/JapanPackagesList.tsx",
+          "beforeHash": "ab1353deae4a308ecac0a074a715d4a322b2ebda297ef6cac791605e1f2f0dfa",
+          "afterHash": "9b738a0f9e4853cb61f239ee5db79a8799138d20a451b6513298c5783c609e3e",
+          "classification": "PRESENTATION_ONLY",
+          "functions": [
+            "handleAddSubmit error presentation"
+          ],
+          "dataFlow": "The existing caught error is passed to the existing fixed-message classifier instead of displaying one generic retry string.",
+          "persistenceBehavior": "NONE. Transaction construction, idempotency key, provider dispatch, in-flight guard, success handling and form state are byte-identical.",
+          "writePath": "Same dataProvider.applyJapanPackageTransaction call and arguments; no added call or retry.",
+          "providerPath": "Unchanged Cloud/Local routing and guardedWrite path.",
+          "externalContract": "Only the human-readable failure alert changes.",
+          "schemaExpectation": "No schema, RPC, payload, RLS, CAS, Revision, Epoch or Restore change."
+        },
+        {
+          "file": "src/providers/cloud/cloudFieldCas.ts",
+          "beforeHash": "788c88195eb4530159aba9573c442f25287ae3045b4e5b9a35754c83414e2970",
+          "afterHash": "3479b881a6e61899a27a5e10a0f951c43b5ad0d3c42e2133b34534d9f2250a37",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "cloudMutationFailureMessage"
+          ],
+          "dataFlow": "A caught error with the exact fixed name/code pair CloudOfflineWriteError/CLOUD_OFFLINE_WRITE_BLOCKED maps to the existing safe offline explanation.",
+          "persistenceBehavior": "NONE. The function remains a pure error-to-fixed-string classifier and does not expose arbitrary server text.",
+          "writePath": "No RPC, mutation builder, retry, cache update, transaction or provider call is added or changed.",
+          "providerPath": "No import or connectivity dependency is added; classification uses only fixed name/code values on the supplied error.",
+          "externalContract": "Existing error classes, codes and all other message branches are unchanged.",
+          "schemaExpectation": "No schema, durable field, RPC, ACL, CAS, Revision, Epoch, Realtime Guard or Restore change."
+        },
+        {
+          "file": "tests/fixtures/japan-package-create-entry.tsx",
+          "beforeHash": null,
+          "afterHash": "a326102b37abdc9c8ef01e556a482dd628757136049e688466b098e2c8336e5f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated React provider fixture"
+          ],
+          "dataFlow": "Synthetic in-memory package rows exercise success, offline and pending submissions.",
+          "persistenceBehavior": "Disposable fixture only.",
+          "writePath": "No Supabase request; RPC count is simulated and asserted.",
+          "providerPath": "Test-only Object.assign fixture over the existing dataProvider.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/fixtures/japan-package-create-vite.config.mjs",
+          "beforeHash": null,
+          "afterHash": "5f7328e8a16797f279b1317477c4681cfdc4a30bb5e54a5c07e2a0bc5c204d4e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated React test configuration"
+          ],
+          "dataFlow": "Binds the browser fixture to an isolated public configuration with a non-credential test key.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "Loopback test server only.",
+          "providerPath": "No live provider request.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/fixtures/japan-package-create.html",
+          "beforeHash": null,
+          "afterHash": "a4f0ef587965ed18f0a15a5e2f399205801b77008123461109ee5c944285deb1",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolated browser fixture document"
+          ],
+          "dataFlow": "Loads only the isolated React entrypoint.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "Loopback test server only.",
+          "providerPath": "No live provider request.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/japan-package-create-v33-postgrest.mjs",
+          "beforeHash": null,
+          "afterHash": "56b45d9818bb82cb291b1cee4d289735d9f17118125bd067fcf27ffe9be807ef",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "disposable PostgreSQL v33/PostgREST regression"
+          ],
+          "dataFlow": "Synthetic package requests exercise name-only and full fields, Unicode, idempotency, rollback, readback, receiving and outbound allocation.",
+          "persistenceBehavior": "Disposable localhost database only.",
+          "writePath": "Authenticated loopback PostgREST with safeupdate; no production URL or credential.",
+          "providerPath": "Uses the existing Japan package request builder against an isolated database.",
+          "externalContract": "Validates the existing v33 RPC contract without changing it.",
+          "schemaExpectation": "Applies the unchanged 078 source only inside the disposable database."
+        },
+        {
+          "file": "tests/japan-package-create-v33-ui.mjs",
+          "beforeHash": null,
+          "afterHash": "896d9061a6a24a6387eb29df6a26590395a836b0b36f4026ade57a7dccf18be9",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "desktop/mobile React regression"
+          ],
+          "dataFlow": "Exercises Unicode input, all visible optional fields, immediate rendering, synchronous double activation and offline form retention.",
+          "persistenceBehavior": "Synthetic in-memory fixture only.",
+          "writePath": "Asserts offline zero-RPC and successful single dispatch; no production request.",
+          "providerPath": "Uses the actual JapanPackagesList component with isolated provider methods.",
+          "externalContract": "Confirms the fixed user message and absence of the misleading generic alert.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
