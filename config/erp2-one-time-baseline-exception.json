@@ -61,6 +61,7 @@
     "scripts/promotion-safety.mjs",
     "scripts/reviewed-change-impact.mjs",
     "scripts/verify-erp2-change-impact.mjs",
+    "scripts/verify-erp2-promotion.mjs",
     "tests/erp2-one-time-baseline-exception.mjs"
   ],
   "consumption": {
