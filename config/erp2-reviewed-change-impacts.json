@@ -8421,6 +8421,136 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "japan-package-create-one-time-baseline-exception-v1",
+      "beforeHead": "35432f74779fc9a6d37d02cfde46bcaec26acf86",
+      "reviewedHead": "daf24d26c2a206580f355168ef89564c2036d79d",
+      "patchSha256": "394798afaf7a0ce0efeb1c399cd7bf9e5ade84bf27cb5ef101b416024e23c99e",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "baseline-exception-control"
+      ],
+      "files": [
+        {
+          "file": "config/erp2-one-time-baseline-exception.json",
+          "beforeHash": null,
+          "afterHash": "4b150be99db8b9bccfcc1e25ba3195052aa30a9dccd25e10c9258c47cc775e54",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["exact one-time authorization binding"],
+          "dataFlow": "Binds one baseline, one original candidate, one failure signature, two immutable failure logs, one Pages target and one-use consumption marker.",
+          "persistenceBehavior": "Release evidence only; no application persistence.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "Exact Owner-authorized baseline exception only.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "scripts/deploy-erp2-pages.mjs",
+          "beforeHash": "0c0399e9c232aa24ef69e5a0a025385f1dc6515b105542699da9605ed15e00da",
+          "afterHash": "8b0d20f9a8771a8b378e1e9bf6f02ddde81d5300effde9790b39c28f338d4721",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["one-time consumption before Pages upload"],
+          "dataFlow": "A verified PASS_WITH_BASELINE_EXCEPTION is atomically consumed before the existing guarded Wrangler upload.",
+          "persistenceBehavior": "Writes one local immutable consumption record with exclusive creation.",
+          "writePath": "Cloudflare upload remains behind the complete promotion guard.",
+          "providerPath": "No provider change.",
+          "externalContract": "Dry-run reports PASS_WITH_BASELINE_EXCEPTION and performs no consumption or upload.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "scripts/one-time-baseline-exception.mjs",
+          "beforeHash": null,
+          "afterHash": "4d4d468c12abc40a003ff77a0d17bc5a039ca935c225dfc0e7ae47a788930f44",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["buildOneTimeBaselineException", "verifyOneTimeBaselineException", "consumeOneTimeBaselineException"],
+          "dataFlow": "Verifies exact ancestry, full Patch SHA256, Git Blobs, failure-log SHA256/signatures, target, allowed control-plane descendant files and unused marker.",
+          "persistenceBehavior": "Only the exclusive local consumption marker is written, immediately before upload.",
+          "writePath": "No application, database or provider write.",
+          "providerPath": "No provider change.",
+          "externalContract": "Every mismatch and reuse fails closed.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "829680ca77bedf7f1f4104f51c17bc09f5ecfa59f40fc8d16dd0739517823c49",
+          "afterHash": "da7fe74367bacc57258b6d42aab4b02f40b51498aab98e17a224265555191bd8",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["verifySafeDescendant"],
+          "dataFlow": "Passes the exact exception configuration and evidence root into the unchanged inspection and evidence verifier.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "All existing descendant checks remain mandatory.",
+          "schemaExpectation": "No schema-contract relaxation."
+        },
+        {
+          "file": "scripts/promotion-safety.mjs",
+          "beforeHash": "a9e2d45c74e1c56db228091507b6311b6bbe6aad5aa7bc523f4f834225c52378",
+          "afterHash": "d9617ced5a1de79ac00a2490f27ebc176db14d5ded953ba00ae96e22b163bb07",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["verifyPostAdoption", "verifySchemaBaselineEvidence"],
+          "dataFlow": "Threads the exact exception inputs into the existing post-adoption descendant verification.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "Canonical Schema, live observation and migration checks remain unchanged.",
+          "schemaExpectation": "No schema-contract relaxation."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "40e91f30a83d3aa490edf6cb6afe1791fa4f40594df4291114a04d0aa0311e94",
+          "afterHash": "90359cc3e5527a42289d1d1ca4a206fc11045792a3d18fe22946d3aae3b6dede",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["regressionScripts", "verifyImpactEvidence"],
+          "dataFlow": "Accepts one preserved FAIL only after exact baseline-exception verification; carried PASS rows require identical script Blobs and bound log SHA256.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "Ordinary releases still require every regression PASS; no generic exemption exists.",
+          "schemaExpectation": "No schema-contract relaxation."
+        },
+        {
+          "file": "scripts/verify-erp2-change-impact.mjs",
+          "beforeHash": "b0e9b09a24e4395b084c02315539782112e3e4dddac668f3fb6c38be6de6326a",
+          "afterHash": "8dfbc8f456bc4632477f0400f56953acbf17cc85c576d6fb5dbdbecf42b1fae8",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["runChangeImpact"],
+          "dataFlow": "Emits the original FAIL row, carries only exact bound PASS logs, and reruns only Release Control regressions on the final candidate.",
+          "persistenceBehavior": "Local release evidence only.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "Result is explicitly PASS_WITH_BASELINE_EXCEPTION.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "scripts/verify-erp2-promotion.mjs",
+          "beforeHash": "cc4e07303532b013747fbaa22079ecdb66265943f0e364bf8a2d9d947441a0cf",
+          "afterHash": "8b5516cb15b88c2e2d39a548e300c5886f3c9598cb1c4415e3e99bc5597a5110",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["runPromotionGuard"],
+          "dataFlow": "Loads the immutable exception config only when sealed evidence explicitly uses it and reports the distinct promotion result.",
+          "persistenceBehavior": "NONE.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "Promotion remains fail closed for missing or invalid exception configuration.",
+          "schemaExpectation": "No schema-contract relaxation."
+        },
+        {
+          "file": "tests/erp2-one-time-baseline-exception.mjs",
+          "beforeHash": null,
+          "afterHash": "18e48aab31b4fccc91c156587b39f227b47aade5e6417c296d0a498051b00240",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["positive and fail-closed exception regression"],
+          "dataFlow": "Covers correct authorization, tampering, wrong Patch, wrong target, different failure, unauthorized file and repeated consumption.",
+          "persistenceBehavior": "Temporary local files only.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "One positive and seven negative cases.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
