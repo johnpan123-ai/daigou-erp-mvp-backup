@@ -1349,8 +1349,10 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   };
 }
 
-export function verifySafeDescendant({ git, candidate, baselineRecord, changeImpactEvidence, now }) {
+export function verifySafeDescendant({ git, candidate, baselineRecord, changeImpactEvidence, now,
+  baselineExceptionConfig = null, evidenceRoot = null }) {
   const inspection = inspectSafeDescendant({ git, candidate, baselineRecord });
-  const regressionEvidence = verifyImpactEvidence({ evidence: changeImpactEvidence, inspection, git, now });
+  const regressionEvidence = verifyImpactEvidence({ evidence: changeImpactEvidence, inspection, git, now,
+    baselineExceptionConfig, evidenceRoot });
   return { ...inspection, regressionEvidence };
 }

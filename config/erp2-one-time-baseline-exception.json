@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "kind": "ERP2_ONE_TIME_BASELINE_FAILURE_EXCEPTION",
+  "id": "erp2-v33-japan-package-create-buyanime-baseline-20261027",
+  "authorizedAt": "2026-10-27T00:00:00+08:00",
+  "expiresAt": "2026-10-28T23:59:59+08:00",
+  "baselineHead": "ff5555c45ca3937f44fab6411d87e3fa25c6671f",
+  "originalCandidateHead": "35432f74779fc9a6d37d02cfde46bcaec26acf86",
+  "originalPatchSha256": "90ebb0bd6897db583fe3c2d64b6b26b06d717cf54ea3b4efc5ea30ef7e3c060a",
+  "failure": {
+    "regressionId": "post-restore-business-release",
+    "script": "tests/buyanime-post-restore-isolated.mjs",
+    "scriptBlob": "f0da4aeca536ac770f6675b9b6d949bfdee7f4f8",
+    "backendCode": "BUYANIME_INVENTORY_READBACK_IDENTITY_ERROR",
+    "uiSymptom": "ISOLATED_IMPORT_SUCCESS_SYNC_TIMEOUT",
+    "stage": "ERP1 Restore -> immediate BuyAnime",
+    "baselineEvidence": {
+      "path": "scratch/ff5555-baseline-compare-20261027.log",
+      "sha256": "9bd61d4cca1add6dd2f487e78289a5f2d5975ab5e08eb3c7f46d9160e7922b26"
+    },
+    "candidateEvidence": {
+      "path": "scratch/erp2-release-evidence/post-restore-business-release.log",
+      "sha256": "cc2e4a1b75a8326ef82740298245b999dca2b386ca80ec6cf7b90e862da0da02"
+    }
+  },
+  "target": {
+    "role": "ERP2_TESTING_PRE_ADOPTION",
+    "accountId": "e0a58431cd5bcf0e01ec3438d531461a",
+    "project": "hippo-erp-realtime-preview",
+    "domain": "hippo-erp-realtime-preview.pages.dev",
+    "url": "https://hippo-erp-realtime-preview.pages.dev"
+  },
+  "unchangedBuyAnimeBlobs": {
+    "src/providers/cloud/buyAnimeImportResume.ts": "b4c510f3ab47bf969a72e547b6412c827e36fd05",
+    "src/providers/cloud/supabaseProvider.ts": "07afbff5841acf81ff3ccd3e73c6b5a19b2ff30b",
+    "src/providers/cloud/inventoryImportTransaction.ts": "82bbf9bf86aea315956e330523c50182e16883d5",
+    "tests/buyanime-post-restore-isolated.mjs": "f0da4aeca536ac770f6675b9b6d949bfdee7f4f8",
+    "tests/fixtures/buyanime-performance-ui.tsx": "09a49d3f54a6e7ba034473ca408d345d0ba32d00",
+    "tests/fixtures/buyanime-resume-provider-entry.ts": "46351406fb3416836ac89e4065417bf297bac1ca"
+  },
+  "carriedPasses": {
+    "sync": { "path": "scratch/erp2-release-evidence/sync.log", "sha256": "b3c8d5bdeb2f88e2b36ff4fe6742287a0bf5feea3530444b58436beea269a178" },
+    "cas": { "path": "scratch/erp2-release-evidence/cas.log", "sha256": "e698aff612ec58ac3794050d1d19d596c932d86457b752ca92c38ed1f4db7a48" },
+    "realtime": { "path": "scratch/erp2-release-evidence/realtime.log", "sha256": "83efc8f9fc1578a946ee0c4a2ff650e95d3b0df1699a171120bb813ea1e5ac70" },
+    "provider-guard": { "path": "scratch/erp2-release-evidence/provider-guard.log", "sha256": "54f5494b5175557586893c545db06087c06fe499560a2e58c3ce7a6b456587ea" },
+    "context-guard": { "path": "scratch/erp2-release-evidence/context-guard.log", "sha256": "ecc999c4cdde11f94c19e996a985a26964dd86246779e938bfc29b35c20477b0" },
+    "cloud-next": { "path": "scratch/erp2-release-evidence/cloud-next.log", "sha256": "99206cbdf8105c0f12799b282adad3bf77184562c25bb0cccd8d1f0b45d6aa9f" },
+    "erp1-v1-exact-restore": { "path": "scratch/erp2-release-evidence/erp1-v1-exact-restore.log", "sha256": "fab12ec6824dfabf04e90a09ac9fb36b61c95cea0159c8c1fed5ead00973c8aa" }
+  },
+  "rerunRegressions": [
+    "guard",
+    "promotion",
+    "baseline-exception-control"
+  ],
+  "allowedDescendantFiles": [
+    "config/erp2-one-time-baseline-exception.json",
+    "config/erp2-reviewed-change-impacts.json",
+    "scripts/deploy-erp2-pages.mjs",
+    "scripts/one-time-baseline-exception.mjs",
+    "scripts/post-adoption-descendant.mjs",
+    "scripts/promotion-safety.mjs",
+    "scripts/reviewed-change-impact.mjs",
+    "scripts/verify-erp2-change-impact.mjs",
+    "tests/erp2-one-time-baseline-exception.mjs"
+  ],
+  "consumption": {
+    "marker": "scratch/erp2-release-evidence/one-time-exceptions/erp2-v33-japan-package-create-buyanime-baseline-20261027.consumed.json",
+    "limit": 1
+  }
+}

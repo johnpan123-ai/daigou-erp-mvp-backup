@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CANONICAL_ERP2_TARGET, DeploymentGuardError } from './promotion-safety.mjs';
 import { runPromotionGuard } from './verify-erp2-promotion.mjs';
+import { consumeOneTimeBaselineException } from './one-time-baseline-exception.mjs';
 
 const argv = process.argv.slice(2);
 const executeIndex = argv.indexOf('--execute');
@@ -11,12 +12,18 @@ if (execute) argv.splice(executeIndex, 1);
 
 const proof = await runPromotionGuard(argv);
 if (!execute) {
-  console.log(JSON.stringify({ result: 'PASS', uploadPerformed: false, proof }, null, 2));
+  console.log(JSON.stringify({ result: proof.promotionResult, uploadPerformed: false, proof }, null, 2));
   process.exit(0);
 }
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const entry = resolve(root, 'node_modules/wrangler/bin/wrangler.js');
+const exception = proof.schemaBaseline?.deploymentLineage?.regressionEvidence?.baselineException;
+if (proof.promotionResult === 'PASS_WITH_BASELINE_EXCEPTION') {
+  proof.baselineExceptionConsumption = consumeOneTimeBaselineException({
+    evidence: exception, root, candidateHead: proof.candidate.head, artifactIdentity: proof.artifact.identity,
+  });
+}
 const args = [
   'pages', 'deploy', proof.artifactRoot,
   '--profile', proof.cloudflare.profile,

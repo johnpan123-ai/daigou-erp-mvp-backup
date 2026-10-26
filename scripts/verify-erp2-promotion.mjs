@@ -78,12 +78,19 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
     try { changeImpactEvidence = JSON.parse(await readFile(resolve(candidateRoot, args.get('change-impact-evidence')), 'utf8')); }
     catch { fail('change-impact evidence missing or invalid'); }
   }
+  let baselineExceptionConfig = null;
+  if (changeImpactEvidence?.result === 'PASS_WITH_BASELINE_EXCEPTION') {
+    try { baselineExceptionConfig = JSON.parse(await readFile(resolve(candidateRoot, 'config/erp2-one-time-baseline-exception.json'), 'utf8')); }
+    catch { fail('baseline exception configuration missing or invalid'); }
+  }
   const schemaBaseline = verifySchemaBaselineEvidence({
     evidence: schemaEvidence,
     contract,
     candidate: proof.candidate,
     candidateGit,
     changeImpactEvidence,
+    baselineExceptionConfig,
+    evidenceRoot: candidateRoot,
     migrationRegistry: await buildMigrationEffectRegistry(),
     liveObservation: {
       projectRef: environment.ERP2_LIVE_SCHEMA_PROJECT_REF,
@@ -91,7 +98,9 @@ export async function runPromotionGuard(argv = process.argv.slice(2), environmen
       observedAt: environment.ERP2_LIVE_SCHEMA_OBSERVED_AT,
     },
   });
-  return { ...proof, artifact, schemaBaseline, candidateWorktree: candidateRoot, artifactRoot };
+  const promotionResult = schemaBaseline.deploymentLineage?.regressionEvidence?.result === 'PASS_WITH_BASELINE_EXCEPTION'
+    ? 'PASS_WITH_BASELINE_EXCEPTION' : 'PASS';
+  return { ...proof, promotionResult, artifact, schemaBaseline, candidateWorktree: candidateRoot, artifactRoot };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

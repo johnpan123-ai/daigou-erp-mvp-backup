@@ -189,7 +189,8 @@ const verifyPreAdoption = ({ evidence, migrationsById }) => {
   }
 };
 
-const verifyPostAdoption = ({ evidence, required, candidate, candidateGit, changeImpactEvidence, now }) => {
+const verifyPostAdoption = ({ evidence, required, candidate, candidateGit, changeImpactEvidence, now,
+  baselineExceptionConfig, evidenceRoot }) => {
   if (evidence.currentFingerprint !== evidence.expectedFingerprint
     || evidence.migrationHistoryProvenance !== 'AVAILABLE'
     || evidence.applyPlan.length !== 0
@@ -209,11 +210,12 @@ const verifyPostAdoption = ({ evidence, required, candidate, candidateGit, chang
       baselineCheckpoint: record.checkpoint, schemaBaselineMutated: false };
   }
   if (typeof candidateGit !== 'function') failClosed('descendant deployment requires actual Git evidence');
-  return verifySafeDescendant({ git: candidateGit, candidate, baselineRecord: record, changeImpactEvidence, now });
+  return verifySafeDescendant({ git: candidateGit, candidate, baselineRecord: record, changeImpactEvidence, now,
+    baselineExceptionConfig, evidenceRoot });
 };
 
 export function verifySchemaBaselineEvidence({ evidence, contract, candidate, liveObservation, migrationRegistry, candidateGit, changeImpactEvidence,
-  now = Date.now() }) {
+  baselineExceptionConfig = null, evidenceRoot = null, now = Date.now() }) {
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
   if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
@@ -242,7 +244,8 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
   verifyLiveObservation({ liveObservation, evidence, contract, now });
   const migrationsById = verifyPlannerContract(evidence, migrationRegistry);
   const deploymentLineage = evidence.mode === 'POST_ADOPTION'
-    ? verifyPostAdoption({ evidence, required, candidate, candidateGit, changeImpactEvidence, now }) : null;
+    ? verifyPostAdoption({ evidence, required, candidate, candidateGit, changeImpactEvidence, now,
+      baselineExceptionConfig, evidenceRoot }) : null;
   if (evidence.mode !== 'POST_ADOPTION') verifyPreAdoption({ evidence, migrationsById });
   return {
     result: 'PASS', mode: evidence.mode, baselineId: required,

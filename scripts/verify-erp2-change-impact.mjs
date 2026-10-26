@@ -6,13 +6,14 @@ import { inspectSafeDescendant } from './post-adoption-descendant.mjs';
 import { regressionScripts, sourceHash, impactHash, sealImpactEvidence, verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { runGitAt, verifyLocalCandidate, verifyRemoteCandidate } from './promotion-safety.mjs';
 import { buildSchemaEvidenceIdentity } from '../tools/schema-reconciliation/evidenceContract.mjs';
+import { buildOneTimeBaselineException } from './one-time-baseline-exception.mjs';
 
 export async function runChangeImpact(argv = process.argv.slice(2)) {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const args = new Map();
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i]; const value = argv[i + 1];
-    if (!['--checkpoint-tag', '--schema-evidence', '--mode', '--output'].includes(key) || !value || value.startsWith('--') || args.has(key)) throw new Error('Invalid change-impact argument');
+    if (!['--checkpoint-tag', '--schema-evidence', '--mode', '--output', '--baseline-exception'].includes(key) || !value || value.startsWith('--') || args.has(key)) throw new Error('Invalid change-impact argument');
     args.set(key, value);
   }
   const mode = args.get('--mode') || 'regressions';
@@ -36,6 +37,12 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
     || baselineRecord.metadata?.historicalMigrationExecutionClaimed !== false) throw new Error('Invalid adopted schema baseline evidence');
   const inspection = inspectSafeDescendant({ git, candidate, baselineRecord });
   if (mode === 'inspect') return inspection;
+  let baselineExceptionConfig = null; let baselineException = null;
+  if (args.has('--baseline-exception')) {
+    baselineExceptionConfig = JSON.parse(await readFile(resolve(root, args.get('--baseline-exception')), 'utf8'));
+    baselineException = buildOneTimeBaselineException({ config: baselineExceptionConfig, root, git,
+      candidateHead: candidate.head });
+  }
   const output = resolve(root, args.get('--output') || 'scratch/erp2-release-evidence/change-impact.json');
   const scope = relative(resolve(root, 'scratch/erp2-release-evidence'), output);
   if (!scope || scope.startsWith('..') || isAbsolute(scope) || !scope.endsWith('.json')) throw new Error('Evidence output must be a JSON under scratch/erp2-release-evidence');
@@ -44,6 +51,25 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
   for (const id of inspection.requiredRegressions) {
     const script = regressionScripts[id];
     if (!script) throw new Error(`Unknown regression:${id}`);
+    const common = { id, script, scriptChecksum: sourceHash(git(['show', `${candidate.head}:${script}`])) };
+    if (baselineException && id === baselineException.regressionId) {
+      const row = { ...common, outputChecksum: baselineException.candidateEvidence.sha256,
+        exitCode: 1, result: 'FAIL', provenance: 'BASELINE_FAILURE_MATCH' };
+      regressions.push(row);
+      console.log(`FAIL_BASELINE_ACCEPTED ${id} (${row.outputChecksum})`);
+      continue;
+    }
+    const carried = baselineExceptionConfig?.carriedPasses?.[id];
+    if (baselineException && carried) {
+      const row = { ...common, outputChecksum: carried.sha256, exitCode: 0, result: 'PASS',
+        provenance: 'CARRIED_FORWARD_EXACT_BLOB', sourceHead: baselineException.originalCandidateHead };
+      regressions.push(row);
+      console.log(`PASS_CARRIED_FORWARD ${id} (${row.outputChecksum})`);
+      continue;
+    }
+    if (baselineException && !baselineExceptionConfig.rerunRegressions.includes(id)) {
+      throw new Error(`Baseline exception has no exact disposition:${id}`);
+    }
     const started = Date.now(); let log = '';
     const exitCode = await new Promise((resolveCode, reject) => {
       const child = spawn(process.execPath, [script], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
@@ -52,17 +78,19 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
       child.once('error', reject); child.once('close', code => resolveCode(code));
     });
     await writeFile(resolve(root, `scratch/erp2-release-evidence/${id}.log`), log);
-    const row = { id, script, scriptChecksum: sourceHash(git(['show', `${candidate.head}:${script}`])),
-      outputChecksum: impactHash(log), exitCode, elapsedMs: Date.now() - started, result: exitCode === 0 ? 'PASS' : 'FAIL' };
+    const row = { ...common, outputChecksum: impactHash(log), exitCode, elapsedMs: Date.now() - started,
+      result: exitCode === 0 ? 'PASS' : 'FAIL', provenance: 'EXECUTED_CURRENT_CANDIDATE' };
     regressions.push(row);
     console.log(`${row.result} ${id} (${row.elapsedMs} ms)`);
     if (exitCode !== 0) throw new Error(`Regression failed:${id}; see local evidence log`);
     if (git(['rev-parse', 'HEAD']).trim() !== candidate.head || git(['status', '--porcelain']).trim()) throw new Error('Source changed during evidence run');
   }
-  const evidence = sealImpactEvidence({ schemaVersion: 1, kind: 'ERP2_REVIEWED_CHANGE_IMPACT', completedAt: new Date().toISOString(), inspection, regressions });
-  verifyImpactEvidence({ evidence, inspection, git });
+  const evidence = sealImpactEvidence({ schemaVersion: 1, kind: 'ERP2_REVIEWED_CHANGE_IMPACT',
+    ...(baselineException ? { result: 'PASS_WITH_BASELINE_EXCEPTION', baselineException } : {}),
+    completedAt: new Date().toISOString(), inspection, regressions });
+  verifyImpactEvidence({ evidence, inspection, git, baselineExceptionConfig, evidenceRoot: root });
   await writeFile(output, JSON.stringify(evidence, null, 2));
-  return { result: 'PASS', sourceHead: candidate.head, checkpoint: candidate.checkpointTag,
+  return { result: baselineException ? 'PASS_WITH_BASELINE_EXCEPTION' : 'PASS', sourceHead: candidate.head, checkpoint: candidate.checkpointTag,
     evidenceIdentity: evidence.identity, output, regressions: regressions.length, liveWrite: 0, deployment: 0 };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { verifyOneTimeBaselineException } from './one-time-baseline-exception.mjs';
 
 export const reviewedImpacts = JSON.parse(readFileSync(new URL('../config/erp2-reviewed-change-impacts.json', import.meta.url), 'utf8'));
 const fail = message => { throw new Error(`DEPLOYMENT_GUARD_FAILED_CLOSED: ${message}`); };
@@ -28,6 +29,7 @@ export const regressionScripts = Object.freeze({
   'buyanime-recovery-epoch': 'tests/buyanime-recovery-epoch.mjs',
   'buyanime-recovery-review': 'tests/buyanime-recovery-change-impact.mjs',
   'post-restore-business-release': 'tests/buyanime-post-restore-isolated.mjs',
+  'baseline-exception-control': 'tests/erp2-one-time-baseline-exception.mjs',
   'erp1-v1-exact-restore': 'tests/erp1-v1-restore-compatibility.mjs',
   'erp1-v1-restore-review': 'tests/erp1-v1-restore-change-impact.mjs',
   'waca-v3-native-replay': 'tests/waca-resolver-v3-replay.mjs',
@@ -143,7 +145,7 @@ export function sealImpactEvidence(evidence) {
   return { ...evidence, identity: impactHash(evidence) };
 }
 
-export function verifyImpactEvidence({ evidence, inspection, git, now = Date.now() }) {
+export function verifyImpactEvidence({ evidence, inspection, git, now = Date.now(), baselineExceptionConfig = null, evidenceRoot = null }) {
   if (!inspection.requiredRegressions.length) return null;
   if (!evidence || evidence.schemaVersion !== 1 || evidence.kind !== 'ERP2_REVIEWED_CHANGE_IMPACT') fail('required change-impact evidence missing');
   const { identity, ...payload } = evidence;
@@ -151,13 +153,45 @@ export function verifyImpactEvidence({ evidence, inspection, git, now = Date.now
   const age = now - Date.parse(evidence.completedAt ?? '');
   if (!Number.isFinite(age) || age < -60_000 || age > 24 * 60 * 60 * 1000) fail('change-impact regressions stale');
   if (!Array.isArray(evidence.regressions) || evidence.regressions.length !== inspection.requiredRegressions.length) fail('required regression scope mismatch');
+  let baselineException = null;
+  if (evidence.result === 'PASS_WITH_BASELINE_EXCEPTION') {
+    if (!baselineExceptionConfig || !evidenceRoot) fail('baseline exception verifier unavailable');
+    baselineException = verifyOneTimeBaselineException({
+      config: baselineExceptionConfig, evidence: evidence.baselineException,
+      root: evidenceRoot, git, candidateHead: inspection.candidateHead, now,
+    });
+  } else if (evidence.result !== undefined || evidence.baselineException !== undefined) {
+    fail('unexpected baseline exception evidence');
+  }
   for (const [index, id] of inspection.requiredRegressions.entries()) {
     const row = evidence.regressions[index];
     const script = regressionScripts[id];
-    if (!script || row?.id !== id || row.script !== script || row.result !== 'PASS' || row.exitCode !== 0
-      || row.scriptChecksum !== sourceHash(git(['show', `${inspection.candidateHead}:${script}`]))
-      || !/^[0-9a-f]{64}$/u.test(row.outputChecksum ?? '')
+    const scriptChecksum = script ? sourceHash(git(['show', `${inspection.candidateHead}:${script}`])) : null;
+    if (!script || row?.id !== id || row.script !== script || row.scriptChecksum !== scriptChecksum
+      || !/^[0-9a-f]{64}$/u.test(row.outputChecksum ?? '')) fail(`required regression invalid: ${id}`);
+    const carried = baselineExceptionConfig?.carriedPasses?.[id];
+    if (baselineException && carried) {
+      if (row.result !== 'PASS' || row.exitCode !== 0 || row.provenance !== 'CARRIED_FORWARD_EXACT_BLOB'
+        || row.sourceHead !== baselineException.originalCandidateHead || row.outputChecksum !== carried.sha256
+        || sourceHash(git(['show', `${baselineException.originalCandidateHead}:${script}`])) !== scriptChecksum) {
+        fail(`carried regression invalid: ${id}`);
+      }
+      continue;
+    }
+    if (baselineException && id === baselineException.regressionId) {
+      if (row.result !== 'FAIL' || row.exitCode === 0 || row.provenance !== 'BASELINE_FAILURE_MATCH'
+        || row.outputChecksum !== baselineException.candidateEvidence.sha256) fail(`accepted baseline failure invalid: ${id}`);
+      continue;
+    }
+    if (row.result !== 'PASS' || row.exitCode !== 0 || (row.provenance && row.provenance !== 'EXECUTED_CURRENT_CANDIDATE')
       || !Number.isFinite(row.elapsedMs) || row.elapsedMs < 0) fail(`required regression invalid: ${id}`);
   }
-  return { result: 'PASS', identity, requiredRegressions: inspection.requiredRegressions, candidateHead: inspection.candidateHead };
+  return { result: baselineException ? 'PASS_WITH_BASELINE_EXCEPTION' : 'PASS', identity,
+    requiredRegressions: inspection.requiredRegressions, candidateHead: inspection.candidateHead,
+    baselineException: baselineException ? {
+      exceptionId: baselineException.exceptionId, identity: baselineException.identity,
+      regressionId: baselineException.regressionId, candidateEvidence: baselineException.candidateEvidence,
+      baselineEvidence: baselineException.baselineEvidence, consumptionMarker: baselineException.consumptionMarker,
+      useLimit: baselineException.useLimit, target: baselineException.target, candidateHead: baselineException.candidateHead,
+    } : null };
 }
