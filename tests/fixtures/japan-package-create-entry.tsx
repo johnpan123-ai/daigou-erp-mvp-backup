@@ -8,7 +8,7 @@ import { CloudOfflineWriteError } from '../../src/providers/cloud/cloudConnectiv
 import type { JapanPackage } from '../../src/lib/db';
 import type { JapanPackageTransactionCommand, JapanPackageTransactionSuccess } from '../../src/providers/cloud/japanPackageTransaction';
 
-type Scenario = 'success' | 'offline' | 'pending';
+type Scenario = 'success' | 'offline' | 'classified' | 'pending';
 const scenario = (new URLSearchParams(window.location.search).get('scenario') || 'success') as Scenario;
 let packages: JapanPackage[] = [];
 let transactionCalls = 0;
@@ -26,6 +26,9 @@ Object.assign(dataProvider, {
     idempotencyKeys.push(command.idempotencyKey);
     if (scenario === 'offline') throw new CloudOfflineWriteError();
     rpcCalls += 1;
+    if (scenario === 'classified') {
+      throw Object.assign(new Error('CORE_SOURCE_CAPACITY'), { details: JSON.stringify({ allocated: 3, cancelable: 2 }) });
+    }
     if (scenario === 'pending') await new Promise<void>(resolve => { releasePending = resolve; });
     if (command.transactionType !== 'create-package') throw new Error('EXPECTED_CREATE_PACKAGE');
     const canonical = { ...command.package, database_id: command.package.id, version: 1 };

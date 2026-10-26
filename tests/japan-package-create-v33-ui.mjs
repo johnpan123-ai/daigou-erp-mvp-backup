@@ -95,6 +95,18 @@ try {
       await context.close();
     }
     {
+      const { context, page, title, dialogs } = await open(browser, 'classified', { width: 1440, height: 1000 });
+      await title.fill('分類器回歸');
+      await page.getByRole('button', { name: '儲存登記' }).click();
+      await page.waitForFunction(() => window.__JAPAN_PACKAGE_CREATE_TEST__.snapshot().transactionCalls === 1);
+      const result = await page.evaluate(() => window.__JAPAN_PACKAGE_CREATE_TEST__.snapshot());
+      assert.equal(result.rpcCalls, 1);
+      assert.equal(result.packages.length, 0);
+      assert.equal(await title.inputValue(), '分類器回歸');
+      assert.ok(dialogs.includes('來源配置數量超過可用數量（已配置 3 件），操作未完成。'));
+      await context.close();
+    }
+    {
       const { context, page, title } = await open(browser, 'pending', { width: 390, height: 844 });
       await title.fill('羊グッズ');
       const save = page.getByRole('button', { name: '儲存登記' });
@@ -113,6 +125,7 @@ try {
     console.log('PASS all visible optional fields preserve their values and successful rows render immediately');
     console.log('PASS double activation dispatches one idempotent command; offline failure sends no RPC and retains the form');
     console.log('PASS CLOUD_OFFLINE_WRITE_BLOCKED reason replaces the misleading generic retry alert');
+    console.log('PASS other errors still use the existing bounded cloudMutationFailureMessage classifier');
   } finally {
     await browser.close();
   }

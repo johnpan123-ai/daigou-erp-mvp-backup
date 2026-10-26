@@ -12,6 +12,14 @@ import { submitRelatedIntent } from '../providers/cloud/relatedTransaction';
 import { japanPackageStatusChoices } from '../lib/japanPackageStatusOptions';
 import { cloudMutationFailureMessage } from '../providers/cloud/cloudFieldCas';
 
+const CLOUD_OFFLINE_WRITE_BLOCKED_MESSAGE = '雲端資料目前不是可確認的最新狀態。新增、修改、刪除與匯入已停用；重新連線後會讀取雲端最新資料。';
+const japanPackageCreateFailureMessage = (error: unknown): string => {
+  const classified = error as { name?: unknown; code?: unknown } | null;
+  return classified?.name === 'CloudOfflineWriteError' && classified.code === 'CLOUD_OFFLINE_WRITE_BLOCKED'
+    ? CLOUD_OFFLINE_WRITE_BLOCKED_MESSAGE
+    : cloudMutationFailureMessage(error);
+};
+
 const CARRIERS_LIST = [
   { name: 'ヤマト運輸 (Yamato)', keyword: 'yamato' },
   { name: '佐川急便 (Sagawa)', keyword: 'sagawa' },
@@ -393,7 +401,7 @@ export default function JapanPackagesList() {
           if (err.kind === 'result-unknown') createOutcomeUnknownRef.current = true;
           alert(err.message);
         } else {
-          alert(cloudMutationFailureMessage(err));
+          alert(japanPackageCreateFailureMessage(err));
         }
       } finally {
         createInFlightRef.current = false;
