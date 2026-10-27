@@ -101,7 +101,8 @@ export function verifyOneTimeBaselineException({ config, evidence, root, git, ca
 
 export function consumeOneTimeBaselineException({ evidence, root, candidateHead, artifactIdentity, now = Date.now() }) {
   if (!evidence || evidence.candidateHead !== candidateHead || !SHA256.test(evidence.identity ?? '')
-    || !SHA256.test(artifactIdentity ?? '') || evidence.useLimit !== 1) fail('consumption identity mismatch');
+    || typeof artifactIdentity !== 'string' || !SHA256.test(artifactIdentity.toLowerCase())
+    || evidence.useLimit !== 1) fail('consumption identity mismatch');
   const marker = resolve(root, evidence.consumptionMarker ?? '');
   if (!inside(resolve(root, 'scratch/erp2-release-evidence'), marker)) fail('consumption marker path');
   mkdirSync(dirname(marker), { recursive: true });

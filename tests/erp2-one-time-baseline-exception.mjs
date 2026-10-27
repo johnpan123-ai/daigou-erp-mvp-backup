@@ -55,14 +55,16 @@ try {
   assert.throws(() => buildOneTimeBaselineException({ config, root, git: unauthorizedGit,
     candidateHead: config.originalCandidateHead, now }), /unapproved descendant file/u);
 
+  assert.throws(() => consumeOneTimeBaselineException({ evidence, root,
+    candidateHead: config.originalCandidateHead, artifactIdentity: 'G'.repeat(64), now }), /consumption identity mismatch/u);
   const consumed = consumeOneTimeBaselineException({ evidence, root,
-    candidateHead: config.originalCandidateHead, artifactIdentity: 'a'.repeat(64), now });
+    candidateHead: config.originalCandidateHead, artifactIdentity: 'A'.repeat(64), now });
   assert.equal(consumed.useCount, 1);
   assert.throws(() => consumeOneTimeBaselineException({ evidence, root,
     candidateHead: config.originalCandidateHead, artifactIdentity: 'a'.repeat(64), now }), /already consumed/u);
   assert.throws(() => buildOneTimeBaselineException({ config, root, git,
     candidateHead: config.originalCandidateHead, now }), /already consumed/u);
-  console.log(JSON.stringify({ result: 'PASS', positive: 1, negative: 7,
+  console.log(JSON.stringify({ result: 'PASS', positive: 1, negative: 8,
     baselineFailurePreserved: true, candidateFailurePreserved: true, useLimit: 1 }));
 } finally {
   rmSync(root, { recursive: true, force: true });
