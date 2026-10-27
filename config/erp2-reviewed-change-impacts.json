@@ -8920,6 +8920,66 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "change-impact-candidate-log-isolation-v1",
+      "beforeHead": "79a2a3411f5fa7c867c73fadcceec05b3c8f9f7a",
+      "reviewedHead": "5b8e3c9e8d15bd36ca1e3b13a8d78fbcc2d577b9",
+      "patchSha256": "48c5d7a9a4ec8a1f4a4c454b9ffc592dce1f6f57fc75a7d862c988aa72fc29c8",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "baseline-exception-control",
+        "change-impact-log-isolation"
+      ],
+      "files": [
+        {
+          "file": "scripts/verify-erp2-change-impact.mjs",
+          "beforeHash": "8dfbc8f456bc4632477f0400f56953acbf17cc85c576d6fb5dbdbecf42b1fae8",
+          "afterHash": "bc49e89ed489f061a6e7cf0c53cd4718b971f511e40f6854b590bd3b5087358a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "regressionLogPath",
+            "runChangeImpact regression log persistence"
+          ],
+          "dataFlow": "Writes current regression logs beneath a candidate-HEAD-specific evidence directory instead of overwriting immutable historical evidence files.",
+          "persistenceBehavior": "Release evidence files only; evidence content, checksum and test execution are unchanged.",
+          "writePath": "No application or database write.",
+          "providerPath": "No Provider, CAS, Realtime, Restore or runtime change.",
+          "externalContract": "Candidate SHA and regression id are validated; traversal and invalid identities fail closed.",
+          "schemaExpectation": "No schema, RPC, ACL, RLS, Ledger or Migration change."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "7738c1bd1b368a81b9c45f31a4b6861d410dea60d20d00526a09a5659dba1305",
+          "afterHash": "1fe590b7434e6748d97f0097d964ec3090c9c8a4d412f21fac81a6b9bbeee172",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "regressionScripts change-impact-log-isolation mapping"
+          ],
+          "dataFlow": "Makes candidate log isolation a mandatory exact regression for this reviewed patch.",
+          "persistenceBehavior": "Release orchestration only.",
+          "writePath": "No application or database write.",
+          "providerPath": "No runtime Provider change.",
+          "externalContract": "Missing or failed isolation evidence fails closed.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/change-impact-log-isolation.mjs",
+          "beforeHash": null,
+          "afterHash": "5e3c999036c9552dbbae71e9397ac3191de4d93d5e93b8875ce48a147fed8700",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "candidate-scoped regression log positive and negative cases"
+          ],
+          "dataFlow": "Proves current and historical log paths differ, distinct candidates cannot collide, and invalid identities are rejected.",
+          "persistenceBehavior": "Temporary test files only.",
+          "writePath": "No production request.",
+          "providerPath": "None.",
+          "externalContract": "Two invalid identity cases fail closed and historical sentinel evidence remains unchanged.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
