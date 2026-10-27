@@ -23,6 +23,7 @@ export const regressionScripts = Object.freeze({
   'waca-review-ui': 'tests/waca-ui-review.mjs',
   'egress-full-read-budget': 'tests/realtime-full-read-budget.mjs',
   'provider-guard': 'tests/p02-1a-provider-guard.mjs',
+  'r5-core-provider-guard': 'tests/r5-core-provider-guard.mjs',
   'context-guard': 'tests/p02-1a-context-guard.mjs',
   'buyanime-journal-identity': 'tests/buyanime-journal-identity.mjs',
   'buyanime-journal-scanner': 'tests/buyanime-journal-scanner.mjs',
