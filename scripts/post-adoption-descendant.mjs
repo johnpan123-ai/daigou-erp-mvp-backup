@@ -970,7 +970,44 @@ export function assertP02FreshHoldCallers(files) {
 }
 // ---- END p02-1a realtime context contract function ----
 
+// Exact follow-up review for the v33 BuyAnime readback and backup-removal patch.
+// Restore only the three reviewed Provider edits or the one reviewed Coordinator
+// edit, then require byte-equivalence with the deployed baseline. This composes
+// with historical WACA/CAS guards without granting a path-level exception.
+const BUYANIME_V33_PROVIDER_PATCH = Object.freeze({
+  'src/providers/cloud/buyAnimeImportCoordinator.ts': Object.freeze({
+    before: '36c7bb0f539247de7935f2ad12e69ac546b19ffd5195b2feea7c15a360406293',
+    after: '746383899657a3835a19f2d039baadace09df6a63adeba7c86f1e7fcff9188d2',
+  }),
+  'src/providers/cloud/supabaseProvider.ts': Object.freeze({
+    before: 'dc86015f9440bb69052e3597438baccbe1bc54ea2dd861dc2eafde7bf9d75aef',
+    after: 'fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213',
+  }),
+});
+function acceptsReviewedBuyAnimeV33ProviderPatch(file, before, after) {
+  const pin = BUYANIME_V33_PROVIDER_PATCH[file];
+  if (!pin || before === null || after === null || sourceHash(before) !== pin.before || sourceHash(after) !== pin.after) return false;
+  let restored = after.replace(/\r\n?/gu, '\n');
+  if (file.endsWith('buyAnimeImportCoordinator.ts')) {
+    const marker = 'export interface BuyAnimeFlowOptions {\n  onStage?: (stage: BuyAnimeStage) => void;\n}';
+    if (restored.split(marker).length !== 2) fail('reviewed BuyAnime Coordinator anchor missing or duplicated');
+    restored = restored.replace(marker,
+      'export interface BuyAnimeFlowOptions {\n  beforeStart?: () => Promise<unknown>;\n  onStage?: (stage: BuyAnimeStage) => void;\n}');
+  } else {
+    const zeroSafe = 'import_sort_index: r.import_sort_index ?? undefined,';
+    if (restored.split(zeroSafe).length !== 3) fail('reviewed BuyAnime import_sort_index anchors missing or duplicated');
+    restored = restored.replaceAll(zeroSafe, 'import_sort_index: r.import_sort_index || undefined,');
+    const start = '      await this.prepareBuyAnimeRecovery();\n      this.buyAnimePipeline.onStage = stage =>';
+    if (restored.split(start).length !== 2) fail('reviewed BuyAnime beforeStart anchor missing or duplicated');
+    restored = restored.replace(start,
+      '      await this.prepareBuyAnimeRecovery();\n      // Backup is after prior-batch recovery and before new Inventory dispatch.\n      await options.beforeStart?.();\n      this.buyAnimePipeline.onStage = stage =>');
+  }
+  if (sourceHash(restored) !== pin.before) fail(`reviewed BuyAnime Provider restoration mismatch: ${file}`);
+  return true;
+}
+
 export function assertReviewedProviderContract(file, before, after) {
+  if (acceptsReviewedBuyAnimeV33ProviderPatch(file, before, after)) return;
   after = restoreReviewedR5CoreProvider(file, after);
   if (wacaRecognitionReviewApplies(file, after)) {
     assertWacaRecognitionProviderContract(file, before, after);

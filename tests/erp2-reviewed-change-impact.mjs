@@ -164,6 +164,22 @@ assert.throws(() => assertReviewedProviderContract(resumeFile, resumeBefore,
   resumeAfter.replace('const reconciled =', "fetch('/unsafe'); const reconciled =")), /FAILED_CLOSED/u);
 console.log('PASS exact BuyAnime canonical identity diff and SHA; future planner/provider/DB/parser/RPC/migration/backup/canonical hunks fail closed');
 
+const buyAnimeV33Base = 'ea0d5c7faca6e8522a27f2e08d44edf80b742ee2';
+const buyAnimeV33Reviewed = '4c8d6fc8128ceb2f84d3db00d508b4be2b45f2d4';
+for (const file of ['src/providers/cloud/buyAnimeImportCoordinator.ts', 'src/providers/cloud/supabaseProvider.ts']) {
+  const before = realGit(['show', `${buyAnimeV33Base}:${file}`]);
+  const after = realGit(['show', `${buyAnimeV33Reviewed}:${file}`]);
+  assert.doesNotThrow(() => assertReviewedProviderContract(file, before, after), file);
+  assert.throws(() => assertReviewedProviderContract(file, before,
+    after.replace(/\n/u, '\n// unreviewed mutation\n')), /FAILED_CLOSED/u, file);
+}
+const buyAnimeV33Provider = realGit(['show', `${buyAnimeV33Reviewed}:src/providers/cloud/supabaseProvider.ts`]);
+assert.throws(() => assertReviewedProviderContract('src/providers/cloud/supabaseProvider.ts',
+  realGit(['show', `${buyAnimeV33Base}:src/providers/cloud/supabaseProvider.ts`]),
+  buyAnimeV33Provider.replace('await this.prepareBuyAnimeRecovery();', 'await this.prepareBuyAnimeRecovery();\n      await this.requireCloudWritePermission();')),
+  /FAILED_CLOSED/u);
+console.log('PASS exact v33 BuyAnime Coordinator/Provider patch; any extra source or write-fence mutation fails closed');
+
 const restoreIntentReview = reviewedImpacts.reviews.find(review => review.id === 'restore-explicit-intent-and-pending-sync-v2');
 assert.ok(restoreIntentReview);
 const restoreBase = restoreIntentReview.beforeHead;
