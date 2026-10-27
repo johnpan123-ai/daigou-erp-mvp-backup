@@ -28,7 +28,13 @@ export async function isolatedDatabase({migrations=R5_V32_MIGRATIONS, safeupdate
   const url=new URL(base); url.pathname='/'+name;
   const admin=new pg.Client({connectionString:adminUrl.toString()}); await admin.connect();
   await admin.query(`create database ${name}`);
+  // Production Supabase sessions run in UTC. Timestamptz CAS evidence travels
+  // as JSON text, so a disposable cluster whose default timezone drifted (for
+  // example a restart without `-c timezone=UTC`) must not change the rendered
+  // offset seen by PostgREST readers versus UTC-pinned SECURITY DEFINER RPCs.
+  await admin.query(`alter database ${name} set timezone to 'UTC'`);
   const sql=new pg.Client({connectionString:url.toString()}); await sql.connect();
+  assert.equal((await sql.query('show timezone')).rows[0].TimeZone,'UTC','Isolated session timezone must match production UTC');
   const port=Number(process.env.WACA_TEST_POSTGREST_PORT??4399);
   assert.ok(Number.isInteger(port)&&port>=1024&&port<=65535,'Isolated PostgREST port must be bounded');
   let server; const secret=randomBytes(32).toString('hex');
@@ -95,7 +101,7 @@ export async function isolatedDatabase({migrations=R5_V32_MIGRATIONS, safeupdate
   return {sql,url,close,http,stopPostgrest,async startPostgrest(){
     server=spawn('wsl.exe',['-e','env',...(safeupdateLibrary ? ['PGOPTIONS=-c session_preload_libraries='+safeupdateLibrary] : []),
       'PGRST_DB_URI='+url.toString(),'PGRST_DB_SCHEMAS=public',
-      'PGRST_DB_ANON_ROLE=anon','PGRST_JWT_SECRET='+secret,'PGRST_SERVER_HOST=127.0.0.1',
+      'PGRST_DB_ANON_ROLE=anon','PGRST_JWT_SECRET='+secret,'PGTZ=UTC','PGRST_SERVER_HOST=127.0.0.1',
       'PGRST_SERVER_PORT='+port,postgrestBinary ?? '/tmp/hippo-waca-v3-postgrest-bin/postgrest'],{stdio:'ignore'});
     for(let n=0;n<60;n++){
       if(server.exitCode!==null)throw new Error('Disposable PostgREST exited before readiness');
