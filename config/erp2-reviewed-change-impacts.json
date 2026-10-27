@@ -8583,8 +8583,8 @@
       "files": [
         {
           "file": "scripts/one-time-baseline-exception.mjs",
-          "beforeHash": "95236066796552ec7408566c7d541881a56dbf7f3e7664ba24d5ad25a47f45d4",
-          "afterHash": "859fc393fbc7345806ead4f0be121ac1aaae9e0af80cccf6a78f7f4dd1ef05c5",
+          "beforeHash": "4d4d468c12abc40a003ff77a0d17bc5a039ca935c225dfc0e7ae47a788930f44",
+          "afterHash": "363df8c050ae15fc603673916d0fa3bd9d1e800551351b57d982631b245146f7",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["consumeOneTimeBaselineException artifact identity validation"],
           "dataFlow": "Normalizes only the canonical 64-character hexadecimal Artifact Identity to lowercase for validation, matching the existing uppercase staging artifact format.",
@@ -8596,8 +8596,8 @@
         },
         {
           "file": "tests/erp2-one-time-baseline-exception.mjs",
-          "beforeHash": "9697ed4c85dc16eee8de3644bfb5986b02a2fdfc919bf77683ce27bffcd061f4",
-          "afterHash": "267a83fbea5383470f1ef643fb9f9aa8cc22cf6879fae64257d95244175edee1",
+          "beforeHash": "18e48aab31b4fccc91c156587b39f227b47aade5e6417c296d0a498051b00240",
+          "afterHash": "5ef4913ab6511919d8bdb3d65ae85f26fc8906cc96005056bd2274c5a7bce16a",
           "classification": "APPLICATION_DOMAIN_ONLY",
           "functions": ["uppercase canonical Artifact Identity positive case", "non-hex Artifact Identity negative case"],
           "dataFlow": "Exercises the exact uppercase identity format emitted by staging-release-build while preserving rejection of a non-hex identity.",
