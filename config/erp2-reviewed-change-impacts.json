@@ -8573,6 +8573,41 @@
           "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
         }
       ]
+    },
+    {
+      "id": "japan-package-create-one-time-baseline-exception-artifact-case-v1",
+      "beforeHead": "4c265ce310e1e3b7b772c5dc18ceffc77f33cb26",
+      "reviewedHead": "d548d521c7c12e95d753c8a1b20f2fa410a174da",
+      "patchSha256": "481018e7197d184029818454001dd321fc50c22767b649fd17fb6ac3e498f927",
+      "requiredRegressions": ["baseline-exception-control"],
+      "files": [
+        {
+          "file": "scripts/one-time-baseline-exception.mjs",
+          "beforeHash": "95236066796552ec7408566c7d541881a56dbf7f3e7664ba24d5ad25a47f45d4",
+          "afterHash": "859fc393fbc7345806ead4f0be121ac1aaae9e0af80cccf6a78f7f4dd1ef05c5",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["consumeOneTimeBaselineException artifact identity validation"],
+          "dataFlow": "Normalizes only the canonical 64-character hexadecimal Artifact Identity to lowercase for validation, matching the existing uppercase staging artifact format.",
+          "persistenceBehavior": "The exclusive one-use consumption marker and its timing are unchanged.",
+          "writePath": "No application or database write; Pages upload remains after successful atomic consumption.",
+          "providerPath": "No provider change.",
+          "externalContract": "Non-hex, wrong-length, mismatched candidate and repeated consumption still fail closed.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "tests/erp2-one-time-baseline-exception.mjs",
+          "beforeHash": "9697ed4c85dc16eee8de3644bfb5986b02a2fdfc919bf77683ce27bffcd061f4",
+          "afterHash": "267a83fbea5383470f1ef643fb9f9aa8cc22cf6879fae64257d95244175edee1",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["uppercase canonical Artifact Identity positive case", "non-hex Artifact Identity negative case"],
+          "dataFlow": "Exercises the exact uppercase identity format emitted by staging-release-build while preserving rejection of a non-hex identity.",
+          "persistenceBehavior": "Temporary local marker only.",
+          "writePath": "No production write.",
+          "providerPath": "No provider change.",
+          "externalContract": "One positive and eight fail-closed cases.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
