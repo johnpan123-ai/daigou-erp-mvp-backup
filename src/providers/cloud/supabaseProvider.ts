@@ -2149,8 +2149,6 @@ export class SupabaseProvider implements IDataProvider {
       const pending = await this.getBuyAnimeImportRecovery() ?? this.buyAnimeRefreshPending;
       if (pending) await this.finishBuyAnime(pending, options);
       await this.prepareBuyAnimeRecovery();
-      // Backup is after prior-batch recovery and before new Inventory dispatch.
-      await options.beforeStart?.();
       this.buyAnimePipeline.onStage = stage => { publishBuyAnimeFlow(buyAnimeFlowLabel(stage)); options.onStage?.(stage); };
       let record: BuyAnimeImportRecord;
       try { record = await this.buyAnimePipeline.start(items, fileName); }

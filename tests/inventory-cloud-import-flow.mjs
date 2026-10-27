@@ -64,13 +64,6 @@ try {
     });
     await page.waitForFunction(() => document.body.innerText.includes('500'));
 
-    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.failNextBackup());
-    await page.locator('input[type=file]').setInputFiles({name:'backup-gated.xls',mimeType:'application/vnd.ms-excel',buffer:Buffer.from(makeHtmlXls('BACKUP-GATE','Backup gate'))});
-    await page.waitForFunction(() => document.body.innerText.includes('備份失敗'));
-    assert.equal((await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls,0,'Failed backup dispatches NO Inventory');
-    assert.equal(await page.getByRole('button',{name:'匯入主檔 XLS'}).isEnabled(),true);
-    assert.equal(await page.getByRole('button',{name:'重試同步'}).count(),0,'A failed pre-dispatch backup has no batch to resume');
-
     const importFile = async (name, sku, title, parent = '') => {
       const expectedUpserts = (await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot())).upsertCalls + 1;
       const chooserPromise = page.waitForEvent('filechooser');
@@ -80,7 +73,15 @@ try {
       await page.waitForFunction(expected => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().upsertCalls === expected, expectedUpserts);
     };
 
+    // Owner 2026-10-27: no pre-import backup download. Even with backup
+    // collection armed to fail, the import dispatches and no file downloads.
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.failNextBackup());
+    const downloads = [];
+    page.on('download', download => downloads.push(download.suggestedFilename()));
     await importFile('new-unjoined.xls', 'NEW-UNJOINED-SKU', 'New Unjoined Product');
+    assert.deepEqual(await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.backupProbe()), { armed: true, reads: 0 },
+      'BuyAnime import must not collect a pre-import backup');
+    await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.disarmBackupFailure());
     await page.waitForFunction(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.snapshot().syncCalls === 0);
     const successDialog = page.getByTestId('buyanime-import-success-modal');
     await successDialog.waitFor();
@@ -135,6 +136,8 @@ try {
     await page.getByTestId('buyanime-import-success-modal').waitFor();
     const evidence = await page.evaluate(() => window.__INVENTORY_CLOUD_IMPORT_TEST__.evidenceSnapshot());
     assert.equal(evidence.commits,0,'BuyAnime UI completion must not write WACA evidence');
+    assert.deepEqual(downloads,[],'BuyAnime imports must not trigger any download');
+    assert.equal(await page.getByText(/備份失敗|匯入前備份/u).count(),0);
     assert.deepEqual(evidence.links,[],'Independent WACA workflow, not BuyAnime, persists WACA master evidence');
   } finally {
     await browser.close();

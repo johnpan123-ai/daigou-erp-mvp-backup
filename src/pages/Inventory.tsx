@@ -17,7 +17,7 @@ import { EmptyState } from '../components/empty/EmptyState';
 import { BuyAnimeImportSuccessDialog } from '../components/BuyAnimeImportSuccessDialog';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useResizableColumns } from '../hooks/useResizableColumns';
-import { createAndDownloadWorkbenchBackup } from '../lib/workbenchJsonBackup';
+import { collectWorkbenchBackupData, createAndDownloadWorkbenchBackup, serializeAndValidateWorkbenchBackup } from '../lib/workbenchJsonBackup';
 import { getProviderMode } from '../providers/providerMode';
 import {
   CLOUD_RESTORE_DISABLED_MESSAGE,
@@ -173,23 +173,21 @@ export default function Inventory() {
     fileInputRef.current?.click();
   };
 
-  const createPreImportBackup = async () => {
-    markBuyAnimeTrace('T06_PREIMPORT_BACKUP_START');
-    const timestamp = new Date();
-    const timestampIso = timestamp.toISOString();
-    let backup;
+  // NEXT/Test only: the local "還原上次狀態" rollback reads this in-browser
+  // restore point. No file download and no browser download wait. Cloud imports
+  // never use it: their safety is the atomic, CAS/epoch-guarded, journaled RPC
+  // flow plus Cloud Backup/Restore, and local rollback is disabled in Cloud.
+  const createLocalRestorePoint = async () => {
+    const timestampIso = new Date().toISOString();
     try {
-      backup = await createAndDownloadWorkbenchBackup(dataProvider, 'workbench-before-xls-import', timestamp);
-      await dataProvider.saveLastImportBackup({ data: backup.json, timestamp: timestampIso });
+      const { json } = serializeAndValidateWorkbenchBackup(await collectWorkbenchBackupData(dataProvider));
+      await dataProvider.saveLastImportBackup({ data: json, timestamp: timestampIso });
     } catch (cause) {
-      const error = new Error('BUYANIME_BACKUP_FAILED', { cause });
-      error.name = 'BuyAnimeBackupError';
+      const error = new Error('BUYANIME_LOCAL_RESTORE_POINT_FAILED', { cause });
+      error.name = 'BuyAnimeRestorePointError';
       throw error;
     }
     setLastBackupTime(timestampIso);
-    setBackupNotice(`已建立匯入前備份：${backup.filename}`);
-    markBuyAnimeTrace('T07_PREIMPORT_BACKUP_DONE', { backupBytes: backup.json.length });
-    return backup;
   };
 
   useLayoutEffect(() => {
@@ -265,7 +263,6 @@ export default function Inventory() {
       importPhase = 'commit';
       if (currentMode === 'cloud' || currentMode === 'fallback') {
         const completed = await dataProvider.completeBuyAnimeImport(itemsWithBatchMeta, file.name, {
-          beforeStart: createPreImportBackup,
           onStage: stage => setImportStatus(buyAnimeFlowLabel(stage)),
         });
         // completeBuyAnimeImport resolves only after Inventory and Catalog,
@@ -276,8 +273,8 @@ export default function Inventory() {
         setSuccessStats(completed.stats);
         return;
       }
-      // NEXT remains local and keeps the same backup-before-dispatch gate.
-      await createPreImportBackup();
+      // NEXT/Test stays local: keep its rollback restore point (no download).
+      await createLocalRestorePoint();
       const stats = await dataProvider.upsertInventory(itemsWithBatchMeta);
 
       let postCommitIssue: 'catalog-readback' | 'group-sync' | 'ui-readback' | null = null;
@@ -314,11 +311,11 @@ export default function Inventory() {
       setImportStatus('');
       setSuccessStats(stats);
     } catch (err) {
-      if (err instanceof Error && err.name === 'BuyAnimeBackupError') {
-        setImportStatus('匯入前 JSON 備份失敗，已中止 XLS 匯入。');
-        const trace = finishBuyAnimeProductionTrace('ERROR', 'BUYANIME_BACKUP_FAILED');
+      if (err instanceof Error && err.name === 'BuyAnimeRestorePointError') {
+        setImportStatus('本機還原點建立失敗，已中止 XLS 匯入；資料未變更。');
+        const trace = finishBuyAnimeProductionTrace('ERROR', 'BUYANIME_LOCAL_RESTORE_POINT_FAILED');
         if (trace) setPerformanceTrace(trace);
-        alert('匯入前 JSON 備份失敗，已中止 XLS 匯入。');
+        alert('本機還原點建立失敗，已中止 XLS 匯入；資料未變更。');
         return;
       }
       if (currentMode === 'cloud' || currentMode === 'fallback') {
@@ -1422,7 +1419,7 @@ export default function Inventory() {
                     disabled={isRollbackPending || isImporting || isCloudRestoreDisabled}
                     title={isCloudRestoreDisabled
                       ? CLOUD_RESTORE_DISABLED_MESSAGE
-                      : `上次匯入前備份時間：${new Date(lastBackupTime!).toLocaleString()}`}
+                      : `上次匯入前還原點：${new Date(lastBackupTime!).toLocaleString()}`}
                   >
                     <RotateCcw size={14} />
                     <span>{isCloudRestoreDisabled ? 'Cloud Mode 暫停還原' : isRollbackPending ? '還原中...' : '還原上次狀態'}</span>

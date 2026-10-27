@@ -7,7 +7,6 @@ export interface BuyAnimeAuthoritativeEvidence {
 }
 
 export interface BuyAnimeFlowOptions {
-  beforeStart?: () => Promise<unknown>;
   onStage?: (stage: BuyAnimeStage) => void;
 }
 

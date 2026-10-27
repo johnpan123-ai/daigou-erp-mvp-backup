@@ -71,6 +71,7 @@ let root: Root | null = null;
 let mockRecovery: BuyAnimeImportRecord | null = null;
 let allowCatalog = false;
 let failBackup = false;
+let backupReads = 0;
 
 dataProvider.getProductGroups = async () => {
   callOrder.push('groups');
@@ -188,7 +189,6 @@ dataProvider.recoverPendingBuyAnimeImport = async (options = {}) => coordinateBu
 dataProvider.completeBuyAnimeImport = async (rows, fileName, options = {}) => coordinateBuyAnimeImport(async () => {
   const pending = await dataProvider.getBuyAnimeImportRecovery();
   if (pending) await finishBuyAnimeImport(pending, dataProvider.resumeBuyAnimeImport, async () => {});
-  await options.beforeStart?.();
   const record = await dataProvider.importBuyAnimeInventory(rows, fileName);
   const result = await finishBuyAnimeImport(record, dataProvider.resumeBuyAnimeImport, async () => {});
   options.onStage?.(result.stage); publishBuyAnimeFlow(buyAnimeFlowLabel(result.stage)); return result;
@@ -197,7 +197,7 @@ dataProvider.getPurchaseBatches = empty as never;
 dataProvider.getPurchaseBatchItems = empty as never;
 dataProvider.getPrivateOrders = empty as never;
 dataProvider.getPrivateOrderItems = empty as never;
-dataProvider.getImportBatches = async () => { if (failBackup) { failBackup=false; throw new Error('ISOLATED_BACKUP_FAILED'); } return []; };
+dataProvider.getImportBatches = async () => { backupReads++; if (failBackup) { failBackup=false; throw new Error('ISOLATED_BACKUP_FAILED'); } return []; };
 dataProvider.getBundleComponents = empty as never;
 dataProvider.getJapanPackages = empty as never;
 dataProvider.getJapanPackageItems = empty as never;
@@ -211,6 +211,8 @@ declare global {
     __INVENTORY_CLOUD_IMPORT_TEST__: {
       failNextImport: (error: { code?: string; message: string }) => void;
       failNextBackup: () => void;
+      backupProbe: () => { armed: boolean; reads: number };
+      disarmBackupFailure: () => void;
       failNextPostCommitGroupRead: () => void;
       allowCatalogResume: () => void;
       completeBootstrap: () => void;
@@ -226,6 +228,8 @@ declare global {
 window.__INVENTORY_CLOUD_IMPORT_TEST__ = {
   failNextImport: error => { nextImportError = error; },
   failNextBackup: () => { failBackup=true; },
+  backupProbe: () => ({ armed: failBackup, reads: backupReads }),
+  disarmBackupFailure: () => { failBackup=false; },
   failNextPostCommitGroupRead: () => { armPostCommitGroupReadFailure = true; },
   allowCatalogResume: () => { allowCatalog = true; },
   completeBootstrap: () => {

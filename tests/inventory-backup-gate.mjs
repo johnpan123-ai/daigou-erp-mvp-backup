@@ -61,10 +61,8 @@ const makeHtmlXls = (sku, title) => `<!doctype html>
 </table></body></html>`;
 
 async function chooseImportFile(page, name, content) {
-  const chooserPromise = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: '匯入主檔 XLS' }).click();
-  const chooser = await chooserPromise;
-  await chooser.setFiles({ name, mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(content) });
+  await page.getByRole('button', { name: '匯入主檔 XLS' }).waitFor();
+  await page.locator('input[type=file]').setInputFiles({ name, mimeType: 'application/vnd.ms-excel', buffer: Buffer.from(content) });
 }
 
 async function readInventory(page) {
@@ -95,7 +93,8 @@ page.on('console', message => {
   const text = message.text();
   if (message.type() === 'error'
     && !text.includes('[Import Backup ERROR]')
-    && !text.includes('Test Sandbox blocked')) unexpectedErrors.push(text);
+    && !text.includes('Test Sandbox blocked')
+    && !(text.includes('[BuyAnime Import]') && text.includes('REQUIRED_FIELD_MISSING'))) unexpectedErrors.push(text);
 });
 page.on('pageerror', error => unexpectedErrors.push(error.message));
 page.on('dialog', async dialog => {
@@ -125,55 +124,59 @@ try {
   assert.deepEqual(Object.keys(manualData), BACKUP_COLLECTIONS);
   for (const key of BACKUP_COLLECTIONS) assert.equal(Array.isArray(manualData[key]), true, `${key} must be an array`);
 
-  const autoDownloadPromise = page.waitForEvent('download');
+  // Owner 2026-10-27: XLS import no longer downloads a pre-import backup.
+  const importDownloads = [];
+  const onDownload = download => importDownloads.push(download.suggestedFilename());
+  page.on('download', onDownload);
   await chooseImportFile(page, 'inventory-success.xls', makeHtmlXls('AUTO-BACKUP-SKU', '匯入成功測試'));
-  const autoDownload = await autoDownloadPromise;
-  assert.match(autoDownload.suggestedFilename(), /^workbench-before-xls-import-\d{8}-\d{6}\.json$/);
-  const autoPath = await autoDownload.path();
-  assert.ok(autoPath, 'Pre-import backup should produce a local download');
-  const autoData = JSON.parse(await readFile(autoPath, 'utf8'));
-  assert.deepEqual(autoData.inventory, [], 'Pre-import JSON must describe state before XLS import');
-
   await page.waitForFunction(async () => {
     const items = await window.dataProvider.getInventory();
     return items.some(item => item.myacg_item_code === 'AUTO-BACKUP-SKU');
   });
-  await waitForDialogText(dialogMessages, /買動漫 Catalog 匯入結果/);
+  await page.getByTestId('buyanime-import-success-modal').waitFor();
+  await page.getByTestId('buyanime-import-success-modal').getByRole('button', { name: '確定' }).click();
   assert.equal((await readInventory(page)).filter(item => item.myacg_item_code === 'AUTO-BACKUP-SKU').length, 1);
-  assert.equal(dialogMessages.some(message => message.includes('買動漫 Catalog 匯入結果')), true, 'Successful backup should allow XLS import');
+  // Local rollback keeps an equivalent in-browser restore point of the pre-import state.
+  const restorePoint = await page.evaluate(() => window.dataProvider.getLastImportBackup());
+  assert.ok(restorePoint, 'Local import must keep a rollback restore point');
+  assert.deepEqual(JSON.parse(restorePoint.data).inventory, [], 'Restore point must describe the pre-import state');
 
-  const sourceBeforeFailure = await readInventory(page);
+  // A broken browser download path can no longer block import.
   await page.evaluate(() => {
     window.__originalCreateObjectUrl = URL.createObjectURL;
-    URL.createObjectURL = () => { throw new Error('forced backup download failure'); };
+    URL.createObjectURL = () => { throw new Error('forced download failure'); };
   });
-  await chooseImportFile(page, 'inventory-must-not-import.xls', makeHtmlXls('BLOCKED-SKU', '不應匯入'));
-  await waitForDialogText(dialogMessages, /備份失敗.*已中止 XLS 匯入/);
-  const afterFailure = await readInventory(page);
-  assert.deepEqual(afterFailure, sourceBeforeFailure, 'Backup failure must leave Inventory unchanged');
-  assert.equal(afterFailure.some(item => item.myacg_item_code === 'BLOCKED-SKU'), false);
-  assert.equal(dialogMessages.some(message => message.includes('備份失敗') && message.includes('已中止 XLS 匯入')), true);
+  await chooseImportFile(page, 'inventory-no-download.xls', makeHtmlXls('NO-DOWNLOAD-SKU', '下載失敗仍可匯入'));
+  await page.waitForFunction(async () => {
+    const items = await window.dataProvider.getInventory();
+    return items.some(item => item.myacg_item_code === 'NO-DOWNLOAD-SKU');
+  });
+  await page.getByTestId('buyanime-import-success-modal').waitFor();
+  await page.getByTestId('buyanime-import-success-modal').getByRole('button', { name: '確定' }).click();
   await page.evaluate(() => {
     URL.createObjectURL = window.__originalCreateObjectUrl;
     delete window.__originalCreateObjectUrl;
   });
+  page.off('download', onDownload);
+  assert.deepEqual(importDownloads, [], 'XLS import must not trigger any download');
+  assert.equal(dialogMessages.some(message => message.includes('備份失敗')), false);
+
+  // Invalid file is rejected before any write.
+  const beforeInvalid = await readInventory(page);
+  await chooseImportFile(page, 'invalid.xls', '<table><tr><th>無效欄位</th></tr><tr><td>x</td></tr></table>');
+  await page.waitForTimeout(500);
+  assert.deepEqual(await readInventory(page), beforeInvalid, 'Invalid file must leave Inventory unchanged');
 
   assert.deepEqual(productionSupabaseRequests, [], 'Inventory backup/import tests must not contact Production Supabase');
   assert.deepEqual(unexpectedErrors, []);
 
   const inventorySource = await readFile(new URL('../src/pages/Inventory.tsx', import.meta.url), 'utf8');
-  const backupCall = inventorySource.indexOf('const backup = await createPreImportBackup()');
-  const parseCall = inventorySource.indexOf('const parsedItems = await parseMyAcgFile(file)');
-  assert.ok(backupCall >= 0 && parseCall > backupCall, 'Backup gate must run before XLS parsing');
-  const backupCatch = inventorySource.slice(backupCall, parseCall);
-  assert.match(backupCatch, /已中止 XLS 匯入/);
-  assert.match(backupCatch, /return;/);
-  assert.doesNotMatch(backupCatch, /continuing import/);
+  assert.doesNotMatch(inventorySource, /workbench-before-xls-import|createPreImportBackup|beforeStart/, 'No pre-import backup download step');
+  assert.match(inventorySource, /createAndDownloadWorkbenchBackup\(dataProvider, 'workbench-backup'\)/, 'Manual backup remains');
 
   console.log('PASS manual JSON backup is non-empty, parseable, and complete');
-  console.log('PASS XLS import downloads a timestamped JSON of the pre-import state first');
-  console.log('PASS successful backup permits XLS parsing and Test DB import');
-  console.log('PASS forced backup failure aborts import and preserves Inventory');
+  console.log('PASS XLS import triggers no download and keeps a local rollback restore point');
+  console.log('PASS download failure no longer blocks import; invalid file leaves Inventory unchanged');
   console.log('PASS existing rollback remains separate and Production Supabase requests = 0');
 } finally {
   await browser.close();
