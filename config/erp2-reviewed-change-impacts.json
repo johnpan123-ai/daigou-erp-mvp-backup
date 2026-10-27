@@ -8829,6 +8829,97 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "buyanime-v33-p02-provider-guard-composition-v1",
+      "beforeHead": "25d18d1c40f1812ee16655e24f0cdbe442013ff0",
+      "reviewedHead": "7ea158034d184ea1921dd089cf2a3741140e033d",
+      "patchSha256": "617e4332542c700004c91c8a56111206c95b2094657b590107b31ebd812e2db4",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "provider-guard",
+        "r5-core-provider-guard",
+        "context-guard"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "cc6d0b383a7e3496111c659832ff3800671940f42a5409ea034639ecf081dfbb",
+          "afterHash": "494d2d2fff226b44c1876b9c81df6e9203b447029dbc04693a5356ee440eefcb",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "restoreReviewedBuyAnimeV33ProviderPatch",
+            "assertReviewedProviderContract exact dispatch"
+          ],
+          "dataFlow": "Exports the existing exact-hash restoration so historical P02, WACA and R5 Provider contracts can judge their own reviewed source after the independently reviewed BuyAnime overlay is removed.",
+          "persistenceBehavior": "NONE. Release inspection only.",
+          "writePath": "No application or database write.",
+          "providerPath": "No runtime Provider change; the same full before/after hashes and restoration anchors remain mandatory.",
+          "externalContract": "The exact v33 BuyAnime pair passes; any different Provider source or restoration mismatch fails closed.",
+          "schemaExpectation": "No schema, RPC, ACL, RLS, CAS, Revision, Epoch, Realtime, Restore or WACA change."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "90359cc3e5527a42289d1d1ca4a206fc11045792a3d18fe22946d3aae3b6dede",
+          "afterHash": "7738c1bd1b368a81b9c45f31a4b6861d410dea60d20d00526a09a5659dba1305",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "regressionScripts r5-core-provider-guard mapping"
+          ],
+          "dataFlow": "Makes the R5 Provider composition proof a mandatory current-candidate regression for this review.",
+          "persistenceBehavior": "NONE. Release orchestration only.",
+          "writePath": "No application or database write.",
+          "providerPath": "Invokes an existing local test file only.",
+          "externalContract": "Missing, failed or source-drifted regression evidence remains fail closed.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/p02-1a-provider-guard.mjs",
+          "beforeHash": "0347f92782af3a2ffcc6be88b4ac859dcaeda7079033d32ea0b8e1ad359e21b8",
+          "afterHash": "1179ecd5d8fdebd2982ad51464fd65d8f05e46157a9b1380588820677886c3e9",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P02 exact Provider positive and negative composition cases"
+          ],
+          "dataFlow": "Normalizes Windows line endings, removes only the exact BuyAnime overlay for historical P02/WACA checks, and separately verifies the full deployed-baseline-to-candidate pair.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Reads immutable Git sources and the current local source.",
+          "externalContract": "Exact patch, P02 member writes/RPCs, WACA writes, top-level additions and arbitrary import_sort_index mutations have positive/negative coverage.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/r5-core-provider-guard.mjs",
+          "beforeHash": "304f184752dd4c4acdbd294d772b0726945bd3ecb9c4cd27b9c0077f526b9310",
+          "afterHash": "90d0eb8ce474688208eeb9ef4ba8e59b0167b0f64d16b34e2c162847aa93d1d2",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "R5 exact overlay composition proof"
+          ],
+          "dataFlow": "Removes the exact later BuyAnime overlay before proving that the R5 Provider overlay still restores to the immutable v32 source.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Reads immutable Git sources only.",
+          "externalContract": "Seven existing R5 bypass mutations remain rejected.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "ff17a2520647f6a6bc6611836da5fd322e99e26c3097963f952f3277fb615235",
+          "afterHash": "bb1ef0773a6cc52a45a35305e6d4868ec7e3df11a99860e431b29d1d0d546966",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Provider composition immutable review identity assertions"
+          ],
+          "dataFlow": "Recomputes the full immutable Git patch SHA and every reviewed before/after source hash for the P02 composition review.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Reads immutable Git objects only.",
+          "externalContract": "A changed patch, file list or before/after blob fails closed.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
