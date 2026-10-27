@@ -8608,6 +8608,184 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "buyanime-v33-readback-and-preimport-download-removal-v1",
+      "beforeHead": "ea0d5c7faca6e8522a27f2e08d44edf80b742ee2",
+      "reviewedHead": "4c8d6fc8128ceb2f84d3db00d508b4be2b45f2d4",
+      "patchSha256": "1225ccfaff1b283b6c76e53b3a6a867a7eaec49b1412a696bfb7a3427312de9d",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "buyanime-production-trace",
+        "buyanime-resume-ui",
+        "post-restore-business-release",
+        "buyanime-lint-delta",
+        "sync",
+        "cas",
+        "realtime",
+        "provider-guard",
+        "context-guard",
+        "cloud-next"
+      ],
+      "files": [
+        {
+          "file": "src/diagnostics/buyAnimeProductionTrace.ts",
+          "beforeHash": "b04ec4822db2241c1347c5f30139277f81c9f2c879253ff49891a9efec094514",
+          "afterHash": "670205885062e9f406e44b2dc65ae126177e2e3ade21ce144a42b41842d3fdfc",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "BuyAnimeTracePoint",
+            "REQUIRED_POINTS"
+          ],
+          "dataFlow": "Removes retired T06/T07 backup trace phases.",
+          "persistenceBehavior": "Diagnostics only.",
+          "writePath": "No write.",
+          "providerPath": "No provider behavior change.",
+          "externalContract": "Trace consumers no longer require T06/T07.",
+          "schemaExpectation": "No schema or RPC change."
+        },
+        {
+          "file": "src/pages/Inventory.tsx",
+          "beforeHash": "9ba9d5c327da790df8e7e37697bcbbf72d0f38358dbf01b8c9d06b40a154d7af",
+          "afterHash": "60143821dbf60364531c9e2b02f2e179cf009e3ee44922ad8e4ef07a98dcdf06",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "createLocalRestorePoint",
+            "handleFileChange",
+            "handleManualExportBackup"
+          ],
+          "dataFlow": "Cloud import no longer downloads a pre-import JSON; NEXT/Test retains an in-browser restore point. Manual export remains.",
+          "persistenceBehavior": "Cloud atomic import and local pre-write rollback semantics remain.",
+          "writePath": "Removes only the Cloud beforeStart backup hook.",
+          "providerPath": "Cloud uses completeBuyAnimeImport; local uses saveLastImportBackup before upsert.",
+          "externalContract": "Automatic download and its failure blocker are removed.",
+          "schemaExpectation": "No schema, RPC, CAS, Epoch, Realtime or Restore change."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportCoordinator.ts",
+          "beforeHash": "36c7bb0f539247de7935f2ad12e69ac546b19ffd5195b2feea7c15a360406293",
+          "afterHash": "746383899657a3835a19f2d039baadace09df6a63adeba7c86f1e7fcff9188d2",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "BuyAnimeFlowOptions"
+          ],
+          "dataFlow": "Removes the obsolete pre-import backup callback.",
+          "persistenceBehavior": "Transaction, journal and recovery behavior unchanged.",
+          "writePath": "No write implementation.",
+          "providerPath": "Coordinator serialization unchanged.",
+          "externalContract": "Callers no longer supply beforeStart.",
+          "schemaExpectation": "No durable contract change."
+        },
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "dc86015f9440bb69052e3597438baccbe1bc54ea2dd861dc2eafde7bf9d75aef",
+          "afterHash": "fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "loadCoreData inventory mapping",
+            "completeBuyAnimeImport",
+            "syncInventoryFromCloud inventory mapping"
+          ],
+          "dataFlow": "Preserves import_sort_index zero and removes the retired backup callback invocation.",
+          "persistenceBehavior": "Atomic RPC, journal, CAS, epoch and refresh behavior remain.",
+          "writePath": "Same inventory and catalog RPC paths; no new retry or write.",
+          "providerPath": "Read mapping uses nullish fallback; import recovery order remains.",
+          "externalContract": "Prevents false expected-null CAS conflicts for stored zero.",
+          "schemaExpectation": "No schema, RPC signature, payload, ACL or RLS change."
+        },
+        {
+          "file": "tests/buyanime-post-restore-timezone-isolated.mjs",
+          "beforeHash": null,
+          "afterHash": "900b59bc7e8f11b9f8cbcec05b6782d6dcad12fc59c1fc9af87bcedc0c6b08ae",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "synthetic UTC Restore to BuyAnime regression"
+          ],
+          "dataFlow": "Exercises UTC readback, repeated import, identity and refresh.",
+          "persistenceBehavior": "Disposable database only.",
+          "writePath": "No production request.",
+          "providerPath": "Actual provider via isolated HTTP.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/buyanime-production-trace.mjs",
+          "beforeHash": "dd6bb11118ff79247c6789ecff7354cc2e1753d8d2856a20649ec1746c5563fa",
+          "afterHash": "56b7646986880ca717c8aca160697c581b7ec04086f063365332b7b77d84d6f2",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "trace point regression"
+          ],
+          "dataFlow": "Updates expected trace points after T06/T07 removal.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "None.",
+          "externalContract": "Trace assertion only.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/fixtures/inventory-cloud-import-entry.tsx",
+          "beforeHash": "109548a4d66b78f8f37987e9eaee2a6f5a6d6e5e88439ee1d166cf0914fc6d1d",
+          "afterHash": "05c35d861bce3d6a9d82b3cdd76f059dc80b273c63f3f3909d8e084962b6f696",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "backup failure probe"
+          ],
+          "dataFlow": "Records whether isolated import attempts backup collection.",
+          "persistenceBehavior": "In-memory fixture only.",
+          "writePath": "No production request.",
+          "providerPath": "Test provider fixture.",
+          "externalContract": "None.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/helpers/saveability-isolated.mjs",
+          "beforeHash": "69d3cfb06172fd1d4482d2a5245d6b6666a3f78d67d735917a9cf235d1503465",
+          "afterHash": "b343c3bead04304bb0714d9f07174d12f4daf5c7053236e79005bc8e006d917d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "isolatedDatabase",
+            "startPostgrest"
+          ],
+          "dataFlow": "Pins disposable database and PostgREST sessions to UTC.",
+          "persistenceBehavior": "Disposable database only.",
+          "writePath": "No production connection.",
+          "providerPath": "Test helper only.",
+          "externalContract": "Isolated timestamp rendering matches UTC.",
+          "schemaExpectation": "No production schema change."
+        },
+        {
+          "file": "tests/inventory-backup-gate.mjs",
+          "beforeHash": "29e7d6c76bf0d9e863324b353342c61fa61e76f4cf8b62d597cf01c7b07a909f",
+          "afterHash": "85850d08b62b4bfce878be0203eacf54a16fa56156e27619095390b8dd04c3d0",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "manual backup and rollback assertions"
+          ],
+          "dataFlow": "Asserts no automatic download, retained restore point and manual backup.",
+          "persistenceBehavior": "Test sandbox only.",
+          "writePath": "Production requests asserted zero.",
+          "providerPath": "Test provider.",
+          "externalContract": "Tracked gate reflects approved behavior.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/inventory-cloud-import-flow.mjs",
+          "beforeHash": "6ce7b9bbedfab5a2db1c1c1ccacd891f69d3decc31116c9a06281c28caa2fa55",
+          "afterHash": "21c462bd1e4f25e1ab2a24ab43a524b6295ad6d86e2bf32585b61ce3763f7d68",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "Cloud BuyAnime UI regression"
+          ],
+          "dataFlow": "Asserts backup collection and downloads are absent while recovery remains.",
+          "persistenceBehavior": "In-memory fixture only.",
+          "writePath": "No production request.",
+          "providerPath": "Isolated Cloud fixture.",
+          "externalContract": "No automatic pre-import download.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }

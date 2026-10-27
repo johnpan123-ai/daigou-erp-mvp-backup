@@ -8,10 +8,15 @@ import {isDeepStrictEqual} from 'node:util';
 import {createServer} from 'vite';
 import {chromium} from 'playwright';
 import {isolatedDatabase,owner} from './helpers/saveability-isolated.mjs';
+import {nodeWindowEventTarget} from './helpers/node-window-event-target.mjs';
 // The Catalog planner is pure, but its shared db.ts module also exports browser
 // adapters. Keep those adapters unopened in this Node-side Restore gate.
 globalThis.indexedDB={open:()=>({})};
-globalThis.window={indexedDB:globalThis.indexedDB,location:{hostname:'127.0.0.1'},localStorage:{getItem:()=>null}};
+globalThis.window=nodeWindowEventTarget({
+ indexedDB:globalThis.indexedDB,
+ location:{hostname:'127.0.0.1'},
+ localStorage:{getItem:()=>null},
+});
 const root='scratch/buyanime-post-restore-recovery-20261005';
 const legacyRaw=await readFile(process.env.ERP1_V1_REAL_SNAPSHOT,'utf8');
 assert.equal(createHash('sha256').update(legacyRaw).digest('hex'),'0048b8b66542d09bbabaad6b7f7741c11f687449d1711cacd6e62e24ef5500e4');
