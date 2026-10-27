@@ -1,12 +1,28 @@
 import { spawn } from 'node:child_process';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inspectSafeDescendant } from './post-adoption-descendant.mjs';
 import { regressionScripts, sourceHash, impactHash, sealImpactEvidence, verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { runGitAt, verifyLocalCandidate, verifyRemoteCandidate } from './promotion-safety.mjs';
 import { buildSchemaEvidenceIdentity } from '../tools/schema-reconciliation/evidenceContract.mjs';
 import { buildOneTimeBaselineException } from './one-time-baseline-exception.mjs';
+
+const SHA1 = /^[0-9a-f]{40}$/u;
+const REGRESSION_ID = /^[a-z0-9][a-z0-9-]*$/u;
+
+export function regressionLogPath({ root, candidateHead, id }) {
+  if (!SHA1.test(candidateHead ?? '') || !REGRESSION_ID.test(id ?? '')) {
+    throw new Error('Invalid candidate-scoped regression log identity');
+  }
+  const evidenceRoot = resolve(root, 'scratch/erp2-release-evidence');
+  const output = resolve(evidenceRoot, 'runs', candidateHead, `${id}.log`);
+  const scope = relative(evidenceRoot, output);
+  if (!scope || scope.startsWith('..') || isAbsolute(scope)) {
+    throw new Error('Regression log escaped the evidence root');
+  }
+  return output;
+}
 
 export async function runChangeImpact(argv = process.argv.slice(2)) {
   const root = fileURLToPath(new URL('../', import.meta.url));
@@ -77,12 +93,14 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
       child.stderr.on('data', bytes => { log += String(bytes); });
       child.once('error', reject); child.once('close', code => resolveCode(code));
     });
-    await writeFile(resolve(root, `scratch/erp2-release-evidence/${id}.log`), log);
+    const logPath = regressionLogPath({ root, candidateHead: candidate.head, id });
+    await mkdir(dirname(logPath), { recursive: true });
+    await writeFile(logPath, log);
     const row = { ...common, outputChecksum: impactHash(log), exitCode, elapsedMs: Date.now() - started,
       result: exitCode === 0 ? 'PASS' : 'FAIL', provenance: 'EXECUTED_CURRENT_CANDIDATE' };
     regressions.push(row);
     console.log(`${row.result} ${id} (${row.elapsedMs} ms)`);
-    if (exitCode !== 0) throw new Error(`Regression failed:${id}; see local evidence log`);
+    if (exitCode !== 0) throw new Error(`Regression failed:${id}; see ${relative(root, logPath)}`);
     if (git(['rev-parse', 'HEAD']).trim() !== candidate.head || git(['status', '--porcelain']).trim()) throw new Error('Source changed during evidence run');
   }
   const evidence = sealImpactEvidence({ schemaVersion: 1, kind: 'ERP2_REVIEWED_CHANGE_IMPACT',
