@@ -180,6 +180,25 @@ assert.throws(() => assertReviewedProviderContract('src/providers/cloud/supabase
   /FAILED_CLOSED/u);
 console.log('PASS exact v33 BuyAnime Coordinator/Provider patch; any extra source or write-fence mutation fails closed');
 
+const providerCompositionReview = reviewedImpacts.reviews.find(
+  review => review.id === 'buyanime-v33-p02-provider-guard-composition-v1',
+);
+assert.ok(providerCompositionReview, 'Provider composition review must bind an immutable exact patch');
+const providerCompositionPatch = execFileSync('git', [
+  'diff', '--binary', '--full-index', '--no-ext-diff', '--no-color',
+  providerCompositionReview.beforeHead, providerCompositionReview.reviewedHead, '--',
+]);
+assert.equal(
+  (await import('node:crypto')).createHash('sha256').update(providerCompositionPatch).digest('hex'),
+  providerCompositionReview.patchSha256,
+  'Provider composition review patch SHA must match the immutable Git range',
+);
+for (const row of providerCompositionReview.files) {
+  assert.equal(sourceHash(realGit(['show', `${providerCompositionReview.beforeHead}:${row.file}`])), row.beforeHash, row.file);
+  assert.equal(sourceHash(realGit(['show', `${providerCompositionReview.reviewedHead}:${row.file}`])), row.afterHash, row.file);
+}
+console.log('PASS exact Provider composition patch SHA and before/after blobs');
+
 const restoreIntentReview = reviewedImpacts.reviews.find(review => review.id === 'restore-explicit-intent-and-pending-sync-v2');
 assert.ok(restoreIntentReview);
 const restoreBase = restoreIntentReview.beforeHead;
