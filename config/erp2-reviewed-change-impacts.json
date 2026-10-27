@@ -8786,6 +8786,49 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "buyanime-v33-provider-contract-composition-v1",
+      "beforeHead": "33748c627a994c6156700b38d42fe0033685d410",
+      "reviewedHead": "04000f5157d32461b5f589bbe7cd37d9d5765223",
+      "patchSha256": "52474ffb9be32dce750911500935317aee87f515bf73fb862dcfc5fb415e2227",
+      "requiredRegressions": [
+        "guard",
+        "promotion"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "da7fe74367bacc57258b6d42aab4b02f40b51498aab98e17a224265555191bd8",
+          "afterHash": "cc6d0b383a7e3496111c659832ff3800671940f42a5409ea034639ecf081dfbb",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "acceptsReviewedBuyAnimeV33ProviderPatch",
+            "assertReviewedProviderContract dispatch"
+          ],
+          "dataFlow": "Accepts only the fully pinned v33 BuyAnime Coordinator and Provider sources, reverses the reviewed edits, and requires exact deployed-baseline equivalence.",
+          "persistenceBehavior": "NONE. Release inspection only.",
+          "writePath": "No application or database write.",
+          "providerPath": "No runtime provider change; historical WACA/CAS source must be byte-identical after exact restoration.",
+          "externalContract": "Any different source, extra write-fence call, missing anchor or duplicated anchor fails closed.",
+          "schemaExpectation": "No schema, RPC, field, ACL, RLS, Revision, Epoch, Realtime or Restore change."
+        },
+        {
+          "file": "tests/erp2-reviewed-change-impact.mjs",
+          "beforeHash": "6a296f631c2fa0eec611ec036a9698592f941d45260eabdd41e40109a3346b54",
+          "afterHash": "ff17a2520647f6a6bc6611836da5fd322e99e26c3097963f952f3277fb615235",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "exact v33 BuyAnime Coordinator/Provider positive and negative cases"
+          ],
+          "dataFlow": "Verifies the exact reviewed sources pass and arbitrary source or write-fence mutations fail closed.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Reads immutable Git sources only.",
+          "externalContract": "One exact positive pair and multiple negative mutations.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
