@@ -6,12 +6,16 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { assertReviewedProviderContract } from '../scripts/post-adoption-descendant.mjs';
+import {
+  assertReviewedProviderContract,
+  restoreReviewedBuyAnimeV33ProviderPatch,
+} from '../scripts/post-adoption-descendant.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const BASELINE = '5f73b2b02d9008dc863cf92978e6ea8e40a850ec'; // adopted schema baseline (checkpoint-20261010-buyanime-import-pipeline-stability-v3)
-const show = file => { try { return execFileSync('git', ['-C', ROOT, 'show', `${BASELINE}:${file}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
-const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+const showAt = (head, file) => execFileSync('git', ['-C', ROOT, 'show', `${head}:${file}`], { encoding: 'utf8' }).replace(/\r\n?/gu, '\n');
+const show = file => { try { return showAt(BASELINE, file); } catch { return null; } };
+const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').replace(/\r\n?/gu, '\n');
 const FILES = ['src/providers/cloud/cloudCacheWriteFence.ts', 'src/providers/cloud/cloudRealtimeReadiness.ts', 'src/providers/cloud/cloudSyncObservability.ts',
   'src/providers/cloud/supabaseProvider.ts', 'src/providers/cloud/cloudTargetedCache.ts', 'src/providers/dataProvider.ts', 'src/providers/cloud/cloudConnectivity.ts'];
 const results = [];
@@ -20,7 +24,10 @@ const rejects = (name, file, before, after, pattern) => pass(`NEG ${name}`, () =
 const mutate = (source, from, to) => { assert.ok(source.includes(from), `mutation anchor missing: ${from.slice(0, 40)}`); return source.replace(from, to); };
 
 // ---- positive: the exact reviewed C1/C1a/C1b sources pass every provider rule
-for (const file of FILES) pass(`POS exact reviewed source accepted: ${file}`, () => assertReviewedProviderContract(file, show(file), read(file)));
+for (const file of FILES) pass(`POS exact reviewed source accepted: ${file}`, () => {
+  const after = restoreReviewedBuyAnimeV33ProviderPatch(file, read(file));
+  assertReviewedProviderContract(file, show(file), after);
+});
 pass('POS guard change is additive (stripping the p02 markers restores the previous guard byte-for-byte)', () => {
   // Prove the original additive patch against its immutable parent. Later guard
   // additions are exercised by the current-source positive and negative cases.
@@ -55,7 +62,20 @@ rejects('unknown new provider file', 'src/providers/cloud/p02Extra.ts', null, 'e
 pass('POS sources without any p02 piece fall through to the pre-existing rules (baseline vs baseline, provider)', () => assertReviewedProviderContract('src/providers/cloud/supabaseProvider.ts', show('src/providers/cloud/supabaseProvider.ts'), show('src/providers/cloud/supabaseProvider.ts')));
 
 // ---- negative: modified provider files
-const pBefore = show(provider), pAfter = read(provider);
+const pBefore = show(provider), pCurrent = read(provider);
+const pAfter = restoreReviewedBuyAnimeV33ProviderPatch(provider, pCurrent);
+pass('POS exact BuyAnime patch restores before historical P02 review', () => {
+  assert.notEqual(pAfter, pCurrent);
+  assert.match(pCurrent, /import_sort_index: r\.import_sort_index \?\? undefined,/u);
+  assert.match(pAfter, /import_sort_index: r\.import_sort_index \|\| undefined,/u);
+});
+pass('POS exact BuyAnime patch remains accepted against its deployed v33 baseline', () =>
+  assertReviewedProviderContract(provider,
+    showAt('ea0d5c7faca6e8522a27f2e08d44edf80b742ee2', provider), pCurrent));
+rejects('BuyAnime import_sort_index differs from the exact reviewed patch', provider,
+  showAt('ea0d5c7faca6e8522a27f2e08d44edf80b742ee2', provider),
+  mutate(pCurrent, 'import_sort_index: r.import_sort_index ?? undefined,',
+    'import_sort_index: r.import_sort_index ?? 1,'), /FAILED_CLOSED/u);
 rejects('pullCoreProductData gains a Cloud write', provider, pBefore, mutate(pAfter, "let query = supabase.from(table).select('*');", "await supabase.from(table).insert({});\n            let query = supabase.from(table).select('*');"), /reviewed member drifted: pullCoreProductData/u);
 rejects('pullCoreProductData gains an RPC', provider, pBefore, mutate(pAfter, "syncRun.realtimeReadiness = readiness.state;", "syncRun.realtimeReadiness = readiness.state;\n          await supabase.rpc('erp_get_sync_token');"), /reviewed member drifted: pullCoreProductData/u);
 rejects('awaitCoreSnapshotAfterRealtimeReady drift', provider, pBefore, mutate(pAfter, 'if (evidence.readyAt > evidence.readStartedAt) return false;', 'if (evidence.readyAt > evidence.readStartedAt + 1) return false;'), /reviewed member drifted: awaitCoreSnapshotAfterRealtimeReady/u);
@@ -74,8 +94,7 @@ rejects('unreviewed top-level helper added to cache', cache, cBefore, mutate(cAf
 
 // ---- stale cloudTargetedCache rule: the original semantics are untouched outside the p02 review
 const LEGACY_BASE = '3347ef8a'; const REVIEWED = '536e7d69'; // reviews buyanime-simple-flow-performance-v1 (e7185e8b) + buyanime-final-fast-import-v1
-const gshow = (rev, file) => execFileSync('git', ['-C', ROOT, 'show', `${rev}:${file}`], { encoding: 'utf8' });
-pass('POS original rule still accepts its reviewed patches against their legacy baseline (3347ef8a -> 536e7d69)', () => assertReviewedProviderContract(cache, gshow(LEGACY_BASE, cache), gshow(REVIEWED, cache)));
+pass('POS original rule still accepts its reviewed patches against their legacy baseline (3347ef8a -> 536e7d69)', () => assertReviewedProviderContract(cache, showAt(LEGACY_BASE, cache), showAt(REVIEWED, cache)));
 pass('POS original rule is NOT relaxed for non-p02 sources (unchanged adopted source still fails closed, as before)', () => assert.throws(() => assertReviewedProviderContract(cache, cBefore, cBefore), /draft\/generation\/cache contract changed/u));
 rejects('p02 source reverting the adopted e7185e8 line (pinned performRefresh drift)', cache, cBefore, mutate(cAfter, "if (isAuthoritativeResourceRead || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty'))", "if ((!this.protectsDraft && !this.prepareDraftProtection) || (previousStatus !== 'fresh-online' && previousStatus !== 'fresh-empty'))"), /reviewed member drifted: performRefresh/u);
 
@@ -130,7 +149,8 @@ await probeCase('observability gains network I/O', observability, `${oSrc}\nexpo
 
 // ---- waca-counted-transition-provider-v1 (exact review): positive + negative proof
 const wsp = 'src/providers/cloud/supabaseProvider.ts', wdp = 'src/providers/dataProvider.ts';
-const wspAfter = read(wsp), wdpAfter = read(wdp), wspBefore = show(wsp), wdpBefore = show(wdp);
+const wspAfter = restoreReviewedBuyAnimeV33ProviderPatch(wsp, read(wsp));
+const wdpAfter = read(wdp), wspBefore = show(wsp), wdpBefore = show(wdp);
 const WACA_DRIFT = name => new RegExp(`waca counted reviewed member drifted: ${name}`, 'u');
 // Mutations of the counted write are scoped to that member (the legacy commitWacaSnapshot shares some lines).
 const inCounted = (source, from, to) => { const at = source.indexOf('  /** 073 counted transition import'); assert.ok(at > 0, 'counted member anchor missing'); return source.slice(0, at) + mutate(source.slice(at), from, to); };

@@ -984,10 +984,10 @@ const BUYANIME_V33_PROVIDER_PATCH = Object.freeze({
     after: 'fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213',
   }),
 });
-function acceptsReviewedBuyAnimeV33ProviderPatch(file, before, after) {
+export function restoreReviewedBuyAnimeV33ProviderPatch(file, source) {
   const pin = BUYANIME_V33_PROVIDER_PATCH[file];
-  if (!pin || before === null || after === null || sourceHash(before) !== pin.before || sourceHash(after) !== pin.after) return false;
-  let restored = after.replace(/\r\n?/gu, '\n');
+  if (!pin || source === null || sourceHash(source) !== pin.after) return source;
+  let restored = source.replace(/\r\n?/gu, '\n');
   if (file.endsWith('buyAnimeImportCoordinator.ts')) {
     const marker = 'export interface BuyAnimeFlowOptions {\n  onStage?: (stage: BuyAnimeStage) => void;\n}';
     if (restored.split(marker).length !== 2) fail('reviewed BuyAnime Coordinator anchor missing or duplicated');
@@ -1003,11 +1003,20 @@ function acceptsReviewedBuyAnimeV33ProviderPatch(file, before, after) {
       '      await this.prepareBuyAnimeRecovery();\n      // Backup is after prior-batch recovery and before new Inventory dispatch.\n      await options.beforeStart?.();\n      this.buyAnimePipeline.onStage = stage =>');
   }
   if (sourceHash(restored) !== pin.before) fail(`reviewed BuyAnime Provider restoration mismatch: ${file}`);
-  return true;
+  return restored;
 }
 
 export function assertReviewedProviderContract(file, before, after) {
-  if (acceptsReviewedBuyAnimeV33ProviderPatch(file, before, after)) return;
+  const buyAnimePin = BUYANIME_V33_PROVIDER_PATCH[file];
+  // The direct reviewed patch is bound by both immutable full-file hashes.
+  // Historical guard regressions call the exported restoration helper first,
+  // so each older contract judges its own exact source rather than a later
+  // independently reviewed overlay.
+  if (buyAnimePin && before !== null && after !== null
+    && sourceHash(before) === buyAnimePin.before && sourceHash(after) === buyAnimePin.after) {
+    restoreReviewedBuyAnimeV33ProviderPatch(file, after);
+    return;
+  }
   after = restoreReviewedR5CoreProvider(file, after);
   if (wacaRecognitionReviewApplies(file, after)) {
     assertWacaRecognitionProviderContract(file, before, after);
