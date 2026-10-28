@@ -1155,10 +1155,6 @@ export default function PurchaseRecords() {
     return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, missingJpyCostCount: missingJpyCost, allCount: total, toPurchaseCount: toPurchase, needsPurchaseCount: needsPurchase };
   }, [baseGroups]);
 
-  const purchaseRecordSortContext = {
-    sortMode, isClosed: checkIsGroupClosed, normalizeTitle: getNormalizedTitle, parseReleaseYm,
-  };
-
   const completedGroups = useMemo(() => {
     if (linkedGroupId !== null) return [];
     try {
@@ -1173,7 +1169,9 @@ export default function PurchaseRecords() {
       result = result.filter(g => checkNeedsPurchase(g));
     }
 
-    result = sortPurchaseRecordGroups(result, purchaseRecordSortContext);
+    result = sortPurchaseRecordGroups(result, {
+      sortMode, isClosed: checkIsGroupClosed, normalizeTitle: getNormalizedTitle, parseReleaseYm,
+    });
 
     return result;
     } catch (err) {
@@ -1215,7 +1213,9 @@ export default function PurchaseRecords() {
     }
 
     // Sort
-    result = sortPurchaseRecordGroups(result, purchaseRecordSortContext);
+    result = sortPurchaseRecordGroups(result, {
+      sortMode, isClosed: checkIsGroupClosed, normalizeTitle: getNormalizedTitle, parseReleaseYm,
+    });
 
     return result;
     } catch (err) {
