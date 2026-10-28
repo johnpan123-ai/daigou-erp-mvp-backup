@@ -56,6 +56,7 @@ import {
   getClosingDateWorkbenchMode,
 } from '../lib/closingDateWorkbenchAccess';
 import { capturePurchaseRecordsEditView, resolvePurchaseRecordsEditView } from '../lib/purchaseRecordsEditView';
+import { sortPurchaseRecordGroups } from '../lib/purchaseRecordsSort';
 import type { ClosingDateWorkbenchApplyRequest } from '../components/closingDateResolution/ClosingDateResolutionWorkbench';
 
 const ClosingDateResolutionWorkbench = lazy(
@@ -1154,6 +1155,10 @@ export default function PurchaseRecords() {
     return { progressCount: progress, closedCount: closed, noClosingDateCount: noClosingDate, missingJpyCostCount: missingJpyCost, allCount: total, toPurchaseCount: toPurchase, needsPurchaseCount: needsPurchase };
   }, [baseGroups]);
 
+  const purchaseRecordSortContext = {
+    sortMode, isClosed: checkIsGroupClosed, normalizeTitle: getNormalizedTitle, parseReleaseYm,
+  };
+
   const completedGroups = useMemo(() => {
     if (linkedGroupId !== null) return [];
     try {
@@ -1168,46 +1173,7 @@ export default function PurchaseRecords() {
       result = result.filter(g => checkNeedsPurchase(g));
     }
 
-    result.sort((a, b) => {
-      if (sortMode === 'release_asc') {
-        const ra = parseReleaseYm(a.release_month);
-        const rb = parseReleaseYm(b.release_month);
-        if (ra.tier !== rb.tier) return ra.tier - rb.tier;
-        if (ra.tier === 1 && ra.ym !== rb.ym) return ra.ym - rb.ym;
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateComp = dateA.localeCompare(dateB);
-        if (dateComp !== 0) return dateComp;
-        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
-        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
-        return titleA.localeCompare(titleB);
-      } else if (sortMode === 'closing_urgent') {
-        const activeA = !checkIsGroupClosed(a);
-        const activeB = !checkIsGroupClosed(b);
-        if (activeA !== activeB) return activeA ? -1 : 1;
-        
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB);
-      } else if (sortMode === 'closing_name') {
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateComp = dateA.localeCompare(dateB);
-        if (dateComp !== 0) return dateComp;
-        
-        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
-        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
-        return titleA.localeCompare(titleB);
-      } else if (sortMode === 'closing_asc') {
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB);
-      } else {
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        return timeB - timeA;
-      }
-    });
+    result = sortPurchaseRecordGroups(result, purchaseRecordSortContext);
 
     return result;
     } catch (err) {
@@ -1249,49 +1215,7 @@ export default function PurchaseRecords() {
     }
 
     // Sort
-    result.sort((a, b) => {
-      if (sortMode === 'release_asc') {
-        const ra = parseReleaseYm(a.release_month);
-        const rb = parseReleaseYm(b.release_month);
-        if (ra.tier !== rb.tier) return ra.tier - rb.tier;
-        if (ra.tier === 1 && ra.ym !== rb.ym) return ra.ym - rb.ym;
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateComp = dateA.localeCompare(dateB);
-        if (dateComp !== 0) return dateComp;
-        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
-        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
-        return titleA.localeCompare(titleB);
-      } else if (sortMode === 'closing_urgent') {
-        const activeA = !checkIsGroupClosed(a);
-        const activeB = !checkIsGroupClosed(b);
-        
-        if (activeA !== activeB) {
-          return activeA ? -1 : 1;
-        }
-        
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB);
-      } else if (sortMode === 'closing_name') {
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateComp = dateA.localeCompare(dateB);
-        if (dateComp !== 0) return dateComp;
-        
-        const titleA = getNormalizedTitle(a.normalized_title || a.title || '');
-        const titleB = getNormalizedTitle(b.normalized_title || b.title || '');
-        return titleA.localeCompare(titleB);
-      } else if (sortMode === 'closing_asc') {
-        const dateA = a.closing_date ? a.closing_date.replace(/\//g, '-') : '9999-12-31';
-        const dateB = b.closing_date ? b.closing_date.replace(/\//g, '-') : '9999-12-31';
-        return dateA.localeCompare(dateB);
-      } else {
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        return timeB - timeA;
-      }
-    });
+    result = sortPurchaseRecordGroups(result, purchaseRecordSortContext);
 
     return result;
     } catch (err) {

@@ -83,7 +83,14 @@ const scenarios = async (page, dialogs, L, label) => {
   // Saving state + Enter/Blur during an in-flight save: one write, no layout shift, draft kept until success.
   {
     const input = L.input('release_month');
-    const box0 = await input.boundingBox();
+    // Layout position in scroll-content coordinates: Playwright may scroll the
+    // .main-area container to reach the input, which is not a layout shift.
+    const contentBox = () => input.evaluate(el => {
+      const rect = el.getBoundingClientRect(); let scrolled = window.scrollY;
+      for (let node = el.parentElement; node; node = node.parentElement) scrolled += node.scrollTop;
+      return { y: rect.top + scrolled, height: rect.height };
+    });
+    const box0 = await contentBox();
     await page.evaluate(() => window.__P0_REACT_HARNESS__.holdNextGroupSave());
     const w0 = await saves(page);
     await typeInto(page, input, '2028-01');
@@ -91,7 +98,7 @@ const scenarios = async (page, dialogs, L, label) => {
     await page.waitForFunction(() => window.__P0_REACT_HARNESS__.snapshot().groupSaveHeld);
     const saving = { attr: await input.getAttribute('data-saving'), busy: await input.getAttribute('aria-busy') };
     await clickAway(page); await input.click(); await input.press('Enter'); await clickAway(page); // more Blur / Enter while saving
-    const box1 = await input.boundingBox();
+    const box1 = await contentBox();
     await page.evaluate(() => window.__P0_REACT_HARNESS__.releaseGroupSave());
     await page.waitForFunction(() => !window.__P0_REACT_HARNESS__.snapshot().groupSaveHeld);
     await sleep(300);
