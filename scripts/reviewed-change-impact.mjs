@@ -25,6 +25,7 @@ export const regressionScripts = Object.freeze({
   'provider-guard': 'tests/p02-1a-provider-guard.mjs',
   'r5-core-provider-guard': 'tests/r5-core-provider-guard.mjs',
   'change-impact-log-isolation': 'tests/change-impact-log-isolation.mjs',
+  'purchase-sort-stability': 'tests/purchase-records-sort-stability.mjs',
   'context-guard': 'tests/p02-1a-context-guard.mjs',
   'buyanime-journal-identity': 'tests/buyanime-journal-identity.mjs',
   'buyanime-journal-scanner': 'tests/buyanime-journal-scanner.mjs',
