@@ -36,6 +36,7 @@ import {
   takeCloudReadToken,
 } from './cloudCacheWriteFence';
 import { finishCloudSyncRun, recordCloudSyncPage, startCloudSyncRun } from './cloudSyncObservability';
+import { fetchPartitionedKeyset } from './cloudKeysetParallel';
 
 type Row = Record<string, unknown> & { id?: string; local_id?: string; deleted_at?: string | null; updated_at?: string };
 
@@ -448,6 +449,13 @@ export class CloudTargetedCache {
     const run = this.queryOverride ? null : startCloudSyncRun('authoritative-refresh');
     let afterId: string | null = null;
     try {
+      if (!this.queryOverride) {
+        // Same rows/order as the id keyset loop below; large tables are read as
+        // parallel id ranges. Injected test queries keep the positional loop.
+        const partitioned = await this.queryAllPartitioned(table, run, signal);
+        finishCloudSyncRun(run, 'committed');
+        return partitioned;
+      }
       for (let from = 0; ; from += AUTHORITATIVE_PAGE_SIZE) {
         const page = await this.query({
           table,
@@ -500,6 +508,60 @@ export class CloudTargetedCache {
     const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
     if (newest) this.cursors.set(table, newest);
     return rows.length;
+  }
+
+  private async queryAllPartitioned(table: string, run: ReturnType<typeof startCloudSyncRun> | null, signal?: AbortSignal): Promise<Row[]> {
+    const activeOnly = !TABLES_WITHOUT_SOFT_DELETE.has(table);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const base = (columns: string, options?: object): any => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let query = (supabase as any).from(table).select(columns, options);
+      if (signal) query = query.abortSignal(signal);
+      if (activeOnly) query = query.is('deleted_at', null);
+      return query;
+    };
+    const beforeRequest = async (mode: 'page' | 'probe') => {
+      signal?.throwIfAborted();
+      if (table === 'inventory_items') {
+        await awaitCatalogCommitReadFence(this.readCaller, signal);
+        recordBuyAnimeCatalogEvidence('inventory-read', { caller: this.readCaller, mode, count: 0, from: -1, to: AUTHORITATIVE_PAGE_SIZE });
+      }
+      this.targetedQueries += 1;
+      this.requestsByTable.set(table, (this.requestsByTable.get(table) || 0) + 1);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const execute = async (query: any) => {
+      const result = await query;
+      if (result.error) {
+        markCloudRequestFailed(result.error);
+        throw result.error;
+      }
+      markCloudReachable();
+      return result as { data: Row[] | null; count?: number | null };
+    };
+    return fetchPartitionedKeyset<Row>({
+      keyColumn: 'id',
+      pageSize: AUTHORITATIVE_PAGE_SIZE,
+      page: async request => {
+        await beforeRequest('page');
+        let query = request.count ? base('*', { count: 'exact' }) : base('*');
+        if (request.gt) query = query.gt('id', request.gt);
+        if (request.gte) query = query.gte('id', request.gte);
+        if (request.lt) query = query.lt('id', request.lt);
+        const result = await execute(query.order('id').limit(request.limit));
+        const rows = result.data || [];
+        this.rowsFetched += rows.length;
+        if (run) recordCloudSyncPage(run, rows);
+        return { rows, count: result.count ?? null };
+      },
+      probe: async (afterKey, offset) => {
+        await beforeRequest('probe');
+        const result = await execute(base('id').gt('id', afterKey).order('id').range(offset, offset));
+        if (run) recordCloudSyncPage(run, []);
+        const id = result.data?.[0]?.id;
+        return typeof id === 'string' && id ? id : null;
+      },
+    });
   }
 
   private async refreshSince(table: string, generation: number, signal?: AbortSignal, conflicts: CloudChange[] = []): Promise<number> {
