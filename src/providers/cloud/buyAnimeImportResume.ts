@@ -72,6 +72,24 @@ export class BuyAnimeResumeError extends Error {
     this.recoveryDiagnostic = recoveryDiagnostic;
   }
 }
+
+/**
+ * erp_inventory_import_core returns these business rejections only AFTER it
+ * proved that no receipt exists for (actor, idempotency key), and before any
+ * write; the receipt is inserted in the same transaction as the business write.
+ * For the actor that dispatched the intent they therefore prove NOT committed.
+ * STALE_AFTER_RESTORE (checked before the receipt lookup),
+ * IDEMPOTENCY_KEY_PAYLOAD_MISMATCH and INVENTORY_COMMIT_UNKNOWN prove nothing.
+ */
+export const BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES: ReadonlySet<string> = new Set([
+  'FIELD_CONFLICT', 'DUPLICATE_CREATE', 'RECORD_DELETED_OR_MISSING', 'INVENTORY_IDENTITY_REPLACEMENT_FORBIDDEN',
+]);
+export const isBuyAnimeInventoryRejected = (error: unknown): error is BuyAnimeResumeError =>
+  error instanceof BuyAnimeResumeError && error.code === 'BUYANIME_INVENTORY_REJECTED';
+export const buyAnimeRejectedServerCode = (error: unknown): string | null => {
+  const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
+  return typeof cause?.code === 'string' ? cause.code : null;
+};
 export const importJournalId = (batchId: string) => deterministicCloudUuid('buyanime-import-journal:' + batchId);
 export const importCatalogKey = (batchId: string) => deterministicCloudUuid('buyanime-import-catalog:' + batchId);
 export const importWacaDeltaKey = (batchId: string) => deterministicCloudUuid('buyanime-import-waca-delta:' + batchId);
@@ -315,6 +333,18 @@ export class BuyAnimeImportPipeline {
    * SAME epoch prove the transaction did not commit. Any other shape (no
    * creates, present key/tombstone, soft-deleted row, surplus target matches,
    * epoch change) stays blocked. Only the journal row changes, through CAS. */
+  /** Definitive server rejection: nothing was written. Close the journal as
+   * FAILED_PRE_COMMIT through the normal journal CAS so it no longer blocks new
+   * imports, then surface the real reason. If the journal cannot be saved the
+   * durable COMMITTING/UNKNOWN record stays and is reconciled later. */
+  private async settleRejected(record: BuyAnimeImportRecord, cause: BuyAnimeResumeError): Promise<never> {
+    let settled = record;
+    if (record.version > 0 && record.stage !== 'FAILED_PRE_COMMIT') {
+      try { settled = await this.store(record, { stage: 'FAILED_PRE_COMMIT' }); }
+      catch { /* keep the durable intent; never bypass CAS/offline protection */ }
+    }
+    throw new BuyAnimeResumeError('BUYANIME_INVENTORY_REJECTED', settled, cause.cause ?? cause);
+  }
   async retireLegacyNotCommitted(input: BuyAnimeImportRecord): Promise<BuyAnimeImportRecord | null> {
     assertImportRecord(input);
     if (!isUnresolvedLegacyInventoryJournal(input)) throw new BuyAnimeResumeError('BUYANIME_LEGACY_RETIREMENT_NOT_APPLICABLE', input);
@@ -396,6 +426,7 @@ export class BuyAnimeImportPipeline {
       await this.port.commitInventory(plan, record);
       markBuyAnimeTrace('T13_INVENTORY_COMMIT_RESPONSE', { mutationRows: plan.operations.length });
     } catch (cause) {
+      if (isBuyAnimeInventoryRejected(cause)) return this.settleRejected(record, cause);
       // An HTTP/error response is not rollback evidence. Receipt-aware imports
       // stay unknown until the read-only server classifier proves the outcome.
       const unknown = Boolean(record.inventory) || classifyMyAcgImportError(cause, 'commit').code === 'COMMIT_RESULT_UNKNOWN';
@@ -465,14 +496,19 @@ export class BuyAnimeImportPipeline {
     if (!proven && record.inventory && record.stage.startsWith('INVENTORY_')) {
       if (!this.port.reconcileInventory || !this.port.resumeInventory)
         throw new BuyAnimeResumeError('BUYANIME_INVENTORY_RECONCILIATION_UNAVAILABLE', record);
-      let outcome = await this.port.reconcileInventory(record);
+      const reconcile = async (current: BuyAnimeImportRecord) => {
+        try { return await this.port.reconcileInventory!(current); }
+        catch (cause) { if (isBuyAnimeInventoryRejected(cause)) return this.settleRejected(current, cause); throw cause; }
+      };
+      let outcome = await reconcile(record);
       if (outcome === 'UNKNOWN') throw new BuyAnimeResumeError('BUYANIME_COMMIT_OUTCOME_UNKNOWN', record);
       if (outcome === 'NOT_COMMITTED') {
         record = await this.store(record, { stage: 'INVENTORY_COMMITTING' });
         await this.assertCurrent(record);
         try { await this.port.resumeInventory(record); }
         catch (cause) {
-          outcome = await this.port.reconcileInventory(record);
+          if (isBuyAnimeInventoryRejected(cause)) return this.settleRejected(record, cause);
+          outcome = await reconcile(record);
           if (outcome !== 'COMMITTED') throw new BuyAnimeResumeError(
             outcome === 'NOT_COMMITTED' ? 'BUYANIME_NOT_COMMITTED' : 'BUYANIME_COMMIT_OUTCOME_UNKNOWN', record, cause);
         }
@@ -589,7 +625,15 @@ export function buyAnimeRecoveryMessage(record: BuyAnimeImportRecord, verified =
   return '主檔已儲存，但雲端核對或後續同步尚未完成；請勿重複匯入。';
 }
 
+const REJECTED_MESSAGES: Readonly<Record<string, string>> = {
+  FIELD_CONFLICT: '雲端主檔在匯入期間已被其他操作修改，本次匯入沒有寫入任何資料。請重新整理後再匯入一次。',
+  RECORD_DELETED_OR_MISSING: '部分商品已被刪除或不存在，本次匯入沒有寫入任何資料。請重新整理後再匯入一次。',
+  DUPLICATE_CREATE: '商品識別重複，本次匯入沒有寫入任何資料。請重新整理後再匯入；若仍發生請聯絡管理員。',
+  INVENTORY_IDENTITY_REPLACEMENT_FORBIDDEN: '商品識別衝突（同一商品已有其他識別碼），本次匯入沒有寫入任何資料。請聯絡管理員核對重複商品。',
+};
 export function buyAnimeRecoveryUserMessage(error:unknown):string {
+  if (isBuyAnimeInventoryRejected(error))
+    return REJECTED_MESSAGES[buyAnimeRejectedServerCode(error) ?? ''] ?? '雲端拒絕本次匯入，沒有寫入任何資料。請重新整理後再匯入。';
   let current=error;
   for(let depth=0;depth<6;depth++) {
     const value=current as {category?:string;code?:string;cause?:unknown}|null;

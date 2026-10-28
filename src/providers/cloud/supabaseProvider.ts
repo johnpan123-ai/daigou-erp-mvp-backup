@@ -208,6 +208,7 @@ import { readFormIntent,stableFormIntent,clearFormIntent } from './privateOrderT
 import { readCloudRowsByIds } from './cloudBulkRead';
 import {
   BuyAnimeImportPipeline, BuyAnimeResumeError, inventoryProof, assertImportRecord, importCatalogKey,
+  BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES, importJournalId, isBuyAnimeInventoryRejected,
   type BuyAnimeImportRecord,
 } from './buyAnimeImportResume';
 import { readBuyAnimeJournal, readEligibleBuyAnimeJournals, saveBuyAnimeJournal } from './buyAnimeImportJournal';
@@ -1921,6 +1922,10 @@ export class SupabaseProvider implements IDataProvider {
         p_idempotency_key: record.inventory.key, p_request: record.inventory.request,
       });
       if (result.error) throw { ...result.error, status: result.status };
+      // A definitive business rejection from THIS actor's apply call proves no
+      // commit (see BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES); anything else stays unknown.
+      if (result.data?.ok === false && BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES.has(String(result.data?.code)))
+        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_REJECTED', record, { code: result.data.code });
       if (result.data?.ok !== true || result.data?.outcome !== 'COMMITTED')
         throw new BuyAnimeResumeError('BUYANIME_INVENTORY_COMMIT_REJECTED', record, { code: result.data?.code });
       const expected = new Set(record.inventory.request.operations.map(op => op.id));
@@ -1942,9 +1947,27 @@ export class SupabaseProvider implements IDataProvider {
     if (result.error) return 'UNKNOWN';
     if (result.data?.ok !== true) {
       if (result.data?.code === 'INVENTORY_COMMIT_UNKNOWN') return 'UNKNOWN';
+      // The server looks up the receipt for the CALLING actor only. The rejection
+      // proves NOT committed only when that actor is the journal's last writer,
+      // i.e. the one who wrote COMMITTING/UNKNOWN right around the dispatch.
+      if (BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES.has(String(result.data?.code))
+        && await this.isBuyAnimeJournalLastWriter(record)) {
+        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_REJECTED', record, { code: result.data?.code });
+      }
       throw new BuyAnimeResumeError('BUYANIME_INVENTORY_READBACK_IDENTITY_ERROR', record, { code: result.data?.code });
     }
     return ['COMMITTED', 'NOT_COMMITTED'].includes(result.data.outcome) ? result.data.outcome : 'UNKNOWN';
+  }
+  private async isBuyAnimeJournalLastWriter(record: BuyAnimeImportRecord): Promise<boolean> {
+    try {
+      const [{ data: { session } }, journal] = await Promise.all([
+        supabase.auth.getSession(),
+        supabase.from('import_batches').select('updated_by,version').eq('id', importJournalId(record.batchId)).maybeSingle(),
+      ]);
+      const actor = session?.user?.id;
+      return Boolean(actor) && !journal.error && journal.data?.updated_by === actor
+        && Number(journal.data?.version) === record.version;
+    } catch { return false; }
   }
   /** SELECT-only. Exact expected UUIDs plus absent proofs' keys INCLUDING tombstones. */
   private async readBuyAnimeLegacyEvidence(record: BuyAnimeImportRecord) {
@@ -2147,7 +2170,11 @@ export class SupabaseProvider implements IDataProvider {
   async completeBuyAnimeImport(items: InventoryItem[], fileName: string, options: BuyAnimeFlowOptions = {}): Promise<BuyAnimeImportRecord> {
     return coordinateBuyAnimeImport(async () => {
       const pending = await this.getBuyAnimeImportRecovery() ?? this.buyAnimeRefreshPending;
-      if (pending) await this.finishBuyAnime(pending, options);
+      // A pending journal proven NOT committed is closed (FAILED_PRE_COMMIT) by
+      // the pipeline; it must not block the new file the user just selected.
+      if (pending) await this.finishBuyAnime(pending, options).catch(error => {
+        if (!isBuyAnimeInventoryRejected(error)) throw error;
+      });
       await this.prepareBuyAnimeRecovery();
       this.buyAnimePipeline.onStage = stage => { publishBuyAnimeFlow(buyAnimeFlowLabel(stage)); options.onStage?.(stage); };
       let record: BuyAnimeImportRecord;

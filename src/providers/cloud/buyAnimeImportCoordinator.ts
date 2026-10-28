@@ -1,4 +1,4 @@
-import { BuyAnimeResumeError, type BuyAnimeImportRecord, type BuyAnimeStage } from './buyAnimeImportResume';
+import { BuyAnimeResumeError, buyAnimeRecoveryUserMessage, isBuyAnimeInventoryRejected, type BuyAnimeImportRecord, type BuyAnimeStage } from './buyAnimeImportResume';
 import type { CloudChange } from './cloudSyncDomain';
 
 export interface BuyAnimeAuthoritativeEvidence {
@@ -38,8 +38,9 @@ export function coordinateBuyAnimeImport<T>(run: () => Promise<T>): Promise<T> {
     catch (error) {
       // Pre-dispatch/backup/permission failures have no committed batch to resume.
       // Let the caller show their specific error, not a misleading resume action.
-      publishBuyAnimeFlow('', error instanceof BuyAnimeResumeError && error.record
-        ? '同步暫時未完成，請稍後重試。已儲存的主檔不會重送。' : '');
+      publishBuyAnimeFlow('', isBuyAnimeInventoryRejected(error) ? buyAnimeRecoveryUserMessage(error)
+        : error instanceof BuyAnimeResumeError && error.record
+          ? '同步暫時未完成，請稍後重試。已儲存的主檔不會重送。' : '');
       throw error;
     } finally {
       presentation = { ...presentation, active: false };

@@ -115,7 +115,11 @@ export async function saveBuyAnimeJournal(record: BuyAnimeImportRecord, expected
       : next,
     ...(compressed ? { buyAnimeImportGzip: compressed } : {}),
   };
-  const values = { version: next.version, details, updated_at: new Date().toISOString() };
+  // The writer's own id is recorded with every journal CAS write: the actor who
+  // wrote COMMITTING/UNKNOWN around a dispatch is the only one whose receipt
+  // lookup can prove that dispatch NOT committed during reconciliation.
+  const writer = (await supabase.auth.getSession()).data.session?.user?.id;
+  const values = { version: next.version, details, updated_at: new Date().toISOString(), ...(writer ? { updated_by: writer } : {}) };
   const result = expectedVersion === 0
     ? await supabase.from('import_batches').insert({
       ...values, id: importJournalId(record.batchId), local_id: importJournalId(record.batchId),
