@@ -915,6 +915,75 @@
           "schemaExpectation": "Unchanged."
         }
       ]
+    },
+    {
+      "id": "purchase-records-sort-stability-v1",
+      "beforeHead": "060ef31e396e42d888ced8c3279913adfbb79c38",
+      "reviewedHead": "8dda18a3bba28cb0d7a0bb107f906d732f3ef31f",
+      "patchSha256": "f2841d34b1925d2b98126a2890e6f43eccfe2ac60909a2584239b014c893cd03",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "provider-guard",
+        "context-guard",
+        "realtime",
+        "purchase-sort-stability",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "1fe590b7434e6748d97f0097d964ec3090c9c8a4d412f21fac81a6b9bbeee172",
+          "afterHash": "f25bf6544687c46b41747d96bc413ef7d8ee969fe2f38badcadc168598e0a132",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["regressionScripts purchase-sort-stability mapping"],
+          "dataFlow": "Binds the exact purchase sorting browser regression to the reviewed candidate.",
+          "persistenceBehavior": "Release orchestration only.",
+          "writePath": "No application or database write.",
+          "providerPath": "No Provider, CAS, Realtime or Restore change.",
+          "externalContract": "Missing, changed or failed regression evidence remains fail closed.",
+          "schemaExpectation": "No Schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "src/lib/purchaseRecordsSort.ts",
+          "beforeHash": null,
+          "afterHash": "72c30885496640b6350bc74480358137a8a66a3db35979cb0211561d0e083cc3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["comparePurchaseRecordGroups", "sortPurchaseRecordGroups"],
+          "dataFlow": "Applies the existing primary sort rules and deterministic title/group-id tie-breakers without mutating shared input arrays.",
+          "persistenceBehavior": "Read-only presentation ordering; no stored values change.",
+          "writePath": "No application or database write.",
+          "providerPath": "No Provider contract change.",
+          "externalContract": "All five sort modes retain their primary keys and gain a stable total order.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/pages/PurchaseRecords.tsx",
+          "beforeHash": "de4fbc0808489afb88bdc02f4f156abf06dab3d7afa0a7911f658e6cdee629ec",
+          "afterHash": "f2ba887bd73ef6d783553782deb21503c93f9d97f2e731c52d9b86cd4c000d25",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["completedGroups ordering", "filteredAndSortedGroups ordering"],
+          "dataFlow": "Routes both the main list and overdue section through the same deterministic comparator.",
+          "persistenceBehavior": "Existing save targets and payloads are unchanged.",
+          "writePath": "No new write path.",
+          "providerPath": "No Provider, CAS, Revision, Epoch or Realtime change.",
+          "externalContract": "Agent edits, targeted cache merges and refreshes no longer reorder equal-key rows.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/purchase-records-sort-stability.mjs",
+          "beforeHash": null,
+          "afterHash": "395969811a7746bdaf4f621c1b1c83761ee98dbb989837f10066ceb6b48dd2b5",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["deterministic comparator cases", "five-agent-edit browser regression", "mobile parity regression"],
+          "dataFlow": "Exercises equal-key input shuffles, five consecutive edits, targeted cache reordering, refresh, sort switching and mobile layout.",
+          "persistenceBehavior": "Disposable local provider data only.",
+          "writePath": "Production and Preview Supabase requests are asserted zero.",
+          "providerPath": "Uses the existing local experimental provider only.",
+          "externalContract": "Any row jump, wrong saved agent, duplicate ordering or remote request fails closed.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
     ,
     {
