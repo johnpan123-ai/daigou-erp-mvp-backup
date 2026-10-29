@@ -95,7 +95,10 @@ try {
     await page.getByTestId('auth-user').getByText('p0-5-editor@staging.invalid').waitFor();
     await page.getByTestId('auth-role').getByText('owner').waitFor();
     await page.getByTestId('editor-check').getByText('true').waitFor();
-    await page.getByText('STAGING / 測試雲端', { exact: true }).first().waitFor();
+    // Owner 2026-10-29: Cloud UI shows the neutral mode name; no staging banner/badge text.
+    await page.getByText('雲端模式', { exact: true }).first().waitFor();
+    assert.equal(await page.getByText(/STAGING|測試雲端|測試環境/u).count(), 0, 'no test-environment text in Cloud UI');
+    assert.equal(await page.locator('.environment-status-bar').count(), 0, 'no environment banner in Cloud UI');
     await expectSentinels();
 
     // E: real reload restores the session and Cloud Mode.
@@ -189,12 +192,21 @@ try {
         production: module.getEnvironmentModeLabel('cloud', 'production'),
         staging: module.getEnvironmentModeLabel('cloud', 'staging'),
         local: module.getEnvironmentModeLabel('local', 'staging'),
+        userCloudStaging: module.getUserFacingModeLabel('cloud', 'staging'),
+        userCloudProduction: module.getUserFacingModeLabel('cloud', 'production'),
+        bannerCloud: module.showsEnvironmentBanner('cloud'),
+        bannerNext: module.showsEnvironmentBanner('next'),
       };
     });
     assert.deepEqual(labels, {
       production: '雲端正式',
       staging: 'STAGING / 測試雲端',
       local: '本地模式｜資料不會同步雲端',
+      // User-facing label never claims 正式 and never shows staging text.
+      userCloudStaging: '雲端模式',
+      userCloudProduction: '雲端模式',
+      bannerCloud: false,
+      bannerNext: true,
     });
 
     const authSource = [

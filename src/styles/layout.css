@@ -44,6 +44,10 @@
   background-color: var(--color-bg-base);
 }
 
+.app-shell--no-environment-bar {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .environment-status-bar {
   grid-column: 1 / -1;
   min-height: 38px;

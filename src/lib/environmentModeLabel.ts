@@ -10,3 +10,18 @@ export function getEnvironmentModeLabel(mode: ProviderMode, runtimeRole: Supabas
   if (mode === 'experimental') return 'EXPERIMENTAL';
   return 'TEST SANDBOX';
 }
+
+/**
+ * Label shown to ERP users. Cloud modes show the neutral mode name only: the
+ * staging/production distinction stays in engineering surfaces (build identity,
+ * diagnostics, logs, getEnvironmentModeLabel) and is never rendered as a
+ * "正式" claim. Local/sandbox modes keep their safety wording.
+ */
+export function getUserFacingModeLabel(mode: ProviderMode, runtimeRole: SupabaseRuntimeRole): string {
+  if (mode === 'cloud') return '雲端模式';
+  if (mode === 'fallback') return '備援模式';
+  return getEnvironmentModeLabel(mode, runtimeRole);
+}
+
+/** The full-width environment banner is a sandbox/local safety notice only. */
+export const showsEnvironmentBanner = (mode: ProviderMode): boolean => mode !== 'cloud' && mode !== 'fallback';

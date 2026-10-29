@@ -13,7 +13,7 @@ import { useAuth } from '../auth/authContext';
 import { useRole } from '../auth/useRole';
 import { useViewport } from '../contexts/ViewportContext';
 import { supabase, supabaseEnvironment } from '../providers/cloud/supabaseClient';
-import { getEnvironmentModeLabel } from '../lib/environmentModeLabel';
+import { getUserFacingModeLabel } from '../lib/environmentModeLabel';
 import { clearSandboxData, getActiveSandboxConfig, isSandboxEnvironmentActive } from '../lib/testSandboxEnvironment';
 import {
   getTestSnapshotMetadata,
@@ -94,7 +94,7 @@ export default function Settings() {
   const isSandbox = isSandboxEnvironmentActive();
   const sandboxConfig = getActiveSandboxConfig();
   const sandboxLabel = sandboxConfig?.label ?? 'Sandbox';
-  const environmentModeLabel = getEnvironmentModeLabel(currentMode, supabaseEnvironment.role);
+  const environmentModeLabel = getUserFacingModeLabel(currentMode, supabaseEnvironment.role);
   const dataSizeObservations = useSyncExternalStore(
     subscribeDataSizeObservations,
     getDataSizeObservations,
@@ -788,7 +788,7 @@ export default function Settings() {
               }}
             >
               <input type="radio" checked={currentMode === 'cloud'} readOnly style={{ position: 'absolute', top: '16px', right: '16px' }} />
-              <div className={`font-semibold ${currentMode === 'cloud' ? '' : 'text-muted'}`} style={{ fontSize: '15px', marginBottom: '4px' }}>{getEnvironmentModeLabel('cloud', supabaseEnvironment.role)}</div>
+              <div className={`font-semibold ${currentMode === 'cloud' ? '' : 'text-muted'}`} style={{ fontSize: '15px', marginBottom: '4px' }}>{getUserFacingModeLabel('cloud', supabaseEnvironment.role)}</div>
               <div className="text-xs text-muted">與 Supabase 雲端資料庫同步，支援多使用者即時協同編輯。</div>
             </label>
 

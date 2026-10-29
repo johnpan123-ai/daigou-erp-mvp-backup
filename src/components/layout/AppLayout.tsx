@@ -6,7 +6,7 @@ import { getProviderMode, markManualLocalEntry, setProviderMode, PROVIDER_MODE_C
 import { useAuth } from '../../auth/authContext';
 import { useRole } from '../../auth/useRole';
 import { supabaseEnvironment } from '../../providers/cloud/supabaseClient';
-import { getEnvironmentModeLabel } from '../../lib/environmentModeLabel';
+import { getUserFacingModeLabel, showsEnvironmentBanner } from '../../lib/environmentModeLabel';
 import { ERP_SYSTEM_SHORT_NAME, ERP_SYSTEM_VERSION } from './erpSystemIdentity';
 import { GlobalSyncControl } from './GlobalSyncControl';
 import { supportsWacaProvider } from '../../waca/providerSupport';
@@ -133,7 +133,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     : providerMode === 'experimental'
       ? 'EXPERIMENTAL'
       : 'TEST SANDBOX';
-  const environmentModeLabel = getEnvironmentModeLabel(providerMode, supabaseEnvironment.role);
+  const environmentModeLabel = getUserFacingModeLabel(providerMode, supabaseEnvironment.role);
+  const showEnvironmentBar = showsEnvironmentBanner(providerMode);
 
   useEffect(() => {
     document.title = providerMode === 'next'
@@ -182,9 +183,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''}`}
+      className={`app-shell ${(!isMobile && isCollapsed) ? 'sidebar-collapsed' : ''} ${showEnvironmentBar ? '' : 'app-shell--no-environment-bar'}`}
     >
-      <div className="environment-status-bar" style={{
+      {showEnvironmentBar && <div className="environment-status-bar" style={{
         backgroundColor: providerMode === 'next' ? '#075985' : providerMode === 'experimental' ? '#9f1239' : providerMode === 'test' ? '#5b21b6' : isCloudOrFallback ? '#b45309' : '#475569',
         color: '#fff',
         fontSize: '14px',
@@ -199,7 +200,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             : providerMode === 'test'
               ? '測試模式｜所有修改只存在本機，不會寫入正式雲端'
           : environmentModeLabel}
-      </div>
+      </div>}
       
       {/* Backdrop overlay for mobile drawer */}
       {isMobile && (
