@@ -19,7 +19,7 @@ import type {
   BundleComponent,
 } from '../lib/db';
 import { useViewport } from '../contexts/ViewportContext';
-import { getBundleComponentDisplay } from '../lib/bundleComponentDisplay';
+import { getBundleComponentDisplay, getBundleComponentShortLabel } from '../lib/bundleComponentDisplay';
 import * as XLSX from 'xlsx';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
@@ -366,6 +366,15 @@ export default function OutboundShipmentDetail() {
       })
     ])),
     [productCategoryById, productGroupById, productVariants]
+  );
+
+  // 套組內含實體商品: short component name only (see getBundleComponentShortLabel).
+  const bundleShortLabelByVariantId = useMemo(
+    () => new Map(productVariants.map(variant => [
+      variant.id,
+      getBundleComponentShortLabel(variant, { categoryById: productCategoryById })
+    ])),
+    [productCategoryById, productVariants]
   );
 
   const categoryGroupById = useMemo(
@@ -1089,11 +1098,10 @@ export default function OutboundShipmentDetail() {
         <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>套組內含實體商品</div>
         {componentVariants.map(component => {
           const componentSku = (component.myacg_item_code || '').trim();
-          const componentDisplay = bundleDisplayByVariantId.get(component.id);
           return (
-            <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+            <div key={component.id} data-testid="outbound-bundle-component" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: '#334155', fontWeight: 600 }}>{componentDisplay?.label || component.variant_name || '單品'}</div>
+                <div style={{ color: '#334155', fontWeight: 600 }}>{bundleShortLabelByVariantId.get(component.id) || component.variant_name || '單品'}</div>
                 <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
                   {componentSku ? `SKU: ${componentSku}` : '無 SKU（不納入彙總）'}
                 </div>
@@ -1821,11 +1829,10 @@ export default function OutboundShipmentDetail() {
                                   <div style={{ color: '#334155', fontSize: 12, fontWeight: 800 }}>套組內含實體商品</div>
                                   {itemBundleVariants.map(component => {
                                     const componentSku = (component.myacg_item_code || '').trim();
-                                    const componentDisplay = bundleDisplayByVariantId.get(component.id);
                                     return (
-                                      <div key={component.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+                                      <div key={component.id} data-testid="outbound-bundle-component" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
                                         <div style={{ minWidth: 0 }}>
-                                          <div style={{ color: '#334155', fontWeight: 600 }}>{componentDisplay?.label || component.variant_name || '單品'}</div>
+                                          <div style={{ color: '#334155', fontWeight: 600 }}>{bundleShortLabelByVariantId.get(component.id) || component.variant_name || '單品'}</div>
                                           <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
                                             {componentSku ? `SKU: ${componentSku}` : '無 SKU（不納入彙總）'}
                                           </div>

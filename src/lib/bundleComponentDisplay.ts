@@ -54,3 +54,27 @@ export const getBundleComponentDisplay = (
     label: `${productTitle}｜${variantTitle}`
   };
 };
+
+const isGenericTitle = (value: string) => !value || GENERIC_PRODUCT_TITLES.has(value);
+
+/**
+ * Short name for a bundle's physical component in the outbound list:
+ * own category / variant name only. Never the owning group's storefront
+ * listing title (e.g. 【小河馬日本代購】預購 26年12月 …), which is what the
+ * generic label falls back to when a component has no specific category.
+ */
+export const getBundleComponentShortLabel = (
+  variant: ProductVariant,
+  context: Pick<BundleComponentDisplayContext, 'categoryById'>
+): string => {
+  const productCategory = variant.product_category_id
+    ? context.categoryById.get(variant.product_category_id)
+    : undefined;
+  const categoryTitle = productCategory?.title?.trim() || '';
+  const rawVariantTitle = (variant.variant_name || variant.raw_variant_name || '').trim();
+  const legacySingleItem = !categoryTitle ? parseLegacySingleItemName(rawVariantTitle) : null;
+  const productTitle = !isGenericTitle(categoryTitle) ? categoryTitle : legacySingleItem?.productTitle || '';
+  const variantTitle = legacySingleItem?.variantTitle || rawVariantTitle;
+  if (productTitle && !isGenericTitle(variantTitle) && variantTitle !== productTitle) return `${productTitle}｜${variantTitle}`;
+  return productTitle || (!isGenericTitle(variantTitle) ? variantTitle : '') || variantTitle || '單一品項';
+};
