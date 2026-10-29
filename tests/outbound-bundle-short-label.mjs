@@ -41,14 +41,27 @@ try {
       { id: 'v-bag', product_group_id: 'g-set', product_title: listing, variant_name: '斜背腰包', myacg_item_code: 'G-BAG-01', sort_order: 1 },
       { id: 'v-mask', product_group_id: 'g-set', product_title: listing, variant_name: '眼罩', myacg_item_code: 'G-MASK-01', sort_order: 2 },
       { id: 'v-stand', product_group_id: 'g-set', product_category_id: 'c-acrylic', product_title: listing, variant_name: 'A款', myacg_item_code: 'G-STAND-A', sort_order: 3 },
+      { id: 'v-set2', product_group_id: 'g-set', product_title: listing, variant_name: '小套組', myacg_item_code: 'G-SET-02', sort_order: 4 },
+      { id: 'v-mask2', product_group_id: 'g-set', product_title: listing, variant_name: '眼罩', myacg_item_code: 'G-MASK-02', sort_order: 5 },
     ]);
-    await dataProvider.saveBundleComponents(['v-bag', 'v-mask', 'v-stand'].map((id, i) => ({ id: `bc-${i}`, bundle_variant_id: 'v-set', component_variant_id: id })));
+    await dataProvider.saveBundleComponents([
+      ...['v-bag', 'v-mask', 'v-stand'].map((id, i) => ({ id: `bc-${i}`, bundle_variant_id: 'v-set', component_variant_id: id })),
+      ...['v-bag', 'v-mask2'].map((id, i) => ({ id: `bc2-${i}`, bundle_variant_id: 'v-set2', component_variant_id: id })),
+    ]);
     await dataProvider.saveJapanPackages([{ id: 'jp-1', title: '合成包裹 01', status: 'arrived', arrived_at: '2026-10-20', created_at: at, updated_at: at }]);
     await dataProvider.saveJapanPackageItems([{ id: 'jpi-1', japan_package_id: 'jp-1', product_group_id: 'g-set', product_variant_id: 'v-set',
-      product_title: listing, variant_name: '全套組', sku: 'G-SET-01', quantity: 2, checked: true, checked_at: at, created_at: at, updated_at: at }]);
-    await dataProvider.saveOutboundShipments([{ id: 'ob-1', title: '合成出庫 01', status: 'received', received_at: at, created_at: at, updated_at: at }]);
-    await dataProvider.saveOutboundShipmentItems([{ id: 'obi-1', outbound_shipment_id: 'ob-1', japan_package_item_id: 'jpi-1', product_group_id: 'g-set',
-      product_variant_id: 'v-set', product_title: listing, variant_name: '全套組', sku: 'G-SET-01', quantity: 2, checked: false, created_at: at, updated_at: at }]);
+      product_title: listing, variant_name: '全套組', sku: 'G-SET-01', quantity: 4, checked: true, checked_at: at, created_at: at, updated_at: at },
+    { id: 'jpi-2', japan_package_id: 'jp-1', product_group_id: 'g-set', product_variant_id: 'v-set2',
+      product_title: listing, variant_name: '小套組', sku: 'G-SET-02', quantity: 1, checked: true, checked_at: at, created_at: at, updated_at: at },
+    { id: 'jpi-3', japan_package_id: 'jp-1', product_group_id: 'g-set', product_variant_id: 'v-bag',
+      product_title: listing, variant_name: '斜背腰包', sku: 'G-BAG-01', quantity: 1, checked: true, checked_at: at, created_at: at, updated_at: at }]);
+    await dataProvider.saveOutboundShipments([{ id: 'ob-1', title: '合成出庫 01', status: 'received', received_at: at, created_at: at, updated_at: at },
+      { id: 'ob-2', title: '合成出庫 02（彙總）', status: 'received', received_at: at, created_at: at, updated_at: at }]);
+    const line = (id, ship, jpi, variant, name, sku, quantity) => ({ id, outbound_shipment_id: ship, japan_package_item_id: jpi, product_group_id: 'g-set',
+      product_variant_id: variant, product_title: listing, variant_name: name, sku, quantity, checked: false, created_at: at, updated_at: at });
+    await dataProvider.saveOutboundShipmentItems([line('obi-1', 'ob-1', 'jpi-1', 'v-set', '全套組', 'G-SET-01', 2),
+      line('obi-2', 'ob-2', 'jpi-1', 'v-set', '全套組', 'G-SET-01', 2), line('obi-3', 'ob-2', 'jpi-2', 'v-set2', '小套組', 'G-SET-02', 1),
+      line('obi-4', 'ob-2', 'jpi-3', 'v-bag', '斜背腰包', 'G-BAG-01', 1)]);
   }, LISTING);
 
   const check = async label => {
@@ -73,10 +86,30 @@ try {
     assert.equal((text.match(/×2/gu) || []).length, 3, `${label}: each component shows ×2`);
   }
   assert.deepEqual(results.desktop.rows, results.mobile.rows, 'desktop and mobile show the same component lines');
+
+  // 各單品品項: same short names; grouping/quantities keyed by SKU only.
+  const summaryFor = async label => {
+    await page.goto(`${BASE_URL}/outbound-shipments/ob-2`, { waitUntil: 'domcontentloaded' });
+    const toggle = page.getByRole('button', { name: /各單品品項/u }).first();
+    await toggle.waitFor(); await toggle.click();
+    const rows = page.locator('[data-testid="outbound-physical-sku-summary"]');
+    let texts;
+    if (await rows.count()) texts = await rows.allInnerTexts();
+    else { const panel = toggle.locator('..'); await panel.locator('div').first().waitFor(); texts = (await panel.innerText()).split('\n').filter(Boolean); }
+    if (SHOTS) await toggle.locator('..').screenshot({ path: `${SHOTS}/summary-${label}.png` });
+    return texts.map(text => text.replace(/\s+/gu, ' ').trim());
+  };
+  const summaries = {};
+  for (const [label, viewport] of [['desktop', { width: 1440, height: 1000 }], ['mobile', { width: 390, height: 900 }]]) {
+    await page.setViewportSize(viewport);
+    summaries[label] = await summaryFor(label);
+    assert.deepEqual(summaries[label], ['斜背腰包×4 SKU: G-BAG-01', '眼罩×2 SKU: G-MASK-01', '眼罩×1 SKU: G-MASK-02', '壓克力立牌｜A款×2 SKU: G-STAND-A'],
+      `${label}: short names, same-name SKUs stay separate, same-SKU quantities summed (2 bundle + 1 bundle + 1 direct)`);
+  }
   // Outer group/bundle context is unchanged.
   assert.ok((await page.locator('body').innerText()).includes('G-SET-01'), 'bundle SKU still shown');
   assert.deepEqual(pageErrors, []); assert.deepEqual(supabase, []);
-  console.log(JSON.stringify({ result: 'PASS', desktop: results.desktop.rows, mobile: results.mobile.rows }));
+  console.log(JSON.stringify({ result: 'PASS', desktop: results.desktop.rows, mobile: results.mobile.rows, summary: summaries }));
 } finally {
   if (browser) await browser.close();
   vite.kill('SIGTERM');

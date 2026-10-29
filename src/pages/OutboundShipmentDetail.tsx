@@ -468,7 +468,7 @@ export default function OutboundShipmentDetail() {
 
   const getPhysicalSkuSummary = useCallback((items: OutboundShipmentItem[]): PhysicalSkuSummary[] => {
     const summaryBySku = new Map<string, PhysicalSkuSummary>();
-    const addQuantity = (sku: string, label: string, directQuantity: number, bundleQuantity: number) => {
+    const addQuantity = (sku: string, label: string, directQuantity: number, bundleQuantity: number, preferLabel = false) => {
       const cleanSku = sku.trim();
       if (!cleanSku) return;
       const key = cleanSku.toUpperCase();
@@ -479,6 +479,9 @@ export default function OutboundShipmentDetail() {
         bundleQuantity: 0,
         totalQuantity: 0,
       };
+      // Bundle components show their short name even if the same SKU was first
+      // added directly; grouping/quantities stay keyed by SKU only.
+      if (preferLabel) current.label = label;
       current.directQuantity += directQuantity;
       current.bundleQuantity += bundleQuantity;
       current.totalQuantity = current.directQuantity + current.bundleQuantity;
@@ -494,9 +497,10 @@ export default function OutboundShipmentDetail() {
           if (!componentSku) continue;
           addQuantity(
             componentSku,
-            bundleDisplayByVariantId.get(component.id)?.label || componentSku,
+            bundleShortLabelByVariantId.get(component.id) || componentSku,
             0,
-            item.quantity
+            item.quantity,
+            true
           );
         }
         continue;
@@ -517,7 +521,7 @@ export default function OutboundShipmentDetail() {
     return Array.from(summaryBySku.values()).sort((a, b) =>
       a.sku.localeCompare(b.sku, 'ja', { numeric: true })
     );
-  }, [bundleDisplayByVariantId, bundleVariantsByParentId, resolveItemSku, resolveItemVariant]);
+  }, [bundleDisplayByVariantId, bundleShortLabelByVariantId, bundleVariantsByParentId, resolveItemSku, resolveItemVariant]);
 
   const resolveItemLabel = useCallback((item: OutboundShipmentItem) => {
     if (!item.japan_package_item_id) return item.variant_name || '單一規格';
@@ -1912,7 +1916,7 @@ export default function OutboundShipmentDetail() {
                           {summaryExpanded && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 10px' }}>
                               {physicalSkuSummary.map(summary => (
-                                <div key={summary.sku} style={{
+                                <div key={summary.sku} data-testid="outbound-physical-sku-summary" style={{
                                   padding: '7px 9px', borderRadius: 6, background: '#fff',
                                   border: '1px solid #dbeafe',
                                 }}>
