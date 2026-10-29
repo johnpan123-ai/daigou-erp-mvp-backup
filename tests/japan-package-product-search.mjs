@@ -60,7 +60,10 @@ try {
     // Count cache reads from here on: typing must not reload package items.
     await page.evaluate(async () => {
       const { dataProvider } = await import('/src/providers/dataProvider.ts');
-      window.__itemReads = 0; const original = dataProvider.getJapanPackageItems.bind(dataProvider);
+      const original = window.__packageSearchOriginalGetItems
+        ?? dataProvider.getJapanPackageItems.bind(dataProvider);
+      window.__packageSearchOriginalGetItems = original;
+      window.__itemReads = 0;
       dataProvider.getJapanPackageItems = (...args) => { window.__itemReads++; return original(...args); };
     });
   };
@@ -75,6 +78,9 @@ try {
     await page.setViewportSize(viewport);
     await open();
     assert.deepEqual(await visibleTitles(), ['合成包裹 A', '合成包裹 B', '合成包裹 C'].filter(t => t !== '合成包裹 B'), `${label}: default 已登記 tab`);
+    // Route hydration may complete after the first visible row. Start the
+    // measurement at the first search action, and never wrap the counter twice.
+    await page.evaluate(() => { window.__itemReads = 0; });
     // 1. package name
     await type('合成包裹 B');
     assert.deepEqual(await visibleTitles(), ['合成包裹 B'], `${label}: package name across statuses`);
@@ -106,13 +112,14 @@ try {
     await type('');
     assert.deepEqual(await visibleTitles(), ['合成包裹 A', '合成包裹 C'], `${label}: cleared search restores 已登記`);
     assert.equal(await page.locator('[data-testid="package-search-matches"]').count(), 0);
-    // 7. click a search result opens that package
+    // 10. no item reload while typing. Capture before navigation because the
+    // destination package detail legitimately reads its own item collection.
     await type('G-STAND-01');
-    await page.locator(':is(.package-card, .mobile-package-card)', { hasText: '合成包裹 B' }).click({ position: { x: 20, y: 20 } });
-    await page.waitForURL(url => url.pathname === '/japan-packages/jp-b');
-    // 10. no item reload while typing
     results[label] = { itemReadsWhileTyping: await page.evaluate(() => window.__itemReads) };
     assert.equal(results[label].itemReadsWhileTyping, 0, `${label}: typing must not re-read package items`);
+    // 7. click a search result opens that package
+    await page.locator(':is(.package-card, .mobile-package-card)', { hasText: '合成包裹 B' }).click({ position: { x: 20, y: 20 } });
+    await page.waitForURL(url => url.pathname === '/japan-packages/jp-b');
   }
   // Package data unchanged by searching (read-only).
   const statuses = await page.evaluate(async () => {
