@@ -84,6 +84,15 @@ try {
     assert.doesNotMatch(text, /【|小河馬日本代購|預購|誕生日紀念/u, `${label}: no storefront listing title in bundle components`);
     for (const expected of ['斜背腰包', 'SKU: G-BAG-01', '眼罩', 'SKU: G-MASK-01', '壓克力立牌｜A款', 'SKU: G-STAND-A']) assert.ok(text.includes(expected), `${label}: ${expected}`);
     assert.equal((text.match(/×2/gu) || []).length, 3, `${label}: each component shows ×2`);
+    // Quantity sits on the name line (name ×N), SKU on the next line; no separate right-hand quantity.
+    assert.deepEqual(results[label].rows.map(row => row.split('\n').map(line => line.trim())),
+      [['斜背腰包×2', 'SKU: G-BAG-01'], ['眼罩×2', 'SKU: G-MASK-01'], ['壓克力立牌｜A款×2', 'SKU: G-STAND-A']], `${label}: name ×N / SKU layout`);
+    const geometry = await page.locator('[data-testid="outbound-bundle-component"]').first().evaluate(row => {
+      const [nameLine, skuLine] = row.firstElementChild.children;
+      const qty = nameLine.lastElementChild.getBoundingClientRect(), name = nameLine.firstElementChild.getBoundingClientRect();
+      return { sameLine: Math.abs(qty.top - name.top) < 4, qtyAfterName: qty.left >= name.right - 1, skuBelow: skuLine.getBoundingClientRect().top >= qty.bottom - 1 };
+    });
+    assert.deepEqual(geometry, { sameLine: true, qtyAfterName: true, skuBelow: true }, `${label}: quantity right after the name`);
   }
   assert.deepEqual(results.desktop.rows, results.mobile.rows, 'desktop and mobile show the same component lines');
 

@@ -1103,14 +1103,17 @@ export default function OutboundShipmentDetail() {
         {componentVariants.map(component => {
           const componentSku = (component.myacg_item_code || '').trim();
           return (
-            <div key={component.id} data-testid="outbound-bundle-component" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+            <div key={component.id} data-testid="outbound-bundle-component" style={{ fontSize: 12 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: '#334155', fontWeight: 600 }}>{bundleShortLabelByVariantId.get(component.id) || component.variant_name || '單品'}</div>
+                {/* Quantity follows the name on the same line, like every other list row. */}
+                <div style={{ color: '#334155', fontWeight: 600, overflowWrap: 'anywhere' }}>
+                  <span>{bundleShortLabelByVariantId.get(component.id) || component.variant_name || '單品'}</span>
+                  <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>×{item.quantity}</span>
+                </div>
                 <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
                   {componentSku ? `SKU: ${componentSku}` : '無 SKU（不納入彙總）'}
                 </div>
               </div>
-              <strong style={{ flexShrink: 0, color: '#1d4ed8' }}>×{item.quantity}</strong>
             </div>
           );
         })}
@@ -1834,14 +1837,17 @@ export default function OutboundShipmentDetail() {
                                   {itemBundleVariants.map(component => {
                                     const componentSku = (component.myacg_item_code || '').trim();
                                     return (
-                                      <div key={component.id} data-testid="outbound-bundle-component" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+                                      <div key={component.id} data-testid="outbound-bundle-component" style={{ fontSize: 12 }}>
                                         <div style={{ minWidth: 0 }}>
-                                          <div style={{ color: '#334155', fontWeight: 600 }}>{bundleShortLabelByVariantId.get(component.id) || component.variant_name || '單品'}</div>
+                                          {/* Quantity follows the name on the same line, like every other list row. */}
+                                          <div style={{ color: '#334155', fontWeight: 600, overflowWrap: 'anywhere' }}>
+                                            <span>{bundleShortLabelByVariantId.get(component.id) || component.variant_name || '單品'}</span>
+                                            <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>×{item.quantity}</span>
+                                          </div>
                                           <div style={{ color: componentSku ? '#64748b' : '#b45309', fontSize: 11 }}>
                                             {componentSku ? `SKU: ${componentSku}` : '無 SKU（不納入彙總）'}
                                           </div>
                                         </div>
-                                        <strong style={{ flexShrink: 0, color: '#1d4ed8' }}>×{item.quantity}</strong>
                                       </div>
                                     );
                                   })}
