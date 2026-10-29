@@ -9043,6 +9043,196 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "outbound-ui-japan-package-search-v1",
+      "beforeHead": "fe4db02901b64b45ffe652c2f2e567b91ec154ae",
+      "reviewedHead": "887eeb442244a567a250086c856e7bc8c7f2376a",
+      "patchSha256": "03d14c83511a6324164f14bee65cfad48d4d4155e738809da97763104e60d28f",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "provider-guard",
+        "context-guard",
+        "realtime",
+        "outbound-bundle-short-label",
+        "japan-package-product-search",
+        "japan-package-confirmation-flicker",
+        "cloud-auth-recovery-react",
+        "outbound-provider-integration",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "f25bf6544687c46b41747d96bc413ef7d8ee969fe2f38badcadc168598e0a132",
+          "afterHash": "4c66356b615bcaa1e55ecd1aa265992f89c778ae7ba8de213375004d17ffd5ce",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["regressionScripts exact UI regression mappings"],
+          "dataFlow": "Binds the exact outbound and Japan package UI regressions to this reviewed candidate.",
+          "persistenceBehavior": "Release orchestration only.",
+          "writePath": "No application or database write.",
+          "providerPath": "No runtime Provider change.",
+          "externalContract": "Missing, changed or failed regression evidence remains fail closed.",
+          "schemaExpectation": "No schema, RPC, Ledger or Migration change."
+        },
+        {
+          "file": "src/components/layout/AppLayout.tsx",
+          "beforeHash": "a5a576bb534aa83b0c7c8d70fc17f5f5340c3cf9ddddfc6324e1090c8b9b4d92",
+          "afterHash": "35dafd41827435899f59e53d322022f069955e4b1a820434aea568d6736a1eb5",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["environment header rendering"],
+          "dataFlow": "Removes the redundant Cloud test banner while keeping the application environment identity.",
+          "persistenceBehavior": "None.",
+          "writePath": "No write path.",
+          "providerPath": "No Provider behavior change.",
+          "externalContract": "Header presentation only.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/lib/bundleComponentDisplay.ts",
+          "beforeHash": "2c9c1a6796c2d6b10d2365bf47043ff09e9b2eee3c5091b9a5e2734a132631cf",
+          "afterHash": "7499e763b8dba3b54e50e61128ed92f6492510565bc870a1c95c0ef2d856b15b",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["bundle component short-label helpers"],
+          "dataFlow": "Derives concise display labels from existing product names without changing source identity or quantity.",
+          "persistenceBehavior": "Read-only display transformation.",
+          "writePath": "No write path.",
+          "providerPath": "No Provider behavior change.",
+          "externalContract": "SKU and quantity inputs remain unchanged.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/lib/environmentModeLabel.ts",
+          "beforeHash": "707a353deb728a2fcd2be1133af93d8dd9784f45ee9b2e0e0122ca7e49a8339d",
+          "afterHash": "a40539f5b07608b0daef899968b0aa740dc903f48d00a5f1878b3066bed8c804",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["environment mode labels"],
+          "dataFlow": "Centralizes user-facing environment labels; internal mode selection is unchanged.",
+          "persistenceBehavior": "None.",
+          "writePath": "No write path.",
+          "providerPath": "Cloud and Local dispatch remain unchanged.",
+          "externalContract": "Presentation labels only.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/lib/japanPackageSearch.ts",
+          "beforeHash": null,
+          "afterHash": "0d5263399c74ea492e31ef3fe49394bc8b83397b261c7e38757c78c9bac491e7",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["normalizeJapanPackageSearchText", "matchJapanPackageSearch"],
+          "dataFlow": "Matches already-loaded package and item fields locally across name, category, specification and SKU.",
+          "persistenceBehavior": "Read-only filtering.",
+          "writePath": "No write path.",
+          "providerPath": "No added Supabase or Provider request.",
+          "externalContract": "Search results retain package and item identities.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/pages/JapanPackagesList.tsx",
+          "beforeHash": "7a9ca76301b36c6805c29a0cf71bc6d42b666911351bdd82b4fdf95b93645052",
+          "afterHash": "b909a426bd9e51290172e478f83674331b462f172316d947859222fb0b6a87dc",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["package and item search rendering", "matched item summaries"],
+          "dataFlow": "Filters existing package/item data and shows every matching package with matched item quantities.",
+          "persistenceBehavior": "Existing package save and status behavior are unchanged.",
+          "writePath": "No new write path.",
+          "providerPath": "Uses data already loaded by the existing page.",
+          "externalContract": "Clearing search restores the existing status filter.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/pages/OutboundShipmentDetail.tsx",
+          "beforeHash": "4dfa3fd0e11183e5554f540b41ea74f56b345ae56dc798406eb898ae2529168c",
+          "afterHash": "f87e49e0ba614b4724f110684ee67fde3ab2e15572880f425095845268e4ffda",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["bundle component rows", "individual item summary"],
+          "dataFlow": "Displays concise names and places bundle quantity beside the name with SKU on the next line.",
+          "persistenceBehavior": "Shipment allocation and receiving data are unchanged.",
+          "writePath": "No new or changed write path.",
+          "providerPath": "No Provider behavior change.",
+          "externalContract": "Source identity, SKU and quantities remain unchanged.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/pages/Settings.tsx",
+          "beforeHash": "78440ace11eacf33bb0591562eacc75c1aa16ed5de2e4e4c70a7fc284fd96211",
+          "afterHash": "e4c8af106ead7802ecfac76bb2fbb58986e7e899cb81865b918c736b23291e35",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["environment settings label"],
+          "dataFlow": "Uses the centralized user-facing environment label.",
+          "persistenceBehavior": "Settings behavior is unchanged.",
+          "writePath": "No new write path.",
+          "providerPath": "No Provider behavior change.",
+          "externalContract": "Label presentation only.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/styles/layout.css",
+          "beforeHash": "918e585a6323f870fe6999c182c9dd6d4d2e1a05ce21a3e0403fff6033566821",
+          "afterHash": "5749c85a32bf49dfcc068b46370dc942c58d8e843530681efda936b36887e227",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["bundle quantity inline styling"],
+          "dataFlow": "Styles quantity inline with the wrapped name on mobile and desktop.",
+          "persistenceBehavior": "None.",
+          "writePath": "No write path.",
+          "providerPath": "None.",
+          "externalContract": "Visual layout only.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/cloud-auth-recovery-react.mjs",
+          "beforeHash": "9fdb203cf711329e7635025f46391f0daeff100609e4f09b2a5abf6111f712b2",
+          "afterHash": "3c7731d3d265e2fa65b3e27a350bec3261f5a18868a436e216250854a483552d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["environment label UI assertion"],
+          "dataFlow": "Updates the presentation assertion while retaining Cloud request and recovery guards.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "Production requests remain asserted zero.",
+          "providerPath": "Existing provider test harness.",
+          "externalContract": "No runtime contract change.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/japan-package-confirmation-flicker.mjs",
+          "beforeHash": "2b96b85a3fdd0e93a9fa66f8ceb759d5592dc531735ced40b770575888ec3ce7",
+          "afterHash": "e5097a20556adf3476f9bad25ccb2e2e22172edf17e0e31f8e659d6c16ae75bf",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["package list fixture assertion"],
+          "dataFlow": "Keeps confirmation rendering coverage compatible with the search field.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Test provider only.",
+          "externalContract": "Original confirmation assertions remain.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/japan-package-product-search.mjs",
+          "beforeHash": null,
+          "afterHash": "6f45c8cfeeb5886063d23f039c7f39c5d094d3f4cbc28f04367c32b6f8862e2c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["desktop and mobile Japan package search regression"],
+          "dataFlow": "Exercises Chinese, Japanese, SKU, category, specification, multi-package and status-spanning search.",
+          "persistenceBehavior": "Disposable local fixture only.",
+          "writePath": "Cloud requests and fixture mutations are asserted zero.",
+          "providerPath": "Existing local experimental provider only.",
+          "externalContract": "Navigation and clear-search behavior are asserted.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/outbound-bundle-short-label.mjs",
+          "beforeHash": null,
+          "afterHash": "9537cd1a0f611c6a18c1d87ef2fde3514013d24ed62a2e4e029047b4c2826d6d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["desktop and mobile outbound label regression"],
+          "dataFlow": "Asserts concise component names, inline quantities, SKU placement and non-duplicated totals.",
+          "persistenceBehavior": "Disposable local fixture only.",
+          "writePath": "No production request.",
+          "providerPath": "Existing local experimental provider only.",
+          "externalContract": "Product source, SKU and quantity semantics are asserted unchanged.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
