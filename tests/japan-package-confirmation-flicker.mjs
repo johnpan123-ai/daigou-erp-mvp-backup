@@ -86,7 +86,7 @@ try {
       try {
         await page.getByText('React Japan Package A', { exact: true }).waitFor();
         const root = page.getByTestId('japan-packages-list-root');
-        const search = page.getByPlaceholder('搜尋包裹名稱、寄件廠商、物流單號...');
+        const search = page.getByPlaceholder('搜尋包裹名稱、寄件廠商、物流單號、商品名稱、SKU...');
         await search.fill('React');
         await root.evaluate(element => {
           window.__FLICKER_LIST_ROOT__ = element;

@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { buildPackageItemSearchIndex, matchPackageItems, normalizePackageSearchText, packageFieldsMatch } from '../lib/japanPackageSearch';
+import type { JapanPackageItem as SearchMatchedItem } from '../lib/db';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Search, Plus, ExternalLink, Clock, Trash2, Package, MapPin, CheckCircle2, Pencil, Eye, AlertTriangle, ChevronRight } from 'lucide-react';
@@ -61,7 +63,11 @@ export default function JapanPackagesList() {
 
   // Filters & Search
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('registered');
+  const [statusFilter, setStatusFilterState] = useState<string>('registered');
+  // While searching, status chips filter the search results only; the list's
+  // own tab is kept untouched and comes back when the search is cleared.
+  const [searchStatusFilter, setSearchStatusFilter] = useState<string>('all');
+  const [expandedMatchPackages, setExpandedMatchPackages] = useState<Set<string>>(() => new Set());
   const [carrierFilter, setCarrierFilter] = useState<string>('all');
   const [showCarrierDrawer, setShowCarrierDrawer] = useState<boolean>(false);
   const [animateCarrierDrawer, setAnimateCarrierDrawer] = useState<boolean>(false);
@@ -430,8 +436,41 @@ export default function JapanPackagesList() {
     }
   };
 
+  const searchQuery = normalizePackageSearchText(useDeferredValue(searchTerm));
+  const isSearching = searchQuery.length > 0;
+  const effectiveStatusFilter = isSearching ? searchStatusFilter : statusFilter;
+  const setStatusFilter = (status: string) => {
+    if (isSearching) setSearchStatusFilter(status);
+    else setStatusFilterState(status);
+  };
+  const updateSearchTerm = (value: string) => {
+    setSearchTerm(value);
+    // Clearing the search returns to the list's own tab and filters.
+    if (!value.trim()) { setSearchStatusFilter('all'); setExpandedMatchPackages(new Set()); }
+  };
+  // Built once per item-cache change from data already loaded for this page.
+  const packageItemSearchIndex = useMemo(() => buildPackageItemSearchIndex(packageItems), [packageItems]);
+  const matchedItemsByPackage = useMemo(
+    () => matchPackageItems(packageItemSearchIndex, searchQuery),
+    [packageItemSearchIndex, searchQuery],
+  );
+  const searchMatchedPackages = useMemo(
+    () => isSearching ? packages.filter(p => packageFieldsMatch(p, searchQuery) || matchedItemsByPackage.has(p.id)) : packages,
+    [isSearching, matchedItemsByPackage, packages, searchQuery],
+  );
+
   // Stats Computations
   const stats = useMemo(() => {
+    if (isSearching) {
+      const scope = searchMatchedPackages;
+      return {
+        total: scope.length,
+        registered: scope.filter(p => p.status === 'registered').length,
+        arrived: scope.filter(p => p.status === 'arrived').length,
+        confirmed: scope.filter(p => p.status === 'confirmed').length,
+        problem: scope.filter(p => p.status === 'problem').length,
+      };
+    }
     return {
       total: packages.length,
       registered: packages.filter(p => p.status === 'registered').length,
@@ -439,19 +478,16 @@ export default function JapanPackagesList() {
       confirmed: packages.filter(p => p.status === 'confirmed').length,
       problem: packages.filter(p => p.status === 'problem').length,
     };
-  }, [packages]);
+  }, [isSearching, packages, searchMatchedPackages]);
 
   // Filtered packages
   const filteredPackages = useMemo(() => {
-    return packages.filter(p => {
-      // Search
-      const titleMatch = (p.title || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const vendorMatch = (p.vendor_name || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const trackingMatch = (p.tracking_number || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const searchMatch = titleMatch || vendorMatch || trackingMatch;
+    return searchMatchedPackages.filter(p => {
+      // Search (package name / vendor / tracking number / item name / SKU) is
+      // applied by searchMatchedPackages; it spans every status by default.
 
       // Status
-      const statusMatch = statusFilter === 'all' || p.status === statusFilter;
+      const statusMatch = effectiveStatusFilter === 'all' || p.status === effectiveStatusFilter;
 
       // Carrier
       const carrierLower = (p.carrier || '').toLowerCase();
@@ -468,14 +504,56 @@ export default function JapanPackagesList() {
         }
       }
 
-      return searchMatch && statusMatch && carrierMatch;
+      return statusMatch && carrierMatch;
     }).sort((a, b) => {
       // Sort by updated_at descending, or created_at descending
       const aTime = a.updated_at || a.created_at || '';
       const bTime = b.updated_at || b.created_at || '';
       return bTime.localeCompare(aTime);
     });
-  }, [packages, searchTerm, statusFilter, carrierFilter]);
+  }, [searchMatchedPackages, effectiveStatusFilter, carrierFilter]);
+
+  const renderMatchedItems = (packageId: string, compact: boolean) => {
+    const matched: SearchMatchedItem[] = isSearching ? (matchedItemsByPackage.get(packageId) || []) : [];
+    if (!matched.length) return null;
+    const expanded = expandedMatchPackages.has(packageId);
+    const visible = expanded ? matched : matched.slice(0, 3);
+    return (
+      <div data-testid="package-search-matches" onClick={e => e.stopPropagation()} style={{
+        gridColumn: '1 / -1', marginTop: compact ? 8 : 0, padding: '10px 12px', borderRadius: 10,
+        background: '#f8fafc', border: '1px solid #e2e8f0', cursor: 'default',
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#334155', marginBottom: 6 }}>符合搜尋的商品（{matched.length}）</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {visible.map(item => {
+            const spec = [item.category_name, item.variant_name].filter(Boolean).join(' — ');
+            return (
+              <div key={item.id} data-testid="package-search-match" style={{ fontSize: 12, minWidth: 0 }}>
+                <div style={{ color: '#334155', fontWeight: 600, overflowWrap: 'anywhere' }}>
+                  <span>{item.product_title || spec || '未命名商品'}</span>
+                  <span style={{ marginLeft: 8, color: '#2563eb', fontWeight: 800, whiteSpace: 'nowrap' }}>×{item.quantity}</span>
+                </div>
+                {spec && item.product_title && <div style={{ color: '#475569', fontSize: 11, overflowWrap: 'anywhere' }}>規格：{spec}</div>}
+                <div style={{ color: item.sku ? '#64748b' : '#b45309', fontSize: 11 }}>{item.sku ? `SKU: ${item.sku}` : '無 SKU'}</div>
+              </div>
+            );
+          })}
+        </div>
+        {matched.length > 3 && (
+          <button type="button" data-testid="package-search-matches-toggle" onClick={e => {
+            e.stopPropagation();
+            setExpandedMatchPackages(previous => {
+              const next = new Set(previous);
+              if (next.has(packageId)) next.delete(packageId); else next.add(packageId);
+              return next;
+            });
+          }} style={{ marginTop: 6, border: 'none', background: 'none', padding: 0, color: '#2563eb', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            {expanded ? '收合' : `顯示全部 ${matched.length} 筆`}
+          </button>
+        )}
+      </div>
+    );
+  };
 
 
 
@@ -1303,10 +1381,10 @@ export default function JapanPackagesList() {
             <Search size={16} className="mobile-search-icon" />
             <input 
               type="text" 
-              placeholder="搜尋包裹 / 單號 / 廠商" 
+              placeholder="搜尋包裹 / 單號 / 廠商 / 商品 / SKU" 
               className="mobile-search-input"
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={e => updateSearchTerm(e.target.value)}
             />
           </div>
 
@@ -1318,10 +1396,10 @@ export default function JapanPackagesList() {
               { key: 'arrived', label: '已到小幫手（舊）', count: stats.arrived, legacy: true },
               { key: 'confirmed', label: '已點收', count: stats.confirmed },
               { key: 'problem', label: '有問題（舊）', count: stats.problem, legacy: true }
-            ].filter(item => !item.legacy || item.count > 0 || statusFilter === item.key).map(item => (
+            ].filter(item => !item.legacy || item.count > 0 || effectiveStatusFilter === item.key).map(item => (
               <button 
                 key={item.key}
-                className={`mobile-wrap-chip ${statusFilter === item.key ? 'active' : ''}`}
+                className={`mobile-wrap-chip ${effectiveStatusFilter === item.key ? 'active' : ''}`}
                 onClick={() => setStatusFilter(item.key)}
               >
                 {item.label} {item.count}
@@ -1398,10 +1476,10 @@ export default function JapanPackagesList() {
                 <Search size={16} className="search-icon" />
                 <input 
                   type="text" 
-                  placeholder="搜尋包裹名稱、寄件廠商、物流單號..." 
+                  placeholder="搜尋包裹名稱、寄件廠商、物流單號、商品名稱、SKU..." 
                   className="input search-input"
                   value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
+                  onChange={e => updateSearchTerm(e.target.value)}
                 />
               </div>
             </div>
@@ -1445,31 +1523,31 @@ export default function JapanPackagesList() {
                 <span className="filter-group-label">包裹狀態：</span>
                 <div className="chips-row">
                   <button 
-                    className={`chip ${statusFilter === 'all' ? 'active' : ''}`}
+                    className={`chip ${effectiveStatusFilter === 'all' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('all')}
                   >
                     全部
                   </button>
                   <button 
-                    className={`chip ${statusFilter === 'registered' ? 'active' : ''}`}
+                    className={`chip ${effectiveStatusFilter === 'registered' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('registered')}
                   >
                     已登記
                   </button>
-                  {(stats.arrived > 0 || statusFilter === 'arrived') && <button 
-                    className={`chip ${statusFilter === 'arrived' ? 'active' : ''}`}
+                  {(stats.arrived > 0 || effectiveStatusFilter === 'arrived') && <button 
+                    className={`chip ${effectiveStatusFilter === 'arrived' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('arrived')}
                   >
                     已到小幫手家（舊）
                   </button>}
                   <button 
-                    className={`chip ${statusFilter === 'confirmed' ? 'active' : ''}`}
+                    className={`chip ${effectiveStatusFilter === 'confirmed' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('confirmed')}
                   >
                     已點收
                   </button>
-                  {(stats.problem > 0 || statusFilter === 'problem') && <button 
-                    className={`chip ${statusFilter === 'problem' ? 'active' : ''}`}
+                  {(stats.problem > 0 || effectiveStatusFilter === 'problem') && <button 
+                    className={`chip ${effectiveStatusFilter === 'problem' ? 'active' : ''}`}
                     onClick={() => setStatusFilter('problem')}
                   >
                     有問題（舊）
@@ -1581,6 +1659,7 @@ export default function JapanPackagesList() {
                     </span>
                   </div>
                 </div>
+                {renderMatchedItems(p.id, true)}
               </div>
             );
           })}
@@ -1760,6 +1839,7 @@ export default function JapanPackagesList() {
                     </button>
                   </div>
                 </div>
+                {renderMatchedItems(p.id, false)}
               </div>
             );
           })}
