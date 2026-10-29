@@ -9233,6 +9233,32 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "japan-package-search-read-measurement-v1",
+      "beforeHead": "8c842ca9dc99a2dde4e153c256ad32220fcc3866",
+      "reviewedHead": "edc0b37a89078b65e7d7ae7b34185eca59b4b2e0",
+      "patchSha256": "fb5f4e7e3624cc6cd5325ee76a67f39fbaab4c7d0732f74f9f4a1dfaa7f2fb18",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "japan-package-product-search"
+      ],
+      "files": [
+        {
+          "file": "tests/japan-package-product-search.mjs",
+          "beforeHash": "6f45c8cfeeb5886063d23f039c7f39c5d094d3f4cbc28f04367c32b6f8862e2c",
+          "afterHash": "eb6c3732d81e3d68da36ef3e3081f90375a9c779903abda09aaf1e6505ff5c5a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["search-only item-read measurement"],
+          "dataFlow": "Keeps the zero-read assertion unchanged while measuring before navigation to the detail page, whose own item reads are legitimate.",
+          "persistenceBehavior": "Test harness only.",
+          "writePath": "No production request; fixture mutations and Supabase requests remain asserted zero.",
+          "providerPath": "The original data-provider function is wrapped once per browser session; no runtime Provider change.",
+          "externalContract": "Desktop and mobile search must still perform zero item re-reads while typing.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
