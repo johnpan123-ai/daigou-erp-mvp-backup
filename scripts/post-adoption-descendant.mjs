@@ -998,6 +998,10 @@ const BUYANIME_FIRST_IMPORT_PROVIDER_PATCH = Object.freeze({
     before: '7bda25fd147d8c7568ff6192437d1f95ac30c8ddcc839428406e517c1408735c',
     after: '87f87a4eb69b5234cd1d36e48d1c58686c6a2938dff83640d3a0f0e3b7b66618',
   }),
+  'src/providers/cloud/buyAnimeImportJournal.ts': Object.freeze({
+    before: '7d8e649ca788e2f289ec3d763a4c875e00aa2ecd7eeb914d5d7a094fb771f2fd',
+    after: 'dc719c8a8aa6b2f21db9a1dad9e76cc90bd679d8a6ed6b566352019991894150',
+  }),
   'src/providers/cloud/supabaseProvider.ts': Object.freeze({
     before: 'fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213',
     after: 'bbcea213dd6564967ac4ce4eab216b1d89fe16f555a7721cc0b5eadedeeb4d95',
@@ -1021,6 +1025,10 @@ export function restoreReviewedBuyAnimeFirstImportProviderPatch(file, source) {
   } else if (file.endsWith('cloudConnectivity.ts')) {
     restored = replaceExactOnce(restored,
       "/**\n * Resolves true once the shared Global Sync state is online + fresh (the same\n * condition assertCloudWriteAllowed enforces), false on timeout or offline.\n * Waiting never relaxes the guard: callers still assert before any write.\n */\nexport const waitForCloudFreshRead = (timeoutMs: number): Promise<boolean> => new Promise(resolve => {\n  const ready = () => snapshot.status === 'online' && (snapshot.readStatus === 'fresh-online' || snapshot.readStatus === 'fresh-empty');\n  if (ready()) { resolve(true); return; }\n  if (snapshot.status === 'offline') { resolve(false); return; }\n  let settled = false;\n  const finish = (value: boolean) => { if (settled) return; settled = true; clearTimeout(timer); listeners.delete(check); resolve(value); };\n  const check = () => { if (ready()) finish(true); else if (snapshot.status === 'offline') finish(false); };\n  const timer = setTimeout(() => finish(false), Math.max(0, timeoutMs));\n  listeners.add(check);\n});\n\n", '', 'Fresh wait helper');
+  } else if (file.endsWith('buyAnimeImportJournal.ts')) {
+    restored = replaceExactOnce(restored,
+      "  // The writer's own id is recorded with every journal CAS write: the actor who\n  // wrote COMMITTING/UNKNOWN around a dispatch is the only one whose receipt\n  // lookup can prove that dispatch NOT committed during reconciliation.\n  const writer = (await supabase.auth.getSession()).data.session?.user?.id;\n  const values = { version: next.version, details, updated_at: new Date().toISOString(), ...(writer ? { updated_by: writer } : {}) };",
+      '  const values = { version: next.version, details, updated_at: new Date().toISOString() };', 'journal writer identity');
   } else {
     for (const [reviewed, label] of [
       ['  waitForCloudFreshRead,\n', 'Fresh wait import'],
