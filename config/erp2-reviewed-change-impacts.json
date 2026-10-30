@@ -9422,6 +9422,41 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "buyanime-v33-first-import-journal-guard-composition-v1",
+      "beforeHead": "0c86949a30b49ad9102edd35396c05f666822d37",
+      "reviewedHead": "777762d1e7bf137006d9e6feaa064f3b530aed43",
+      "patchSha256": "1f3b8725d180b7b4b4e59ded044282a55cda218b152652cc492ad51a7b0b993c",
+      "requiredRegressions": ["guard", "promotion", "provider-guard", "r5-core-provider-guard", "buyanime-first-import-provider-guard"],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "6f90eaa49fcf742ca36d714cdf87cef967fccbfadb0e674cf457e119f51021c3",
+          "afterHash": "b8a4b6b89dcd6cc44337241a31a965ff9fe641f5decabb4c7cda761b15cd6a14",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["BuyAnime journal exact overlay restoration"],
+          "dataFlow": "Extends the existing full-hash review to the exact journal writer-id addition before applying all historical journal rules.",
+          "persistenceBehavior": "Release inspection only.",
+          "writePath": "No application or database write.",
+          "providerPath": "Only the exact reviewed journal before/after pair is accepted.",
+          "externalContract": "Any journal source drift or restoration mismatch fails closed.",
+          "schemaExpectation": "No schema, RPC, CAS, Revision or Epoch change."
+        },
+        {
+          "file": "tests/buyanime-first-import-provider-guard.mjs",
+          "beforeHash": "3b865e431f9b5e6196cac19c8ac42796186ab5e88acd2b5cf2da22c621fdb7f4",
+          "afterHash": "c608da22a8dafdfbedfdac722d3b22593cf439194e436be2c391f5ed0549b133",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["journal writer exact positive and negative cases"],
+          "dataFlow": "Proves exact restoration and rejection of an altered updated_by assignment.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Reads immutable Git and local sources.",
+          "externalContract": "Unreviewed journal writer changes fail closed.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
