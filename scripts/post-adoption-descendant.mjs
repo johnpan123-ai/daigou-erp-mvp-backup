@@ -984,7 +984,62 @@ const BUYANIME_V33_PROVIDER_PATCH = Object.freeze({
     after: 'fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213',
   }),
 });
+
+// Exact additive review for the v33 first-import recovery patch.  These full-file
+// pins make the exception single-candidate and fail closed; the reverse transform
+// is used only to let all historical Provider/P02/WACA rules inspect the source
+// they originally adopted.
+const BUYANIME_FIRST_IMPORT_PROVIDER_PATCH = Object.freeze({
+  'src/providers/cloud/buyAnimeImportCoordinator.ts': Object.freeze({
+    before: '746383899657a3835a19f2d039baadace09df6a63adeba7c86f1e7fcff9188d2',
+    after: '03efe6c92ef2f876eef4471e1ad1c902298bb88615e3c34f5c218aabe3f2a448',
+  }),
+  'src/providers/cloud/cloudConnectivity.ts': Object.freeze({
+    before: '7bda25fd147d8c7568ff6192437d1f95ac30c8ddcc839428406e517c1408735c',
+    after: '87f87a4eb69b5234cd1d36e48d1c58686c6a2938dff83640d3a0f0e3b7b66618',
+  }),
+  'src/providers/cloud/supabaseProvider.ts': Object.freeze({
+    before: 'fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213',
+    after: 'bbcea213dd6564967ac4ce4eab216b1d89fe16f555a7721cc0b5eadedeeb4d95',
+  }),
+});
+const replaceExactOnce = (source, reviewed, previous, label) => {
+  if (source.split(reviewed).length !== 2) fail(`reviewed BuyAnime first-import anchor missing or duplicated: ${label}`);
+  return source.replace(reviewed, previous);
+};
+export function restoreReviewedBuyAnimeFirstImportProviderPatch(file, source) {
+  const pin = BUYANIME_FIRST_IMPORT_PROVIDER_PATCH[file];
+  if (!pin || source === null || sourceHash(source) !== pin.after) return source;
+  let restored = source.replace(/\r\n?/gu, '\n');
+  if (file.endsWith('buyAnimeImportCoordinator.ts')) {
+    restored = replaceExactOnce(restored,
+      "import { BuyAnimeResumeError, buyAnimeRecoveryUserMessage, isBuyAnimeInventoryRejected, type BuyAnimeImportRecord, type BuyAnimeStage } from './buyAnimeImportResume';",
+      "import { BuyAnimeResumeError, type BuyAnimeImportRecord, type BuyAnimeStage } from './buyAnimeImportResume';", 'coordinator import');
+    restored = replaceExactOnce(restored,
+      "      publishBuyAnimeFlow('', isBuyAnimeInventoryRejected(error) ? buyAnimeRecoveryUserMessage(error)\n        : error instanceof BuyAnimeResumeError && error.record\n          ? '同步暫時未完成，請稍後重試。已儲存的主檔不會重送。' : '');",
+      "      publishBuyAnimeFlow('', error instanceof BuyAnimeResumeError && error.record\n        ? '同步暫時未完成，請稍後重試。已儲存的主檔不會重送。' : '');", 'coordinator rejection message');
+  } else if (file.endsWith('cloudConnectivity.ts')) {
+    restored = replaceExactOnce(restored,
+      "/**\n * Resolves true once the shared Global Sync state is online + fresh (the same\n * condition assertCloudWriteAllowed enforces), false on timeout or offline.\n * Waiting never relaxes the guard: callers still assert before any write.\n */\nexport const waitForCloudFreshRead = (timeoutMs: number): Promise<boolean> => new Promise(resolve => {\n  const ready = () => snapshot.status === 'online' && (snapshot.readStatus === 'fresh-online' || snapshot.readStatus === 'fresh-empty');\n  if (ready()) { resolve(true); return; }\n  if (snapshot.status === 'offline') { resolve(false); return; }\n  let settled = false;\n  const finish = (value: boolean) => { if (settled) return; settled = true; clearTimeout(timer); listeners.delete(check); resolve(value); };\n  const check = () => { if (ready()) finish(true); else if (snapshot.status === 'offline') finish(false); };\n  const timer = setTimeout(() => finish(false), Math.max(0, timeoutMs));\n  listeners.add(check);\n});\n\n", '', 'Fresh wait helper');
+  } else {
+    for (const [reviewed, label] of [
+      ['  waitForCloudFreshRead,\n', 'Fresh wait import'],
+      ['  BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES, importJournalId, isBuyAnimeInventoryRejected,\n', 'recovery import'],
+      ['/** Bounded wait for Global Sync Fresh before a BuyAnime import dispatches (nothing is sent meanwhile). */\nconst BUYANIME_SYNC_WAIT_MS = 30_000;\n\n', 'Fresh wait budget'],
+      ["      // A definitive business rejection from THIS actor's apply call proves no\n      // commit (see BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES); anything else stays unknown.\n      if (result.data?.ok === false && BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES.has(String(result.data?.code)))\n        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_REJECTED', record, { code: result.data.code });\n", 'apply rejection'],
+      ["      // The server looks up the receipt for the CALLING actor only. The rejection\n      // proves NOT committed only when that actor is the journal's last writer,\n      // i.e. the one who wrote COMMITTING/UNKNOWN right around the dispatch.\n      if (BUYANIME_DEFINITIVE_NOT_COMMITTED_CODES.has(String(result.data?.code))\n        && await this.isBuyAnimeJournalLastWriter(record)) {\n        throw new BuyAnimeResumeError('BUYANIME_INVENTORY_REJECTED', record, { code: result.data?.code });\n      }\n", 'readback rejection'],
+      ["  private async isBuyAnimeJournalLastWriter(record: BuyAnimeImportRecord): Promise<boolean> {\n    try {\n      const [{ data: { session } }, journal] = await Promise.all([\n        supabase.auth.getSession(),\n        supabase.from('import_batches').select('updated_by,version').eq('id', importJournalId(record.batchId)).maybeSingle(),\n      ]);\n      const actor = session?.user?.id;\n      return Boolean(actor) && !journal.error && journal.data?.updated_by === actor\n        && Number(journal.data?.version) === record.version;\n    } catch { return false; }\n  }\n", 'journal writer proof'],
+      ["    // The core bootstrap may be done while Global Sync still withholds Fresh\n    // (e.g. Realtime readiness timed out and the authoritative catch-up runs).\n    // Wait, bounded, for the same Fresh state the write guard requires instead\n    // of failing a first import; the guard below is unchanged.\n    if (!(await waitForCloudFreshRead(0))) {\n      publishBuyAnimeFlow('等待雲端同步完成後開始匯入…');\n      await waitForCloudFreshRead(BUYANIME_SYNC_WAIT_MS);\n    }\n", 'pre-dispatch Fresh wait'],
+    ]) restored = replaceExactOnce(restored, reviewed, '', label);
+    restored = replaceExactOnce(restored,
+      "      // A pending journal proven NOT committed is closed (FAILED_PRE_COMMIT) by\n      // the pipeline; it must not block the new file the user just selected.\n      if (pending) await this.finishBuyAnime(pending, options).catch(error => {\n        if (!isBuyAnimeInventoryRejected(error)) throw error;\n      });",
+      '      if (pending) await this.finishBuyAnime(pending, options);', 'pending rejection recovery');
+  }
+  if (sourceHash(restored) !== pin.before) fail(`reviewed BuyAnime first-import restoration mismatch: ${file}`);
+  return restored;
+}
 export function restoreReviewedBuyAnimeV33ProviderPatch(file, source) {
+  source = restoreReviewedBuyAnimeFirstImportProviderPatch(file, source);
   const pin = BUYANIME_V33_PROVIDER_PATCH[file];
   if (!pin || source === null || sourceHash(source) !== pin.after) return source;
   let restored = source.replace(/\r\n?/gu, '\n');
@@ -1007,6 +1062,16 @@ export function restoreReviewedBuyAnimeV33ProviderPatch(file, source) {
 }
 
 export function assertReviewedProviderContract(file, before, after) {
+  const firstImportPin = BUYANIME_FIRST_IMPORT_PROVIDER_PATCH[file];
+  if (firstImportPin && before !== null && after !== null
+    && sourceHash(before) === firstImportPin.before && sourceHash(after) === firstImportPin.after) {
+    restoreReviewedBuyAnimeFirstImportProviderPatch(file, after);
+    return;
+  }
+  if (firstImportPin && after !== null && sourceHash(after) === firstImportPin.after) {
+    assertReviewedProviderContract(file, before, restoreReviewedBuyAnimeFirstImportProviderPatch(file, after));
+    return;
+  }
   const buyAnimePin = BUYANIME_V33_PROVIDER_PATCH[file];
   // The direct reviewed patch is bound by both immutable full-file hashes.
   // Historical guard regressions call the exported restoration helper first,
