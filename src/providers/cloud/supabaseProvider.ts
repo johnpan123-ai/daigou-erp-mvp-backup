@@ -134,6 +134,7 @@ import {
   markCloudReadLoading,
   markCloudReachable,
   markCloudRequestFailed,
+  waitForCloudFreshRead,
 } from './cloudConnectivity';
 import { CloudTargetedCache } from './cloudTargetedCache';
 import { getProviderMode } from '../providerMode';
@@ -412,6 +413,9 @@ const fetchAllKeyset = async <T>(
     afterKey = lastKey;
   }
 };
+
+/** Bounded wait for Global Sync Fresh before a BuyAnime import dispatches (nothing is sent meanwhile). */
+const BUYANIME_SYNC_WAIT_MS = 30_000;
 
 /** Bounded wait for Realtime postgres_changes readiness before the core snapshot. */
 const CORE_REALTIME_READINESS_WAIT_MS = 3000;
@@ -2092,6 +2096,14 @@ export class SupabaseProvider implements IDataProvider {
         await this.corePullCompletionPromise.catch(() => undefined);
       this.pullPromise = null;
       await this.waitForCloudBootstrapConvergence();
+    }
+    // The core bootstrap may be done while Global Sync still withholds Fresh
+    // (e.g. Realtime readiness timed out and the authoritative catch-up runs).
+    // Wait, bounded, for the same Fresh state the write guard requires instead
+    // of failing a first import; the guard below is unchanged.
+    if (!(await waitForCloudFreshRead(0))) {
+      publishBuyAnimeFlow('等待雲端同步完成後開始匯入…');
+      await waitForCloudFreshRead(BUYANIME_SYNC_WAIT_MS);
     }
     await this.requireCloudWritePermission();
     assertCloudWriteAllowed();

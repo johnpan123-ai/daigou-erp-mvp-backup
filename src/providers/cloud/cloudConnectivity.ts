@@ -203,6 +203,22 @@ export const markCloudRequestFailed = (error: unknown): void => {
   markCloudUnavailable('cloud-request-failed');
 };
 
+/**
+ * Resolves true once the shared Global Sync state is online + fresh (the same
+ * condition assertCloudWriteAllowed enforces), false on timeout or offline.
+ * Waiting never relaxes the guard: callers still assert before any write.
+ */
+export const waitForCloudFreshRead = (timeoutMs: number): Promise<boolean> => new Promise(resolve => {
+  const ready = () => snapshot.status === 'online' && (snapshot.readStatus === 'fresh-online' || snapshot.readStatus === 'fresh-empty');
+  if (ready()) { resolve(true); return; }
+  if (snapshot.status === 'offline') { resolve(false); return; }
+  let settled = false;
+  const finish = (value: boolean) => { if (settled) return; settled = true; clearTimeout(timer); listeners.delete(check); resolve(value); };
+  const check = () => { if (ready()) finish(true); else if (snapshot.status === 'offline') finish(false); };
+  const timer = setTimeout(() => finish(false), Math.max(0, timeoutMs));
+  listeners.add(check);
+});
+
 export const assertCloudWriteAllowed = (): void => {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     markCloudUnavailable('browser-offline');
