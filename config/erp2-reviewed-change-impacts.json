@@ -1255,8 +1255,7 @@
           "schemaExpectation": "NONE: migrations/tables/columns/RLS/ACL/RPC signatures/canonical engine unchanged."
         }
       ]
-    }
-    ,
+    },
     {
       "id": "buyanime-adopted-review-lineage-v1",
       "beforeHead": "f06664a6c6b939b6c6fb0127babef654f085ff53",
@@ -9256,6 +9255,170 @@
           "writePath": "No production request; fixture mutations and Supabase requests remain asserted zero.",
           "providerPath": "The original data-provider function is wrapped once per browser session; no runtime Provider change.",
           "externalContract": "Desktop and mobile search must still perform zero item re-reads while typing.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
+    },
+    {
+      "id": "buyanime-v33-first-import-unknown-recovery-v1",
+      "beforeHead": "84afcac7eb05140813eb47446d9916083ad9e0b5",
+      "reviewedHead": "3e3346ef9b8c04b07bca0b9efa2870c31cec6d2d",
+      "patchSha256": "2b809955d3d903790c8f4b60d14ddfcbc6506fed463d236d0b07a4ff147113ad",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "provider-guard",
+        "r5-core-provider-guard",
+        "context-guard",
+        "buyanime-first-import-provider-guard",
+        "buyanime-first-import-sync-gate",
+        "buyanime-rejected-recovery",
+        "inventory-backup-gate",
+        "buyanime-resume-ui",
+        "buyanime-lint-delta"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "494d2d2fff226b44c1876b9c81df6e9203b447029dbc04693a5356ee440eefcb",
+          "afterHash": "6f90eaa49fcf742ca36d714cdf87cef967fccbfadb0e674cf457e119f51021c3",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["restoreReviewedBuyAnimeFirstImportProviderPatch", "assertReviewedProviderContract exact dispatch"],
+          "dataFlow": "Removes only the full-hash-pinned first-import Provider overlay before historical P02, WACA and R5 contracts inspect their adopted sources.",
+          "persistenceBehavior": "Release inspection only.",
+          "writePath": "No application or database write.",
+          "providerPath": "Exact before/after source hashes and restoration anchors are mandatory.",
+          "externalContract": "The reviewed patch passes; any source drift or restoration mismatch fails closed.",
+          "schemaExpectation": "No schema, RPC, ACL, RLS, CAS, Revision, Epoch, Restore or WACA change."
+        },
+        {
+          "file": "scripts/reviewed-change-impact.mjs",
+          "beforeHash": "4c66356b615bcaa1e55ecd1aa265992f89c778ae7ba8de213375004d17ffd5ce",
+          "afterHash": "59181bb0a5cd73b4979bcd578cd1f77df5d1a359ad391ae13558bb6b8e2f105e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["regressionScripts BuyAnime first-import mappings"],
+          "dataFlow": "Binds the exact first-import, rejected-recovery, backup and Provider regressions to this review.",
+          "persistenceBehavior": "Release orchestration only.",
+          "writePath": "No application or database write.",
+          "providerPath": "Invokes existing isolated tests only.",
+          "externalContract": "Missing, changed or failed regression evidence fails closed.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportCoordinator.ts",
+          "beforeHash": "746383899657a3835a19f2d039baadace09df6a63adeba7c86f1e7fcff9188d2",
+          "afterHash": "03efe6c92ef2f876eef4471e1ad1c902298bb88615e3c34f5c218aabe3f2a448",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["coordinateBuyAnimeImport rejected result presentation"],
+          "dataFlow": "Shows the trusted definitive-rejection reason while retaining resume messaging for unknown outcomes.",
+          "persistenceBehavior": "No persistence I/O added.",
+          "writePath": "Existing coordinator callback only.",
+          "providerPath": "No direct Provider or RPC access.",
+          "externalContract": "Definitive rejection and unknown result remain distinct.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportJournal.ts",
+          "beforeHash": "7d8e649ca788e2f289ec3d763a4c875e00aa2ecd7eeb914d5d7a094fb771f2fd",
+          "afterHash": "dc719c8a8aa6b2f21db9a1dad9e76cc90bd679d8a6ed6b566352019991894150",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["saveBuyAnimeJournal writer identity"],
+          "dataFlow": "Records the authenticated writer on the existing journal CAS row so receipt classification is actor-bound.",
+          "persistenceBehavior": "Adds updated_by to the existing journal write when an authenticated actor exists.",
+          "writePath": "Existing import_batches CAS insert/update only.",
+          "providerPath": "Existing Supabase auth session and journal path.",
+          "externalContract": "CAS version and durable intent semantics are unchanged.",
+          "schemaExpectation": "Uses the existing updated_by field; no schema or migration change."
+        },
+        {
+          "file": "src/providers/cloud/buyAnimeImportResume.ts",
+          "beforeHash": "85d24ed91ea106928bfba3f9a8d1752ba494839179915baeab34960cdf5813c8",
+          "afterHash": "60e17ff84efeacb39948f549c870ba9cf8d2900b49d5a393949c30ca72ce2e35",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["definitive rejection classifier", "settleRejected", "resume rejection handling", "buyAnimeRecoveryUserMessage"],
+          "dataFlow": "Only four receipt-aware server rejections may close a journal as FAILED_PRE_COMMIT; all ambiguous outcomes remain blocked.",
+          "persistenceBehavior": "Uses the existing journal CAS store; failed CAS leaves the durable unresolved record intact.",
+          "writePath": "No new RPC or table path.",
+          "providerPath": "Existing pipeline port only.",
+          "externalContract": "Unknown, stale epoch and payload mismatch outcomes cannot be treated as not committed.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/providers/cloud/cloudConnectivity.ts",
+          "beforeHash": "7bda25fd147d8c7568ff6192437d1f95ac30c8ddcc839428406e517c1408735c",
+          "afterHash": "87f87a4eb69b5234cd1d36e48d1c58686c6a2938dff83640d3a0f0e3b7b66618",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["waitForCloudFreshRead"],
+          "dataFlow": "Waits for the existing online and Fresh state without publishing Fresh or changing the write guard.",
+          "persistenceBehavior": "None.",
+          "writePath": "No request, RPC or storage operation.",
+          "providerPath": "Read-only observation of the existing connectivity snapshot and listeners.",
+          "externalContract": "Offline or timeout resolves false; assertCloudWriteAllowed remains authoritative.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "fca4f0a3c4a4b2080c6a7248519022a4bfd7527c067b2aecb4da296c5f545213",
+          "afterHash": "bbcea213dd6564967ac4ce4eab216b1d89fe16f555a7721cc0b5eadedeeb4d95",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["BuyAnime definitive rejection", "isBuyAnimeJournalLastWriter", "prepareBuyAnimeRecovery Fresh wait", "completeBuyAnimeImport"],
+          "dataFlow": "Waits for full Global Sync before dispatch and accepts not-committed only for an exact server code plus current journal writer/version proof.",
+          "persistenceBehavior": "Existing inventory RPC and journal paths only; no write occurs while waiting or after timeout guard refusal.",
+          "writePath": "Existing erp_inventory_import_core path remains behind permission and Fresh guards.",
+          "providerPath": "CAS, Revision, Epoch, Realtime and Restore guards are unchanged.",
+          "externalContract": "First import waits at most 30 seconds; timeout sends zero RPCs; existing journal prevents duplicate dispatch.",
+          "schemaExpectation": "No schema, RPC signature, ACL or migration change."
+        },
+        {
+          "file": "src/utils/myacgImportErrors.ts",
+          "beforeHash": "1138ebf0846dd71309cef242c9f03dba68c4bf9ed20f4790c264eb767bf23d07",
+          "afterHash": "0d39b01f7d782f7345e672099e5a61499f62315b964b0f151579e916e7a86937",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["CLOUD_SYNC_NOT_READY classification", "myAcgImportDiagnostic safe codes"],
+          "dataFlow": "Maps the pre-request Cloud write guard to a trusted user message and emits only allowlisted code/class diagnostics.",
+          "persistenceBehavior": "None.",
+          "writePath": "No write path.",
+          "providerPath": "Consumes existing trusted error codes only.",
+          "externalContract": "Untrusted error messages are not displayed.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/buyanime-first-import-provider-guard.mjs",
+          "beforeHash": null,
+          "afterHash": "3b865e431f9b5e6196cac19c8ac42796186ab5e88acd2b5cf2da22c621fdb7f4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["exact Provider overlay positive and negative cases"],
+          "dataFlow": "Proves exact restoration and rejects drift, shortened wait, removed permission guard and relaxed offline behavior.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request.",
+          "providerPath": "Reads immutable Git and local sources.",
+          "externalContract": "Any non-reviewed Provider source fails closed.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/buyanime-first-import-sync-gate-isolated.mjs",
+          "beforeHash": null,
+          "afterHash": "c3bc8ee5bb8c790d58a0bbcb25466194b57147eceb6e7f381681bd9d155b971a",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["Fresh wait success and timeout isolated regression"],
+          "dataFlow": "Exercises delayed full sync and the 30-second timeout with RPC and pending-state assertions.",
+          "persistenceBehavior": "Disposable isolated PostgreSQL/PostgREST only.",
+          "writePath": "Production endpoints are not used; timeout asserts zero RPCs.",
+          "providerPath": "Real Provider path with an isolated backend.",
+          "externalContract": "Full sync permits one import; timeout preserves zero writes and a retryable form.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/buyanime-rejected-recovery-isolated.mjs",
+          "beforeHash": null,
+          "afterHash": "9507a77623a1447187020e22fe3d9fa0518c6e7fd9eaa1ff25f7a68f51bbe68c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["definitive rejection and unknown result isolated regression"],
+          "dataFlow": "Proves actor-bound definitive rejection closes safely and ambiguous or wrong-actor results stay blocked.",
+          "persistenceBehavior": "Disposable isolated PostgreSQL/PostgREST only.",
+          "writePath": "Production endpoints are not used.",
+          "providerPath": "Real journal CAS and inventory RPC behavior in isolation.",
+          "externalContract": "No duplicate dispatch is permitted while a durable unresolved journal remains.",
           "schemaExpectation": "No schema change."
         }
       ]
