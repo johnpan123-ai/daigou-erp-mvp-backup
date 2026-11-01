@@ -325,6 +325,10 @@ type PurchaseRecordsViewSnapshot = {
 };
 let lastPurchaseRecordsView: PurchaseRecordsViewSnapshot | null = null;
 
+const PURCHASE_RECORDS_FIRST_ROWS = 40;
+const PURCHASE_RECORDS_ROW_CHUNK = 80;
+const PURCHASE_RECORDS_MIN_ROW_PX = 56;
+
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
   const providerMode = getProviderMode();
@@ -1299,6 +1303,28 @@ export default function PurchaseRecords() {
     }
     return completedGroups;
   }, [editMode, stableCompletedOrder, completedGroups, groups, linkedGroupId]);
+
+  // Chunked list rendering: the first rows paint at once, the rest are appended in small batches
+  // (doubling) on later frames, so the page stays responsive with thousands of groups. Only the rendered
+  // slice is limited; selection, counts, search, sort and data stay on the full list. Only page
+  // entry (cold load / return from level 2) is chunked; the limit never shrinks afterwards, so
+  // search/filter/sort and data refreshes render as before. A pending scroll restore renders
+  // enough rows to reach the saved position first.
+  const [initialRowLimit] = useState(() => {
+    const saved = Number.parseInt(sessionStorage.getItem('erp_purchase_records_scroll') || '', 10);
+    const viewportRows = Math.ceil((window.innerHeight || 1000) / PURCHASE_RECORDS_MIN_ROW_PX);
+    return Math.max(PURCHASE_RECORDS_FIRST_ROWS, Number.isFinite(saved) ? Math.ceil(saved / PURCHASE_RECORDS_MIN_ROW_PX) + viewportRows * 2 : 0);
+  });
+  const [rowWindowLimit, setRowWindowLimit] = useState(initialRowLimit);
+  const mainRowLimit = editMode ? Infinity : rowWindowLimit;
+  useEffect(() => {
+    if (mainRowLimit >= displayedMainGroups.length) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => setRowWindowLimit(limit => Math.max(limit * 2, limit + PURCHASE_RECORDS_ROW_CHUNK)), 0);
+    });
+    return () => { cancelAnimationFrame(frame); if (timer) clearTimeout(timer); };
+  }, [mainRowLimit, displayedMainGroups.length]);
 
   useEffect(() => {
     if (searchTerm.trim().length > 0) {
@@ -3555,9 +3581,9 @@ export default function PurchaseRecords() {
 
       {/* Table section */}
       {(() => {
-        const renderGroupsTable = (list: ProductGroup[], tableId: string) => {
+        const renderGroupsTable = (list: ProductGroup[], tableId: string, rowLimit = Infinity) => {
           try {
-            return renderGroupsTableInner(list, tableId);
+            return renderGroupsTableInner(list, tableId, rowLimit);
           } catch (err) {
             console.error('[PurchaseRecords] renderGroupsTable crashed:', err);
             logCrash(`renderGroupsTable(${tableId})`, err);
@@ -3571,11 +3597,12 @@ export default function PurchaseRecords() {
           }
         };
 
-        const renderGroupsTableInner = (list: ProductGroup[], tableId: string) => {
+        const renderGroupsTableInner = (list: ProductGroup[], tableId: string, rowLimit: number) => {
+          const rows = rowLimit < list.length ? list.slice(0, rowLimit) : list;
           if (isMobile) {
             return (
               <div className="mobile-card-list workspace-content" data-workspace-content>
-                {list.map((g) => {
+                {rows.map((g) => {
                   const details = getGroupPlatformDetails(g.id);
                   const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                   const { skuDisplay, count } = getGroupSkuAndPriceRange(g.id);
@@ -3822,7 +3849,7 @@ export default function PurchaseRecords() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((g, idx) => {
+                  {rows.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
@@ -4263,7 +4290,7 @@ export default function PurchaseRecords() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((g, idx) => {
+                  {rows.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
                     const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                     const status = getGroupStatus(g);
@@ -4613,7 +4640,7 @@ export default function PurchaseRecords() {
             <div className="flex-col gap-md">
               {displayedMainGroups.length > 0 && (
                 <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%' }}>
-                  {renderGroupsTable(displayedMainGroups, 'main')}
+                  {renderGroupsTable(displayedMainGroups, 'main', mainRowLimit)}
                 </div>
               )}
     
