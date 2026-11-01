@@ -33,5 +33,12 @@ try {
   assert.equal(findMatchingInventoryItem('zz9', grown)?.inventory_key, 'new');
   inventory.push({ inventory_key: 'pushed', myacg_item_code: 'YY8', myacg_sold_quantity: 1 });
   assert.equal(findMatchingInventoryItem('yy8', inventory)?.inventory_key, 'pushed');
+  // Same array, same length, row replaced at either end -> re-indexed.
+  inventory[inventory.length - 1] = { inventory_key: 'replaced', myacg_item_code: 'XX7', myacg_sold_quantity: 3 };
+  assert.equal(findMatchingInventoryItem('xx7', inventory)?.inventory_key, 'replaced');
+  assert.equal(findMatchingInventoryItem('yy8', inventory), undefined, 'no stale hit for the replaced row');
+  // A refreshed copy (what every provider read returns) never reuses the old index.
+  const refreshed = inventory.map(row => row.inventory_key === 'k0' ? { ...row, myacg_item_code: 'WW6' } : row);
+  assert.equal(findMatchingInventoryItem('ww6', refreshed)?.inventory_key, 'k0');
   console.log(JSON.stringify({ result: 'PASS', checked }));
 } finally { await vite.close(); }

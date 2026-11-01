@@ -620,19 +620,22 @@ export const getBaseSku = (code: string): string => {
 /**
  * SKU -> inventory rows (original order kept), built once per inventory array instead of a full
  * scan per lookup (purchase-record demand runs one lookup per variant: O(V*I) -> O(V+I)).
- * Rebuilt when the array length changes; inventory rows are replaced, never re-keyed in place.
+ * Each data refresh delivers a new array (new index); the same array is re-indexed if its length or
+ * first/last row changes. Inventory rows are replaced, never re-keyed in place.
  */
-const inventoryCodeIndexes = new WeakMap<readonly InventoryItem[], { length: number; byCode: Map<string, InventoryItem[]> }>();
+const inventoryCodeIndexes = new WeakMap<readonly InventoryItem[], {
+  length: number; first: InventoryItem | undefined; last: InventoryItem | undefined; byCode: Map<string, InventoryItem[]>;
+}>();
 const inventoryItemsByCode = (inventory: readonly InventoryItem[]): Map<string, InventoryItem[]> => {
   const cached = inventoryCodeIndexes.get(inventory);
-  if (cached && cached.length === inventory.length) return cached.byCode;
+  if (cached && cached.length === inventory.length && cached.first === inventory[0] && cached.last === inventory[inventory.length - 1]) return cached.byCode;
   const byCode = new Map<string, InventoryItem[]>();
   for (const item of inventory) {
     const code = (item.myacg_item_code ?? '').trim().toUpperCase();
     const list = byCode.get(code);
     if (list) list.push(item); else byCode.set(code, [item]);
   }
-  inventoryCodeIndexes.set(inventory, { length: inventory.length, byCode });
+  inventoryCodeIndexes.set(inventory, { length: inventory.length, first: inventory[0], last: inventory[inventory.length - 1], byCode });
   return byCode;
 };
 

@@ -11,7 +11,8 @@ import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, Purc
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
+import { getViewSnapshotGeneration } from '../lib/viewSnapshotGeneration';
 import { productGroupDisplayName, purchaseRecordGroupIds, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
@@ -248,10 +249,11 @@ const IdentityShadowBlock = ({
 );
 
 
-const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
+const ScrollWrapper = ({ children, scrollId }: { children: React.ReactNode; isMobile: boolean; scrollId?: string }) => {
   return (
     <div
       className="mobile-scroll-wrapper"
+      data-purchase-records-scroll={scrollId}
       style={{
         width: '100%',
         overflowX: 'auto',
@@ -318,12 +320,24 @@ const parseReleaseYm = (raw: string | undefined | null): { tier: 0 | 1 | 2; ym: 
  */
 type PurchaseRecordsViewSnapshot = {
   scope: string;
+  generation: number;
   wacaMeta: ProductGroup | null;
   groups: ProductGroup[]; variants: ProductVariant[]; categories: ProductCategory[];
   batches: PurchaseBatch[]; batchItems: PurchaseBatchItem[]; privateOrders: PrivateOrder[];
   privateOrderItems: PrivateOrderItem[]; inventory: InventoryItem[]; salesOrderItems: SalesOrderItem[];
 };
 let lastPurchaseRecordsView: PurchaseRecordsViewSnapshot | null = null;
+
+/** Scroll positions saved when opening level 2: the page (.main-area) and the main table wrapper. */
+const PURCHASE_RECORDS_SCROLL_KEY = 'erp_purchase_records_scroll';
+type SavedPurchaseRecordsScroll = { scope: string; generation: number; page: number; table: number };
+const readSavedPurchaseRecordsScroll = (scope: string): SavedPurchaseRecordsScroll | null => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(PURCHASE_RECORDS_SCROLL_KEY) || 'null') as SavedPurchaseRecordsScroll | null;
+    return saved && saved.scope === scope && saved.generation === getViewSnapshotGeneration()
+      && Number.isFinite(saved.page) && Number.isFinite(saved.table) ? saved : null;
+  } catch { return null; }
+};
 
 const PURCHASE_RECORDS_FIRST_ROWS = 40;
 const PURCHASE_RECORDS_ROW_CHUNK = 80;
@@ -337,7 +351,11 @@ export default function PurchaseRecords() {
   const closingDateWorkbenchMode = getClosingDateWorkbenchMode(providerMode);
   const { user } = useAuth();
   const viewScope = `${providerMode}:${user?.id ?? ''}`;
-  const [returnView] = useState(() => (lastPurchaseRecordsView?.scope === viewScope ? lastPurchaseRecordsView : null));
+  const navigationType = useNavigationType();
+  const [returnView] = useState(() => (lastPurchaseRecordsView?.scope === viewScope
+    && lastPurchaseRecordsView.generation === getViewSnapshotGeneration() ? lastPurchaseRecordsView : null));
+  // Saved scroll applies only to a Back/Forward return in the same account, mode and cache generation.
+  const [savedScroll] = useState(() => (navigationType === 'POP' ? readSavedPurchaseRecordsScroll(viewScope) : null));
 
   const [groups, setGroups] = useState<ProductGroup[]>(() => returnView?.groups ?? []);
   const [variants, setVariants] = useState<ProductVariant[]>(() => returnView?.variants ?? []);
@@ -370,7 +388,7 @@ export default function PurchaseRecords() {
   const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(() => returnView?.wacaMeta ?? null);
   useEffect(() => {
     if (isInitialLoading) return;
-    lastPurchaseRecordsView = { scope: viewScope, wacaMeta, groups, variants, categories, batches, batchItems,
+    lastPurchaseRecordsView = { scope: viewScope, generation: getViewSnapshotGeneration(), wacaMeta, groups, variants, categories, batches, batchItems,
       privateOrders, privateOrderItems, inventory, salesOrderItems };
   }, [isInitialLoading, viewScope, wacaMeta, groups, variants, categories, batches, batchItems, privateOrders, privateOrderItems, inventory, salesOrderItems]);
   const [showWacaDialog, setShowWacaDialog] = useState<boolean>(false);
@@ -721,24 +739,32 @@ export default function PurchaseRecords() {
   // button. Waits for groups to actually be loaded (and one more frame for the list to paint)
   // before scrolling, and only runs once per mount so later data refreshes don't re-trigger it.
   const scrollRestoredRef = useRef(false);
+  const scrollRestoreFrameRef = useRef(0);
   useEffect(() => {
     if (scrollRestoredRef.current) return;
     if (groups.length === 0) return;
-
-    const saved = sessionStorage.getItem('erp_purchase_records_scroll');
-    sessionStorage.removeItem('erp_purchase_records_scroll');
+    sessionStorage.removeItem(PURCHASE_RECORDS_SCROLL_KEY);
     scrollRestoredRef.current = true;
-
-    if (saved) {
-      const y = parseInt(saved, 10);
-      if (!isNaN(y)) {
-        requestAnimationFrame(() => {
-          const scrollEl = document.querySelector('.main-area');
-          if (scrollEl) scrollEl.scrollTop = y;
-        });
-      }
-    }
-  }, [groups]);
+    if (!savedScroll) return;
+    // Chunked rendering may still be appending rows: wait (bounded) until the table is tall
+    // enough for the saved position, then restore the page and the table wrapper.
+    let attempts = 0;
+    const apply = () => {
+      const page = document.querySelector('.main-area');
+      const table = document.querySelector<HTMLElement>('[data-purchase-records-scroll="main"]');
+      const tableReady = !savedScroll.table || (table !== null && table.scrollHeight - table.clientHeight >= savedScroll.table);
+      if (!tableReady && attempts++ < 120) { scrollRestoreFrameRef.current = requestAnimationFrame(apply); return; }
+      scrollRestoreFrameRef.current = 0;
+      if (page) page.scrollTop = savedScroll.page;
+      if (table) table.scrollTop = savedScroll.table;
+    };
+    // Not cancelled by later data refreshes (this effect runs once); only by unmount below.
+    scrollRestoreFrameRef.current = requestAnimationFrame(apply);
+  }, [groups, savedScroll]);
+  useEffect(() => () => {
+    // An unfinished restore (e.g. StrictMode's dev remount) is retried by the next mount.
+    if (scrollRestoreFrameRef.current) { cancelAnimationFrame(scrollRestoreFrameRef.current); scrollRestoreFrameRef.current = 0; scrollRestoredRef.current = false; }
+  }, []);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -1311,9 +1337,9 @@ export default function PurchaseRecords() {
   // search/filter/sort and data refreshes render as before. A pending scroll restore renders
   // enough rows to reach the saved position first.
   const [initialRowLimit] = useState(() => {
-    const saved = Number.parseInt(sessionStorage.getItem('erp_purchase_records_scroll') || '', 10);
     const viewportRows = Math.ceil((window.innerHeight || 1000) / PURCHASE_RECORDS_MIN_ROW_PX);
-    return Math.max(PURCHASE_RECORDS_FIRST_ROWS, Number.isFinite(saved) ? Math.ceil(saved / PURCHASE_RECORDS_MIN_ROW_PX) + viewportRows * 2 : 0);
+    const target = savedScroll ? Math.max(savedScroll.page, savedScroll.table) : 0;
+    return Math.max(PURCHASE_RECORDS_FIRST_ROWS, savedScroll ? Math.ceil(target / PURCHASE_RECORDS_MIN_ROW_PX) + viewportRows * 2 : 0);
   });
   const [rowWindowLimit, setRowWindowLimit] = useState(initialRowLimit);
   const mainRowLimit = editMode ? Infinity : rowWindowLimit;
@@ -2412,10 +2438,10 @@ export default function PurchaseRecords() {
   // the window itself doesn't scroll) right before leaving for a detail page, so we can
   // restore it if the user comes back via the browser Back button.
   const navigateToDetail = (id: string) => {
-    const scrollEl = document.querySelector('.main-area');
-    if (scrollEl) {
-      sessionStorage.setItem('erp_purchase_records_scroll', String(scrollEl.scrollTop));
-    }
+    const saved: SavedPurchaseRecordsScroll = { scope: viewScope, generation: getViewSnapshotGeneration(),
+      page: document.querySelector('.main-area')?.scrollTop ?? 0,
+      table: document.querySelector('[data-purchase-records-scroll="main"]')?.scrollTop ?? 0 };
+    sessionStorage.setItem(PURCHASE_RECORDS_SCROLL_KEY, JSON.stringify(saved));
     navigate(`/purchase-records/${id}`);
   };
 
@@ -3768,7 +3794,7 @@ export default function PurchaseRecords() {
           return (
             <>
               {activeTab === 'proxy' ? (
-              <ScrollWrapper isMobile={isMobile}>
+              <ScrollWrapper isMobile={isMobile} scrollId={tableId}>
                 <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
                 <thead>
                   <tr>
@@ -4204,7 +4230,7 @@ export default function PurchaseRecords() {
               </table>
               </ScrollWrapper>
             ) : (
-              <ScrollWrapper isMobile={isMobile}>
+              <ScrollWrapper isMobile={isMobile} scrollId={tableId}>
                 <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
                 <thead className="purchase-records-sticky-header">
                   <tr>

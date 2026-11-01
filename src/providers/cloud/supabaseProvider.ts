@@ -82,6 +82,7 @@
   }
 })();
 
+import { bumpViewSnapshotGeneration } from '../../lib/viewSnapshotGeneration';
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { beginCatalogCommitReadFence, awaitCatalogCommitReadFence } from './catalogCommitReadFence';
 import { recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
@@ -482,7 +483,7 @@ export class SupabaseProvider implements IDataProvider {
     if (updateAutoQuantity) {
       // The server has committed both ledger and quantity; invalidate this
       // client cache so the next read is not mistaken for authoritative data.
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
       this.pullPromise = null;
     }
     return revision;
@@ -505,7 +506,7 @@ export class SupabaseProvider implements IDataProvider {
       throw new Error('WACA 雲端寫入結果無法確認，請先重新讀取訂單與數量。');
     }
     markCloudReachable();
-    this.isPulled = false;
+    this.isPulled = false; bumpViewSnapshotGeneration();
     this.pullPromise = null;
     return revision;
   }
@@ -531,7 +532,7 @@ export class SupabaseProvider implements IDataProvider {
     const result = data as WacaRecognitionResult;
     if (!result || result.requestId !== request.requestId || !['COMMITTED', 'NO_CHANGE'].includes(result.status)
       || result.revision !== request.revision + (result.status === 'COMMITTED' ? 1 : 0)) throw new Error('WACA_RECOGNITION_COMMIT_UNKNOWN');
-    this.isPulled = false; this.pullPromise = null;
+    this.isPulled = false; bumpViewSnapshotGeneration(); this.pullPromise = null;
     markCloudReachable();
     return result;
   }
@@ -1150,7 +1151,7 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     if (shouldForce) {
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
       // Force must not fork a second full pull while the first is still active.
     }
     if (this.isPulled) return;
@@ -1473,6 +1474,7 @@ export class SupabaseProvider implements IDataProvider {
             },
             onCommitted: () => {
               this.authoritativeCacheGeneration += 1;
+              bumpViewSnapshotGeneration();
               this.lastCoreSnapshotReadiness = {
                 cacheGeneration: this.authoritativeCacheGeneration,
                 realtimeGeneration: readiness.state === 'ready' ? readiness.generation : null,
@@ -1526,7 +1528,7 @@ export class SupabaseProvider implements IDataProvider {
           markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
           if (isSchemaMissingError(err)) {
             alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
-            this.isPulled = false;
+            this.isPulled = false; bumpViewSnapshotGeneration();
             throw err;
           }
           console.log('[Sync Pull] core failed: keep local cache');
@@ -1567,7 +1569,7 @@ export class SupabaseProvider implements IDataProvider {
       ]);
       if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
       markCloudReadDeferred(cachedRows.some(rows => rows.length > 0));
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
     });
 
     return this.pullPromise;
@@ -2091,7 +2093,7 @@ export class SupabaseProvider implements IDataProvider {
     if (status.status !== 'online' || !['fresh-online','fresh-empty'].includes(status.readStatus)) {
       // Never promote a partial SELECT to global authority or bypass offline
       // protection. Only a real completed bootstrap may restore write readiness.
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
       if (status.authoritativeReadPending && this.corePullCompletionPromise)
         await this.corePullCompletionPromise.catch(() => undefined);
       this.pullPromise = null;
