@@ -44,6 +44,7 @@ import {
   fetchReadonlyCatalogText,
 } from '../lib/readonlyCatalogApi';
 import { getProviderMode } from '../providers/providerMode';
+import { useAuth } from '../auth/authContext';
 import { purchaseRecordsWacaQuantity } from '../waca/reconciliation';
 import { readNextRawCollections } from '../lib/nextRawDbIntegrityProbe';
 import {
@@ -308,22 +309,41 @@ const parseReleaseYm = (raw: string | undefined | null): { tier: 0 | 1 | 2; ym: 
   return { tier: 2, ym: 0 };
 };
 
+/**
+ * Last list data this page rendered, kept in module memory (same tab, same session) so a
+ * route return (level 2 -> level 1) can repaint the previous screen immediately instead of
+ * blanking behind the full-page loader while the IndexedDB preview is read again. It is only
+ * a preview: the page still marks itself as syncing and the normal cache + provider load runs
+ * on every mount and replaces it. Scoped by provider mode and signed-in user.
+ */
+type PurchaseRecordsViewSnapshot = {
+  scope: string;
+  wacaMeta: ProductGroup | null;
+  groups: ProductGroup[]; variants: ProductVariant[]; categories: ProductCategory[];
+  batches: PurchaseBatch[]; batchItems: PurchaseBatchItem[]; privateOrders: PrivateOrder[];
+  privateOrderItems: PrivateOrderItem[]; inventory: InventoryItem[]; salesOrderItems: SalesOrderItem[];
+};
+let lastPurchaseRecordsView: PurchaseRecordsViewSnapshot | null = null;
+
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
   const providerMode = getProviderMode();
   const isNextIdentityShadowMode = canUseProxyIdentityShadow(providerMode);
   const isClosingDateWorkbenchAvailable = canUseClosingDateWorkbenchUi(providerMode);
   const closingDateWorkbenchMode = getClosingDateWorkbenchMode(providerMode);
+  const { user } = useAuth();
+  const viewScope = `${providerMode}:${user?.id ?? ''}`;
+  const [returnView] = useState(() => (lastPurchaseRecordsView?.scope === viewScope ? lastPurchaseRecordsView : null));
 
-  const [groups, setGroups] = useState<ProductGroup[]>([]);
-  const [variants, setVariants] = useState<ProductVariant[]>([]);
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
-  const [batches, setBatches] = useState<PurchaseBatch[]>([]);
-  const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
-  const [privateOrders, setPrivateOrders] = useState<PrivateOrder[]>([]);
-  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
+  const [groups, setGroups] = useState<ProductGroup[]>(() => returnView?.groups ?? []);
+  const [variants, setVariants] = useState<ProductVariant[]>(() => returnView?.variants ?? []);
+  const [categories, setCategories] = useState<ProductCategory[]>(() => returnView?.categories ?? []);
+  const [batches, setBatches] = useState<PurchaseBatch[]>(() => returnView?.batches ?? []);
+  const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>(() => returnView?.batchItems ?? []);
+  const [privateOrders, setPrivateOrders] = useState<PrivateOrder[]>(() => returnView?.privateOrders ?? []);
+  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>(() => returnView?.privateOrderItems ?? []);
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => returnView?.inventory ?? []);
+  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>(() => returnView?.salesOrderItems ?? []);
   const batchItemsByGroupId = useMemo(
     () => mapPurchaseBatchItemsByGroup(batches, batchItems),
     [batches, batchItems]
@@ -337,12 +357,18 @@ export default function PurchaseRecords() {
   // cloud fetch) — blocks the table so we never render a misleading "0 筆" while data is still
   // in flight. isSyncing: true only while showing stale local cache and waiting for the real
   // cloud sync to confirm/replace it — shows a small non-blocking indicator instead.
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
+  // A route return starts from the previous screen (still "syncing" until the reload confirms it).
+  const [isInitialLoading, setIsInitialLoading] = useState(() => !returnView);
+  const [isSyncing, setIsSyncing] = useState(() => Boolean(returnView));
 
   const [editMode, setEditMode] = useState<boolean>(false);
 
-  const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(null);
+  const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(() => returnView?.wacaMeta ?? null);
+  useEffect(() => {
+    if (isInitialLoading) return;
+    lastPurchaseRecordsView = { scope: viewScope, wacaMeta, groups, variants, categories, batches, batchItems,
+      privateOrders, privateOrderItems, inventory, salesOrderItems };
+  }, [isInitialLoading, viewScope, wacaMeta, groups, variants, categories, batches, batchItems, privateOrders, privateOrderItems, inventory, salesOrderItems]);
   const [showWacaDialog, setShowWacaDialog] = useState<boolean>(false);
   const [animateWacaDialog, setAnimateWacaDialog] = useState<boolean>(false);
 
