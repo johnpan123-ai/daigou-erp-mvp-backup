@@ -113,6 +113,7 @@ interface ReceivedSkuDisplayRow {
 }
 
 const OUTBOUND_DETAIL_CACHE_KEY = 'outbound-shipment-detail';
+const BACKGROUND_REFRESH_NOTICE_DELAY_MS = 600;
 type OutboundDetailRead = [OutboundShipment[], OutboundShipmentItem[], JapanPackage[], JapanPackageItem[], InventoryItem[], ProductGroup[],
   ProductVariant[], ProductCategory[], PrivateOrderItem[], PurchaseBatchItem[], SalesOrderItem[], BundleComponent[]];
 
@@ -178,6 +179,7 @@ export default function OutboundShipmentDetail() {
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
   const [itemSaveError, setItemSaveError] = useState<string | null>(null);
   const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
+  const [showBackgroundRefreshNotice, setShowBackgroundRefreshNotice] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState<'idle' | 'submitting' | 'unknown' | 'sync-pending'>('idle');
   const deleteInFlightRef = useRef(false);
   const selectedItemsRef = useRef<OutboundShipmentItem[]>(seed?.currentItems ?? []);
@@ -194,6 +196,19 @@ export default function OutboundShipmentDetail() {
     twdPrice: '',
     quantity: '1'
   });
+
+  useEffect(() => {
+    if (pendingItemSaveCount !== 0 || !isRefreshing) {
+      setShowBackgroundRefreshNotice(false);
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setShowBackgroundRefreshNotice(true),
+      BACKGROUND_REFRESH_NOTICE_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isRefreshing, pendingItemSaveCount]);
 
   // Header form
   const [formTitle, setFormTitle] = useState(() => seed?.shipment?.title || '');
@@ -1516,14 +1531,14 @@ export default function OutboundShipmentDetail() {
             data-testid="outbound-background-status-slot"
             role="status"
             aria-live="polite"
-            aria-hidden={pendingItemSaveCount === 0 && isRefreshing ? undefined : true}
+            aria-hidden={showBackgroundRefreshNotice ? undefined : true}
             style={{
               flex: '0 0 132px', height: 18, lineHeight: '18px', color: '#64748b', fontWeight: 600,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              visibility: pendingItemSaveCount === 0 && isRefreshing ? 'visible' : 'hidden',
+              visibility: showBackgroundRefreshNotice ? 'visible' : 'hidden',
             }}
           >
-            {pendingItemSaveCount === 0 && isRefreshing ? '同步最新資料中…' : '\u00a0'}
+            {showBackgroundRefreshNotice ? '同步最新資料中…' : '\u00a0'}
           </span>
           {deleteStatus === 'unknown' && (
             <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>
