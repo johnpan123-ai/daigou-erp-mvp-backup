@@ -13,6 +13,19 @@ type CommitWork<T> = (value: T) => void;
  */
 const returnCache = new Map<string, { scope: string; generation: number; value: unknown }>();
 
+/** A cached read for this page, only if it matches the scope, the current cache generation and `accept`. */
+export function readMountedContentCache<C>(cacheKey: string, scope: string, accept?: (value: unknown) => boolean): C | null {
+  const entry = returnCache.get(cacheKey);
+  if (!entry || entry.scope !== scope || entry.generation !== getViewSnapshotGeneration()) return null;
+  return !accept || accept(entry.value) ? entry.value as C : null;
+}
+
+/** Keep a committed read; a read that started under an older cache generation is never kept. */
+export function storeMountedContentCache(cacheKey: string, scope: string, readGeneration: number, value: unknown): void {
+  if (readGeneration !== getViewSnapshotGeneration()) return;
+  returnCache.set(cacheKey, { scope, generation: readGeneration, value });
+}
+
 export interface MountedContentCacheOptions {
   /** Page identity; the page's read must not depend on route params (filter per id on commit). */
   cacheKey: string;
@@ -30,12 +43,7 @@ export interface MountedContentCacheOptions {
  * first read is treated as a refresh instead of a cold start.
  */
 export function useMountedContentLoadState<C = unknown>(cache?: MountedContentCacheOptions) {
-  const [cached] = useState<C | null>(() => {
-    if (!cache) return null;
-    const entry = returnCache.get(cache.cacheKey);
-    if (!entry || entry.scope !== cache.scope || entry.generation !== getViewSnapshotGeneration()) return null;
-    return !cache.accept || cache.accept(entry.value) ? entry.value as C : null;
-  });
+  const [cached] = useState<C | null>(() => (cache ? readMountedContentCache<C>(cache.cacheKey, cache.scope, cache.accept) : null));
   const [isInitialLoading, setIsInitialLoading] = useState(() => cached === null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasUsableData, setHasUsableData] = useState(() => cached !== null);
@@ -68,9 +76,7 @@ export function useMountedContentLoadState<C = unknown>(cache?: MountedContentCa
       setHasUsableData(true);
       const options = cacheRef.current;
       // A read that straddled a cache invalidation is shown but not kept for later remounts.
-      if (options && cacheGeneration === getViewSnapshotGeneration()) {
-        returnCache.set(options.cacheKey, { scope: options.scope, generation: cacheGeneration, value });
-      }
+      if (options) storeMountedContentCache(options.cacheKey, options.scope, cacheGeneration, value);
       return true;
     } finally {
       if (mountedRef.current && generation === generationRef.current) {
