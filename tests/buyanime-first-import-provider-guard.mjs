@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   assertReviewedProviderContract,
   restoreReviewedBuyAnimeFirstImportProviderPatch,
+  restoreReviewedNineUiProviderPatch,
 } from '../scripts/post-adoption-descendant.mjs';
 
 const BASE = '84afcac7eb05140813eb47446d9916083ad9e0b5';
@@ -18,7 +19,7 @@ const after = file => readFileSync(file, 'utf8').replace(/\r\n?/gu, '\n');
 
 for (const file of files) {
   const oldSource = before(file), reviewed = after(file);
-  assert.equal(restoreReviewedBuyAnimeFirstImportProviderPatch(file, reviewed), oldSource, `${file} exact restoration`);
+  assert.equal(restoreReviewedBuyAnimeFirstImportProviderPatch(file, restoreReviewedNineUiProviderPatch(file, reviewed)), oldSource, `${file} exact restoration`);
   assert.doesNotThrow(() => assertReviewedProviderContract(file, oldSource, reviewed), `${file} exact patch accepted`);
   assert.throws(() => assertReviewedProviderContract(file, oldSource, reviewed.replace(/\n/u, '\n ')), /FAILED_CLOSED/u,
     `${file} arbitrary one-byte drift rejected`);
