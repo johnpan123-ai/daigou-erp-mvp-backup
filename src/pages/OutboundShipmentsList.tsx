@@ -15,6 +15,8 @@ import { PageHeader, PageShell } from '../components/layout/PageHeader';
 import { useViewport } from '../contexts/ViewportContext';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
 import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
+import { useViewCacheScope } from '../hooks/useViewCacheScope';
+import { OUTBOUND_LIST_CACHE_KEY, type OutboundListRead } from './outboundListCache';
 import {
   buildOutboundShipmentProductSearchIndex,
   outboundShipmentMatchesSearch,
@@ -50,14 +52,16 @@ export default function OutboundShipmentsList() {
   const { isMobile } = useViewport();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  // A route return starts from the last read; the normal read below refreshes it.
+  const viewCacheScope = useViewCacheScope();
+  const { cached, isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState<OutboundListRead>({ cacheKey: OUTBOUND_LIST_CACHE_KEY, scope: viewCacheScope });
 
-  const [shipments, setShipments] = useState<OutboundShipment[]>([]);
-  const [shipmentItems, setShipmentItems] = useState<OutboundShipmentItem[]>([]);
-  const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>([]);
-  const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
-  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
-  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
-  const { isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
+  const [shipments, setShipments] = useState<OutboundShipment[]>(() => cached?.[0] ?? []);
+  const [shipmentItems, setShipmentItems] = useState<OutboundShipmentItem[]>(() => cached?.[1] ?? []);
+  const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>(() => cached?.[2] ?? []);
+  const [productGroups, setProductGroups] = useState<ProductGroup[]>(() => cached?.[3] ?? []);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>(() => cached?.[4] ?? []);
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>(() => cached?.[5] ?? []);
   const statusFilter = parseOutboundStatusFilter(searchParams.get('status'));
   const searchTerm = searchParams.get('q') ?? '';
   const sortMode = searchParams.has('sort')
@@ -97,7 +101,7 @@ export default function OutboundShipmentsList() {
         dataProvider.getProductGroups(),
         dataProvider.getProductVariants(),
         dataProvider.getBundleComponents(),
-      ]), ([s, si, jpi, groups, variants, bundles]) => {
+      ]) as Promise<OutboundListRead>, ([s, si, jpi, groups, variants, bundles]) => {
         setShipments(s);
         setShipmentItems(si);
         setJapanPackageItems(jpi);
