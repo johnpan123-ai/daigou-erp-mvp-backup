@@ -30,9 +30,14 @@ try {
   connectivity.markCloudReadDeferred(true);
   assert.equal(connectivity.getCloudConnectivitySnapshot().authoritativeReadPending, true);
   assert.equal(view().status, 'syncing-cached', '4s fallback keeps background request explicit');
-  assert.match(view().banner, /背景同步中.*顯示上次快取/u);
+  // Ordinary background sync: toolbar status only (no full-width banner); writes stay blocked.
+  assert.equal(view().banner, null, 'normal background sync shows no full-width banner');
+  assert.equal(view().writeAllowed, false);
+  assert.match(view().detail, /顯示上次快取.*暫停/u, 'toolbar tooltip explains writes are paused');
   assert.throws(() => connectivity.assertCloudWriteAllowed(), /CLOUD_OFFLINE_WRITE_BLOCKED|雲端資料目前不是/u);
 
+  // Retrying after a failed refresh is abnormal: banner kept.
+  assert.match(view('cloud', { ...refresh, errorAt: Date.now() + 1000 }).banner ?? '', /背景同步中.*顯示上次快取/u, 'failed-refresh retry keeps its banner');
   connectivity.markCloudReadFresh(12);
   assert.equal(view().status, 'fresh', '6s late success converges to fresh');
   assert.equal(connectivity.getCloudConnectivitySnapshot().authoritativeReadPending, false);
@@ -44,6 +49,12 @@ try {
 
   connectivity.markCloudReadLoading('manual-refresh');
   assert.equal(view('cloud', { ...refresh, busy: true }).status, 'syncing');
+  assert.equal(view('cloud', { ...refresh, busy: true }).banner, null, 'normal sync: no orange banner');
+  assert.equal(view('cloud', { ...refresh, busy: true }).writeAllowed, false, 'normal sync still blocks writes');
+  assert.throws(() => connectivity.assertCloudWriteAllowed(), /CLOUD_OFFLINE_WRITE_BLOCKED|雲端資料目前不是/u, 'write guard unchanged');
+  // Real problems keep a clear banner.
+  assert.match(presentation.resolveGlobalSyncPresentation('cloud', connectivity.getCloudConnectivitySnapshot(), refresh, { unproven: true }).banner, /即時同步目前未確認/u);
+  assert.match(view('cloud', { ...refresh, restorePending: true }).banner, /雲端還原進行中/u);
   connectivity.markCloudReadFresh(12);
   assert.equal(view('cloud', { ...refresh, lastCompletedAt: Date.now() }).status, 'fresh', 'manual refresh recovery');
 
@@ -74,6 +85,9 @@ try {
   assert.match(settingsSource, /Supabase 雲端資料庫為正式來源/u);
   assert.doesNotMatch(settingsSource, /所有的 ERP 資料目前皆儲存在您的瀏覽器本地端/u);
 
+  connectivity.markCloudUnavailable('browser-offline');
+  assert.match(view('cloud', { ...refresh, busy: true }).banner ?? '', /顯示上次快取|Offline/u, 'offline keeps a banner');
+  assert.match(view().banner, /Offline/u);
   console.log('PASS fast success, soft fallback, late success, permanent failure, and manual recovery');
   console.log('PASS Realtime recovery, route parity, NEXT local semantics, and Cloud Settings copy');
 } finally {
