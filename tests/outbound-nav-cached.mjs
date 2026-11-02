@@ -224,7 +224,21 @@ try {
     afterBump = await stop();
     assert.ok(afterBump.loaderFrames > 0, 'stale-generation cache is not used (cold load)');
   }
-  console.log('OUTNAV', JSON.stringify({ result, edit, afterBump, supabase: supabaseRequests.length, errors: unexpectedErrors.slice(0, 3) }));
+  // Blue external-link button of a group: opens the MyACG member-center list page in a new tab only.
+  await page.waitForFunction(() => document.querySelector('[data-testid="outbound-myacg-button"]'), null, { timeout: 60000 });
+  const linkCheck = await page.evaluate(async () => {
+    const calls = []; const original = window.open;
+    window.open = (...args) => { calls.push(args); return null; };
+    try { navigator.clipboard.writeText = async () => {}; } catch { /* clipboard stub unavailable */ }
+    const before = location.href;
+    document.querySelector('[data-testid="outbound-myacg-button"]').click();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    window.open = original;
+    return { calls, stayed: location.href === before };
+  });
+  assert.deepEqual(linkCheck.calls, [['https://www.myacg.com.tw/member_center_v2.php?e_id=1&list_type=3', '_blank', 'noopener,noreferrer']], 'member-center list page in a new tab');
+  assert.equal(linkCheck.stayed, true, 'ERP page stays where it was');
+  console.log('OUTNAV', JSON.stringify({ result, edit, afterBump, linkCheck, supabase: supabaseRequests.length, errors: unexpectedErrors.slice(0, 3) }));
   for (const label of Object.keys(result)) for (const r of result[label]) {
     assert.ok(r.detailOk, `${label}: correct shipment`);
     assert.equal(r.back.loaderFrames, 0, `${label}: list return without full-page loader`);

@@ -97,12 +97,12 @@ try {
   assert.deepEqual(result.copyOnlyCalls, [['clipboard', expectedName]], 'Copy-only must use the unchanged group name and open no page');
   assert.deepEqual(result.beforeClipboardSettles, [
     ['clipboard', expectedName],
-    ['open', 'https://www.myacg.com.tw/member_center_v2.php', '_blank', 'noopener,noreferrer'],
+    ['open', 'https://www.myacg.com.tw/member_center_v2.php?e_id=1&list_type=3', '_blank', 'noopener,noreferrer'],
   ], 'Clipboard must start while ERP is focused and the new tab must still open before Clipboard settles');
   assert.deepEqual(result.shortcutCalls[0], ['clipboard', expectedName], 'Both actions must copy the identical name');
   assert.equal(result.clipboardFailed, true);
   assert.deepEqual(result.failedClipboardCalls[1], [
-    'open', 'https://www.myacg.com.tw/member_center_v2.php', '_blank', 'noopener,noreferrer',
+    'open', 'https://www.myacg.com.tw/member_center_v2.php?e_id=1&list_type=3', '_blank', 'noopener,noreferrer',
   ], 'Clipboard failure must not prevent opening MyACG');
   console.log('PASS copy-only preserves the exact existing group name and opens no page');
   console.log('PASS MyACG shortcut opens synchronously and copies the identical name');
