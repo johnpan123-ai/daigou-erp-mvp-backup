@@ -66,6 +66,12 @@ let viteOutput = '';
 vite.stdout.on('data', chunk => { viteOutput += String(chunk); });
 vite.stderr.on('data', chunk => { viteOutput += String(chunk); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const stopVite = async () => {
+  if (vite.exitCode !== null || vite.signalCode !== null) return;
+  const exited = new Promise((resolve, reject) => { vite.once('exit', resolve); vite.once('error', reject); });
+  if (!vite.kill('SIGTERM')) throw new Error('Vite cleanup signal was not delivered');
+  await exited;
+};
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -215,5 +221,5 @@ try {
 } finally {
   await context.close();
   await browser.close();
-  vite.kill('SIGTERM');
+  await stopVite();
 }
