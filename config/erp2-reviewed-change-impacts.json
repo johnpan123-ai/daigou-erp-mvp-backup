@@ -9880,6 +9880,28 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "erp2-v33-persistent-isolated-postgrest-harness-v1",
+      "beforeHead": "d8775ff62433de0940bf915845ddb2ddba26768c",
+      "reviewedHead": "57ffe623a6f0f6e81885ac91af485a8facb2de14",
+      "patchSha256": "377b71336f1b83c015264b67c3defb365f27869e2c9c78bd2ab7a67d5cc4cd0a",
+      "requiredRegressions": ["guard", "post-restore-business-release"],
+      "files": [
+        {
+          "file": "tests/helpers/saveability-isolated.mjs",
+          "beforeHash": "7b2f952668ef826fb935748ac4667fb05280cdc654738ed0ef72e612d92dcf47",
+          "afterHash": "13098d6de7f39f069b3d6db49e8fb6be371c42357e6647934d1e4d3dd3717abb",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["isolatedDatabase verified tool resolution"],
+          "dataFlow": "Uses explicitly supplied verified PostgREST and safeupdate paths from the release environment before the historical ephemeral fallback.",
+          "persistenceBehavior": "Disposable loopback PostgreSQL/PostgREST test harness only.",
+          "writePath": "Targets remain restricted to 127.0.0.1:55492 and disposable waca_v3 databases; no production endpoint is accepted.",
+          "providerPath": "No product Provider, CAS, Realtime, Journal or Restore code changes.",
+          "externalContract": "Only the historical verified /tmp layout or the version-pinned persistent WSL tool layout is accepted; arbitrary paths fail closed.",
+          "schemaExpectation": "No product schema, migration or Ledger change."
+        }
+      ]
     }
   ]
 }
