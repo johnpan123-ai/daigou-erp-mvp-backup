@@ -9457,6 +9457,308 @@
           "schemaExpectation": "No schema change."
         }
       ]
+    },
+    {
+      "id": "erp2-v33-nine-ui-sync-runtime-v1",
+      "beforeHead": "80e59fd0ee7fd34906968b1d3deedde2252a6bc0",
+      "reviewedHead": "8e987773f89da8c56323554543de946bda692318",
+      "patchSha256": "ee646fe9ad6d02b9c27bf5c1ee89ee4605a6c01dea5f8a4f3bc14070c02518bc",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "provider-guard",
+        "r5-core-provider-guard",
+        "context-guard",
+        "buyanime-first-import-provider-guard",
+        "sync"
+      ],
+      "files": [
+        {
+          "file": "scripts/post-adoption-descendant.mjs",
+          "beforeHash": "b8a4b6b89dcd6cc44337241a31a965ff9fe641f5decabb4c7cda761b15cd6a14",
+          "afterHash": "f63110894eb31a8ee1d2a71e5e4abde278ba6987b1d6ce3f18ed7f3d9a14c8ff",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "P02_CTX_PINS",
+            "assertNineUiProviderSemantics",
+            "restoreReviewedNineUiProviderPatch",
+            "assertReviewedProviderContract"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Exact release inspection for the immutable nine-UI Provider and sync-presentation patch; arbitrary source drift and write/RPC expansion remain fail-closed.",
+          "dataFlow": "Exact release inspection for the immutable nine-UI Provider and sync-presentation patch; arbitrary source drift and write/RPC expansion remain fail-closed.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/components/layout/GlobalSyncControl.tsx",
+          "beforeHash": "8c325e63b783eddbcd121f711035f741256ccc744f3e0659a78fe37787404653",
+          "afterHash": "b7c02722ec158c888658b500a95e58eab3fc0c418a8273c9c1168973f9a2b49c",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "GlobalSyncControl presentation"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Moves normal in-progress sync feedback into the toolbar without changing the write gate.",
+          "dataFlow": "Moves normal in-progress sync feedback into the toolbar without changing the write gate.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/contexts/globalSyncPresentation.ts",
+          "beforeHash": "0aa7d35ae2a04e5f153061f3e48a4ccb6814b51299c5633a01c7c8a7311f1312",
+          "afterHash": "24d33c0656a242bc89565da954beea80306b27f7074f9bc98c645aeb6cdd2db8",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "resolveGlobalSyncPresentation"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Hides only the orange warning for normal loading/stale-cache states while preserving writeAllowed=false and offline/error warnings.",
+          "dataFlow": "Hides only the orange warning for normal loading/stale-cache states while preserving writeAllowed=false and offline/error warnings.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/hooks/useMountedContentLoadState.ts",
+          "beforeHash": "db70b54ce51c7897c3bdf4b6bcbf13b89b87f6abf1bedf40ea5a9acfa5a31f65",
+          "afterHash": "4c5f68ed2c4bd43238fdd55d34d0a810f568beacc9fdef1ec835f05b85bf920b",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "useMountedContentLoadState"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Keeps usable mounted content visible during authoritative background refresh and scopes return-cache reuse.",
+          "dataFlow": "Keeps usable mounted content visible during authoritative background refresh and scopes return-cache reuse.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/hooks/useViewCacheScope.ts",
+          "beforeHash": null,
+          "afterHash": "1eeb44171d71beea6a1dbc6e49dca7e23fd83c1258ee40fc70ce33d5687b768b",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "useViewCacheScope"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Binds page caches to provider mode and signed-in user identity.",
+          "dataFlow": "Binds page caches to provider mode and signed-in user identity.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/lib/db.ts",
+          "beforeHash": "94eef452c84dcdb0948ca8f4a3bc6d7c1038e71f04c589901c7d7047a43ce31d",
+          "afterHash": "be2c2306771ba9f1b24848a1ae8ac7f201c277b0218d26df45809519f620aae2",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "inventory SKU indexes",
+            "view generation invalidation"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Adds in-memory SKU indexes and cache-generation invalidation without changing durable fields, serializers or quantities.",
+          "dataFlow": "Adds in-memory SKU indexes and cache-generation invalidation without changing durable fields, serializers or quantities.",
+          "persistenceBehavior": "Schema-neutral read/cache behavior only; durable business semantics unchanged.",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/lib/outboundGroupQuickActions.ts",
+          "beforeHash": "04c48e72ab93bac3b317d729d7b48c5093d806b5a11be707209092efdbd182cb",
+          "afterHash": "2b93d442368eab6e625f779feb5df091e539d1b546ce941520b320fe7c45c6a4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "copyOutboundGroupNameAndOpenMyacg"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Corrects the outbound external member-center URL only.",
+          "dataFlow": "Corrects the outbound external member-center URL only.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/lib/viewSnapshotGeneration.ts",
+          "beforeHash": null,
+          "afterHash": "b2d85ee1a0bccff44b129c029c62c13cf026ed80a1f5b66ff79aadeec9336974",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "bumpViewSnapshotGeneration",
+            "getViewSnapshotGeneration"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Provides an in-memory generation fence so stale page previews are discarded after authoritative replacement.",
+          "dataFlow": "Provides an in-memory generation fence so stale page previews are discarded after authoritative replacement.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/pages/OutboundShipmentDetail.tsx",
+          "beforeHash": "f87e49e0ba614b4724f110684ee67fde3ab2e15572880f425095845268e4ffda",
+          "afterHash": "f736cedf69d6b60aa4db52cb49469298b2473dbccb3aded9b554b1bdc9ad2614",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "mounted detail cache",
+            "background refresh notice delay",
+            "outbound external action"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Keeps outbound detail mounted across list navigation, preserves source/quantity logic, and delays the cosmetic sync notice for 600 ms.",
+          "dataFlow": "Keeps outbound detail mounted across list navigation, preserves source/quantity logic, and delays the cosmetic sync notice for 600 ms.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/pages/OutboundShipmentsList.tsx",
+          "beforeHash": "66d2d24b7526ca9a6f32a71f673a2201ecf176b795276ab753b95015ce2ac5d9",
+          "afterHash": "df4454257129fa38c2869eafc2df272d9666b0aa3ec7ca4dd08c56ae9727e1f6",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "outbound list return cache"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Reuses only identity- and generation-scoped outbound list snapshots while authoritative refresh remains active.",
+          "dataFlow": "Reuses only identity- and generation-scoped outbound list snapshots while authoritative refresh remains active.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/pages/PurchaseRecords.tsx",
+          "beforeHash": "f2ba887bd73ef6d783553782deb21503c93f9d97f2e731c52d9b86cd4c000d25",
+          "afterHash": "6e8d1e789d56c79aa9f3076e216228c8640773c88fe6f4cda74814aefa69f6ab",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "return preview",
+            "chunked rows",
+            "scroll restoration"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Restores list and table scroll state, indexes SKU lookups and chunks initial paint without changing saved group identity or quantities.",
+          "dataFlow": "Restores list and table scroll state, indexes SKU lookups and chunks initial paint without changing saved group identity or quantities.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/pages/UnlistedItems.tsx",
+          "beforeHash": "92f010e3e28c030067ed99b7be5cf6ca00ff9d74a61aa252b4836872989f3db2",
+          "afterHash": "2289a5c541a68aa4a2eb9a5e16ab768703c8793ebae8627b4c6f81dd92a0b505",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "inline title actions",
+            "mounted content refresh"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Moves existing actions beside the title and preserves mounted content during background refresh.",
+          "dataFlow": "Moves existing actions beside the title and preserves mounted content during background refresh.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/pages/outboundListCache.ts",
+          "beforeHash": null,
+          "afterHash": "84eada115da80319ce4148383f84e8f8ed59fa422415bebc350c7b79156f7c5e",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": [
+            "OUTBOUND_LIST_CACHE_KEY",
+            "OutboundListRead"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Defines the shared in-memory outbound list/detail cache identity and read tuple only.",
+          "dataFlow": "Defines the shared in-memory outbound list/detail cache identity and read tuple only.",
+          "persistenceBehavior": "NONE",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Existing Provider boundary unchanged.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/providers/cloud/cloudKeysetParallel.ts",
+          "beforeHash": null,
+          "afterHash": "40044dbffbfddf6ccde4b06f75c6d75350d3c4cee3e11631b5a12c0e3bfc7c57",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "fetchPartitionedKeyset"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Adds read-only bounded parallel keyset retrieval with dedupe, monotonic cursor checks and sequential fallback.",
+          "dataFlow": "Adds read-only bounded parallel keyset retrieval with dedupe, monotonic cursor checks and sequential fallback.",
+          "persistenceBehavior": "Schema-neutral read/cache behavior only; durable business semantics unchanged.",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Exact full-file hashes plus structural Provider semantics and negative guard cases.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/providers/cloud/cloudTargetedCache.ts",
+          "beforeHash": "f7ef88d76423a6c6af38a256010c0c82173aa0728310450d3023e1c80b9971d8",
+          "afterHash": "5d87ac6db9c6c82a729747f736c081c36c1dffc7c9bf167d6de1099552176318",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "queryAll",
+            "queryAllPartitioned"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Uses the reviewed read-only keyset helper; table writes, RPCs and protected cache semantics remain unchanged.",
+          "dataFlow": "Uses the reviewed read-only keyset helper; table writes, RPCs and protected cache semantics remain unchanged.",
+          "persistenceBehavior": "Schema-neutral read/cache behavior only; durable business semantics unchanged.",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Exact full-file hashes plus structural Provider semantics and negative guard cases.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        },
+        {
+          "file": "src/providers/cloud/supabaseProvider.ts",
+          "beforeHash": "bbcea213dd6564967ac4ce4eab216b1d89fe16f555a7721cc0b5eadedeeb4d95",
+          "afterHash": "639d47dccb652b9819c8e70075ac2b52beb1d56d0f11934c61539450d83ad3c2",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": [
+            "pullCoreProductData",
+            "cache generation invalidation"
+          ],
+          "changedInputs": "Immutable ERP2 v33 formal baseline plus the Owner-reviewed experimental patch.",
+          "changedOutputs": "Uses reviewed read-only keyset retrieval and invalidates page generations after committed provider mutations; WACA/CAS/Revision/Epoch/Realtime write boundaries remain unchanged.",
+          "dataFlow": "Uses reviewed read-only keyset retrieval and invalidates page generations after committed provider mutations; WACA/CAS/Revision/Epoch/Realtime write boundaries remain unchanged.",
+          "persistenceBehavior": "Schema-neutral read/cache behavior only; durable business semantics unchanged.",
+          "writePath": "No new Cloud write or RPC; existing write guards remain authoritative.",
+          "providerPath": "Exact full-file hashes plus structural Provider semantics and negative guard cases.",
+          "externalContract": "No Schema, RPC, RLS, ACL, Backup/Restore resource or serialized business contract change.",
+          "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
+        }
+      ]
     }
   ]
 }
