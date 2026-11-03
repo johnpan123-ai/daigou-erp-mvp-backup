@@ -9902,6 +9902,41 @@
           "schemaExpectation": "No product schema, migration or Ledger change."
         }
       ]
+    },
+    {
+      "id": "erp2-v33-nine-ui-hooks-lint-closure-v1",
+      "beforeHead": "c99bd8da5114116091815cd1dd2cdaaf1de4438c",
+      "reviewedHead": "6324c809b00bcf0ceb670a04f0d3f657072fc0fe",
+      "patchSha256": "dda20e531b91f47bae5c261ee2cc1b7aa651af6b5a50b29a6e675095de9cc687",
+      "requiredRegressions": ["guard", "sync", "outbound-provider-integration"],
+      "files": [
+        {
+          "file": "src/hooks/useMountedContentLoadState.ts",
+          "beforeHash": "4c5f68ed2c4bd43238fdd55d34d0a810f568beacc9fdef1ec835f05b85bf920b",
+          "afterHash": "f97e4632f6fad68a61ddf4107380c96b65f71cedae43892b8d487d8dfe81a902",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["useMountedContentLoadState cache option synchronization"],
+          "dataFlow": "Synchronizes the latest cache options after commit instead of mutating a ref during render; generation and mounted-response fences are unchanged.",
+          "persistenceBehavior": "In-memory page return cache only.",
+          "writePath": "No Provider, RPC or durable write change.",
+          "providerPath": "Cloud/Local scope and generation isolation remain unchanged.",
+          "externalContract": "Cold-load, background-refresh and stale-response semantics are preserved.",
+          "schemaExpectation": "No schema, migration or Ledger change."
+        },
+        {
+          "file": "src/pages/OutboundShipmentDetail.tsx",
+          "beforeHash": "f736cedf69d6b60aa4db52cb49469298b2473dbccb3aded9b554b1bdc9ad2614",
+          "afterHash": "4503d50ef29743941a0fb1c638d6b15d6c3d36fc8ff88cfe40fd37036ce41f0b",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["background refresh notice CSS delay", "outbound pool event handlers", "addPoolGroupItems"],
+          "dataFlow": "Moves the cosmetic 600 ms reveal to CSS and routes pool actions through direct event handlers while preserving the same selected item payload and save queue.",
+          "persistenceBehavior": "Existing outbound item save path and quantities only; no new persistence.",
+          "writePath": "Existing saveOutboundShipmentItems transaction remains authoritative.",
+          "providerPath": "No Provider, CAS, Realtime, Epoch, Journal or Restore change.",
+          "externalContract": "SKU, source identity, available quantity and group-add semantics remain unchanged.",
+          "schemaExpectation": "No schema, migration or Ledger change."
+        }
+      ]
     }
   ]
 }
