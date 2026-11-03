@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { ClosingDateCalendar } from '../components/ClosingDateCalendar';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { getBaseSku, calculateFinalMyacgDemand, calculateVariantDemandAndPurchased } from '../lib/db';
 import { dataProvider, StaleDataError } from '../providers/dataProvider';
@@ -522,6 +523,7 @@ export default function PurchaseManagement() {
   // and rules as Purchase Records level 1 (closing date = draft committed on blur / Enter; the other two save on change).
   // 官方結單日 / 發售月份 / 官網網址: same shared rule as level 1 (local draft; save once on Blur / Enter).
   const basicInfo = useProductGroupBasicInfoDrafts();
+  const [closingDateCalendarOpen, setClosingDateCalendarOpen] = useState(false);
   const [notFoundId, setNotFoundId] = useState<string | null>(null);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -2039,6 +2041,14 @@ export default function PurchaseManagement() {
     if (e.key === 'Enter') void basicInfo.commit(group, field, 'enter', handleUpdateGroupField);
     else if (e.key === 'Escape') { basicInfo.cancel(group.id, field); e.currentTarget.blur(); }
   };
+  // 官方結單日 calendar: a click anywhere on the field opens a small calendar under it. The text field
+  // keeps focus and stays typeable (YYYY/MM/DD shorthand, Enter, Esc, Blur unchanged); a picked day goes
+  // through the same draft + single commit as Enter. Nothing is filled in until a day is clicked.
+  const handleClosingDatePicked = (slashDate: string) => {
+    setClosingDateCalendarOpen(false);
+    basicInfo.change(group, 'closing_date', slashDate);
+    void basicInfo.commit(group, 'closing_date', 'enter', handleUpdateGroupField);
+  };
   const basicInfoProps = (field: BasicInfoField, baseStyle: React.CSSProperties) => {
     const error = basicInfo.errorOf(group.id, field);
     const saving = basicInfo.isSaving(group.id, field);
@@ -2116,9 +2126,19 @@ export default function PurchaseManagement() {
             <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '10px' }}>商品基本資訊</div>
             <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '10px 16px' }}>
               <label style={basicInfoLabel}>官方結單日
-                <input className="input" data-testid="purchase-group-closing-date" type="text" placeholder="YYYY/MM/DD"
-                  onChange={handleBasicInfoChange} onBlur={handleBasicInfoBlur} onKeyDown={handleBasicInfoKeyDown}
-                  {...basicInfoProps('closing_date', { ...basicInfoField, width: '140px' })} />
+                <span style={{ position: 'relative', display: 'inline-block' }}>
+                  <input className="input" data-testid="purchase-group-closing-date" type="text" placeholder="YYYY/MM/DD"
+                    aria-haspopup="dialog" aria-expanded={closingDateCalendarOpen}
+                    onChange={handleBasicInfoChange}
+                    onBlur={event => { setClosingDateCalendarOpen(false); handleBasicInfoBlur(event); }}
+                    onKeyDown={event => { if (event.key === 'Escape' || event.key === 'Enter' || event.key === 'Tab') setClosingDateCalendarOpen(false); handleBasicInfoKeyDown(event); }}
+                    onClick={() => setClosingDateCalendarOpen(true)}
+                    {...basicInfoProps('closing_date', { ...basicInfoField, width: '140px', cursor: 'pointer' })} />
+                  {closingDateCalendarOpen && (
+                    <ClosingDateCalendar value={basicInfo.valueOf(group, 'closing_date')} onPick={handleClosingDatePicked}
+                      onClose={() => setClosingDateCalendarOpen(false)} />
+                  )}
+                </span>
               </label>
               <label style={basicInfoLabel}>發售月份
                 <input className="input" data-testid="purchase-group-release-month" type="text" placeholder="例如 2027-02"
