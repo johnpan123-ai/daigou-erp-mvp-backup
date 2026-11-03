@@ -14,11 +14,13 @@ export const viewer='00000000-0000-4000-8000-000000000098';
 // tests append 078 once; nothing here is a production migration runner.
 export const R5_V32_MIGRATIONS=Object.freeze(CANONICAL_FRESH_INSTALL_V3.filter(f=>f!=='078_core_source_capacity_and_receiving.sql'));
 export async function isolatedDatabase({migrations=R5_V32_MIGRATIONS, safeupdateLibrary, postgrestBinary}={}) {
+  safeupdateLibrary ??= process.env.WACA_TEST_SAFEUPDATE_LIBRARY;
+  postgrestBinary ??= process.env.WACA_TEST_POSTGREST_BINARY;
   if(safeupdateLibrary !== undefined) assert.match(safeupdateLibrary,
-    /^\/tmp\/erp2-waca-21000-safeupdate\.[A-Za-z0-9]+\/safeupdate\.so$/u,
+    /^(?:\/tmp\/erp2-waca-21000-safeupdate\.[A-Za-z0-9]+|\/home\/[A-Za-z0-9._-]+\/\.local\/share\/erp2-test-tools\/safeupdate-104f78d27b607076b49f22927ba33828fd0a98a0)\/safeupdate\.so$/u,
     'Only the disposable, locally built safeupdate library is allowed');
   if(postgrestBinary !== undefined) assert.match(postgrestBinary,
-    /^\/tmp\/erp2-waca-074-postgrest\.[A-Za-z0-9]+\/postgrest$/u,
+    /^(?:\/tmp\/erp2-waca-074-postgrest\.[A-Za-z0-9]+|\/home\/[A-Za-z0-9._-]+\/\.local\/share\/erp2-test-tools\/postgrest-14\.18)\/postgrest$/u,
     'Only the official checksum-verified disposable PostgREST runtime is allowed');
   const base=new URL(process.env.WACA_ISOLATED_PG_URL||'invalid:');
   assert.equal(base.hostname,'127.0.0.1'); assert.equal(base.port,'55492');
