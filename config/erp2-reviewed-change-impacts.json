@@ -9759,6 +9759,127 @@
           "schemaExpectation": "ERP2 semantic Schema v33 remains unchanged."
         }
       ]
+    },
+    {
+      "id": "erp2-v33-nine-ui-sync-test-contract-v1",
+      "beforeHead": "afc729c08d0048e8f159fde3b434ba4c769329b8",
+      "reviewedHead": "34c401a8a7c1f4870c557a46a3ef3922676f0ef5",
+      "patchSha256": "6009933fd7d8aeece9214c75ae247051b5bd734a15617b0597201b1b721228b4",
+      "requiredRegressions": [
+        "guard",
+        "promotion",
+        "provider-guard",
+        "r5-core-provider-guard",
+        "context-guard",
+        "buyanime-first-import-provider-guard",
+        "sync"
+      ],
+      "files": [
+        {
+          "file": "tests/buyanime-first-import-provider-guard.mjs",
+          "beforeHash": "c608da22a8dafdfbedfdac722d3b22593cf439194e436be2c391f5ed0549b133",
+          "afterHash": "87638064cd10eedd0ed58f2e4afddb56e1c8fe5b72439989543268097d34c0ea",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["exact nine-UI Provider overlay composition cases"],
+          "dataFlow": "Composes the exact read-only nine-UI Provider overlay before the existing BuyAnime contract and retains all negative mutations.",
+          "persistenceBehavior": "Test only.",
+          "writePath": "No production request or write.",
+          "providerPath": "Reads immutable Git and local sources; arbitrary drift remains fail-closed.",
+          "externalContract": "Shortened waits, removed permission checks, relaxed offline handling and journal writer drift remain rejected.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/fixtures/buyanime-resume-provider-entry.ts",
+          "beforeHash": "d1f64cabc177e7186cd29f4d740ae9e34f2d8168c3586f9275f0a625838d1432",
+          "afterHash": "4c24b30b6ba55f9ab138b3affd962f1788f29aa0182b465cfe0ab3d7876df958",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["isolated PostgREST Content-Range transport"],
+          "dataFlow": "Forwards the isolated PostgREST Content-Range header so bounded keyset reads exercise the real pagination contract.",
+          "persistenceBehavior": "Disposable isolated fixture only.",
+          "writePath": "No production endpoint; existing isolated RPC counters remain unchanged.",
+          "providerPath": "Test transport only; Provider permission and journal behavior are unchanged.",
+          "externalContract": "Adds only optional Content-Range evidence to the isolated response shape.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/helpers/saveability-isolated.mjs",
+          "beforeHash": "b343c3bead04304bb0714d9f07174d12f4daf5c7053236e79005bc8e006d917d",
+          "afterHash": "7b2f952668ef826fb935748ac4667fb05280cdc654738ed0ef72e612d92dcf47",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["isolated PostgREST Content-Range capture"],
+          "dataFlow": "Returns the real isolated PostgREST Content-Range header to pagination fixtures without changing assertions or timeouts.",
+          "persistenceBehavior": "Disposable isolated database helper only.",
+          "writePath": "Production databases are never addressed.",
+          "providerPath": "No Provider or write-guard change.",
+          "externalContract": "Existing isolated database, UTC and safeupdate requirements remain intact.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/mounted-content-stability.mjs",
+          "beforeHash": "ca595cf595b8f70115c851df03262f70d2ded640a98d600c0cc3114b6b1264a5",
+          "afterHash": "6b43d214c146b2ebcae88b6348c19ff4fd70981de347691109483b45bf96a0a4",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["mounted outbound and purchase-list continuity assertions"],
+          "dataFlow": "Adds affected routes to the existing no-full-page-loading and stable-root assertions.",
+          "persistenceBehavior": "Browser regression only.",
+          "writePath": "No production write.",
+          "providerPath": "Existing held-read harness; no safety bypass.",
+          "externalContract": "Original cold-start and background-refresh assertions are retained.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/p02-1a-context-guard.mjs",
+          "beforeHash": "fc0b92f35704723e825d14b33213671a11fa1af60668e7c840a18e7331005bd3",
+          "afterHash": "b8ba1baf88aafea23b84862671499dbca1e534664f95ce57fd615356522686f0",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["nine-UI Context pin positive and negative cases"],
+          "dataFlow": "Pins the exact reviewed UI/cache/context blobs and rejects arbitrary mutations.",
+          "persistenceBehavior": "Guard test only.",
+          "writePath": "No request or write.",
+          "providerPath": "Existing Context and Provider boundaries remain fail-closed.",
+          "externalContract": "Unreviewed cache-scope, sync-presentation or page drift is rejected.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/p02-1a-provider-guard.mjs",
+          "beforeHash": "1179ecd5d8fdebd2982ad51464fd65d8f05e46157a9b1380588820677886c3e9",
+          "afterHash": "c94e17bfa5cfb29f5a0c4ecf3c62b48d516db394c9c53af7f2cf1df9bae4b63f",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["nine-UI Provider restoration and negative cases"],
+          "dataFlow": "Restores the exact read-only keyset/cache overlay before historical WACA, CAS, Revision, Epoch and Realtime checks.",
+          "persistenceBehavior": "Guard test only.",
+          "writePath": "No production request or write.",
+          "providerPath": "RPC additions, direct writes, permission removal and arbitrary Provider member drift remain rejected.",
+          "externalContract": "The historical Provider pin is composed, not replaced or weakened.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/promotion-sync-state.mjs",
+          "beforeHash": "7298ca5943e56b7315a3d3508e4f5698a6543e29cf08d8b1703706d09abb60b4",
+          "afterHash": "fc4922114d1c0d8d2d43fbb3116e57d642e87a00060f4e7bdc4d8c1d2a625fe5",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["normal-sync presentation and write-block assertions"],
+          "dataFlow": "Verifies normal sync hides only the orange banner while writeAllowed remains false; offline, Restore and unproven states retain warnings.",
+          "persistenceBehavior": "Presentation regression only.",
+          "writePath": "Explicitly asserts the Cloud write guard still rejects during sync.",
+          "providerPath": "Consumes existing connectivity state without changing it.",
+          "externalContract": "No safety condition is reclassified as writable.",
+          "schemaExpectation": "No schema change."
+        },
+        {
+          "file": "tests/r5-core-provider-guard.mjs",
+          "beforeHash": "90d0eb8ce474688208eeb9ef4ba8e59b0167b0f64d16b34e2c162847aa93d1d2",
+          "afterHash": "c24f79584e1e7b6fac56066651c7f3e0020f3214046e827f57571378b33394bc",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["R5 Provider overlay composition"],
+          "dataFlow": "Removes the exact read-only nine-UI overlay before applying the immutable R5 Provider comparison.",
+          "persistenceBehavior": "Guard test only.",
+          "writePath": "No production request or write.",
+          "providerPath": "All seven historical bypass mutations remain rejected.",
+          "externalContract": "Legacy R5 Provider pins remain unchanged.",
+          "schemaExpectation": "No schema change."
+        }
+      ]
     }
   ]
 }
