@@ -7,7 +7,7 @@ import type { BuyAnimeImportRecord } from '../../src/providers/cloud/buyAnimeImp
 
 declare global {
   interface Window {
-    __BUYANIME_ISOLATED_HTTP__: (request: { path: string; method: string; body?: unknown; prefer?: string; accept?: string }) => Promise<{status:number;data:unknown;contentRange?:string}>;
+    __BUYANIME_ISOLATED_HTTP__: (request: { path: string; method: string; body?: unknown; prefer?: string; accept?: string }) => Promise<{status:number;data:unknown}>;
     __BUYANIME_RESUME_PROVIDER__: {
       setup: (actor: string) => void;
       parse: (base64: string) => ReturnType<typeof parseMyAcgFile>;
@@ -72,8 +72,7 @@ window.__BUYANIME_RESUME_PROVIDER__ = {
           wacaLost=false;throw new TypeError('Failed to fetch: isolated WACA response lost after commit');
         }
         return new Response(result.status===204?null:JSON.stringify(result.data),{
-          status:result.status,headers:{'content-type':'application/json',
-            ...(result.contentRange?{'content-range':result.contentRange}:{})},
+          status:result.status,headers:{'content-type':'application/json'},
         });
       } },
     });
