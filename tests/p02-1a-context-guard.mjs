@@ -167,7 +167,13 @@ const policyProbe = async (name, mutated, pattern) => {
 await presentationProbe('probe sanity (unchanged)', pres, null);
 await presentationProbe('unproven view writable even if someone re-pins it', mutate(pres, "  status: 'cached', label: REALTIME_UNPROVEN_LABEL, tone: 'warning', writeAllowed: false,", "  status: 'cached', label: REALTIME_UNPROVEN_LABEL, tone: 'warning', writeAllowed: true,"), /shows an unproven state as synced or writable/u);
 await presentationProbe('stale-cache shown as synced even if re-pinned', mutate(pres, '  if (fresh && !refreshFailed) {', "  if ((fresh || connectivity.readStatus === 'stale-cache') && !refreshFailed) {"), /shows an unproven state as synced or writable/u);
-await presentationProbe('unproven read-only state hidden even if re-pinned', mutate(pres, '  if (realtime?.unproven && !fresh) return realtimeUnprovenView();\n', ''), /hides the unproven read-only state/u);
+await presentationProbe('unproven read-only state hidden even if re-pinned', mutate(pres, '  if (realtime?.unproven && !fresh) return realtimeUnprovenView();', ''), /hides the unproven read-only state/u);
+await presentationProbe('normal sync loses its paused-write explanation even if re-pinned', mutate(pres,
+  '        detail: `目前顯示上次快取，資料可能不是最新。${NORMAL_SYNC_DETAIL}`,',
+  "        detail: '資料同步中',"), /cached sync presentation must hide the banner while keeping writes paused and explained/u);
+await presentationProbe('offline sync problem banner hidden even if re-pinned', mutate(pres,
+  "        banner: abnormal ? '雲端背景同步中｜目前顯示上次快取；寫入已暫停' : null,",
+  '        banner: null,'), /offline sync problem banner or write pause missing/u);
 await policyProbe('probe sanity (unchanged)', pol, null);
 await policyProbe('policy gains network I/O', `${pol}\nexport const leak = () => fetch('https://x.invalid');\n`, /network\/persistence I\/O/u);
 await policyProbe('policy gains an import', `import { markCloudReadFresh } from '../providers/cloud/cloudConnectivity';\n${pol}`, /recovery policy dependency changed/u);
@@ -181,7 +187,7 @@ rejects('A3-limit banner colour change now needs a review (banner element is pin
 accepts('A4 unrelated effect added to the boundary', CTX, mutate(ctx, '  const isEditing = useCallback(', "  useEffect(() => { document.title = document.title || 'ERP'; }, []);\n  const isEditing = useCallback("));
 accepts('A5 refresh message text changed', CTX, mutate(ctx, "        let message = '已更新至最新資料';", "        let message = '已更新為最新資料';"));
 accepts('A6 unrelated top-level helper added', CTX, `${ctx}\nexport const formatSyncTime = (at: number) => new Date(at).toLocaleTimeString();\n`);
-accepts('A7 presentation type declaration extended', PRES, mutate(pres, '  restorePending?: boolean;\n}', '  restorePending?: boolean;\n  /** reviewed: optional trace id */\n  traceId?: string;\n}'));
+accepts('A7 presentation type declaration extended', PRES, mutate(pres, '  restorePending?: boolean;', '  restorePending?: boolean;\n  /** reviewed: optional trace id */\n  traceId?: string;'));
 accepts('A8 comments in the policy module', POL, `// note for maintainers\n${pol}\n// end\n`);
 accepts('A9 conflict close-button label changed', CTX, mutate(ctx, 'aria-label="關閉衝突提示"', 'aria-label="關閉資料衝突提示"'));
 accepts('A11 context value type extended (type-only)', CTX, mutate(ctx, '  connectivity: CloudConnectivitySnapshot;\n  /** C1f', '  connectivity: CloudConnectivitySnapshot;\n  /** reviewed: optional */\n  syncPresentationNote?: string;\n  /** C1f'));

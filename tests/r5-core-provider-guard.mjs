@@ -5,13 +5,14 @@ import {restoreReviewedR5CoreProvider} from '../scripts/r5-core-provider-review.
 import {
   assertReviewedProviderContract,
   restoreReviewedBuyAnimeV33ProviderPatch,
+  restoreReviewedNineUiProviderPatch,
 } from '../scripts/post-adoption-descendant.mjs';
 const data='src/providers/dataProvider.ts', cloud='src/providers/cloud/supabaseProvider.ts';
 const read=f=>readFileSync(f,'utf8').replace(/\r\n?/g,'\n');
 const base=f=>execFileSync('git',['show','23a02377044c7cf56a41aabe1ddce79fc0535df5:'+f],{encoding:'utf8'}).replace(/\r\n?/g,'\n');
 const adopted=f=>execFileSync('git',['show','5f73b2b02d9008dc863cf92978e6ea8e40a850ec:'+f],{encoding:'utf8'}).replace(/\r\n?/g,'\n');
 for(const file of [data,cloud]){
-  const reviewedSource=restoreReviewedBuyAnimeV33ProviderPatch(file,read(file));
+  const reviewedSource=restoreReviewedBuyAnimeV33ProviderPatch(file,restoreReviewedNineUiProviderPatch(file,read(file)));
   assertReviewedProviderContract(file,adopted(file),reviewedSource);
   // The exact overlay reverses only this task's additions, not any old control.
   const restored=restoreReviewedR5CoreProvider(file,reviewedSource);

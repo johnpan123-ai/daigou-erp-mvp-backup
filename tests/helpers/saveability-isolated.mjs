@@ -91,7 +91,8 @@ export async function isolatedDatabase({migrations=R5_V32_MIGRATIONS, safeupdate
       ...(sub?{authorization:'Bearer '+token(sub)}:{}),...(body===undefined?{}:{'content-type':'application/json'}),
     },body:body===undefined?undefined:JSON.stringify(body),signal:options.signal});
     const text=await response.text();
-    return {status:response.status,data:text?JSON.parse(text):null};
+    const contentRange=response.headers.get('content-range');
+    return {status:response.status,data:text?JSON.parse(text):null,...(contentRange?{contentRange}:{})};
   };
   const stopPostgrest=async()=>{
     if(!server)return;

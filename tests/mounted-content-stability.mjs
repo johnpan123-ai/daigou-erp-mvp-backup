@@ -157,10 +157,15 @@ try {
       const scrollBefore = await page.evaluate(() => window.scrollY);
       assert.equal(await root.isVisible(), true);
       assert.equal(await page.getByText('載入中...', { exact: true }).count(), 0);
+      const backgroundRefreshNotice = page.getByText('同步最新資料中…', { exact: true });
+      await page.waitForTimeout(300);
+      assert.equal(await backgroundRefreshNotice.isVisible(), false, 'Short background refresh flashed its status notice');
+      await backgroundRefreshNotice.waitFor({ state: 'visible' });
       await page.evaluate(async () => {
         window.__P0_REACT_HARNESS__.releasePageRead();
         await window.__OUTBOUND_ECHO__;
       });
+      await backgroundRefreshNotice.waitFor({ state: 'hidden' });
       assert.equal(await page.evaluate(() => window.scrollY), scrollBefore);
       assert.equal(await page.evaluate(() => document.querySelector('[data-testid="outbound-shipment-detail-root"]') === window.__OUTBOUND_ROOT__), true);
 
