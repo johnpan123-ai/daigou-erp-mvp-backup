@@ -1,4 +1,5 @@
-export const MYACG_MEMBER_CENTER_URL = 'https://www.myacg.com.tw/member_center_v2.php';
+/** 出庫管理商品群組的藍色外連按鈕：買動漫會員中心的指定清單頁（只用於此按鈕）。 */
+export const MYACG_MEMBER_CENTER_URL = 'https://www.myacg.com.tw/member_center_v2.php?e_id=1&list_type=3';
 
 type ClipboardWriter = (text: string) => Promise<void>;
 type ExternalPageOpener = (url: string, target: string, features: string) => unknown;

@@ -82,6 +82,7 @@
   }
 })();
 
+import { bumpViewSnapshotGeneration } from '../../lib/viewSnapshotGeneration';
 import { supabase, supabaseEnvironment } from './supabaseClient';
 import { beginCatalogCommitReadFence, awaitCatalogCommitReadFence } from './catalogCommitReadFence';
 import { recordBuyAnimeCatalogEvidence } from '../../diagnostics/buyAnimeProductionTrace';
@@ -141,6 +142,7 @@ import { getProviderMode } from '../providerMode';
 import { awaitRealtimeReadiness, isRealtimeReadyGeneration } from './cloudRealtimeReadiness';
 import { beginCloudSnapshot, commitCloudSnapshot, endCloudSnapshot } from './cloudCacheWriteFence';
 import { finishCloudSyncRun, noteCloudSyncEvent, recordCloudSyncPage, startCloudSyncRun } from './cloudSyncObservability';
+import { fetchPartitionedKeyset } from './cloudKeysetParallel';
 import { CLOUD_TABLE_RESOURCE } from './cloudSyncDomain';
 import {
   PURCHASE_BATCH_TRANSACTION_RPC,
@@ -380,38 +382,49 @@ const fetchAll = async <T>(
 // are converged by Realtime re-reads (or the authoritative catch-up).
 const KEYSET_PAGE_SIZE = 1000;
 type CloudSyncRunHandle = ReturnType<typeof startCloudSyncRun>;
+// Keyset reads are partitioned (see cloudKeysetParallel): identical rows and key
+// order, but tables larger than one page are fetched as parallel key ranges.
+// `build` returns a fresh filtered query (no order/limit); `beforeRequest` runs
+// before EVERY request (e.g. the Catalog commit read fence).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type KeysetQueryBuilder = () => any;
 const fetchAllKeyset = async <T>(
   keyColumn: string,
-  fetchPage: (afterKey: string | null, limit: number) => Promise<{ data: T[] | null; error: any }>,
+  build: KeysetQueryBuilder,
   run: CloudSyncRunHandle | null,
+  beforeRequest?: () => Promise<void>,
 ): Promise<T[]> => {
-  const rows: T[] = [];
-  const seen = new Set<string>();
-  let afterKey: string | null = null;
-  while (true) {
-    const { data, error } = await fetchPage(afterKey, KEYSET_PAGE_SIZE);
-    if (error) {
-      markCloudRequestFailed(error);
-      throw error;
+  const execute = async <R>(query: PromiseLike<{ data: R[] | null; error: unknown; count?: number | null }>) => {
+    const result = await query;
+    if (result.error) {
+      markCloudRequestFailed(result.error);
+      throw result.error;
     }
     markCloudReachable();
-    const page = data || [];
-    recordCloudSyncPage(run, page);
-    for (const item of page) {
-      const key = (item as Record<string, unknown>)[keyColumn];
-      if (typeof key === 'string' && key) {
-        if (seen.has(key)) continue;
-        seen.add(key);
-      }
-      rows.push(item);
-    }
-    if (page.length < KEYSET_PAGE_SIZE) return rows;
-    const lastKey = (page[page.length - 1] as Record<string, unknown>)[keyColumn];
-    if (typeof lastKey !== 'string' || !lastKey || lastKey === afterKey) {
-      throw new Error(`CLOUD_KEYSET_CURSOR_NOT_ADVANCING:${keyColumn}`);
-    }
-    afterKey = lastKey;
-  }
+    return result;
+  };
+  return fetchPartitionedKeyset<T>({
+    keyColumn,
+    page: async request => {
+      await beforeRequest?.();
+      let query = request.count ? build().select('*', { count: 'exact' }) : build().select('*');
+      if (request.gt) query = query.gt(keyColumn, request.gt);
+      if (request.gte) query = query.gte(keyColumn, request.gte);
+      if (request.lt) query = query.lt(keyColumn, request.lt);
+      const result = await execute<T>(query.order(keyColumn).limit(request.limit));
+      const rows = result.data || [];
+      recordCloudSyncPage(run, rows);
+      return { rows, count: result.count ?? null };
+    },
+    probe: async (afterKey, offset) => {
+      await beforeRequest?.();
+      const result = await execute<Record<string, unknown>>(build().select(keyColumn)
+        .gt(keyColumn, afterKey).order(keyColumn).range(offset, offset));
+      recordCloudSyncPage(run, []);
+      const key = result.data?.[0]?.[keyColumn];
+      return typeof key === 'string' && key ? key : null;
+    },
+  });
 };
 
 /** Bounded wait for Global Sync Fresh before a BuyAnime import dispatches (nothing is sent meanwhile). */
@@ -482,7 +495,7 @@ export class SupabaseProvider implements IDataProvider {
     if (updateAutoQuantity) {
       // The server has committed both ledger and quantity; invalidate this
       // client cache so the next read is not mistaken for authoritative data.
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
       this.pullPromise = null;
     }
     return revision;
@@ -505,7 +518,7 @@ export class SupabaseProvider implements IDataProvider {
       throw new Error('WACA 雲端寫入結果無法確認，請先重新讀取訂單與數量。');
     }
     markCloudReachable();
-    this.isPulled = false;
+    this.isPulled = false; bumpViewSnapshotGeneration();
     this.pullPromise = null;
     return revision;
   }
@@ -531,7 +544,7 @@ export class SupabaseProvider implements IDataProvider {
     const result = data as WacaRecognitionResult;
     if (!result || result.requestId !== request.requestId || !['COMMITTED', 'NO_CHANGE'].includes(result.status)
       || result.revision !== request.revision + (result.status === 'COMMITTED' ? 1 : 0)) throw new Error('WACA_RECOGNITION_COMMIT_UNKNOWN');
-    this.isPulled = false; this.pullPromise = null;
+    this.isPulled = false; bumpViewSnapshotGeneration(); this.pullPromise = null;
     markCloudReachable();
     return result;
   }
@@ -1150,7 +1163,7 @@ export class SupabaseProvider implements IDataProvider {
     }
 
     if (shouldForce) {
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
       // Force must not fork a second full pull while the first is still active.
     }
     if (this.isPulled) return;
@@ -1190,11 +1203,12 @@ export class SupabaseProvider implements IDataProvider {
           const readStartedAt = Date.now();
 
           // 1. 單一並行批次、Keyset 分頁、伺服器端排除已軟刪除資料
-          const keysetById = (table: string, activeOnly = true) => fetchAllKeyset<any>('id', async (afterKey, limit) => {
-            let query = supabase.from(table).select('*');
-            if (activeOnly) query = query.is('deleted_at', null);
-            if (afterKey !== null) query = query.gt('id', afterKey);
-            return query.order('id').limit(limit);
+          const keysetById = (table: string, activeOnly = true) => fetchAllKeyset<any>('id', () => {
+            const query = supabase.from(table);
+            return { select: (columns: string, options?: object) => {
+              const selected = query.select(columns, options);
+              return activeOnly ? selected.is('deleted_at', null) : selected;
+            } };
           }, syncRun);
           const [groups, categories, variants, batches, batchItems, po, poi, jp, jpi, bcData, osData, osiData, salesOrderRows, salesOrderItemRows, inventoryRows, dashboardImageRows] = await Promise.all([
             keysetById('product_groups'),
@@ -1213,13 +1227,12 @@ export class SupabaseProvider implements IDataProvider {
             keysetById('sales_order_items'),
             // inventory_key is the table's unique key: keyset on it keeps the existing cache order.
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            fetchAllKeyset<any>('inventory_key', async (afterKey, limit) => {
+            fetchAllKeyset<any>('inventory_key', () => ({
+              select: (columns: string, options?: object) => supabase.from('inventory_items').select(columns, options).is('deleted_at', null),
+            }), syncRun, async () => {
               await awaitCatalogCommitReadFence('provider-bootstrap');
-              recordBuyAnimeCatalogEvidence('inventory-read',{caller:'provider-bootstrap',mode:'page',from:-1,to:limit});
-              let query = supabase.from('inventory_items').select('*').is('deleted_at', null);
-              if (afterKey !== null) query = query.gt('inventory_key', afterKey);
-              return query.order('inventory_key').limit(limit);
-            }, syncRun),
+              recordBuyAnimeCatalogEvidence('inventory-read',{caller:'provider-bootstrap',mode:'page',from:-1,to:KEYSET_PAGE_SIZE});
+            }),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             fetchAll<any>(async (from, to) => supabase.from('dashboard_category_images').select('category_key, image_url, storage_path').is('deleted_at', null).order('category_key').range(from, to)),
           ]);
@@ -1473,6 +1486,7 @@ export class SupabaseProvider implements IDataProvider {
             },
             onCommitted: () => {
               this.authoritativeCacheGeneration += 1;
+              bumpViewSnapshotGeneration();
               this.lastCoreSnapshotReadiness = {
                 cacheGeneration: this.authoritativeCacheGeneration,
                 realtimeGeneration: readiness.state === 'ready' ? readiness.generation : null,
@@ -1526,7 +1540,7 @@ export class SupabaseProvider implements IDataProvider {
           markCloudReadFailed(err, cachedRows.some(rows => rows.length > 0));
           if (isSchemaMissingError(err)) {
             alert(`雲端資料庫結構缺失：${err.message || JSON.stringify(err)}。同步流程已中斷，請聯絡管理員匯入 SQL Migration 補建表格！`);
-            this.isPulled = false;
+            this.isPulled = false; bumpViewSnapshotGeneration();
             throw err;
           }
           console.log('[Sync Pull] core failed: keep local cache');
@@ -1567,7 +1581,7 @@ export class SupabaseProvider implements IDataProvider {
       ]);
       if (this.authoritativeCacheGeneration > startingAuthoritativeGeneration) return;
       markCloudReadDeferred(cachedRows.some(rows => rows.length > 0));
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
     });
 
     return this.pullPromise;
@@ -2091,7 +2105,7 @@ export class SupabaseProvider implements IDataProvider {
     if (status.status !== 'online' || !['fresh-online','fresh-empty'].includes(status.readStatus)) {
       // Never promote a partial SELECT to global authority or bypass offline
       // protection. Only a real completed bootstrap may restore write readiness.
-      this.isPulled = false;
+      this.isPulled = false; bumpViewSnapshotGeneration();
       if (status.authoritativeReadPending && this.corePullCompletionPromise)
         await this.corePullCompletionPromise.catch(() => undefined);
       this.pullPromise = null;

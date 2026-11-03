@@ -22,7 +22,9 @@ import { useViewport } from '../contexts/ViewportContext';
 import { getBundleComponentDisplay, getBundleComponentShortLabel } from '../lib/bundleComponentDisplay';
 import * as XLSX from 'xlsx';
 import { useCloudResourceSync } from '../contexts/CloudRealtimeSyncContext';
-import { useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
+import { dropMountedContentCache, patchMountedContentCache, useMountedContentLoadState } from '../hooks/useMountedContentLoadState';
+import { OUTBOUND_LIST_CACHE_KEY, type OutboundListRead } from './outboundListCache';
+import { useViewCacheScope } from '../hooks/useViewCacheScope';
 import {
   copyOutboundGroupNameToClipboard,
   copyOutboundGroupNameAndOpenMyacg,
@@ -110,26 +112,51 @@ interface ReceivedSkuDisplayRow {
   sourceItems: OutboundShipmentItem[];
 }
 
+const OUTBOUND_DETAIL_CACHE_KEY = 'outbound-shipment-detail';
+const BACKGROUND_REFRESH_NOTICE_DELAY_MS = 600;
+type OutboundDetailRead = [OutboundShipment[], OutboundShipmentItem[], JapanPackage[], JapanPackageItem[], InventoryItem[], ProductGroup[],
+  ProductVariant[], ProductCategory[], PrivateOrderItem[], PurchaseBatchItem[], SalesOrderItem[], BundleComponent[]];
+
+/** The page state for one shipment id, derived from a full read (fresh or the return cache). */
+const deriveOutboundDetail = (value: OutboundDetailRead, id: string | undefined) => {
+  const [shipments, items, jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems] = value;
+  const activeShipmentIds = new Set(shipments.map(s => s.id));
+  return {
+    items,
+    allShipmentItems: items.filter(item => activeShipmentIds.has(item.outbound_shipment_id)),
+    jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems,
+    shipment: shipments.find(s => s.id === id) || null,
+    currentItems: items.filter(i => i.outbound_shipment_id === id),
+  };
+};
+
 export default function OutboundShipmentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const { isMobile } = useViewport();
+  // Return cache: the last full read (not per id); the shipment is re-derived for this id.
+  const viewCacheScope = useViewCacheScope();
+  const { cached, isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState<OutboundDetailRead>({
+    cacheKey: OUTBOUND_DETAIL_CACHE_KEY, scope: viewCacheScope,
+    // Only when the cached read contains this shipment (a new or unknown id cold-loads).
+    accept: value => (value as OutboundDetailRead)[0].some(row => row.id === id),
+  });
+  const [seed] = useState(() => (cached ? deriveOutboundDetail(cached, id) : null));
 
-  const [shipment, setShipment] = useState<OutboundShipment | null>(null);
-  const [selectedItems, setSelectedItems] = useState<OutboundShipmentItem[]>([]);
-  const [allShipmentItems, setAllShipmentItems] = useState<OutboundShipmentItem[]>([]);
-  const [japanPackages, setJapanPackages] = useState<JapanPackage[]>([]);
-  const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>([]);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
-  const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
-  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
-  const [productCategories, setProductCategories] = useState<ProductCategory[]>([]);
-  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
-  const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>([]);
-  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
-  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>([]);
-  const { isInitialLoading, isRefreshing, runLoad } = useMountedContentLoadState();
+  const [shipment, setShipment] = useState<OutboundShipment | null>(() => seed?.shipment ?? null);
+  const [selectedItems, setSelectedItems] = useState<OutboundShipmentItem[]>(() => seed?.currentItems ?? []);
+  const [allShipmentItems, setAllShipmentItems] = useState<OutboundShipmentItem[]>(() => seed?.allShipmentItems ?? []);
+  const [japanPackages, setJapanPackages] = useState<JapanPackage[]>(() => seed?.jp ?? []);
+  const [japanPackageItems, setJapanPackageItems] = useState<JapanPackageItem[]>(() => seed?.jpi ?? []);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(() => seed?.inv ?? []);
+  const [productGroups, setProductGroups] = useState<ProductGroup[]>(() => seed?.groups ?? []);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>(() => seed?.variants ?? []);
+  const [productCategories, setProductCategories] = useState<ProductCategory[]>(() => seed?.categories ?? []);
+  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>(() => seed?.privateItems ?? []);
+  const [purchaseBatchItems, setPurchaseBatchItems] = useState<PurchaseBatchItem[]>(() => seed?.batchItems ?? []);
+  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>(() => seed?.salesItems ?? []);
+  const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>(() => seed?.bundleItems ?? []);
   const [poolSearch, setPoolSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [collapsedSelectedGroups, setCollapsedSelectedGroups] = useState<Set<string>>(new Set());
@@ -152,10 +179,11 @@ export default function OutboundShipmentDetail() {
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
   const [itemSaveError, setItemSaveError] = useState<string | null>(null);
   const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
+  const [showBackgroundRefreshNotice, setShowBackgroundRefreshNotice] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState<'idle' | 'submitting' | 'unknown' | 'sync-pending'>('idle');
   const deleteInFlightRef = useRef(false);
-  const selectedItemsRef = useRef<OutboundShipmentItem[]>([]);
-  const allShipmentItemsRef = useRef<OutboundShipmentItem[]>([]);
+  const selectedItemsRef = useRef<OutboundShipmentItem[]>(seed?.currentItems ?? []);
+  const allShipmentItemsRef = useRef<OutboundShipmentItem[]>(seed?.items ?? []);
   const itemSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const latestQueuedSaveRef = useRef(0);
   const pendingItemSaveCountRef = useRef(0);
@@ -169,13 +197,26 @@ export default function OutboundShipmentDetail() {
     quantity: '1'
   });
 
+  useEffect(() => {
+    if (pendingItemSaveCount !== 0 || !isRefreshing) {
+      setShowBackgroundRefreshNotice(false);
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setShowBackgroundRefreshNotice(true),
+      BACKGROUND_REFRESH_NOTICE_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isRefreshing, pendingItemSaveCount]);
+
   // Header form
-  const [formTitle, setFormTitle] = useState('');
-  const [formCarrier, setFormCarrier] = useState('');
-  const [formTracking, setFormTracking] = useState('');
-  const [formWeight, setFormWeight] = useState('');
-  const [formCost, setFormCost] = useState('');
-  const [formNote, setFormNote] = useState('');
+  const [formTitle, setFormTitle] = useState(() => seed?.shipment?.title || '');
+  const [formCarrier, setFormCarrier] = useState(() => seed?.shipment?.carrier || '');
+  const [formTracking, setFormTracking] = useState(() => seed?.shipment?.tracking_number || '');
+  const [formWeight, setFormWeight] = useState(() => seed?.shipment?.weight_kg?.toString() || '');
+  const [formCost, setFormCost] = useState(() => seed?.shipment?.shipping_cost?.toString() || '');
+  const [formNote, setFormNote] = useState(() => seed?.shipment?.note || '');
 
   const loadData = useCallback(async () => {
     await runLoad(async () => Promise.all([
@@ -191,26 +232,25 @@ export default function OutboundShipmentDetail() {
         dataProvider.getPurchaseBatchItems(),
         dataProvider.getSalesOrderItems(),
         dataProvider.getBundleComponents(),
-      ]), ([shipments, items, jp, jpi, inv, groups, variants, categories, privateItems, batchItems, salesItems, bundleItems]) => {
-      allShipmentItemsRef.current = items;
-      const activeShipmentIds = new Set(shipments.map(s => s.id));
-      setAllShipmentItems(items.filter(item => activeShipmentIds.has(item.outbound_shipment_id)));
-      setJapanPackages(jp);
-      setJapanPackageItems(jpi);
-      setInventoryItems(inv);
-      setProductGroups(groups);
-      setProductVariants(variants);
-      setProductCategories(categories);
-      setPrivateOrderItems(privateItems);
-      setPurchaseBatchItems(batchItems);
-      setSalesOrderItems(salesItems);
-      setBundleComponents(bundleItems);
+      ]) as Promise<OutboundDetailRead>, value => {
+      const next = deriveOutboundDetail(value, id);
+      allShipmentItemsRef.current = next.items;
+      setAllShipmentItems(next.allShipmentItems);
+      setJapanPackages(next.jp);
+      setJapanPackageItems(next.jpi);
+      setInventoryItems(next.inv);
+      setProductGroups(next.groups);
+      setProductVariants(next.variants);
+      setProductCategories(next.categories);
+      setPrivateOrderItems(next.privateItems);
+      setPurchaseBatchItems(next.batchItems);
+      setSalesOrderItems(next.salesItems);
+      setBundleComponents(next.bundleItems);
 
-      const current = shipments.find(s => s.id === id);
-      const currentItems = items.filter(i => i.outbound_shipment_id === id);
-      setShipment(current || null);
-      selectedItemsRef.current = currentItems;
-      setSelectedItems(currentItems);
+      const current = next.shipment;
+      setShipment(current);
+      selectedItemsRef.current = next.currentItems;
+      setSelectedItems(next.currentItems);
 
       if (current) {
         setFormTitle(current.title);
@@ -251,6 +291,20 @@ export default function OutboundShipmentDetail() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // Keep the return caches (this page and the list) in step with this shipment's committed
+  // state, so a later remount never flashes pre-edit header/lines before its refresh.
+  useEffect(() => {
+    if (isInitialLoading || !id || !shipment || shipment.id !== id) return;
+    const replaceShipment = (rows: OutboundShipment[]) => rows.map(row => (row.id === id ? shipment : row));
+    const replaceItems = (rows: OutboundShipmentItem[]) => [...rows.filter(row => row.outbound_shipment_id !== id), ...selectedItems];
+    patchMountedContentCache<OutboundDetailRead>(OUTBOUND_DETAIL_CACHE_KEY, viewCacheScope, value => {
+      const next = [...value] as OutboundDetailRead; next[0] = replaceShipment(value[0]); next[1] = replaceItems(value[1]); return next;
+    });
+    patchMountedContentCache<OutboundListRead>(OUTBOUND_LIST_CACHE_KEY, viewCacheScope, value => {
+      const next = [...value] as OutboundListRead; next[0] = replaceShipment(value[0]); next[1] = replaceItems(value[1]); return next;
+    });
+  }, [id, isInitialLoading, shipment, selectedItems, viewCacheScope]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -911,6 +965,8 @@ export default function OutboundShipmentDetail() {
     deleteInFlightRef.current = true;
     setDeleteStatus('submitting');
     try {
+      // Whatever the outcome, neither page may repaint this shipment from a cached read.
+      dropMountedContentCache(OUTBOUND_DETAIL_CACHE_KEY); dropMountedContentCache(OUTBOUND_LIST_CACHE_KEY);
       const result = await dataProvider.deleteOutboundShipmentTransaction(command);
       outboundShipmentDeleteIntentCoordinator.complete(command);
       if (result.syncPending) {
@@ -1475,14 +1531,14 @@ export default function OutboundShipmentDetail() {
             data-testid="outbound-background-status-slot"
             role="status"
             aria-live="polite"
-            aria-hidden={pendingItemSaveCount === 0 && isRefreshing ? undefined : true}
+            aria-hidden={showBackgroundRefreshNotice ? undefined : true}
             style={{
               flex: '0 0 132px', height: 18, lineHeight: '18px', color: '#64748b', fontWeight: 600,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              visibility: pendingItemSaveCount === 0 && isRefreshing ? 'visible' : 'hidden',
+              visibility: showBackgroundRefreshNotice ? 'visible' : 'hidden',
             }}
           >
-            {pendingItemSaveCount === 0 && isRefreshing ? '同步最新資料中…' : '\u00a0'}
+            {showBackgroundRefreshNotice ? '同步最新資料中…' : '\u00a0'}
           </span>
           {deleteStatus === 'unknown' && (
             <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>

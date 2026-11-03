@@ -11,7 +11,8 @@ import type { ProductGroup, ProductVariant, ProductCategory, PurchaseBatch, Purc
 import { Receipt, Search, Trash2, Calendar, Copy, Check, ExternalLink, AlertTriangle, CircleDollarSign } from 'lucide-react';
 import { EmptyState } from '../components/empty/EmptyState';
 import { PageHeader, PageShell } from '../components/layout/PageHeader';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useNavigationType } from 'react-router-dom';
+import { getViewSnapshotGeneration } from '../lib/viewSnapshotGeneration';
 import { productGroupDisplayName, purchaseRecordGroupIds, purchaseRecordsGroupScope } from '../lib/productGroupDisplayName';
 import { useViewport } from '../contexts/ViewportContext';
 import { useResizableColumns } from '../hooks/useResizableColumns';
@@ -44,6 +45,7 @@ import {
   fetchReadonlyCatalogText,
 } from '../lib/readonlyCatalogApi';
 import { getProviderMode } from '../providers/providerMode';
+import { useAuth } from '../auth/authContext';
 import { purchaseRecordsWacaQuantity } from '../waca/reconciliation';
 import { readNextRawCollections } from '../lib/nextRawDbIntegrityProbe';
 import {
@@ -247,10 +249,11 @@ const IdentityShadowBlock = ({
 );
 
 
-const ScrollWrapper = ({ children }: { children: React.ReactNode; isMobile: boolean }) => {
+const ScrollWrapper = ({ children, scrollId }: { children: React.ReactNode; isMobile: boolean; scrollId?: string }) => {
   return (
     <div
       className="mobile-scroll-wrapper"
+      data-purchase-records-scroll={scrollId}
       style={{
         width: '100%',
         overflowX: 'auto',
@@ -308,22 +311,61 @@ const parseReleaseYm = (raw: string | undefined | null): { tier: 0 | 1 | 2; ym: 
   return { tier: 2, ym: 0 };
 };
 
+/**
+ * Last list data this page rendered, kept in module memory (same tab, same session) so a
+ * route return (level 2 -> level 1) can repaint the previous screen immediately instead of
+ * blanking behind the full-page loader while the IndexedDB preview is read again. It is only
+ * a preview: the page still marks itself as syncing and the normal cache + provider load runs
+ * on every mount and replaces it. Scoped by provider mode and signed-in user.
+ */
+type PurchaseRecordsViewSnapshot = {
+  scope: string;
+  generation: number;
+  wacaMeta: ProductGroup | null;
+  groups: ProductGroup[]; variants: ProductVariant[]; categories: ProductCategory[];
+  batches: PurchaseBatch[]; batchItems: PurchaseBatchItem[]; privateOrders: PrivateOrder[];
+  privateOrderItems: PrivateOrderItem[]; inventory: InventoryItem[]; salesOrderItems: SalesOrderItem[];
+};
+let lastPurchaseRecordsView: PurchaseRecordsViewSnapshot | null = null;
+
+/** Scroll positions saved when opening level 2: the page (.main-area) and the main table wrapper. */
+const PURCHASE_RECORDS_SCROLL_KEY = 'erp_purchase_records_scroll';
+type SavedPurchaseRecordsScroll = { scope: string; generation: number; page: number; table: number };
+const readSavedPurchaseRecordsScroll = (scope: string): SavedPurchaseRecordsScroll | null => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(PURCHASE_RECORDS_SCROLL_KEY) || 'null') as SavedPurchaseRecordsScroll | null;
+    return saved && saved.scope === scope && saved.generation === getViewSnapshotGeneration()
+      && Number.isFinite(saved.page) && Number.isFinite(saved.table) ? saved : null;
+  } catch { return null; }
+};
+
+const PURCHASE_RECORDS_FIRST_ROWS = 40;
+const PURCHASE_RECORDS_ROW_CHUNK = 80;
+const PURCHASE_RECORDS_MIN_ROW_PX = 56;
+
 export default function PurchaseRecords() {
   const { isMobile } = useViewport();
   const providerMode = getProviderMode();
   const isNextIdentityShadowMode = canUseProxyIdentityShadow(providerMode);
   const isClosingDateWorkbenchAvailable = canUseClosingDateWorkbenchUi(providerMode);
   const closingDateWorkbenchMode = getClosingDateWorkbenchMode(providerMode);
+  const { user } = useAuth();
+  const viewScope = `${providerMode}:${user?.id ?? ''}`;
+  const navigationType = useNavigationType();
+  const [returnView] = useState(() => (lastPurchaseRecordsView?.scope === viewScope
+    && lastPurchaseRecordsView.generation === getViewSnapshotGeneration() ? lastPurchaseRecordsView : null));
+  // Saved scroll applies only to a Back/Forward return in the same account, mode and cache generation.
+  const [savedScroll] = useState(() => (navigationType === 'POP' ? readSavedPurchaseRecordsScroll(viewScope) : null));
 
-  const [groups, setGroups] = useState<ProductGroup[]>([]);
-  const [variants, setVariants] = useState<ProductVariant[]>([]);
-  const [categories, setCategories] = useState<ProductCategory[]>([]);
-  const [batches, setBatches] = useState<PurchaseBatch[]>([]);
-  const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>([]);
-  const [privateOrders, setPrivateOrders] = useState<PrivateOrder[]>([]);
-  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>([]);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>([]);
+  const [groups, setGroups] = useState<ProductGroup[]>(() => returnView?.groups ?? []);
+  const [variants, setVariants] = useState<ProductVariant[]>(() => returnView?.variants ?? []);
+  const [categories, setCategories] = useState<ProductCategory[]>(() => returnView?.categories ?? []);
+  const [batches, setBatches] = useState<PurchaseBatch[]>(() => returnView?.batches ?? []);
+  const [batchItems, setBatchItems] = useState<PurchaseBatchItem[]>(() => returnView?.batchItems ?? []);
+  const [privateOrders, setPrivateOrders] = useState<PrivateOrder[]>(() => returnView?.privateOrders ?? []);
+  const [privateOrderItems, setPrivateOrderItems] = useState<PrivateOrderItem[]>(() => returnView?.privateOrderItems ?? []);
+  const [inventory, setInventory] = useState<InventoryItem[]>(() => returnView?.inventory ?? []);
+  const [salesOrderItems, setSalesOrderItems] = useState<SalesOrderItem[]>(() => returnView?.salesOrderItems ?? []);
   const batchItemsByGroupId = useMemo(
     () => mapPurchaseBatchItemsByGroup(batches, batchItems),
     [batches, batchItems]
@@ -337,12 +379,18 @@ export default function PurchaseRecords() {
   // cloud fetch) — blocks the table so we never render a misleading "0 筆" while data is still
   // in flight. isSyncing: true only while showing stale local cache and waiting for the real
   // cloud sync to confirm/replace it — shows a small non-blocking indicator instead.
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
+  // A route return starts from the previous screen (still "syncing" until the reload confirms it).
+  const [isInitialLoading, setIsInitialLoading] = useState(() => !returnView);
+  const [isSyncing, setIsSyncing] = useState(() => Boolean(returnView));
 
   const [editMode, setEditMode] = useState<boolean>(false);
 
-  const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(null);
+  const [wacaMeta, setWacaMeta] = useState<ProductGroup | null>(() => returnView?.wacaMeta ?? null);
+  useEffect(() => {
+    if (isInitialLoading) return;
+    lastPurchaseRecordsView = { scope: viewScope, generation: getViewSnapshotGeneration(), wacaMeta, groups, variants, categories, batches, batchItems,
+      privateOrders, privateOrderItems, inventory, salesOrderItems };
+  }, [isInitialLoading, viewScope, wacaMeta, groups, variants, categories, batches, batchItems, privateOrders, privateOrderItems, inventory, salesOrderItems]);
   const [showWacaDialog, setShowWacaDialog] = useState<boolean>(false);
   const [animateWacaDialog, setAnimateWacaDialog] = useState<boolean>(false);
 
@@ -691,24 +739,32 @@ export default function PurchaseRecords() {
   // button. Waits for groups to actually be loaded (and one more frame for the list to paint)
   // before scrolling, and only runs once per mount so later data refreshes don't re-trigger it.
   const scrollRestoredRef = useRef(false);
+  const scrollRestoreFrameRef = useRef(0);
   useEffect(() => {
     if (scrollRestoredRef.current) return;
     if (groups.length === 0) return;
-
-    const saved = sessionStorage.getItem('erp_purchase_records_scroll');
-    sessionStorage.removeItem('erp_purchase_records_scroll');
+    sessionStorage.removeItem(PURCHASE_RECORDS_SCROLL_KEY);
     scrollRestoredRef.current = true;
-
-    if (saved) {
-      const y = parseInt(saved, 10);
-      if (!isNaN(y)) {
-        requestAnimationFrame(() => {
-          const scrollEl = document.querySelector('.main-area');
-          if (scrollEl) scrollEl.scrollTop = y;
-        });
-      }
-    }
-  }, [groups]);
+    if (!savedScroll) return;
+    // Chunked rendering may still be appending rows: wait (bounded) until the table is tall
+    // enough for the saved position, then restore the page and the table wrapper.
+    let attempts = 0;
+    const apply = () => {
+      const page = document.querySelector('.main-area');
+      const table = document.querySelector<HTMLElement>('[data-purchase-records-scroll="main"]');
+      const tableReady = !savedScroll.table || (table !== null && table.scrollHeight - table.clientHeight >= savedScroll.table);
+      if (!tableReady && attempts++ < 120) { scrollRestoreFrameRef.current = requestAnimationFrame(apply); return; }
+      scrollRestoreFrameRef.current = 0;
+      if (page) page.scrollTop = savedScroll.page;
+      if (table) table.scrollTop = savedScroll.table;
+    };
+    // Not cancelled by later data refreshes (this effect runs once); only by unmount below.
+    scrollRestoreFrameRef.current = requestAnimationFrame(apply);
+  }, [groups, savedScroll]);
+  useEffect(() => () => {
+    // An unfinished restore (e.g. StrictMode's dev remount) is retried by the next mount.
+    if (scrollRestoreFrameRef.current) { cancelAnimationFrame(scrollRestoreFrameRef.current); scrollRestoreFrameRef.current = 0; scrollRestoredRef.current = false; }
+  }, []);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -1273,6 +1329,28 @@ export default function PurchaseRecords() {
     }
     return completedGroups;
   }, [editMode, stableCompletedOrder, completedGroups, groups, linkedGroupId]);
+
+  // Chunked list rendering: the first rows paint at once, the rest are appended in small batches
+  // (doubling) on later frames, so the page stays responsive with thousands of groups. Only the rendered
+  // slice is limited; selection, counts, search, sort and data stay on the full list. Only page
+  // entry (cold load / return from level 2) is chunked; the limit never shrinks afterwards, so
+  // search/filter/sort and data refreshes render as before. A pending scroll restore renders
+  // enough rows to reach the saved position first.
+  const [initialRowLimit] = useState(() => {
+    const viewportRows = Math.ceil((window.innerHeight || 1000) / PURCHASE_RECORDS_MIN_ROW_PX);
+    const target = savedScroll ? Math.max(savedScroll.page, savedScroll.table) : 0;
+    return Math.max(PURCHASE_RECORDS_FIRST_ROWS, savedScroll ? Math.ceil(target / PURCHASE_RECORDS_MIN_ROW_PX) + viewportRows * 2 : 0);
+  });
+  const [rowWindowLimit, setRowWindowLimit] = useState(initialRowLimit);
+  const mainRowLimit = editMode ? Infinity : rowWindowLimit;
+  useEffect(() => {
+    if (mainRowLimit >= displayedMainGroups.length) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => setRowWindowLimit(limit => Math.max(limit * 2, limit + PURCHASE_RECORDS_ROW_CHUNK)), 0);
+    });
+    return () => { cancelAnimationFrame(frame); if (timer) clearTimeout(timer); };
+  }, [mainRowLimit, displayedMainGroups.length]);
 
   useEffect(() => {
     if (searchTerm.trim().length > 0) {
@@ -2360,10 +2438,10 @@ export default function PurchaseRecords() {
   // the window itself doesn't scroll) right before leaving for a detail page, so we can
   // restore it if the user comes back via the browser Back button.
   const navigateToDetail = (id: string) => {
-    const scrollEl = document.querySelector('.main-area');
-    if (scrollEl) {
-      sessionStorage.setItem('erp_purchase_records_scroll', String(scrollEl.scrollTop));
-    }
+    const saved: SavedPurchaseRecordsScroll = { scope: viewScope, generation: getViewSnapshotGeneration(),
+      page: document.querySelector('.main-area')?.scrollTop ?? 0,
+      table: document.querySelector('[data-purchase-records-scroll="main"]')?.scrollTop ?? 0 };
+    sessionStorage.setItem(PURCHASE_RECORDS_SCROLL_KEY, JSON.stringify(saved));
     navigate(`/purchase-records/${id}`);
   };
 
@@ -3529,9 +3607,9 @@ export default function PurchaseRecords() {
 
       {/* Table section */}
       {(() => {
-        const renderGroupsTable = (list: ProductGroup[], tableId: string) => {
+        const renderGroupsTable = (list: ProductGroup[], tableId: string, rowLimit = Infinity) => {
           try {
-            return renderGroupsTableInner(list, tableId);
+            return renderGroupsTableInner(list, tableId, rowLimit);
           } catch (err) {
             console.error('[PurchaseRecords] renderGroupsTable crashed:', err);
             logCrash(`renderGroupsTable(${tableId})`, err);
@@ -3545,11 +3623,12 @@ export default function PurchaseRecords() {
           }
         };
 
-        const renderGroupsTableInner = (list: ProductGroup[], tableId: string) => {
+        const renderGroupsTableInner = (list: ProductGroup[], tableId: string, rowLimit: number) => {
+          const rows = rowLimit < list.length ? list.slice(0, rowLimit) : list;
           if (isMobile) {
             return (
               <div className="mobile-card-list workspace-content" data-workspace-content>
-                {list.map((g) => {
+                {rows.map((g) => {
                   const details = getGroupPlatformDetails(g.id);
                   const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                   const { skuDisplay, count } = getGroupSkuAndPriceRange(g.id);
@@ -3715,7 +3794,7 @@ export default function PurchaseRecords() {
           return (
             <>
               {activeTab === 'proxy' ? (
-              <ScrollWrapper isMobile={isMobile}>
+              <ScrollWrapper isMobile={isMobile} scrollId={tableId}>
                 <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1350px' : undefined }}>
                 <thead>
                   <tr>
@@ -3796,7 +3875,7 @@ export default function PurchaseRecords() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((g, idx) => {
+                  {rows.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
                     const status = getGroupStatus(g);
                     const closingDateStyle = getClosingDateStyle(g.closing_date);
@@ -4151,7 +4230,7 @@ export default function PurchaseRecords() {
               </table>
               </ScrollWrapper>
             ) : (
-              <ScrollWrapper isMobile={isMobile}>
+              <ScrollWrapper isMobile={isMobile} scrollId={tableId}>
                 <table className="erp-table workspace-content" data-workspace-content style={{ width: '100%', tableLayout: 'fixed', minWidth: editMode ? '1200px' : undefined }}>
                 <thead className="purchase-records-sticky-header">
                   <tr>
@@ -4237,7 +4316,7 @@ export default function PurchaseRecords() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((g, idx) => {
+                  {rows.map((g, idx) => {
                     const details = getGroupPlatformDetails(g.id);
                     const demandAndPurchased = getGroupDemandAndPurchased(g.id);
                     const status = getGroupStatus(g);
@@ -4587,7 +4666,7 @@ export default function PurchaseRecords() {
             <div className="flex-col gap-md">
               {displayedMainGroups.length > 0 && (
                 <div className="card" style={{ padding: 0, overflow: 'hidden', width: '100%', maxWidth: '100%' }}>
-                  {renderGroupsTable(displayedMainGroups, 'main')}
+                  {renderGroupsTable(displayedMainGroups, 'main', mainRowLimit)}
                 </div>
               )}
     
