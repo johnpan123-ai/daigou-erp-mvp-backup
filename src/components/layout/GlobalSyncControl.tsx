@@ -12,13 +12,11 @@ export function GlobalSyncControl() {
   const status = presentation.status;
   const lastSync = mode === 'cloud' || mode === 'fallback'
     ? connectivity.lastFreshReadAt : activeRefresh.lastCompletedAt;
-  const lastSyncText = lastSync ? `最後同步：${new Date(lastSync).toLocaleString('zh-TW', { hour12: false })}` : '';
-  const tooltip = [presentation.detail, lastSyncText].filter(Boolean).join('\n') || undefined;
+  const tooltip = lastSync ? `最後同步：${new Date(lastSync).toLocaleString('zh-TW', { hour12: false })}` : undefined;
 
   return (
     <div className="global-sync-control" data-global-sync-control>
-      <span className={`global-sync-status global-sync-status--${status}`} role="status" title={tooltip} aria-live="polite"
-        data-write-paused={presentation.writeAllowed ? undefined : 'true'}>
+      <span className={`global-sync-status global-sync-status--${status}`} role="status" title={tooltip} aria-live="polite">
         <span aria-hidden="true">{symbols[status]}</span> {presentation.label}
       </span>
       <button

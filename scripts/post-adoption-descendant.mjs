@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { classifyReviewedFile, reviewForCandidate, sourceHash, verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { restoreReviewedR5CoreProvider } from './r5-core-provider-review.mjs';
@@ -718,7 +716,7 @@ const P02_CTX_PROTECTED_IDS = new Set(['holdCloudFresh', 'releaseCloudFresh', 'm
   'awaitRealtimeReadiness', 'getRealtimeReadiness', 'COMPLETENESS_HOLD', 'REALTIME_RECOVERY_POLICY', 'RealtimeRecoveryScheduler',
   'setRealtimeUnproven', 'getCloudRealtimeTestBridge', 'resolveGlobalSyncPresentation', 'assertCloudWriteAllowed', 'CloudTargetedCache',
   'syncPresentation', 'realtimeRecovery', 'setRealtimeRecovery', 'GLOBAL_SYNC_LABELS', 'REALTIME_UNPROVEN_LABEL', 'REALTIME_UNPROVEN_BANNER']);
-const P02_CTX_PINS = Object.freeze({"context":{"imports":["04c6792773cc27642dcf85b3d48bf9634fb82eee309c9888baf63ddf332fe15d","0c2b82e5ba99a3b13388fdc0b8fc3dd9017f028504aa6f41453691c175437b7e","1ded6982167408ef37f37f6f6a6239f2fc3339493f9d4193de2cc041bfd5065c","75cfac80bb922f7ac35779f657b327a61526d3e2fb9451c7b01c25be93fa90d4","77ecef6e7ecfe1015d42f76b59c03559910eea2c1d09fea873d031902e103a1a","7f394f63b1b9fe96e03ae80557d61a2e3dc47b3fec384ca6700e4935eac520c5","af91826ce04dc6e3f1b9465028c80400fd82d59c49ccd5c57b448ab71103f271","b2b0016943289a1974985ab16249b1c2c835612faae5a3a7912be17dac948e89","dd4c88a1f308105f9c9d652842643a5272120ed46e80b6b63cc7a06604aae9f9"],"topLevel":{"CloudRealtimeContext":"9a71e2d1d3ae854f8752ab703cfbc65daf88440b9d7ce26ec6cfd53707d3c865","REALTIME_TABLES":"fac9776f601dfaa98be91dc1791e58d3265e8659f8e580de23a61a1a3c9d945d","GLOBAL_REFRESH_RESOURCES":"4050892699a91b6f84de1c63e684cd4c3cef0e05820acfec7daff7056a48277c","CLOUD_RESTORE_EPOCH_TABLE":"2b125e4e8e8f2b30f962c56ec454ea308cce5809e2ed2bd32f72f5f4ceb80d0a","REALTIME_READINESS_WAIT_MS":"72383b6bd57ecae07494de2575f46b79fad81d0f590e6b9e81dcbc591580f533","UNPROVEN_CATCH_UP_MS":"a84e772e77671399dbf23856995b05a10ac3daf506ff0eb5cbe3ccaafa854351","LATE_READINESS_WATCH_MS":"50f485ad7f98cd9e7fa3312086ac459e2253da3d7044c3d004b385894bcbf041","MAX_PROOF_REREADS":"6601a412be63df8f8569a9285f7d91c4a99623130af71caac0be6c71d44e44ad","COMPLETENESS_HOLD":"7e9431a57ab3f649278f923c3a19e41f66fe9649e2aa0a844142d209b49be021","useGlobalSyncControl":"45384bc8518a77182bc01d75b2d16437876015413ad5a5e74ea1b265f5a83520"},"syncEngine":"0024b2c29828b820cbd0a5ec6c9a9b75bd9499286305a9bd597cf14c31ae6629","boundaryStatements":{"testBridge":"fa56720b9483f1012f505ed3de601d10ffb176f65f8080788dcfe9e215eb6908","enabled":"0e27efc350150515a9e94edd71be02c641caf535e67fb752dada7320b536b4d5","connectivity":"02d36ae33c3a421bdcca283ab5e1a54a57afbaf705024fb83cc525e34f68cd34","cloudMode":"ac507e3f32aff0295e0d7e01e53c2a58e8430bca0be943407acbfa11c6c1600f","presentationMode":"39fe9a362867486a61dd91378235f54bad45842346880a115c857956681b4c09","presentationRefresh":"84f2d7704f8bc4a9321cf72d5419a34cbb79dd5b6a9b95553b696f1c986edb89","syncPresentation":"9338d5e11611d612a1b9a67cf3457dbb623d2b840740c83db3053eb9b13f2dc8","realtimeUnproven,setRealtimeUnproven":"a987d8cbdea2dbead391a35e6540d54142fd7e519537fe3fb274249897fa35ab","realtimeRecovery,setRealtimeRecovery":"8a32117a8651367cc596f580f8dabe41556c1a1369c3ac3f4939fc428b69cb4e","value":"7b7360b1e4923e7d87c1c75cddc3ce7f260c9af02f32177be0fb6f21982b6f26"},"banner":"26fec02e4bef842eb0a1c7714dbf4aea0f325dd1f36d633fc17a63d897e9d43c"},"presentation":{"GLOBAL_SYNC_LABELS":"ab55bb27287d13d6f0bc663a80b66e4ae34b8b6832a97bbd4787974eb8e978a8","REALTIME_UNPROVEN_LABEL":"21688fdeff0eaa83882fffde26d7b9024947775f39dac56f2f94569de84a6360","REALTIME_UNPROVEN_BANNER":"f0c20b1f02dabb1e25ed88dc35b042d6f6456a2b3a96aa9fb41183510bf1f745","isRealtimeUnproven":"20c8b4b852179dc76d35ccd6ac358de576851c24ddc77d5ab4d10cde3b1cb06b","realtimeUnprovenView":"b99422800dbc29ce1aa7756cf340e49306a2f2a76a0df027b2673c22636197e3","resolveGlobalSyncPresentation":"393f31b81ced5b759cee4a7d4e41051247bd60a533b3395f3db11443f4c90939","resolveGlobalSyncStatus":"9a95111153b23f74222ad4a1a49e8bc64c429de9ba8c2d18f6a5ab3cc0d668e5"},"policy":"672ba9b2e44c29b0ed6a5a9dcdf0b772595ec4ed212b6284b6a65f499dedd3fb"});
+const P02_CTX_PINS = Object.freeze({"context":{"imports":["04c6792773cc27642dcf85b3d48bf9634fb82eee309c9888baf63ddf332fe15d","0c2b82e5ba99a3b13388fdc0b8fc3dd9017f028504aa6f41453691c175437b7e","1ded6982167408ef37f37f6f6a6239f2fc3339493f9d4193de2cc041bfd5065c","75cfac80bb922f7ac35779f657b327a61526d3e2fb9451c7b01c25be93fa90d4","77ecef6e7ecfe1015d42f76b59c03559910eea2c1d09fea873d031902e103a1a","7f394f63b1b9fe96e03ae80557d61a2e3dc47b3fec384ca6700e4935eac520c5","af91826ce04dc6e3f1b9465028c80400fd82d59c49ccd5c57b448ab71103f271","b2b0016943289a1974985ab16249b1c2c835612faae5a3a7912be17dac948e89","dd4c88a1f308105f9c9d652842643a5272120ed46e80b6b63cc7a06604aae9f9"],"topLevel":{"CloudRealtimeContext":"9a71e2d1d3ae854f8752ab703cfbc65daf88440b9d7ce26ec6cfd53707d3c865","REALTIME_TABLES":"fac9776f601dfaa98be91dc1791e58d3265e8659f8e580de23a61a1a3c9d945d","GLOBAL_REFRESH_RESOURCES":"4050892699a91b6f84de1c63e684cd4c3cef0e05820acfec7daff7056a48277c","CLOUD_RESTORE_EPOCH_TABLE":"2b125e4e8e8f2b30f962c56ec454ea308cce5809e2ed2bd32f72f5f4ceb80d0a","REALTIME_READINESS_WAIT_MS":"72383b6bd57ecae07494de2575f46b79fad81d0f590e6b9e81dcbc591580f533","UNPROVEN_CATCH_UP_MS":"a84e772e77671399dbf23856995b05a10ac3daf506ff0eb5cbe3ccaafa854351","LATE_READINESS_WATCH_MS":"50f485ad7f98cd9e7fa3312086ac459e2253da3d7044c3d004b385894bcbf041","MAX_PROOF_REREADS":"6601a412be63df8f8569a9285f7d91c4a99623130af71caac0be6c71d44e44ad","COMPLETENESS_HOLD":"7e9431a57ab3f649278f923c3a19e41f66fe9649e2aa0a844142d209b49be021","useGlobalSyncControl":"45384bc8518a77182bc01d75b2d16437876015413ad5a5e74ea1b265f5a83520"},"syncEngine":"0024b2c29828b820cbd0a5ec6c9a9b75bd9499286305a9bd597cf14c31ae6629","boundaryStatements":{"testBridge":"fa56720b9483f1012f505ed3de601d10ffb176f65f8080788dcfe9e215eb6908","enabled":"0e27efc350150515a9e94edd71be02c641caf535e67fb752dada7320b536b4d5","connectivity":"02d36ae33c3a421bdcca283ab5e1a54a57afbaf705024fb83cc525e34f68cd34","cloudMode":"ac507e3f32aff0295e0d7e01e53c2a58e8430bca0be943407acbfa11c6c1600f","presentationMode":"39fe9a362867486a61dd91378235f54bad45842346880a115c857956681b4c09","presentationRefresh":"84f2d7704f8bc4a9321cf72d5419a34cbb79dd5b6a9b95553b696f1c986edb89","syncPresentation":"9338d5e11611d612a1b9a67cf3457dbb623d2b840740c83db3053eb9b13f2dc8","realtimeUnproven,setRealtimeUnproven":"a987d8cbdea2dbead391a35e6540d54142fd7e519537fe3fb274249897fa35ab","realtimeRecovery,setRealtimeRecovery":"8a32117a8651367cc596f580f8dabe41556c1a1369c3ac3f4939fc428b69cb4e","value":"7b7360b1e4923e7d87c1c75cddc3ce7f260c9af02f32177be0fb6f21982b6f26"},"banner":"26fec02e4bef842eb0a1c7714dbf4aea0f325dd1f36d633fc17a63d897e9d43c"},"presentation":{"GLOBAL_SYNC_LABELS":"ab55bb27287d13d6f0bc663a80b66e4ae34b8b6832a97bbd4787974eb8e978a8","REALTIME_UNPROVEN_LABEL":"21688fdeff0eaa83882fffde26d7b9024947775f39dac56f2f94569de84a6360","REALTIME_UNPROVEN_BANNER":"f0c20b1f02dabb1e25ed88dc35b042d6f6456a2b3a96aa9fb41183510bf1f745","isRealtimeUnproven":"20c8b4b852179dc76d35ccd6ac358de576851c24ddc77d5ab4d10cde3b1cb06b","realtimeUnprovenView":"b99422800dbc29ce1aa7756cf340e49306a2f2a76a0df027b2673c22636197e3","resolveGlobalSyncPresentation":"2926c9de43206055c87f90325bf56f722dfdf77a0050bc266db66347e2b89a2a","resolveGlobalSyncStatus":"9a95111153b23f74222ad4a1a49e8bc64c429de9ba8c2d18f6a5ab3cc0d668e5"},"policy":"672ba9b2e44c29b0ed6a5a9dcdf0b772595ec4ed212b6284b6a65f499dedd3fb"});
 const p02CtxBindingNames = (tree, statement) => {
   if (ts.isVariableStatement(statement)) {
     const names = [];
@@ -781,22 +779,6 @@ const p02PresentationSemantics = (file, after) => {
         }
         if (!isFresh && realtime?.unproven && !restorePending && view.action !== 'realtime-reconnect') fail('p02 1a presentation hides the unproven read-only state');
       }
-  const normalSync = exports.resolveGlobalSyncPresentation('cloud',
-    { status: 'online', readStatus: 'loading', authoritativeReadPending: true, lastReachableAt: 1, lastFreshReadAt: null, reason: null },
-    { mode: 'cloud', busy: true, errorAt: null, lastCompletedAt: null, message: '', restorePending: false });
-  if (normalSync.banner !== null || normalSync.writeAllowed !== false || !/暫停/u.test(normalSync.detail ?? '')) {
-    fail('p02 1a normal sync presentation must hide the banner while keeping writes paused and explained');
-  }
-  const cachedSync = exports.resolveGlobalSyncPresentation('cloud',
-    { status: 'online', readStatus: 'stale-cache', authoritativeReadPending: true, lastReachableAt: 1, lastFreshReadAt: null, reason: null },
-    { mode: 'cloud', busy: true, errorAt: null, lastCompletedAt: null, message: '', restorePending: false });
-  if (cachedSync.banner !== null || cachedSync.writeAllowed !== false || !/暫停/u.test(cachedSync.detail ?? '')) {
-    fail('p02 1a cached sync presentation must hide the banner while keeping writes paused and explained');
-  }
-  const offlineSync = exports.resolveGlobalSyncPresentation('cloud',
-    { status: 'offline', readStatus: 'offline', authoritativeReadPending: true, lastReachableAt: 1, lastFreshReadAt: null, reason: 'browser-offline' },
-    { mode: 'cloud', busy: true, errorAt: null, lastCompletedAt: null, message: '', restorePending: false });
-  if (!offlineSync.banner || offlineSync.writeAllowed !== false) fail('p02 1a offline sync problem banner or write pause missing');
 };
 export function assertP02RealtimeContextContract(file, after) {
   if (after === null) fail('p02 1a realtime context source missing');
@@ -1087,90 +1069,7 @@ export function restoreReviewedBuyAnimeV33ProviderPatch(file, source) {
   return restored;
 }
 
-// Exact, additive review for the nine-change experimental integration. The
-// product sources are bound to immutable full-file hashes, then checked for
-// read-only keyset behaviour and a narrow member-change set. After that exact
-// overlay is removed, every historical Provider/WACA/CAS/Restore guard runs on
-// the immutable 6a266ffd source. This is intentionally not a reusable allowlist.
-const NINE_UI_PROVIDER_BASE = '6a266ffd63bc97f84440883a3d56de5245fb2bea';
-const NINE_UI_PROVIDER_PINS = Object.freeze({
-  'src/providers/cloud/cloudKeysetParallel.ts': { before: null, after: '40044dbffbfddf6ccde4b06f75c6d75350d3c4cee3e11631b5a12c0e3bfc7c57' },
-  'src/providers/cloud/cloudTargetedCache.ts': { before: 'f7ef88d76423a6c6af38a256010c0c82173aa0728310450d3023e1c80b9971d8', after: '5d87ac6db9c6c82a729747f736c081c36c1dffc7c9bf167d6de1099552176318' },
-  'src/providers/cloud/supabaseProvider.ts': { before: 'bbcea213dd6564967ac4ce4eab216b1d89fe16f555a7721cc0b5eadedeeb4d95', after: '639d47dccb652b9819c8e70075ac2b52beb1d56d0f11934c61539450d83ad3c2' },
-});
-const NINE_UI_REVIEW_ROOT = fileURLToPath(new URL('..', import.meta.url));
-const nineUiBaseSource = file => {
-  const pin = NINE_UI_PROVIDER_PINS[file];
-  if (!pin || pin.before === null) return null;
-  const source = execFileSync('git', ['--no-replace-objects', '-C', NINE_UI_REVIEW_ROOT, 'show', `${NINE_UI_PROVIDER_BASE}:${file}`], { encoding: 'utf8' })
-    .replace(/\r\n?/gu, '\n');
-  if (sourceHash(source) !== pin.before) fail(`nine-ui immutable Provider baseline mismatch: ${file}`);
-  return source;
-};
-const nineUiClassMembers = (file, source, className) => {
-  const tree = parse(file, source);
-  const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === className);
-  if (!cls) fail(`nine-ui Provider class missing: ${className}`);
-  return { tree, members: new Map(cls.members.map(member => [p02MemberKey(tree, member), canonical(tree, member)])) };
-};
-const nineUiCloudWrites = (file, source) => {
-  const tree = parse(file, source);
-  return nodes(tree).filter(ts.isCallExpression).filter(call => /\.(?:insert|update|upsert|delete|rpc)$/u.test(call.expression.getText(tree)))
-    .map(call => canonical(tree, call)).sort();
-};
-export function assertNineUiProviderSemantics(file, before, after) {
-  if (file === 'src/providers/cloud/cloudKeysetParallel.ts') {
-    const tree = parse(file, after);
-    if (tree.statements.some(ts.isImportDeclaration)) fail('nine-ui keyset helper gained a runtime dependency');
-    if (nineUiCloudWrites(file, after).length) fail('nine-ui keyset helper gained Cloud write or RPC I/O');
-    const text = after;
-    for (const required of ['count: true', 'Promise.all', 'CLOUD_KEYSET_CURSOR_NOT_ADVANCING', 'dedupe([first.rows', 'await sequentialRest()', 'gte: bound', 'request = { gt: last, lt, limit }']) {
-      if (!text.includes(required)) fail(`nine-ui keyset safety invariant missing: ${required}`);
-    }
-    return;
-  }
-  if (before === null) fail(`nine-ui Provider baseline missing: ${file}`);
-  const specs = file.endsWith('cloudTargetedCache.ts')
-    ? { className: 'CloudTargetedCache', changed: ['queryAll', 'queryAllPartitioned'] }
-    : { className: 'SupabaseProvider', changed: ['commitWacaSnapshot', 'commitWacaCountedSnapshot', 'commitWacaRecognition', 'pullCoreProductData', 'prepareBuyAnimeRecovery'] };
-  const oldState = nineUiClassMembers(file, before, specs.className);
-  const newState = nineUiClassMembers(file, after, specs.className);
-  const changed = [...new Set([...oldState.members.keys(), ...newState.members.keys()])]
-    .filter(name => oldState.members.get(name) !== newState.members.get(name)).sort();
-  if (JSON.stringify(changed) !== JSON.stringify([...specs.changed].sort())) fail(`nine-ui unreviewed Provider member changed: ${file}:${changed.join(',')}`);
-  if (JSON.stringify(nineUiCloudWrites(file, before)) !== JSON.stringify(nineUiCloudWrites(file, after))) {
-    fail(`nine-ui Provider changed a Cloud write or RPC boundary: ${file}`);
-  }
-  if (file.endsWith('supabaseProvider.ts')) {
-    for (const name of ['commitWacaSnapshot', 'commitWacaCountedSnapshot', 'commitWacaRecognition', 'prepareBuyAnimeRecovery']) {
-      const restored = newState.members.get(name)?.replace(/\s*bumpViewSnapshotGeneration\(\);/gu, '');
-      if (restored !== oldState.members.get(name)) fail(`nine-ui ${name} changed beyond cache-generation invalidation`);
-    }
-    const pull = newState.members.get('pullCoreProductData') ?? '';
-    if (!pull.includes('fetchAllKeyset') || !pull.includes('bumpViewSnapshotGeneration')) fail('nine-ui core pull lost keyset read or cache-generation invalidation');
-  } else {
-    const partitioned = newState.members.get('queryAllPartitioned') ?? '';
-    if (!partitioned.includes('fetchPartitionedKeyset') || /\.(?:insert|update|upsert|delete|rpc)\(/u.test(partitioned)) {
-      fail('nine-ui targeted cache partitioned path is not read-only');
-    }
-  }
-}
-export function restoreReviewedNineUiProviderPatch(file, source) {
-  const pin = NINE_UI_PROVIDER_PINS[file];
-  if (!pin || source === null || sourceHash(source) !== pin.after) return source;
-  const before = nineUiBaseSource(file);
-  assertNineUiProviderSemantics(file, before, source);
-  return before;
-}
-
 export function assertReviewedProviderContract(file, before, after) {
-  const nineUiPin = NINE_UI_PROVIDER_PINS[file];
-  if (nineUiPin && after !== null && sourceHash(after) === nineUiPin.after) {
-    const restored = restoreReviewedNineUiProviderPatch(file, after);
-    if (restored === null) return;
-    assertReviewedProviderContract(file, before, restored);
-    return;
-  }
   const firstImportPin = BUYANIME_FIRST_IMPORT_PROVIDER_PATCH[file];
   if (firstImportPin && before !== null && after !== null
     && sourceHash(before) === firstImportPin.before && sourceHash(after) === firstImportPin.after) {

@@ -866,14 +866,12 @@ export default function UnlistedItems() {
                   style={{ width: '18px', height: '18px', marginTop: '2px' }}
                 />
                 <div style={{ flex: 1, marginLeft: '10px' }}>
-                  {/* Inline flow: the buttons trail the last word of the name, even when it wraps. */}
-                  <div className="mobile-card-title" data-testid="unlisted-title-row" style={{ display: 'block', overflowWrap: 'anywhere' }}>
+                  <div className="mobile-card-title" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                     <span>{item.name}</span>
-                    <span data-testid="unlisted-title-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', verticalAlign: 'middle', whiteSpace: 'nowrap', margin: '-12px 0 -12px 6px' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                       <button
                         onClick={() => handleCopyItemName(item.id, item.name)}
                         title="複製商品名稱"
-                              aria-label="複製商品名稱"
                         style={{
                           border: 'none',
                           background: 'none',
@@ -890,18 +888,17 @@ export default function UnlistedItems() {
                         to={purchaseRecordsDetailUrl(item.id)}
                         state={{ from: '/unlisted-items' }}
                         title="查看訂購紀錄"
-                              aria-label="查看訂購紀錄"
                         style={{
                           color: '#3b82f6',
                           display: 'inline-flex',
                           alignItems: 'center',
                           minHeight: 44,
-                          padding: '4px 2px'
+                          padding: '4px 6px'
                         }}
                       >
-                        <ExternalLink size={12} />
+                        <ExternalLink size={12} /> 查看訂購紀錄
                       </Link>
-                    </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1002,13 +999,12 @@ export default function UnlistedItems() {
                     </td>
                     <td style={{ color: '#0f172a', verticalAlign: 'middle', padding: '16px 16px' }}>
                       <div>
-                        <div data-testid="unlisted-title-row" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span className="workspace-product-title" title={item.name} style={{ flex: '0 1 auto', fontSize: '16px', fontWeight: 700 }}>{item.name}</span>
-                          <div className="workspace-row-actions" data-testid="unlisted-title-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="workspace-product-title" title={item.name} style={{ flex: 1, fontSize: '16px', fontWeight: 700 }}>{item.name}</span>
+                          <div className="workspace-row-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginLeft: '8px' }}>
                             <button
                               onClick={() => handleCopyItemName(item.id, item.name)}
                               title="複製商品名稱"
-                              aria-label="複製商品名稱"
                               style={{
                                 border: 'none',
                                 background: 'none',
@@ -1025,16 +1021,15 @@ export default function UnlistedItems() {
                               to={purchaseRecordsDetailUrl(item.id)}
                               state={{ from: '/unlisted-items' }}
                               title="查看訂購紀錄"
-                              aria-label="查看訂購紀錄"
                               style={{
                                 color: '#3b82f6',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 minHeight: 44,
-                                padding: '4px 2px'
+                                padding: '4px 6px'
                               }}
                             >
-                              <ExternalLink size={14} />
+                              <ExternalLink size={14} /> 查看訂購紀錄
                             </Link>
                           </div>
                         </div>

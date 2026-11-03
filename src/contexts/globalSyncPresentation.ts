@@ -19,10 +19,7 @@ export interface GlobalSyncPresentation {
   writeAllowed: boolean;
   /** C1f: the banner offers an immediate Realtime reconnect (which must still prove completeness). */
   action?: 'realtime-reconnect';
-  /** Toolbar status tooltip: what this state means for writes (normal sync shows no banner). */
-  detail?: string;
 }
-
 
 export const GLOBAL_SYNC_LABELS: Record<GlobalSyncStatus, string> = {
   local: '本機資料',
@@ -86,24 +83,15 @@ export function resolveGlobalSyncPresentation(
   if (realtime?.unproven && !fresh) return realtimeUnprovenView();
 
   if (refresh.busy || connectivity.authoritativeReadPending) {
-    // Normal, in-progress sync is shown only in the toolbar status ("同步中…"), not as a full-width
-    // banner. Writes stay paused exactly as before (writeAllowed / assertCloudWriteAllowed unchanged).
-    const NORMAL_SYNC_DETAIL = '正在取得最新雲端資料；完成前新增、修改、刪除與匯入暫停，按下也不會執行。';
     if (cached) {
-      // Offline, or retrying after a failed read, is a real problem and keeps its banner;
-      // an ordinary background refresh over the cache is shown in the toolbar only.
-      const abnormal = connectivity.status === 'offline' || connectivity.readStatus === 'offline' || refreshFailed;
       return {
         status: 'syncing-cached', label: GLOBAL_SYNC_LABELS['syncing-cached'], tone: 'warning', writeAllowed: false,
-        banner: abnormal ? '雲端背景同步中｜目前顯示上次快取；寫入已暫停' : null,
-        detail: `目前顯示上次快取，資料可能不是最新。${NORMAL_SYNC_DETAIL}`,
+        banner: '雲端背景同步中｜目前顯示上次快取；寫入已暫停',
       };
     }
     return {
-      status: 'syncing', label: GLOBAL_SYNC_LABELS.syncing, tone: fresh ? 'neutral' : 'warning', writeAllowed: fresh,
-      // Offline while retrying is a real problem and stays explained in a banner.
-      banner: !fresh && connectivity.status === 'offline' ? 'Offline｜正在嘗試重新連線，尚無可確認的最新資料；寫入已暫停' : null,
-      ...(fresh ? {} : { detail: NORMAL_SYNC_DETAIL }),
+      status: 'syncing', label: GLOBAL_SYNC_LABELS.syncing, tone: 'warning', writeAllowed: fresh,
+      banner: fresh ? null : '雲端資料同步中｜等待最新資料；寫入已暫停',
     };
   }
 
