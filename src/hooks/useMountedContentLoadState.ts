@@ -51,7 +51,10 @@ export function useMountedContentLoadState<C = unknown>(cache?: MountedContentCa
   const generationRef = useRef(0);
   const mountedRef = useRef(true);
   const cacheRef = useRef(cache);
-  cacheRef.current = cache;
+
+  useEffect(() => {
+    cacheRef.current = cache;
+  }, [cache]);
 
   useEffect(() => {
     mountedRef.current = true;

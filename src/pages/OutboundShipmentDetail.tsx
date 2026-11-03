@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Plus, Minus, Trash2, CheckSquare, PackageOpen, Search, ChevronDown, ChevronUp, Edit3, ExternalLink, Check } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
@@ -90,6 +90,29 @@ interface PoolItem {
   productGroupId?: string;
 }
 
+const addPoolGroupItems = (
+  currentItems: OutboundShipmentItem[], items: PoolItem[], shipmentId: string,
+): OutboundShipmentItem[] => {
+  let updated = [...currentItems];
+  for (const poolItem of items) {
+    const existing = updated.find(item => item.japan_package_item_id === poolItem.japanPackageItemId);
+    if (existing) {
+      if (existing.quantity < poolItem.availableQty) {
+        updated = updated.map(item => item.id === existing.id ? { ...item, quantity: poolItem.availableQty } : item);
+      }
+      continue;
+    }
+    updated.push({
+      id: crypto.randomUUID(), outbound_shipment_id: shipmentId,
+      japan_package_item_id: poolItem.japanPackageItemId, product_group_id: poolItem.productGroupId,
+      product_title: poolItem.productTitle, variant_name: poolItem.displayName, sku: poolItem.sku,
+      note: poolItem.note, quantity: poolItem.availableQty, checked: false,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    });
+  }
+  return updated;
+};
+
 interface GroupSourceSummary {
   myacg: number;
   waca: number;
@@ -179,7 +202,6 @@ export default function OutboundShipmentDetail() {
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
   const [itemSaveError, setItemSaveError] = useState<string | null>(null);
   const [lastItemsSavedAt, setLastItemsSavedAt] = useState<string | null>(null);
-  const [showBackgroundRefreshNotice, setShowBackgroundRefreshNotice] = useState(false);
   const [deleteStatus, setDeleteStatus] = useState<'idle' | 'submitting' | 'unknown' | 'sync-pending'>('idle');
   const deleteInFlightRef = useRef(false);
   const selectedItemsRef = useRef<OutboundShipmentItem[]>(seed?.currentItems ?? []);
@@ -197,18 +219,7 @@ export default function OutboundShipmentDetail() {
     quantity: '1'
   });
 
-  useEffect(() => {
-    if (pendingItemSaveCount !== 0 || !isRefreshing) {
-      setShowBackgroundRefreshNotice(false);
-      return;
-    }
-
-    const timer = window.setTimeout(
-      () => setShowBackgroundRefreshNotice(true),
-      BACKGROUND_REFRESH_NOTICE_DELAY_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [isRefreshing, pendingItemSaveCount]);
+  const showBackgroundRefreshNotice = pendingItemSaveCount === 0 && isRefreshing;
 
   // Header form
   const [formTitle, setFormTitle] = useState(() => seed?.shipment?.title || '');
@@ -733,8 +744,7 @@ export default function OutboundShipmentDetail() {
     return saveItems(items, affectedItemIds);
   }, [saveItems]);
 
-  const addItemToShipment = useCallback((poolItem: PoolItem, qty?: number) => {
-    const currentItems = selectedItemsRef.current;
+  const addItemToShipment = useCallback((currentItems: OutboundShipmentItem[], poolItem: PoolItem, qty?: number) => {
     const existing = currentItems.find(i => i.japan_package_item_id === poolItem.japanPackageItemId);
     const addQty = qty || 1;
 
@@ -767,35 +777,23 @@ export default function OutboundShipmentDetail() {
     void applyAndSaveItems(updated);
   }, [applyAndSaveItems, id]);
 
-  const addGroupToShipment = useCallback((items: PoolItem[]) => {
-    let updated = [...selectedItemsRef.current];
-    for (const poolItem of items) {
-      const existing = updated.find(i => i.japan_package_item_id === poolItem.japanPackageItemId);
-      if (existing) {
-        if (existing.quantity < poolItem.availableQty) {
-          updated = updated.map(i =>
-            i.id === existing.id ? { ...i, quantity: poolItem.availableQty } : i
-          );
-        }
-      } else {
-        updated.push({
-          id: crypto.randomUUID(),
-          outbound_shipment_id: id!,
-          japan_package_item_id: poolItem.japanPackageItemId,
-          product_group_id: poolItem.productGroupId,
-          product_title: poolItem.productTitle,
-          variant_name: poolItem.displayName,
-          sku: poolItem.sku,
-          note: poolItem.note,
-          quantity: poolItem.availableQty,
-          checked: false,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
-      }
-    }
-    void applyAndSaveItems(updated);
-  }, [applyAndSaveItems, id]);
+  const handleAddGroupClick = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const groupName = event.currentTarget.dataset.groupName;
+    const items = groupName ? groupedPool.get(groupName) : undefined;
+    if (!items || !id) return;
+    const updated = addPoolGroupItems(selectedItems, items, id);
+    selectedItemsRef.current = updated;
+    setSelectedItems(updated);
+    void saveItems(updated);
+  }, [groupedPool, id, saveItems, selectedItems]);
+
+  const handleAddItemClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    const itemId = event.currentTarget.dataset.poolItemId;
+    const poolItem = itemId ? poolItems.find(item => item.japanPackageItemId === itemId) : undefined;
+    if (poolItem) addItemToShipment(selectedItems, poolItem);
+  }, [addItemToShipment, poolItems, selectedItems]);
 
   const removeItem = useCallback((itemId: string) => {
     const updated = selectedItemsRef.current.filter(i => i.id !== itemId);
@@ -1535,11 +1533,15 @@ export default function OutboundShipmentDetail() {
             style={{
               flex: '0 0 132px', height: 18, lineHeight: '18px', color: '#64748b', fontWeight: 600,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              visibility: showBackgroundRefreshNotice ? 'visible' : 'hidden',
+              visibility: 'hidden',
+              animation: showBackgroundRefreshNotice
+                ? `outbound-background-notice-show 0s linear ${BACKGROUND_REFRESH_NOTICE_DELAY_MS}ms forwards`
+                : undefined,
             }}
           >
             {showBackgroundRefreshNotice ? '同步最新資料中…' : '\u00a0'}
           </span>
+          <style>{'@keyframes outbound-background-notice-show { to { visibility: visible; } }'}</style>
           {deleteStatus === 'unknown' && (
             <span role="alert" style={{ color: '#b91c1c', fontWeight: 700 }}>刪除結果待查證，請勿重複操作。</span>
           )}
@@ -2064,7 +2066,8 @@ export default function OutboundShipmentDetail() {
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, paddingLeft: 22 }}>
                         <span style={{ fontSize: 12, color: '#64748b' }}>{remainingItems.length} 規格，共 {totalAvailable} 件</span>
                         <button
-                          onClick={e => { e.stopPropagation(); addGroupToShipment(items); }}
+                          data-group-name={groupName}
+                          onClick={handleAddGroupClick}
                           style={{
                             padding: '8px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
                             background: '#3b82f6', color: '#fff', border: 'none', cursor: 'pointer',
@@ -2081,7 +2084,8 @@ export default function OutboundShipmentDetail() {
                       return (
                         <div
                           key={poolItem.japanPackageItemId}
-                          onDoubleClick={() => addItemToShipment(poolItem)}
+                          data-pool-item-id={poolItem.japanPackageItemId}
+                          onDoubleClick={handleAddItemClick}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 8,
                             padding: '10px 10px 10px 28px', borderRadius: 6, marginTop: 2,
@@ -2099,7 +2103,8 @@ export default function OutboundShipmentDetail() {
                             可出 {remainingQty}/{poolItem.availableQty}
                           </span>
                           <button
-                            onClick={e => { e.stopPropagation(); addItemToShipment(poolItem); }}
+                            data-pool-item-id={poolItem.japanPackageItemId}
+                            onClick={handleAddItemClick}
                             style={{
                               width: 40, height: 40, borderRadius: 8, border: '1px solid #cbd5e1',
                               background: '#f8fafc', cursor: 'pointer', display: 'flex',
