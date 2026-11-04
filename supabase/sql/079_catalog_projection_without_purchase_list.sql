@@ -1,6 +1,5 @@
--- 079 Candidate only. Owner approval + Codex review required before applying to ERP2; never apply to ERP1.
--- Location: supabase/candidates/ (outside the canonical chain on purpose). Adoption = move to supabase/sql/ and add to
--- supabase/canonicalFreshInstallV3.mjs after Owner approval and Codex review (release-control step).
+-- 079 approved source for the ERP2 migration chain; never apply to ERP1.
+-- Formal ERP2 execution still requires the separately approved migration procedure and preflight.
 -- Business rule (Owner 2026-11-04): 採購總表 only lists products the Owner explicitly added.
 -- Importing / projecting BuyAnime rows into 訂購紀錄 (Catalog 'create'), BuyAnime sync ('sync') and
 -- reparse must not add or remove a product from 採購總表 (product_groups.show_in_purchase_list).
@@ -9,6 +8,51 @@
 -- Rollback: re-run the erp_apply_catalog_transaction definition from 070 (restores the paired
 -- projection rule); existing rows are not touched by either direction.
 BEGIN;
+
+-- Fail closed if a Catalog write is active or the reviewed 070 predecessor has
+-- drifted. SHARE NOWAIT conflicts with the RowExclusive lock held by a running
+-- receipt insert/update, closing the precheck-to-replacement race.
+DO $migration$
+DECLARE
+  v_oid oid := pg_catalog.to_regprocedure('public.erp_apply_catalog_transaction(uuid,jsonb)');
+  v_definition text;
+  v_config text[];
+  v_security_definer boolean;
+  v_owner text;
+BEGIN
+  IF v_oid IS NULL THEN
+    RAISE EXCEPTION 'CATALOG_079_PREDECESSOR_MISSING' USING ERRCODE='55000';
+  END IF;
+  BEGIN
+    LOCK TABLE public.erp_idempotency_keys IN SHARE MODE NOWAIT;
+  EXCEPTION WHEN lock_not_available THEN
+    RAISE EXCEPTION 'CATALOG_079_REQUEST_IN_FLIGHT' USING ERRCODE='55006';
+  END;
+  IF EXISTS (
+    SELECT 1 FROM public.erp_idempotency_keys
+     WHERE status='processing' AND request_payload->>'family'='catalog'
+  ) THEN
+    RAISE EXCEPTION 'CATALOG_079_INCOMPLETE_REQUEST_EXISTS' USING ERRCODE='55000';
+  END IF;
+  SELECT pg_catalog.pg_get_functiondef(p.oid),p.proconfig,p.prosecdef,r.rolname
+    INTO v_definition,v_config,v_security_definer,v_owner
+    FROM pg_catalog.pg_proc p
+    JOIN pg_catalog.pg_roles r ON r.oid=p.proowner
+   WHERE p.oid=v_oid;
+  v_definition:=pg_catalog.replace(pg_catalog.replace(v_definition,E'\r\n',E'\n'),E'\r',E'\n');
+  IF v_owner<>'postgres' OR NOT v_security_definer
+     OR NOT ('search_path=""'=ANY(coalesce(v_config,ARRAY[]::text[])))
+     OR (pg_catalog.length(v_definition)-pg_catalog.length(pg_catalog.replace(
+          v_definition,'AND coalesce(g.show_in_purchase_list,false)=false','')))
+        / pg_catalog.length('AND coalesce(g.show_in_purchase_list,false)=false') <> 1
+     OR (pg_catalog.length(v_definition)-pg_catalog.length(pg_catalog.replace(
+          v_definition,$anchor$group_op->'changes'->'show_in_purchase_list'='true'::jsonb$anchor$,'')))
+        / pg_catalog.length($anchor$group_op->'changes'->'show_in_purchase_list'='true'::jsonb$anchor$) <> 1
+     OR pg_catalog.strpos(v_definition,'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH')=0
+     OR pg_catalog.strpos(v_definition,'CATALOG_PURCHASE_LIST_CHANGE_FORBIDDEN')>0 THEN
+    RAISE EXCEPTION 'CATALOG_079_PREDECESSOR_DRIFT' USING ERRCODE='55000';
+  END IF;
+END $migration$;
 
 CREATE OR REPLACE FUNCTION public.erp_apply_catalog_transaction(p_idempotency_key uuid,p_request jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$

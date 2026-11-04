@@ -31,7 +31,7 @@ try {
     create publication supabase_realtime;
   `);
   for (const file of CANONICAL_FRESH_INSTALL_V3) {
-    await database.exec(await read(`../../supabase/sql/${file}`));
+    await database.exec((await read(`../../supabase/sql/${file}`)).replace(/\r\n?/gu, '\n'));
   }
   const snapshotSql = await read('./sql/live-schema-snapshot-readonly.sql');
   const inventorySql = await read('./sql/026b-inventory-preconditions-readonly.sql');

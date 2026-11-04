@@ -50,7 +50,7 @@ async function applyMigrations(database, files, label) {
   for (const file of files) {
     if (label === 'fresh' && file === '026b_cloud_inventory_uuid_identity_bridge.sql') {
       await assert.rejects(
-        () => database.query(readFileSync('supabase/sql/027_cloud_restore_safeupdate_compatible_delete.sql', 'utf8')),
+        () => database.query(readFileSync('supabase/sql/027_cloud_restore_safeupdate_compatible_delete.sql', 'utf8').replace(/\r\n?/gu, '\n')),
         /CLOUD_RESTORE_ID_PRIMARY_KEY_CONTRACT_MISMATCH:inventory_items/,
         'the historical unbridged path must fail closed, not be silently ignored',
       );
@@ -58,7 +58,7 @@ async function applyMigrations(database, files, label) {
       console.log('PASS unbridged 027 fails closed on inventory_key PK');
     }
     try {
-      await database.query(readFileSync(`supabase/sql/${file}`, 'utf8'));
+      await database.query(readFileSync(`supabase/sql/${file}`, 'utf8').replace(/\r\n?/gu, '\n'));
       console.log('PASS', label, file);
     } catch (error) {
       throw new Error(`${file}: ${error.message}`, { cause: error });

@@ -8,7 +8,8 @@ import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
 import { CANONICAL_FRESH_INSTALL_V3 } from '../supabase/canonicalFreshInstallV3.mjs';
 
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false }, appType: 'custom' });
-assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '078_core_source_capacity_and_receiving.sql', 'Release target includes 078 source safety');
+assert.ok(CANONICAL_FRESH_INSTALL_V3.includes('078_core_source_capacity_and_receiving.sql'), 'Release target retains 078 source safety');
+assert.equal(CANONICAL_FRESH_INSTALL_V3.at(-1), '079_catalog_projection_without_purchase_list.sql', 'Release target includes 079 Catalog projection boundary');
 assert.ok(CANONICAL_FRESH_INSTALL_V3.includes('075_waca_order_recognition_management.sql'), '075 appends protected line recognition');
 const db = await isolatedDatabase({ migrations: CANONICAL_FRESH_INSTALL_V3 });
 const out = {};

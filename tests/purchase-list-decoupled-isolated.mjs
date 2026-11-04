@@ -1,10 +1,10 @@
 // 079 candidate acceptance: BuyAnime 訂購紀錄 import/projection never changes 採購總表
-// (show_in_purchase_list). Real erp_apply_catalog_transaction on disposable PostgreSQL (v32 + 079),
+// (show_in_purchase_list). Real erp_apply_catalog_transaction on disposable PostgreSQL (v33 + 079),
 // real planCatalogTransaction; synthetic data only.
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
-import { isolatedDatabase, R5_V32_MIGRATIONS, uuid } from './helpers/saveability-isolated.mjs';
-const db = await isolatedDatabase({ migrations: [...R5_V32_MIGRATIONS, '../candidates/079_catalog_projection_without_purchase_list.sql'] });
+import { isolatedDatabase, R5_V33_MIGRATIONS, uuid } from './helpers/saveability-isolated.mjs';
+const db = await isolatedDatabase({ migrations: [...R5_V33_MIGRATIONS, '../sql/079_catalog_projection_without_purchase_list.sql'] });
 globalThis.indexedDB = { open: () => ({}) };
 globalThis.window = { indexedDB: globalThis.indexedDB, location: { hostname: '127.0.0.1' }, localStorage: { getItem: () => null } };
 const vite = await createServer({ configFile: false, server: { middlewareMode: true, hmr: false } });

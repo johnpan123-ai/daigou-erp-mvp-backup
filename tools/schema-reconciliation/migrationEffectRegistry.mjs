@@ -45,6 +45,26 @@ const DEPENDENCY_SOURCE_FILES = Object.freeze({
 });
 
 export const MIGRATION_EFFECT_SPECS = Object.freeze({
+  '079': {
+    sourceFile: '079_catalog_projection_without_purchase_list.sql', dependencies: ['070', '078'],
+    risk: 'CATALOG_PURCHASE_LIST_PROJECTION_BOUNDARY', idempotency: 'TRANSACTIONAL_EXACT_FUNCTION_REPLACEMENT',
+    classification: 'NO_NEW_DURABLE_RESOURCE',
+    preconditions: [fn('erp_apply_catalog_transaction(uuid,jsonb)', {
+      owner: 'postgres', securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+      publicExecute: false, requiredConfig: ['search_path=""'],
+      definitionIncludes: ["group_op->'changes'->'show_in_purchase_list'='true'::jsonb",
+        "v.source='inventory_import'", 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH'],
+    })],
+    postconditions: [fn('erp_apply_catalog_transaction(uuid,jsonb)', {
+      owner: 'postgres', securityDefiner: true, authenticatedExecute: true, anonExecute: false,
+      publicExecute: false, requiredConfig: ['search_path=""'],
+      definitionIncludes: ['CATALOG_PURCHASE_LIST_CHANGE_FORBIDDEN',
+        "coalesce(op->'values'->'show_in_purchase_list','false'::jsonb) is distinct from 'false'::jsonb",
+        "v.source='inventory_import'", 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH'],
+      definitionExcludes: ["group_op->'changes'->'show_in_purchase_list'='true'::jsonb"],
+      retainedImplementation: 'CATALOG_079',
+    })],
+  },
   '078': {
     sourceFile: '078_core_source_capacity_and_receiving.sql', dependencies: ['051', '076', '077'],
     risk: 'CORE_SOURCE_CAPACITY_RECEIVING_PROGRESS', idempotency: 'TRANSACTIONAL_CREATE_AND_SOURCE_ANCHOR_PATCH',
@@ -968,6 +988,11 @@ export function extractSqlEffects(sql) {
 
 export async function buildMigrationEffectRegistry() {
   const readMigration = createMigrationSourceReader(ROOT);
+  const canonical079=JSON.parse(await readFile(new URL('../../docs/schema-candidates/erp2-v34-catalog-projection-without-purchase-list.snapshot.json',import.meta.url),'utf8'));
+  const catalog079Object='public.erp_apply_catalog_transaction(uuid,jsonb)';
+  const retained079={contract:'CATALOG_079_EXACT_IMPLEMENTATION',activationObjects:[catalog079Object],
+    functions:[{object:catalog079Object,sha256:fingerprintFunctionImplementation(canonical079.functions[catalog079Object])}]};
+  if(!retained079.functions[0].sha256)throw new Error('CATALOG_079_CANONICAL_MISSING:'+catalog079Object);
   const canonical078=JSON.parse(await readFile(new URL('../../docs/schema-candidates/erp2-v33-r5-source-capacity-receiving.snapshot.json',import.meta.url),'utf8'));
   const core078=[
     'public.erp_core_restore_in_progress()','public.erp_core_write_lock()','public.erp_core_source_guard()',
@@ -1023,7 +1048,8 @@ export async function buildMigrationEffectRegistry() {
     const retainedCondition = condition => condition.retainedImplementation === 'WACA_075'
       ? { ...condition, retainedImplementation: retained075 }
       : condition.retainedImplementation === 'WACA_077' ? { ...condition, retainedImplementation: retained077 }
-      : condition.retainedImplementation === 'R5_078' ? { ...condition, retainedImplementation: retained078 } : condition;
+      : condition.retainedImplementation === 'R5_078' ? { ...condition, retainedImplementation: retained078 }
+      : condition.retainedImplementation === 'CATALOG_079' ? { ...condition, retainedImplementation: retained079 } : condition;
     const postconditions = [...spec.postconditions, ...derivedConditions].map(retainedCondition)
       .filter((value, index, values) => values.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(value)) === index);
     const dependencySources = [];

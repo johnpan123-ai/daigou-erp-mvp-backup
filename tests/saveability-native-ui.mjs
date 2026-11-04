@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
 import {chromium} from 'playwright';
-import {isolatedDatabase,R5_V32_MIGRATIONS,uuid} from './helpers/saveability-isolated.mjs';
+import {isolatedDatabase,R5_V33_MIGRATIONS,uuid} from './helpers/saveability-isolated.mjs';
 // 079 candidate: 訂購紀錄 projection without 採購總表 change.
-const db=await isolatedDatabase({migrations:[...R5_V32_MIGRATIONS,'../candidates/079_catalog_projection_without_purchase_list.sql']});let vite,browser;
+const db=await isolatedDatabase({migrations:[...R5_V33_MIGRATIONS,'../sql/079_catalog_projection_without_purchase_list.sql']});let vite,browser;
 const origin='http://127.0.0.1:4401';
 const bridge=createServer(async(req,res)=>{
   res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Access-Control-Allow-Headers','content-type');

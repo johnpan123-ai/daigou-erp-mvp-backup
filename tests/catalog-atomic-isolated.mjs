@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
-import { isolatedDatabase,R5_V32_MIGRATIONS,uuid,viewer } from './helpers/saveability-isolated.mjs';
+import { isolatedDatabase,R5_V33_MIGRATIONS,uuid,viewer } from './helpers/saveability-isolated.mjs';
 // 079 candidate: Catalog projection no longer touches 採購總表 (show_in_purchase_list).
-const CANDIDATE_079='../candidates/079_catalog_projection_without_purchase_list.sql';
-const db=await isolatedDatabase({migrations:[...R5_V32_MIGRATIONS,CANDIDATE_079]});
+const MIGRATION_079='../sql/079_catalog_projection_without_purchase_list.sql';
+const db=await isolatedDatabase({migrations:[...R5_V33_MIGRATIONS,MIGRATION_079]});
 // db.ts exports the existing browser adapters as well as pure matching helpers.
 // Never resolve a storage open in this Node test; the planner must not use it.
 globalThis.indexedDB={open:()=>({})};
@@ -132,7 +132,7 @@ try{
   await assert.rejects(call(inject),/CATALOG_MANUAL_METADATA_FORBIDDEN/);
   await sql.query(readFileSync('supabase/sql/056_catalog_materialized_purchase_projection.sql','utf8'));
   await sql.query(readFileSync('supabase/sql/070_catalog_set_based_commit_and_reconciliation.sql','utf8'));
-  await sql.query(readFileSync('supabase/sql/'+CANDIDATE_079,'utf8'));
+  await sql.query(readFileSync('supabase/sql/'+MIGRATION_079,'utf8'));
   await db.startPostgrest();
   const postgrestTimings=[];
   for(let run=1;run<=5;run++){

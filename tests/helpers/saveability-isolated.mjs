@@ -9,10 +9,13 @@ import { CANONICAL_FRESH_INSTALL_V3 } from '../../supabase/canonicalFreshInstall
 export const uuid=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 export const owner='00000000-0000-4000-8000-000000000099';
 export const viewer='00000000-0000-4000-8000-000000000098';
-// Tests of the migration boundary start at the current live v32 by default.
-// Latest-target tests pass the full source chain explicitly. Candidate-flag
-// tests append 078 once; nothing here is a production migration runner.
-export const R5_V32_MIGRATIONS=Object.freeze(CANONICAL_FRESH_INSTALL_V3.filter(f=>f!=='078_core_source_capacity_and_receiving.sql'));
+// Boundary tests can start from either historical v32 or the current live v33.
+// Candidate tests append the migration under review exactly once; nothing here
+// is a production migration runner.
+export const R5_V32_MIGRATIONS=Object.freeze(CANONICAL_FRESH_INSTALL_V3.filter(f=>
+  !['078_core_source_capacity_and_receiving.sql','079_catalog_projection_without_purchase_list.sql'].includes(f)));
+export const R5_V33_MIGRATIONS=Object.freeze(CANONICAL_FRESH_INSTALL_V3.filter(f=>
+  f!=='079_catalog_projection_without_purchase_list.sql'));
 export async function isolatedDatabase({migrations=R5_V32_MIGRATIONS, safeupdateLibrary, postgrestBinary}={}) {
   safeupdateLibrary ??= process.env.WACA_TEST_SAFEUPDATE_LIBRARY;
   postgrestBinary ??= process.env.WACA_TEST_POSTGREST_BINARY;

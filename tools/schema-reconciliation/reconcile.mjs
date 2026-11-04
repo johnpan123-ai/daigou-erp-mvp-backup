@@ -133,7 +133,8 @@ function evidenceFor(snapshot, condition) {
         && (condition.publicExecute === undefined || value.publicExecute === condition.publicExecute)
         && (condition.requiredConfig ?? []).every(entry => (value.config ?? [])
           .some(actual => canonicalConfig(actual) === canonicalConfig(entry)))
-        && (condition.definitionIncludes ?? []).every(entry => definition.includes(normalizeDefinition(entry)));
+        && (condition.definitionIncludes ?? []).every(entry => definition.includes(normalizeDefinition(entry)))
+        && (condition.definitionExcludes ?? []).every(entry => !definition.includes(normalizeDefinition(entry)));
       return exact(Boolean(value), matches, value ?? null);
     }
     case 'functionSignatureSet': {
