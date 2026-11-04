@@ -415,7 +415,7 @@ export default function Inventory() {
 
   const handleCreatePurchaseRecords = async () => {
     if (selectedSkus.size === 0) return;
-    const confirmImport = window.confirm(`你即將匯入 ${selectedSkus.size} 個商品至訂購紀錄表，是否確認？`);
+    const confirmImport = window.confirm(`你即將匯入 ${selectedSkus.size} 個商品至訂購紀錄表，是否確認？\n\n此操作只會匯入訂購紀錄，不會自動加入採購總表。`);
     if (!confirmImport) return;
     try {
       await dataProvider.createPurchaseRecordFromInventory(Array.from(selectedSkus));
@@ -432,7 +432,7 @@ export default function Inventory() {
     const skusToImport = g.skus.map(s => s.myacg_item_code);
     if (skusToImport.length === 0) return;
 
-    const confirmImport = window.confirm(`你即將匯入該群組共 ${skusToImport.length} 個商品至訂購紀錄表，是否確認？`);
+    const confirmImport = window.confirm(`你即將匯入該群組共 ${skusToImport.length} 個商品至訂購紀錄表，是否確認？\n\n此操作只會匯入訂購紀錄，不會自動加入採購總表。`);
     if (!confirmImport) return;
 
     try {

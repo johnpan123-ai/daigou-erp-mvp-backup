@@ -56,7 +56,7 @@ try {
   const beforeQuantity=JSON.stringify([...repo.autoQuantities].sort());
   await catalog.createPurchaseRecordFromInventory.call(context,['G07609652']);
   assert.equal(projection.purchaseRecordGroupIds(variants).size,1,'explicit action creates Purchase Records projection');
-  assert.equal(groups.find(row=>row.id===variants.find(row=>row.myacg_item_code==='G07609652').product_group_id).show_in_purchase_list,true);
+  assert.equal(groups.find(row=>row.id===variants.find(row=>row.myacg_item_code==='G07609652').product_group_id).show_in_purchase_list,false,'079: 訂購紀錄 projection never adds to 採購總表');
   core.rematchHistoricalWaca(repo,masterModule.buildWacaMasterReference(variants,fresh),'projection-later',new Set(['GP-FUWAWA']));
   assert.equal(JSON.stringify([...repo.autoQuantities].sort()),beforeQuantity,'projection later cannot double-count WACA');
 

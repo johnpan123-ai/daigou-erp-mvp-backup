@@ -56,7 +56,8 @@ async function materializeProductMasterFromInventory(
           release_month: '',
           has_official_site: false,
           product_url: '',
-          show_in_purchase_list: projectToPurchaseRecords,
+          // 採購總表 membership is only the Owner's explicit add/remove; never set by import or projection.
+          show_in_purchase_list: false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
@@ -69,10 +70,6 @@ async function materializeProductMasterFromInventory(
           group.listing_type = determineListingType(title);
           groupsUpdated = true;
         }
-      }
-      if (projectToPurchaseRecords && group.show_in_purchase_list !== true) {
-        group.show_in_purchase_list = true;
-        groupsUpdated = true;
       }
 
       // We should resolve specs using ALL variants in this group + new items
@@ -221,7 +218,7 @@ export async function ensureProductMasterFromInventory(
   return materializeProductMasterFromInventory.call(this, itemCodes, false);
 }
 
-/** Explicit user projection from Product Master into Purchase Records. */
+/** Explicit user projection from Product Master into Purchase Records (訂購紀錄 only; 採購總表 unchanged). */
 export async function createPurchaseRecordFromInventory(
   this: CatalogAlgorithmContext, itemCodes: string[],
 ): Promise<void> {

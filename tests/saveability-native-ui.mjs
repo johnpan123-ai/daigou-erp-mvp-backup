@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
 import {chromium} from 'playwright';
-import {isolatedDatabase,uuid} from './helpers/saveability-isolated.mjs';
-const db=await isolatedDatabase();let vite,browser;
+import {isolatedDatabase,R5_V32_MIGRATIONS,uuid} from './helpers/saveability-isolated.mjs';
+// 079 candidate: 訂購紀錄 projection without 採購總表 change.
+const db=await isolatedDatabase({migrations:[...R5_V32_MIGRATIONS,'../candidates/079_catalog_projection_without_purchase_list.sql']});let vite,browser;
 const origin='http://127.0.0.1:4401';
 const bridge=createServer(async(req,res)=>{
   res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Access-Control-Allow-Headers','content-type');
@@ -67,7 +68,7 @@ try{
   await page.waitForTimeout(500);
   const uiProjectionMs=performance.now()-uiBegan;
   const materialized=(await db.sql.query("select g.show_in_purchase_list,v.source,v.waca_auto_quantity from product_variants v join product_groups g on g.id=v.product_group_id where v.myacg_item_code='G-UI-MAT'")).rows[0];
-  assert.deepEqual([materialized.show_in_purchase_list,materialized.source,Number(materialized.waca_auto_quantity)],[true,'myacg_order_import',7]);
+  assert.deepEqual([materialized.show_in_purchase_list,materialized.source,Number(materialized.waca_auto_quantity)],[false,'myacg_order_import',7],'079: 訂購紀錄 import leaves 採購總表 unchanged');
   const action=page.getByText('Synthetic UI Catalog',{exact:true}).first().locator('xpath=ancestor::tr[1]').getByRole('button',{name:/匯入訂購紀錄|建立訂購紀錄/});await action.click();
   await page.waitForTimeout(500);
   const catalog=(await db.sql.query("select id from public.product_groups where title='Synthetic UI Catalog' and deleted_at is null")).rows;

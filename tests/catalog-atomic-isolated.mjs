@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
-import { isolatedDatabase,uuid,viewer } from './helpers/saveability-isolated.mjs';
-const db=await isolatedDatabase();
+import { isolatedDatabase,R5_V32_MIGRATIONS,uuid,viewer } from './helpers/saveability-isolated.mjs';
+// 079 candidate: Catalog projection no longer touches 採購總表 (show_in_purchase_list).
+const CANDIDATE_079='../candidates/079_catalog_projection_without_purchase_list.sql';
+const db=await isolatedDatabase({migrations:[...R5_V32_MIGRATIONS,CANDIDATE_079]});
 // db.ts exports the existing browser adapters as well as pure matching helpers.
 // Never resolve a storage open in this Node test; the planner must not use it.
 globalThis.indexedDB={open:()=>({})};
@@ -43,7 +45,7 @@ try{
   for(let n=0;n<5;n++)assert.equal((await call(plan,key)).replayed,true);
   let current=await snapshot();
   assert.equal(current.groups.length,2); assert.equal(current.variants.length,3);
-  assert.equal(current.groups.find(g=>g.title==='Synthetic catalog').show_in_purchase_list,true);
+  assert.equal(current.groups.find(g=>g.title==='Synthetic catalog').show_in_purchase_list,false,'079: 訂購紀錄 projection never adds to 採購總表');
   assert.equal(Number(current.variants.find(v=>v.myacg_item_code==='G-CATALOG-1').myacg_auto_quantity),3);
   const again=await planCatalogTransaction(current,'create',['G-CATALOG-1','G-CATALOG-2']);
   assert.equal((await call(again)).ok,true); assert.deepEqual(await snapshot(),current);
@@ -54,9 +56,8 @@ try{
   const syncFresh=await planCatalogTransaction(stable,'sync'); assert.equal((await call(syncFresh)).ok,true);
   assert.equal((await snapshot()).variants.length,4);
 
-  // Materialized BuyAnime Product Masters remain hidden until the user makes
-  // an explicit create projection. The server accepts only the paired group +
-  // provenance transition and preserves unrelated WACA quantity evidence.
+  // 079: an explicit create projection changes provenance only (訂購紀錄); 採購總表 stays as it was.
+  // Unrelated WACA quantity evidence is preserved.
   const exactCodes=await insertMaterialized('G-PROJECTION',2,100,[
     {code:'G07609652',title:'Fuwawa',raw:'Fuwawa'},
     {code:'G07609640',title:'Mococo',raw:'Mococo'},
@@ -64,7 +65,7 @@ try{
   const materializedBefore=await snapshot();
   const projection=await planCatalogTransaction(materializedBefore,'create',exactCodes);
   assert.equal(projection.request.mode,'create');
-  assert.equal(projection.request.operations.product_groups.filter(o=>o.changes?.show_in_purchase_list===true).length,2);
+  assert.equal(projection.request.operations.product_groups.filter(o=>'show_in_purchase_list' in (o.changes??{})).length,0,'projection carries no 採購總表 change');
   assert.equal(projection.request.operations.product_variants.filter(o=>o.changes?.source==='myacg_order_import').length,2);
 
   // Validation happens before the mutation block: arbitrary and reverse
@@ -75,11 +76,15 @@ try{
     await assert.rejects(call(invalid),/CATALOG_PROVENANCE_TRANSITION_FORBIDDEN/);
     assert.equal((await sql.query('select count(*)::int n from public.product_groups where id in ($1,$2) and show_in_purchase_list',[uuid(100),uuid(103)])).rows[0].n,0);
   }
-  const sourceOnly=structuredClone(projection); sourceOnly.request.operations.product_groups=[];
-  await assert.rejects(call(sourceOnly),/CATALOG_PROVENANCE_TRANSITION_FORBIDDEN/);
-  const forgedGroup=structuredClone(projection);
-  forgedGroup.request.operations.product_groups[0].expected.show_in_purchase_list=true;
-  await assert.rejects(call(forgedGroup),/CATALOG_PROVENANCE_TRANSITION_FORBIDDEN/);
+  // 079: no Catalog request may set or clear 採購總表 (patch) or create a group inside it.
+  const forgedShow=structuredClone(projection);
+  forgedShow.request.operations.product_groups=[{kind:'patch',id:uuid(100),observedVersion:materializedBefore.groups.find(g=>g.id===uuid(100)).version,
+    expected:{show_in_purchase_list:false},changes:{show_in_purchase_list:true}}];
+  await assert.rejects(call(forgedShow),/CATALOG_PURCHASE_LIST_CHANGE_FORBIDDEN/);
+  const forgedCreate=structuredClone(projection);
+  forgedCreate.request.operations.product_groups=[{kind:'create',id:uuid(1999),values:{local_id:uuid(1999),title:'Forged visible',show_in_purchase_list:true}}];
+  await assert.rejects(call(forgedCreate),/CATALOG_PURCHASE_LIST_CHANGE_FORBIDDEN/);
+  assert.equal((await sql.query('select count(*)::int n from public.product_groups where id in ($1,$2) and show_in_purchase_list',[uuid(100),uuid(103)])).rows[0].n,0);
 
   // Force the second variant mutation to fail after both group operations have
   // run. The PL/pgSQL exception block must roll the entire Catalog transaction
@@ -99,7 +104,7 @@ try{
     from public.product_variants v join public.product_groups g on g.id=v.product_group_id
     where v.id in ($1,$2) order by v.id`,[uuid(101),uuid(104)])).rows;
   assert.deepEqual(projected.map(r=>[r.show_in_purchase_list,r.source,Number(r.waca_auto_quantity)]),[
-    [true,'myacg_order_import',7],[true,'myacg_order_import',7],
+    [false,'myacg_order_import',7],[false,'myacg_order_import',7],
   ]);
   assert.equal((await call(await planCatalogTransaction(await snapshot(),'create',exactCodes))).ok,true,'Fresh replay was not idempotent');
 
@@ -127,6 +132,7 @@ try{
   await assert.rejects(call(inject),/CATALOG_MANUAL_METADATA_FORBIDDEN/);
   await sql.query(readFileSync('supabase/sql/056_catalog_materialized_purchase_projection.sql','utf8'));
   await sql.query(readFileSync('supabase/sql/070_catalog_set_based_commit_and_reconciliation.sql','utf8'));
+  await sql.query(readFileSync('supabase/sql/'+CANDIDATE_079,'utf8'));
   await db.startPostgrest();
   const postgrestTimings=[];
   for(let run=1;run<=5;run++){
