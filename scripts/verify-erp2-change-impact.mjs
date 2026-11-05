@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { inspectSafeDescendant } from './post-adoption-descendant.mjs';
+import { inspectPreAdoptionMaintenance, inspectSafeDescendant } from './post-adoption-descendant.mjs';
 import { regressionScripts, sourceHash, impactHash, sealImpactEvidence, verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { runGitAt, verifyLocalCandidate, verifyRemoteCandidate } from './promotion-safety.mjs';
 import { buildSchemaEvidenceIdentity } from '../tools/schema-reconciliation/evidenceContract.mjs';
@@ -43,15 +43,19 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
   if (candidate.head !== remote.remoteBranchHead) throw new Error('Candidate remote mismatch');
   if (!args.get('--schema-evidence')) throw new Error('Missing --schema-evidence containing the immutable adopted baseline');
   const schemaEvidence = JSON.parse(await readFile(resolve(root, args.get('--schema-evidence')), 'utf8'));
-  const baselineRecord = schemaEvidence.baselineRecord;
-  // This step consumes historical adoption evidence for Git ancestry only.
-  // It does NOT replace the later fresh Live fingerprint/deployment guard.
-  if (schemaEvidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(schemaEvidence)
-    || baselineRecord?.eventType !== 'BASELINE_ADOPTED' || baselineRecord.result !== 'PASS'
-    || baselineRecord.supabaseProjectRef !== contract.environments.erp2.supabaseProject
-    || baselineRecord.schemaFingerprintAfter !== contract.schemaBaseline.canonicalFingerprint
-    || baselineRecord.metadata?.historicalMigrationExecutionClaimed !== false) throw new Error('Invalid adopted schema baseline evidence');
-  const inspection = inspectSafeDescendant({ git, candidate, baselineRecord });
+  if (schemaEvidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(schemaEvidence)) throw new Error('Invalid schema evidence identity');
+  const inspection = schemaEvidence.mode === 'PRE_ADOPTION_MAINTENANCE'
+    ? inspectPreAdoptionMaintenance({ git, candidate, contract })
+    : (() => {
+      const baselineRecord = schemaEvidence.baselineRecord;
+      // This step consumes historical adoption evidence for Git ancestry only.
+      // It does NOT replace the later fresh Live fingerprint/deployment guard.
+      if (baselineRecord?.eventType !== 'BASELINE_ADOPTED' || baselineRecord.result !== 'PASS'
+        || baselineRecord.supabaseProjectRef !== contract.environments.erp2.supabaseProject
+        || baselineRecord.schemaFingerprintAfter !== contract.schemaBaseline.canonicalFingerprint
+        || baselineRecord.metadata?.historicalMigrationExecutionClaimed !== false) throw new Error('Invalid adopted schema baseline evidence');
+      return inspectSafeDescendant({ git, candidate, baselineRecord });
+    })();
   if (mode === 'inspect') return inspection;
   let baselineExceptionConfig = null; let baselineException = null;
   if (args.has('--baseline-exception')) {

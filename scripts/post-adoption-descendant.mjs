@@ -1569,6 +1569,80 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
   };
 }
 
+// PRE_ADOPTION_MAINTENANCE is a single, post-079 release lane.  It is not a
+// generic PRE_ADOPTION bypass: the database boundary, fingerprint, base tree,
+// exact review id, and changed-file set are all pinned by the canonical
+// contract.  Product/provider/RPC sources can never enter this lane.
+export function inspectPreAdoptionMaintenance({ git, candidate, contract }) {
+  const maintenance = contract?.schemaBaseline?.preAdoptionMaintenance;
+  const failMaintenance = message => fail(`PRE_ADOPTION_MAINTENANCE: ${message}`);
+  if (!maintenance || !sha(maintenance.approvedBaseHead) || !sha(candidate?.head)
+    || candidate.head === maintenance.approvedBaseHead) failMaintenance('invalid candidate/base identity');
+  try { git(['rev-parse', `${maintenance.approvedBaseCheckpoint}^{}`]); }
+  catch { failMaintenance('approved maintenance base checkpoint is unavailable'); }
+  if (git(['rev-parse', `${maintenance.approvedBaseCheckpoint}^{}`]).trim() !== maintenance.approvedBaseHead) {
+    failMaintenance('approved maintenance base checkpoint mismatch');
+  }
+  const remote = git(['ls-remote', 'origin', `refs/tags/${maintenance.approvedBaseCheckpoint}`, `refs/tags/${maintenance.approvedBaseCheckpoint}^{}`]);
+  const refs = new Map(remote.trim().split(/\r?\n/u).filter(Boolean).map(row => {
+    const [head, ref] = row.split(/\s+/u); return [ref, head];
+  }));
+  if ((refs.get(`refs/tags/${maintenance.approvedBaseCheckpoint}^{}`)
+    ?? refs.get(`refs/tags/${maintenance.approvedBaseCheckpoint}`)) !== maintenance.approvedBaseHead) {
+    failMaintenance('approved maintenance base checkpoint is not remotely proven');
+  }
+  try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', maintenance.approvedBaseHead, candidate.head]); }
+  catch { failMaintenance('candidate is outside the approved post-079 base'); }
+  const changed = git(['diff', '--name-only', '--no-renames', maintenance.approvedBaseHead, candidate.head, '--'])
+    .trim().split(/\r?\n/u).filter(Boolean).sort();
+  const metadataFile = 'config/erp2-reviewed-change-impacts.json';
+  if (!changed.includes(metadataFile)) failMaintenance('exact review metadata append is missing');
+  const reviewFiles = changed.filter(file => file !== metadataFile);
+  const allowed = new Set([
+    'config/erp-environment-identity.json',
+    'scripts/promotion-safety.mjs',
+    'scripts/reviewed-change-impact.mjs',
+    'scripts/verify-erp2-change-impact.mjs',
+    'scripts/post-adoption-descendant.mjs',
+    'tools/schema-reconciliation/cli.mjs',
+    'tools/schema-reconciliation/reconcile.mjs',
+    'tests/erp2-pre-adoption-maintenance-guard.mjs',
+    'tests/schema-reconciliation.mjs',
+  ]);
+  if (reviewFiles.some(file => !allowed.has(file))) {
+    failMaintenance(`changed file is outside the exact maintenance panel: ${reviewFiles.filter(file => !allowed.has(file)).join(',')}`);
+  }
+  const reviews = reviewForCandidate(git, candidate.head, maintenance.approvedBaseHead);
+  const exact = reviews.filter(review => review.id === maintenance.exactReviewId);
+  if (exact.length !== 1) failMaintenance('exact maintenance review is missing or duplicated');
+  const reviewed = exact[0];
+  if (reviewed.beforeHead !== maintenance.approvedBaseHead
+    || reviewed.files.some(row => row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL')) {
+    failMaintenance('exact maintenance review anchor or classification mismatch');
+  }
+  const exactFiles = reviewed.files.map(row => row.file).sort();
+  if (JSON.stringify(exactFiles) !== JSON.stringify(reviewFiles)) failMaintenance('exact maintenance review scope mismatch');
+  const sourceAt = (revision, file) => {
+    try { return git(['show', `${revision}:${file}`]); } catch { return null; }
+  };
+  for (const row of reviewed.files) {
+    const after = git(['show', `${candidate.head}:${row.file}`]);
+    if (sourceHash(after) !== row.afterHash) failMaintenance(`exact maintenance blob mismatch: ${row.file}`);
+  }
+  return {
+    result: 'PASS', mode: 'PRE_ADOPTION_MAINTENANCE',
+    baselineHead: maintenance.approvedBaseHead, baselineCheckpoint: maintenance.approvedBaseCheckpoint,
+    candidateHead: candidate.head, candidateCheckpoint: candidate.checkpointTag, candidateBranch: candidate.branch ?? null,
+    ancestry: 'PASS', schemaSensitiveFiles: 0, nonSchemaFiles: changed.length,
+    migrationChecksumParity: 'PASS', canonicalContractParity: 'PASS', backupContractParity: 'PASS', providerContractParity: 'PASS',
+    changedFiles: changed.map(file => ({ file, classification: file === metadataFile ? 'RELEASE_CONTROL_METADATA' : 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL',
+      beforeHash: sourceHash(sourceAt(maintenance.approvedBaseHead, file)), afterHash: sourceHash(sourceAt(candidate.head, file)) })),
+    persistenceSchemaNeutralFiles: reviewFiles.length, unknownFiles: 0,
+    requiredRegressions: [...new Set(reviewed.requiredRegressions ?? ['pre-adoption-maintenance-guard'])],
+    schemaBaselineMutated: false,
+  };
+}
+
 export function verifySafeDescendant({ git, candidate, baselineRecord, changeImpactEvidence, now,
   baselineExceptionConfig = null, evidenceRoot = null }) {
   const inspection = inspectSafeDescendant({ git, candidate, baselineRecord });

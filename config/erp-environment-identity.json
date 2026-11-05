@@ -29,7 +29,20 @@
     "canonicalFingerprint": "9bb81937fa2c58b58ddb87c7a36cdfa8e1048b971974ec21804e508602d617d8",
     "snapshotToolChecksum": "3010baa9d50e6348b42519fc7c05640e9e2cd2b36d5b2513317cc2c7fa0a4218",
     "snapshotMaxAgeMs": 86400000,
-    "liveObservationMaxAgeMs": 7200000
+    "liveObservationMaxAgeMs": 7200000,
+    "preAdoptionMaintenance": {
+      "mode": "PRE_ADOPTION_MAINTENANCE",
+      "migrationId": "079",
+      "requiredMigrationSourceHead": "73083c3d028e23506e0bd7bec9ad8b949a226cfc",
+      "requiredMigrationCheckpoint": "checkpoint-20261104-erp2-v33-079-purchase-list-decouple-v1",
+      "requiredMigrationSourceChecksum": "391e42478375a471f251ee647424c82f7cf47fd3cdc3ebd1523fdaa86d45363c",
+      "requiredFingerprint": "9bb81937fa2c58b58ddb87c7a36cdfa8e1048b971974ec21804e508602d617d8",
+      "approvedBaseHead": "a9320b4ae8e964d38bf262c8561ba69f699da1b0",
+      "approvedBaseCheckpoint": "checkpoint-20261105-erp2-v33-079-postadoption-v1",
+      "exactReviewId": "erp2-pre-adoption-maintenance-079-v1",
+      "forbidBaselineAdoption": true,
+      "requireZeroMigrationDelta": true
+    }
   },
   "environments": {
     "erp2": {

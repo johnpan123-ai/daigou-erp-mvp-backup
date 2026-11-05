@@ -327,6 +327,7 @@ console.log('PASS baseline adoption never fabricates migration execution');
 
 const fixtureContract = structuredClone(contract);
 fixtureContract.schemaBaseline.canonicalFingerprint = fullPlan.expectedFingerprint;
+fixtureContract.schemaBaseline.preAdoptionMaintenance.requiredFingerprint = fullPlan.expectedFingerprint;
 const evidence = fullPlan;
 const liveObservation = { projectRef: evidence.projectRef, fingerprint: evidence.currentFingerprint,
   observedAt: evidence.snapshotIdentity.capturedAt };

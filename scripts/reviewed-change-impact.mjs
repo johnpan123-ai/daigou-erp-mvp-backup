@@ -38,6 +38,7 @@ export const regressionScripts = Object.freeze({
   'buyanime-recovery-review': 'tests/buyanime-recovery-change-impact.mjs',
   'post-restore-business-release': 'tests/buyanime-post-restore-isolated.mjs',
   'baseline-exception-control': 'tests/erp2-one-time-baseline-exception.mjs',
+  'pre-adoption-maintenance-guard': 'tests/erp2-pre-adoption-maintenance-guard.mjs',
   'erp1-v1-exact-restore': 'tests/erp1-v1-restore-compatibility.mjs',
   'erp1-v1-restore-review': 'tests/erp1-v1-restore-change-impact.mjs',
   'waca-v3-native-replay': 'tests/waca-resolver-v3-replay.mjs',

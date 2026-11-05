@@ -382,6 +382,9 @@ export function planSchemaDelta(snapshot, registry, options = {}) {
       currentFingerprint,
     },
     migrationHistoryProvenance: snapshot.migrationHistory?.available ? 'AVAILABLE' : 'UNAVAILABLE',
+    migrationHistory: snapshot.migrationHistory?.available
+      ? { available: true, records: snapshot.migrationHistory.records ?? [] }
+      : { available: false, records: [] },
     currentFingerprint,
     expectedFingerprint: options.expectedSnapshot ? fingerprintStructuralSnapshot(options.expectedSnapshot) : null,
     targetAfterDeltaFingerprint: options.expectedSnapshot ? fingerprintStructuralSnapshot(options.expectedSnapshot) : null,
