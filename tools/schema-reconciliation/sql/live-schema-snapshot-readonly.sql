@@ -97,6 +97,7 @@ functions_object as (
   ) order by p.proname,oidvectortypes(p.proargtypes)) as value
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace and n.nspname='public'
   join pg_language l on l.oid=p.prolang
+  where p.prokind='f'
 ),
 schema_names as (
   select jsonb_agg(nspname order by nspname) value from pg_namespace

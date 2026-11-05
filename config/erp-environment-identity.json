@@ -26,8 +26,8 @@
     "canonicalAlgorithm": "POSTGRESQL_LEXICAL_V3",
     "preAdoptionMode": "READ_ONLY_RECONCILIATION",
     "postAdoptionLedger": "public.erp_schema_migration_ledger",
-    "canonicalFingerprint": "a5387d8513f2f1aab7eba16ab2f0b10a43a21fdbfeb85d8ac0686a6fc7878ac5",
-    "snapshotToolChecksum": "ea74a283f565adc2af090284b3dfd78ac83b8ff5c24e71707867839b1e424281",
+    "canonicalFingerprint": "9bb81937fa2c58b58ddb87c7a36cdfa8e1048b971974ec21804e508602d617d8",
+    "snapshotToolChecksum": "3010baa9d50e6348b42519fc7c05640e9e2cd2b36d5b2513317cc2c7fa0a4218",
     "snapshotMaxAgeMs": 86400000,
     "liveObservationMaxAgeMs": 7200000
   },
