@@ -58,6 +58,7 @@ import type { CloudResource } from '../providers/cloud/cloudSyncDomain';
 import { getProviderMode } from '../providers/providerMode';
 import { supabaseEnvironment } from '../providers/cloud/supabaseClient';
 import CloudRestoreIntegrityAuditTool from './CloudRestoreIntegrityAudit';
+import SchemaMigrationAuditRunner from './SchemaMigrationAuditRunner';
 import { normalizeCloudRestoreCandidateVariants, type CloudRestoreVariantNormalizationRecord } from '../lib/cloudRestoreVariantNormalization';
 import { assessWacaRestoreLoss, type WacaRestoreLossReport } from '../waca/restoreLoss';
 import { WacaRestoreLossNotice } from './WacaRestoreLossNotice';
@@ -1011,6 +1012,7 @@ export default function CloudAtomicRestorePanel({
         <details data-testid="cloud-restore-advanced-tools" style={{ marginTop: 10 }}>
           <summary>進階／技術工具</summary>
           <CloudRestoreIntegrityAuditTool key={user.id} />
+          <SchemaMigrationAuditRunner key={`080-${user.id}`} />
         </details>
       )}
 
