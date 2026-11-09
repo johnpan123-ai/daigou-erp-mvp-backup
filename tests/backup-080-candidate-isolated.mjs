@@ -8,7 +8,7 @@ import { isolatedDatabase, owner } from './helpers/saveability-isolated.mjs';
 // bytes because the deployed v33 function is known to have a CRLF prosrc.
 // Compare rollback bodies after newline normalization for isolated portability.
 const sqlText = file => readFileSync(file, 'utf8').replace(/\r\n?/gu, '\n');
-const CANDIDATE = sqlText('supabase/candidates/080_backup_export_jit_off_single_flight.sql');
+const CANDIDATE = sqlText('supabase/candidates/080_backup_export_function_timeout_single_flight.sql');
 const ROLLBACK = readFileSync('supabase/candidates/080_rollback.sql', 'utf8');
 const RESOURCES = ['inventory_items', 'product_groups', 'product_categories', 'product_variants', 'bundle_components', 'purchase_batches', 'purchase_batch_items',
   'private_orders', 'private_order_items', 'sales_orders', 'sales_order_items', 'japan_packages', 'japan_package_items', 'outbound_shipments', 'outbound_shipment_items',
@@ -36,13 +36,14 @@ try {
   const before = await exportAs(a, owner); const stateBefore = await fnState();
   assert.deepEqual(Object.keys(JSON.parse(before)), RESOURCES, '24 resources in contract order');
 
+  const settingsBefore = (await sql.query('select count(*)::int n from pg_db_role_setting')).rows[0].n;
   await sql.query(CANDIDATE);
   const st = await fnState();
   assert.equal(st.v, 's', 'STABLE kept'); assert.equal(st.sd, true, 'SECURITY DEFINER kept');
-  assert.ok(st.cfg.includes('jit=off'), 'jit=off applies to this function'); assert.ok(st.cfg.some(c => c.startsWith('search_path=')), 'search_path kept');
+  assert.ok(st.cfg.includes('statement_timeout=60s'), 'timeout scoped to this function'); assert.ok(!st.cfg.some(c => c.startsWith('jit=')), 'no ineffective jit clause'); assert.ok(st.cfg.some(c => c.startsWith('search_path=')), 'search_path kept');
   assert.ok(!st.cfg.some(c => c.startsWith('work_mem=')), 'work_mem not raised');
   assert.equal(st.acl, stateBefore.acl, 'ACL unchanged');
-  assert.equal((await sql.query("select current_setting('jit') j")).rows[0].j, 'on', 'no global change');
+  assert.equal((await sql.query("select current_setting('statement_timeout') t")).rows[0].t, '0', 'no session/global timeout change'); assert.equal((await sql.query("select count(*)::int n from pg_db_role_setting")).rows[0].n, settingsBefore, 'no role/database setting change');
   const after = await exportAs(a, owner);
   assert.equal(after, before, 'byte-identical snapshot');
   // Owner gate unchanged.
@@ -66,7 +67,7 @@ try {
   // The read-only root-cause script runs as-is (both EXPLAIN ANALYZE passes) and persists nothing.
   const groupsBefore = (await sql.query('select count(*)::int n from public.product_groups')).rows[0].n;
   await sql.query(sqlText('supabase/candidates/080_readonly_root_cause_diagnostics.sql'));
-  assert.equal((await sql.query("select current_setting('jit') j")).rows[0].j, 'on', 'diagnostics left no setting behind');
+  assert.equal((await sql.query("select current_setting('statement_timeout') t")).rows[0].t, '0', 'diagnostics left no setting behind');
   assert.equal((await sql.query('select count(*)::int n from public.product_groups')).rows[0].n, groupsBefore);
   // Rollback restores 065 state exactly (config, volatility, ACL) and the same output.
   await sql.query(ROLLBACK);
@@ -75,5 +76,5 @@ try {
   assert.deepEqual(rb.cfg, stateBefore.cfg);
   assert.equal(await exportAs(a, owner), before);
   await a.end(); await b.end();
-  console.log('PASS 080 candidate: identical 24-resource JSON, jit=off scoped to the RPC, ACL/owner gate unchanged, single-flight fail-closed, rollback exact');
+  console.log('PASS 080 candidate: identical 24-resource JSON, statement_timeout scoped to the RPC (no role/global change), ACL/owner gate unchanged, single-flight fail-closed, rollback exact');
 } finally { await Promise.allSettled(clients.map(client => client.end())); await db.close(); }

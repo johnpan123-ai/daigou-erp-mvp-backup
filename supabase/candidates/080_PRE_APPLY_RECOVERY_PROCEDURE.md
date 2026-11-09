@@ -1,39 +1,34 @@
-# 080 — one-time pre-apply recovery assurance while the backup RPC is broken (candidate)
+# 080 — pre-apply procedure (candidate; nothing here has been run on production)
 
-Deadlock: the release guard wants a fresh authoritative 24-resource JSON, but the RPC that produces it
-times out (57014, ~10.36 s). Not acceptable as substitutes: the 2026-11-05 backup, the 16-resource
-Workbench export, or calling the RPC from SQL Editor with forged JWT claims (not the ERP2 Owner auth path,
-Dashboard timeout) — that earlier "Method A" is withdrawn.
+Deadlock: the release guard needs a fresh authoritative 24-resource JSON, but the export RPC fails
+(HTTP 500 / 57014, ~10.36 s). Not acceptable substitutes: the 2026-11-05 backup, the 16-resource Workbench
+export, or calling the RPC from SQL Editor with forged JWT claims (withdrawn "Method A").
 
-## Why a one-time procedure is proportionate for 080 only
-080 replaces one read-only function (no table, data, ACL, RLS, role, timeout or Ledger change) and has an
-exact rollback file. The guard's backup requirement protects business data; 080 cannot change it.
-
-## Step 1 — root-cause evidence (read only)
-Run `080_readonly_root_cause_diagnostics.sql` (as postgres; SQL Editor or psql over the direct connection).
-It executes the export's exact SELECT twice in a READ ONLY transaction (jit on / jit off) with
-EXPLAIN (ANALYZE, BUFFERS, SETTINGS). No RPC call, no impersonation, nothing persisted.
-Accept 080 only if the evidence shows the JIT share (or the jit-off timing) explains the 57014. Otherwise STOP
-and re-evaluate (e.g. compute size / I/O).
+## Step 1 — read-only root-cause evidence (as postgres, SQL Editor or psql direct connection)
+Run `080_readonly_root_cause_diagnostics.sql`. Read-only transaction, rolled back, no RPC, no impersonation.
+Accept 080 only if BOTH hold:
+- A1/A2 show a statement_timeout on `authenticated` (or `authenticator`/database) below the export time; and
+- B shows Execution Time above that limit but well below 60 s (080 ceiling).
+Otherwise STOP (e.g. limit not found -> API gateway/other layer; time >= 60 s -> transport redesign).
+Also check Dashboard > Logs > Postgres for "canceling statement due to statement timeout" from user
+`authenticator` at the failing timestamp; and the PostgREST version (hoisting of function-level
+statement_timeout requires PostgREST >= 12; isolated proof used 13.0.7).
 
 ## Step 2 — recovery guarantee (one of)
-A. Platform recovery point: Supabase Dashboard > Database > Backups (daily backup or PITR) for project
-   `rhfdjsklfrgpoqsaqpkn`, timestamp later than the last business write. Record ref + timestamp.
-B. Consistent PostgreSQL snapshot: from the Owner's machine over the direct connection of that project,
-   read-only session, single snapshot (pg_dump default):
-   `PGOPTIONS='-c default_transaction_read_only=on' pg_dump --format=custom --schema=public --no-owner -f erp2-pre080.dump "<direct connection URI for rhfdjsklfrgpoqsaqpkn>"`
-   Record host (contains the project ref), sha256 of the file, pg_dump version, time.
-Either gives a complete recovery guarantee for the whole project. Neither is presented as the App's
-authoritative JSON.
+A. Platform recovery point (Dashboard > Database > Backups / PITR), later than the last business write.
+B. Consistent read-only pg_dump, preferred variant without any permission change:
+   `PGOPTIONS='-c default_transaction_read_only=on' pg_dump --format=custom --schema=public --no-owner --serializable-deferrable -f erp2-pre080.dump "<direct URI, user postgres>"`
+   Only if postgres cannot be used: `080_pgdump_readonly_role_candidate.sql` (SELECT + BYPASSRLS, NOLOGIN until
+   time-boxed activation), then `080_pgdump_readonly_role_revoke.sql` immediately after the dump.
+   Record sha256, pg_dump version (must be >= server major), time.
 
-## Step 3 — single-use approval record (audit), bound to this change only
-{ project: rhfdjsklfrgpoqsaqpkn, migration: 080_backup_export_jit_off_single_flight.sql,
-  sql_sha256: <value in SHA256SUMS>, recovery: <A or B evidence>, root_cause: <Step 1 summary>,
-  approved_by: Owner, approved_at, expires: same day }.
-The release tool accepts it only for this exact SQL sha256 and only when the migration's statements touch
-`public.erp_export_cloud_restore_snapshot_json` alone; any mismatch FAILS CLOSED. No reusable exemption.
+## Step 3 — single-use approval record bound to this change
+{ project: rhfdjsklfrgpoqsaqpkn, migration: 080_backup_export_function_timeout_single_flight.sql,
+  sql_sha256: <SHA256SUMS>, recovery: <A|B evidence>, root_cause: <Step 1 values>, approved_by: Owner,
+  approved_at, expires: same day }. Release tool accepts it only for this exact sha256 and only when the
+migration touches `public.erp_export_cloud_restore_snapshot_json` alone; any mismatch FAILS CLOSED. No reusable exemption.
 
 ## Step 4 — apply and restore the normal path
-Apply 080. Immediately run the in-app 「匯出 JSON 備份」: it must complete without 57014 and pass the
-manifest/24-resource checks. That file becomes the normal guard input for every later release.
-Rollback if needed: `080_rollback.sql` (function only).
+Apply 080 (contains `notify pgrst, 'reload schema'`; PostgREST reads function settings at schema-cache load).
+Immediately run in-app 「匯出 JSON 備份」: must finish without 57014 and pass manifest/24-resource checks;
+that file is the normal guard input from then on. Rollback: `080_rollback.sql` (function only).

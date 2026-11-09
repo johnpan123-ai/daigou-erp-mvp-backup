@@ -69,7 +69,7 @@ try {
   const TIMEOUT = Number(process.env.B080_TIMEOUT_MS || 60000);
   for (const scale of SCALES) {
     await load(scale);
-    if (process.env.B080_APPLY) await sql.query(readFileSync('supabase/candidates/080_backup_export_jit_off_single_flight.sql', 'utf8'));
+    if (process.env.B080_APPLY) await sql.query(readFileSync('supabase/candidates/080_backup_export_function_timeout_single_flight.sql', 'utf8'));
     const probe = await connect(); report[`bytes_x${scale}`] = (await backupAs(probe, TIMEOUT)).bytes; await probe.end();
     for (const setting of SETTINGS) {
       await sql.query(setting === 'default' ? 'alter function public.erp_export_cloud_restore_snapshot_json() reset work_mem'

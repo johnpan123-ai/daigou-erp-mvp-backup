@@ -1,16 +1,24 @@
 -- 080 Candidate only (NOT applied). Owner approval + Codex review required; never apply to ERP1.
 -- Location: supabase/candidates/ (outside the canonical chain). Adoption = move to supabase/sql/ and register
 -- in supabase/canonicalFreshInstallV3.mjs (release-control step).
--- Production symptom: erp_export_cloud_restore_snapshot_json() cancelled after ~10.36 s (SQLSTATE 57014).
+-- Production symptom: in-app export -> PostgREST RPC erp_export_cloud_restore_snapshot_json() -> HTTP 500,
+-- SQLSTATE 57014 after ~10.36 s, while the same SELECT is not cancelled in a postgres (SQL Editor) session.
+-- Mechanism (verified in isolation, tests/backup-080-api-timeout-isolated.mjs, PostgREST 13.0.7):
+--   PostgREST logs in as `authenticator`, switches to `authenticated` and applies that role's
+--   statement_timeout; the export is cancelled with 57014 exactly at that limit. SQL Editor runs as postgres
+--   and does not inherit it. PostgREST hoists a function-level `SET statement_timeout` before calling the
+--   function, so the limit can be raised for this one RPC only.
+--   Production value of authenticated.statement_timeout is NOT yet read (see 080_readonly_root_cause_diagnostics.sql).
 -- Change (function only; body, 24 resources, ordering, JSON return, owner gate, ACL unchanged):
---   * SET jit = off for this function: the 24 ordered json_agg sub-plans exceed JIT cost thresholds on
---     every call; JIT compile time is pure overhead for a once-per-backup statement.
---   * work_mem NOT raised: isolated measurement (1x = 30.7 MB, 2x = 61.5 MB synthetic snapshot) shows zero
---     temp spill at the 4 MB default; 64 MB would allow up to 24 x 64 MB of sort memory per export for no gain.
---   * Single-flight advisory lock (transaction-scoped, released on commit/rollback/cancel): bounds memory to
---     one export; a concurrent caller gets CLOUD_BACKUP_ALREADY_RUNNING (fail closed, no partial output).
---   * Keeps 065's STABLE (one MVCC snapshot across all 24 resources; no temp materialisation in PostgREST).
--- No table, data, role, timeout, RLS or Ledger change. Rollback: supabase/candidates/080_rollback.sql.
+--   * SET statement_timeout = '60s' for this RPC only. No role/database/global timeout change; every other
+--     RPC/table request keeps the authenticated limit. 60 s is a bounded ceiling, not unlimited.
+--   * Single-flight advisory lock (transaction-scoped, released on commit/rollback/cancel): with a longer
+--     ceiling at most one export runs; a concurrent caller gets CLOUD_BACKUP_ALREADY_RUNNING (fail closed,
+--     no partial output). Bounds memory (isolated: 5 concurrent = +1.87 GB -> +0.33 GB) and connections.
+--   * jit NOT set (production jit is already off -> the earlier jit=off clause was ineffective, removed).
+--   * work_mem NOT raised (zero temp spill measured at the 4 MB default).
+--   * Keeps 065's STABLE (one MVCC snapshot across all 24 resources) and SECURITY DEFINER + fixed search_path.
+-- No table, data, role, RLS, Ledger or schema change. Rollback: supabase/candidates/080_rollback.sql.
 begin;
 
 create or replace function public.erp_export_cloud_restore_snapshot_json()
@@ -19,7 +27,7 @@ language plpgsql
 stable
 security definer
 set search_path = pg_catalog, public, extensions
-set jit = off
+set statement_timeout = '60s'
 as $$
 declare
   v_actor uuid := auth.uid();
