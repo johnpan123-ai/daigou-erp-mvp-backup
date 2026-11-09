@@ -39,6 +39,8 @@ export const regressionScripts = Object.freeze({
   'post-restore-business-release': 'tests/buyanime-post-restore-isolated.mjs',
   'baseline-exception-control': 'tests/erp2-one-time-baseline-exception.mjs',
   'pre-adoption-maintenance-guard': 'tests/erp2-pre-adoption-maintenance-guard.mjs',
+  'owner-080-audit-runner-contract': 'tests/owner-080-audit-runner-contract.mjs',
+  'realtime-background-presentation': 'tests/realtime-background-presentation.mjs',
   'erp1-v1-exact-restore': 'tests/erp1-v1-restore-compatibility.mjs',
   'erp1-v1-restore-review': 'tests/erp1-v1-restore-change-impact.mjs',
   'waca-v3-native-replay': 'tests/waca-resolver-v3-replay.mjs',
@@ -105,8 +107,9 @@ export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = nul
     try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, candidateHead]); }
     catch { return false; }
     git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.beforeHead, review.reviewedHead]);
+    const registryFile = 'config/erp2-reviewed-change-impacts.json';
     const changed = git(['diff', '--name-only', '--no-renames', review.beforeHead, review.reviewedHead, '--'])
-      .trim().split(/\r?\n/u).filter(Boolean).sort();
+      .trim().split(/\r?\n/u).filter(Boolean).filter(file => file !== registryFile).sort();
     if (impactHash(changed) !== impactHash(review.files.map(row => row.file).sort())) fail('review patch scope mismatch');
     for (const row of review.files) {
       const previous = previousReviews.get(row.file);
