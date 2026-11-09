@@ -8,7 +8,7 @@ import {
   buildPlannerIdentity,
   buildSchemaEvidenceIdentity,
 } from '../tools/schema-reconciliation/evidenceContract.mjs';
-import { inspectPreAdoptionMaintenance, verifySafeDescendant } from './post-adoption-descendant.mjs';
+import { inspectPreAdoptionMaintenance, inspectPost080Maintenance, verifySafeDescendant } from './post-adoption-descendant.mjs';
 import { verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT,
   SQL_CANONICAL_ALGORITHM } from '../tools/schema-reconciliation/schemaContract.mjs';
@@ -68,7 +68,7 @@ export function assertCanonicalContract(contract) {
   const maintenance = contract.schemaBaseline.preAdoptionMaintenance;
   if (!maintenance || maintenance.mode !== 'PRE_ADOPTION_MAINTENANCE'
     || maintenance.migrationId !== '079'
-    || maintenance.requiredFingerprint !== contract.schemaBaseline.canonicalFingerprint
+    || maintenance.requiredFingerprint !== '9bb81937fa2c58b58ddb87c7a36cdfa8e1048b971974ec21804e508602d617d8'
     || maintenance.requiredMigrationSourceHead !== '73083c3d028e23506e0bd7bec9ad8b949a226cfc'
     || maintenance.requiredMigrationCheckpoint !== 'checkpoint-20261104-erp2-v33-079-purchase-list-decouple-v1'
     || maintenance.requiredMigrationSourceChecksum !== '391e42478375a471f251ee647424c82f7cf47fd3cdc3ebd1523fdaa86d45363c'
@@ -77,6 +77,23 @@ export function assertCanonicalContract(contract) {
     || maintenance.exactReviewId !== 'erp2-pre-adoption-maintenance-079-v1'
     || maintenance.forbidBaselineAdoption !== true || maintenance.requireZeroMigrationDelta !== true) {
     failClosed('invalid PRE_ADOPTION_MAINTENANCE contract');
+  }
+  const post080 = contract.schemaBaseline.post080Maintenance;
+  if (!post080 || post080.mode !== 'PRE_ADOPTION_MAINTENANCE_080'
+    || post080.bootstrapMode !== 'PRE_ADOPTION_AUDIT_BOOTSTRAP_080'
+    || post080.migrationId !== '080'
+    || post080.requiredFingerprint !== contract.schemaBaseline.canonicalFingerprint
+    || post080.previousFingerprint !== maintenance.requiredFingerprint
+    || post080.requiredMigrationSourceHead !== '9e5ce2e0a0dc856b50057e48766313b0af1019f1'
+    || post080.requiredMigrationCheckpoint !== 'checkpoint-20261110-erp2-v33-080-apply-audit-v1'
+    || post080.requiredMigrationSourceChecksum !== '590ef5550ea2945e537cf6ec5014c7324837649b0fc87cdb79cf76bf34601db7'
+    || !/^[a-f0-9]{40}$/u.test(post080.approvedBaseHead ?? '')
+    || !post080.approvedBaseCheckpoint?.startsWith('checkpoint-')
+    || post080.exactReviewId !== 'erp2-pre-adoption-maintenance-080-realtime-v1'
+    || post080.auditRunnerPath !== 'src/components/SchemaMigrationAuditRunner.tsx'
+    || post080.auditRunnerCommit !== 'fffcec6899d5a8d26899146194638e4a2768e009'
+    || post080.forbidBaselineAdoption !== true || post080.requireZeroMigrationDelta !== true) {
+    failClosed('invalid PRE_ADOPTION_MAINTENANCE_080 contract');
   }
   return { account, target, gate };
 }
@@ -247,6 +264,68 @@ export const verifyPreAdoptionMaintenanceEvidence = ({ evidence, contract, migra
   return { migration: appliedRecord, baselineAdoption: 'NOT_ADOPTED', migrationDelta: [] };
 };
 
+export const verifyPost080MaintenanceEvidence = ({ evidence, contract, candidate, migrationsById }) => {
+  const maintenance = contract.schemaBaseline.post080Maintenance;
+  const bootstrap = evidence.mode === maintenance.bootstrapMode;
+  if (!bootstrap && evidence.mode !== maintenance.mode) failClosed('080 maintenance evidence mode is invalid');
+  if (evidence.currentFingerprint !== maintenance.requiredFingerprint
+    || evidence.expectedFingerprint !== maintenance.requiredFingerprint
+    || evidence.targetAfterDeltaFingerprint !== maintenance.requiredFingerprint
+    || evidence.migrationHistoryProvenance !== 'AVAILABLE'
+    || !Array.isArray(evidence.migrations) || !Array.isArray(evidence.applyPlan)
+    || evidence.applyPlan.length !== 0 || !Array.isArray(evidence.migrationHistory?.records)
+    || evidence.baselineRecord) {
+    failClosed('080 maintenance evidence is not canonical');
+  }
+  for (const item of evidence.migrations) {
+    if (item.state !== 'SATISFIED' || item.applyMethod !== 'NO_APPLY') {
+      failClosed(`080 maintenance migration delta is not empty: ${item.migrationId}`);
+    }
+  }
+  const migration079 = migrationsById.get('079');
+  if (!migration079 || migration079.state !== 'SATISFIED' || migration079.applyMethod !== 'NO_APPLY') {
+    failClosed('079 is not proven satisfied by the post-080 schema');
+  }
+  const records = evidence.migrationHistory.records;
+  const applied080 = records.filter(record => record.eventType === 'MIGRATION_APPLIED'
+    && record.eventKey === maintenance.migrationId && record.result === 'PASS');
+  if (bootstrap) {
+    if (applied080.length !== 0) failClosed('080 bootstrap cannot run after an existing 080 ledger event');
+    const bootstrapProof = evidence.auditBootstrap;
+    if (!bootstrapProof || bootstrapProof.migrationId !== '080'
+      || bootstrapProof.sourceChecksum !== maintenance.requiredMigrationSourceChecksum
+      || bootstrapProof.sourceHead !== maintenance.requiredMigrationSourceHead
+      || bootstrapProof.checkpoint !== maintenance.requiredMigrationCheckpoint
+      || bootstrapProof.schemaFingerprintBefore !== maintenance.previousFingerprint
+      || bootstrapProof.schemaFingerprintAfter !== maintenance.requiredFingerprint
+      || bootstrapProof.candidateHead !== candidate.head
+      || bootstrapProof.candidateCheckpoint !== candidate.checkpointTag
+      || bootstrapProof.runnerPath !== maintenance.auditRunnerPath
+      || bootstrapProof.runnerCommit !== maintenance.auditRunnerCommit) {
+      failClosed('080 audit bootstrap proof is missing or mismatched');
+    }
+  } else {
+    if (applied080.length !== 1) failClosed('post-080 maintenance requires exactly one PASS 080 ledger event');
+    const record = applied080[0];
+    if (record.sourceHead !== maintenance.requiredMigrationSourceHead
+      || record.checkpoint !== maintenance.requiredMigrationCheckpoint
+      || record.sourceChecksum !== maintenance.requiredMigrationSourceChecksum
+      || record.schemaFingerprintBefore !== maintenance.previousFingerprint
+      || record.schemaFingerprintAfter !== maintenance.requiredFingerprint
+      || record.supabaseProjectRef !== CANONICAL_ERP2_TARGET.supabaseProject
+      || record.environmentRole !== 'PRODUCTION'
+      || record.metadata?.historicalMigrationExecutionClaimed === true) {
+      failClosed('080 ledger event identity mismatch');
+    }
+  }
+  const adoptionRecords = records.filter(record => record.eventType === 'BASELINE_ADOPTED'
+    && record.result === 'PASS');
+  if (maintenance.forbidBaselineAdoption && adoptionRecords.length > 0) {
+    failClosed('080 maintenance cannot contain baseline adoption');
+  }
+  return { migration: applied080[0] ?? null, baselineAdoption: 'NOT_ADOPTED', migrationDelta: [] };
+};
+
 const verifyPostAdoption = ({ evidence, required, candidate, candidateGit, changeImpactEvidence, now,
   baselineExceptionConfig, evidenceRoot }) => {
   if (evidence.currentFingerprint !== evidence.expectedFingerprint
@@ -276,16 +355,20 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
   baselineExceptionConfig = null, evidenceRoot = null, now = Date.now() }) {
   assertCanonicalContract(contract);
   const required = contract.schemaBaseline.requiredBaselineId;
+  const maintenance079 = contract.schemaBaseline.preAdoptionMaintenance;
+  const maintenance080 = contract.schemaBaseline.post080Maintenance;
+  const expectedFingerprint = evidence?.mode === maintenance079?.mode
+    ? maintenance079.requiredFingerprint : contract.schemaBaseline.canonicalFingerprint;
   if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
     || evidence.fingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
     || evidence.canonicalContract !== SCHEMA_CANONICAL_CONTRACT
     || evidence.canonicalAlgorithm !== SQL_CANONICAL_ALGORITHM
-    || !['PRE_ADOPTION', 'POST_ADOPTION', 'PRE_ADOPTION_MAINTENANCE'].includes(evidence.mode)
+    || !['PRE_ADOPTION', 'POST_ADOPTION', 'PRE_ADOPTION_MAINTENANCE', maintenance080?.mode, maintenance080?.bootstrapMode].includes(evidence.mode)
     || evidence.requiredBaselineId !== required
     || evidence.projectRef !== CANONICAL_ERP2_TARGET.supabaseProject
     || evidence.sourceHead !== candidate.head || evidence.checkpoint !== candidate.checkpointTag
     || !SHA256_PATTERN.test(evidence.currentFingerprint ?? '')
-    || evidence.expectedFingerprint !== contract.schemaBaseline.canonicalFingerprint
+    || evidence.expectedFingerprint !== expectedFingerprint
     || evidence.targetAfterDeltaFingerprint !== evidence.expectedFingerprint
     || evidence.readyForApply !== true || !Array.isArray(evidence.blockers) || evidence.blockers.length !== 0
     || !SHA256_PATTERN.test(evidence.evidenceFingerprint ?? '')) {
@@ -313,6 +396,15 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
       ? verifyImpactEvidence({ evidence: changeImpactEvidence, inspection, git: candidateGit, now,
         baselineExceptionConfig, evidenceRoot }) : null;
     if (!regressionEvidence) failClosed('maintenance change-impact evidence is required');
+    deploymentLineage = { ...inspection, regressionEvidence };
+  } else if (evidence.mode === maintenance080?.mode || evidence.mode === maintenance080?.bootstrapMode) {
+    verifyPost080MaintenanceEvidence({ evidence, contract, candidate, migrationsById });
+    if (typeof candidateGit !== 'function') failClosed('080 maintenance deployment requires actual Git evidence');
+    const inspection = inspectPost080Maintenance({ git: candidateGit, candidate, contract });
+    const regressionEvidence = changeImpactEvidence
+      ? verifyImpactEvidence({ evidence: changeImpactEvidence, inspection, git: candidateGit, now,
+        baselineExceptionConfig, evidenceRoot }) : null;
+    if (!regressionEvidence) failClosed('080 maintenance change-impact evidence is required');
     deploymentLineage = { ...inspection, regressionEvidence };
   } else {
     verifyPreAdoption({ evidence, migrationsById });

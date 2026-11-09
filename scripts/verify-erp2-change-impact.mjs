@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { inspectPreAdoptionMaintenance, inspectSafeDescendant } from './post-adoption-descendant.mjs';
+import { inspectPreAdoptionMaintenance, inspectPost080Maintenance, inspectSafeDescendant } from './post-adoption-descendant.mjs';
 import { regressionScripts, sourceHash, impactHash, sealImpactEvidence, verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { runGitAt, verifyLocalCandidate, verifyRemoteCandidate } from './promotion-safety.mjs';
 import { buildSchemaEvidenceIdentity } from '../tools/schema-reconciliation/evidenceContract.mjs';
@@ -44,7 +44,10 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
   if (!args.get('--schema-evidence')) throw new Error('Missing --schema-evidence containing the immutable adopted baseline');
   const schemaEvidence = JSON.parse(await readFile(resolve(root, args.get('--schema-evidence')), 'utf8'));
   if (schemaEvidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(schemaEvidence)) throw new Error('Invalid schema evidence identity');
-  const inspection = schemaEvidence.mode === 'PRE_ADOPTION_MAINTENANCE'
+  const post080Modes = new Set(['PRE_ADOPTION_MAINTENANCE_080', 'PRE_ADOPTION_AUDIT_BOOTSTRAP_080']);
+  const inspection = post080Modes.has(schemaEvidence.mode)
+    ? inspectPost080Maintenance({ git, candidate, contract })
+    : schemaEvidence.mode === 'PRE_ADOPTION_MAINTENANCE'
     ? inspectPreAdoptionMaintenance({ git, candidate, contract })
     : (() => {
       const baselineRecord = schemaEvidence.baselineRecord;
