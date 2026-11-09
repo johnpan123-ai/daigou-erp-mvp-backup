@@ -52,6 +52,10 @@ const isRealtimeUnproven = (connectivity: CloudConnectivitySnapshot): boolean =>
 export interface RealtimeCompletenessView {
   /** The completeness hold is in its unproven phase (pending limit passed, channel error, recovery). */
   unproven: boolean;
+  /** Realtime is paused because the tab stayed hidden (not synced; writes stay blocked). */
+  backgroundPaused?: boolean;
+  /** The tab is visible again and the paused channel is being re-established and proven. */
+  resuming?: boolean;
 }
 
 const realtimeUnprovenView = (): GlobalSyncPresentation => ({
@@ -79,6 +83,14 @@ export function resolveGlobalSyncPresentation(
       tone: 'warning', writeAllowed: false,
       banner: '雲端還原進行中｜等待完整性與最新畫面驗證；寫入已暫停',
     };
+  }
+
+  // Background pause / resume: a normal, expected state (no banner, no reconnect counter). Never
+  // synced or writable: Fresh stays withheld by the completeness hold until the resumed channel
+  // proves itself. Offline and real failures fall through to their own presentation.
+  if (!fresh && connectivity.status !== 'offline' && !realtime?.unproven) {
+    if (realtime?.backgroundPaused) return { status: 'syncing', label: '背景暫停中，切回後同步', tone: 'neutral', writeAllowed: false, banner: null };
+    if (realtime?.resuming) return { status: 'syncing', label: '正在重新連線…', tone: 'neutral', writeAllowed: false, banner: null };
   }
 
   // C1f (A3/A4): an unproven Realtime generation stays visibly read-only while its recovery

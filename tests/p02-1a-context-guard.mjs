@@ -13,7 +13,13 @@ const POL = 'src/contexts/realtimeRecoveryPolicy.ts';
 const ctx = read(CTX), pres = read(PRES), pol = read(POL);
 const results = [];
 const check = (name, fn) => { try { fn(); results.push({ name, ok: true }); console.log('PASS', name); } catch (error) { results.push({ name, ok: false, error: String(error.message) }); console.log('FAIL', name, error.message); } };
-const mutate = (source, from, to) => { assert.equal(source.split(from).length, 2, `mutation anchor must be unique: ${from.slice(0, 60)}`); return source.replace(from, to); };
+// Preserve the reviewed file's materialized line endings while making mutation anchors portable.
+const mutate = (source, from, to) => {
+  const materializedFrom = source.includes('\r\n') ? from.replace(/\n/gu, '\r\n') : from;
+  const materializedTo = source.includes('\r\n') ? to.replace(/\n/gu, '\r\n') : to;
+  assert.equal(source.split(materializedFrom).length, 2, `mutation anchor must be unique: ${from.slice(0, 60)}`);
+  return source.replace(materializedFrom, materializedTo);
+};
 const accepts = (name, file, source) => check(`POS ${name}`, () => assertP02RealtimeContextContract(file, source));
 const rejects = (name, file, source, pattern) => check(`NEG ${name}`, () => assert.throws(() => assertP02RealtimeContextContract(file, source), pattern));
 
@@ -23,7 +29,9 @@ for (const file of P02_REALTIME_CONTEXT_FILES) accepts(`exact reviewed source ac
 
 // ---- negative: completeness hold / readiness proof / fresh / epoch (N1-N8)
 const ENGINE = /realtime sync engine drifted/u;
-rejects('N1 completeness hold at subscribe removed', CTX, mutate(ctx, "      holdCompleteness('pending', 'realtime-readiness-pending');\n", ''), ENGINE);
+rejects('N1 completeness hold at subscribe removed', CTX, mutate(ctx,
+  "      holdCompleteness('pending', 'realtime-readiness-pending');\n      let nextChannel = supabase.channel(realtimeTopic);\n",
+  '      let nextChannel = supabase.channel(realtimeTopic);\n'), ENGINE);
 rejects('N2 SUBSCRIBED releases the hold without the system ok proof', CTX, mutate(ctx, '            markRealtimeSubscribed(gen);\n', '            markRealtimeSubscribed(gen);\n            releaseCompleteness();\n'), ENGINE);
 rejects('N3 proof no longer requires the ready generation', CTX, mutate(ctx, 'attempt.readStartSeq > ready!.seq && isRealtimeReadyGeneration(gen)', 'attempt.readStartSeq > ready!.seq'), ENGINE);
 rejects('N4 markCloudReadFresh called outside the sync engine', CTX, `${ctx}\nexport function leakFresh() { markCloudReadFresh(); }\n`, /protected identifier outside the reviewed pieces: markCloudReadFresh/u);
@@ -36,7 +44,7 @@ rejects('N8 COMPLETENESS_HOLD renamed', CTX, mutate(ctx, "const COMPLETENESS_HOL
 rejects('N9 status handler accepts events of a replaced generation', CTX, mutate(ctx, "        nextChannel.subscribe(status => {\n          if (disposed || generation !== channelGeneration || channel !== nextChannel) return;", "        nextChannel.subscribe(status => {\n          if (disposed) return;"), ENGINE);
 rejects('N10 channel replacement releases the hold without proof', CTX, mutate(ctx, "      holdCompleteness('unproven', `realtime-recovering-${cause}`);", '      releaseCompleteness();'), ENGINE);
 rejects('N11 pending-limit timer unlocks instead of showing unproven', CTX, mutate(ctx, "        holdCompleteness('unproven', reason);\n        reconnect.markNeeded('channel-interrupted');", "        releaseCompleteness();\n        reconnect.markNeeded('channel-interrupted');"), ENGINE);
-rejects('N12 recovery keeps running after proof (shouldRecover bypass)', CTX, mutate(ctx, 'shouldRecover: () => !disposed && !faultDisconnected && completenessHeld,', 'shouldRecover: () => true,'), ENGINE);
+rejects('N12 recovery keeps running after proof (shouldRecover bypass)', CTX, mutate(ctx, 'shouldRecover: () => !disposed && !faultDisconnected && !backgroundPaused && completenessHeld,', 'shouldRecover: () => true,'), ENGINE);
 rejects('N12b recovery of a ready channel releases instead of proving by catch-up', CTX, mutate(ctx, "            if (!result.proven) throw new Error('P0_2_REALTIME_CATCH_UP_NOT_PROVEN');", '            releaseCompleteness();'), ENGINE);
 rejects('N13 manual reconnect declares Fresh outside the engine', CTX, mutate(ctx, '  const reconnectRealtime = useCallback(() => { realtimeReconnectRef.current?.(); }, []);', '  const reconnectRealtime = useCallback(() => { realtimeReconnectRef.current?.(); setRealtimeUnproven(false); }, []);'), /protected identifier outside the reviewed pieces: setRealtimeUnproven/u);
 rejects('N13b recovery SDK grace removed from the policy', POL, mutate(pol, 'sdkRejoinGraceMs: 12_000,', 'sdkRejoinGraceMs: 0,'), /recovery policy differs from its exact review/u);
@@ -56,7 +64,9 @@ rejects('N16 protected identifier aliased through a string', CTX, `${ctx}\nexpor
 rejects('N17 dynamic import of a protected module', CTX, `${ctx}\nexport const lazy = () => import('../providers/cloud/cloudConnectivity');\n`, /dynamic import/u);
 rejects('N18 readiness wait constant changed', CTX, mutate(ctx, 'const REALTIME_READINESS_WAIT_MS = 3000;', 'const REALTIME_READINESS_WAIT_MS = 1;'), /top-level statement drifted: REALTIME_READINESS_WAIT_MS/u);
 rejects('N19 test bridge gating changed', CTX, mutate(ctx, "const enabled = (getProviderMode() === 'cloud' || Boolean(testBridge)) && Boolean(user);", 'const enabled = Boolean(user);'), /boundary statement drifted: enabled/u);
-rejects('N20 presentation input no longer carries the unproven evidence', CTX, mutate(ctx, '{ unproven: realtimeUnproven }', '{ unproven: false }'), /boundary statement drifted: syncPresentation/u);
+rejects('N20 presentation input no longer carries the unproven evidence', CTX, mutate(ctx,
+  "    unproven: realtimeUnproven, backgroundPaused: realtimePhase === 'paused', resuming: realtimePhase === 'resuming',",
+  "    unproven: false, backgroundPaused: realtimePhase === 'paused', resuming: realtimePhase === 'resuming',"), /boundary statement drifted: syncPresentation/u);
 rejects('N21 protected import changed (extra binding)', CTX, mutate(ctx, "import { markAllCloudTablesUnresolved } from '../providers/cloud/cloudTargetedCache';", "import { markAllCloudTablesUnresolved, __resetUnresolvedCloudTablesForTests } from '../providers/cloud/cloudTargetedCache';"), /protected import changed/u);
 rejects('N22 presentation gains an unreviewed runtime statement', PRES, `${pres}\nexport const alwaysWritable = () => true;\n`, /presentation unreviewed top-level statement/u);
 rejects('N23 presentation gains a runtime import', PRES, `import { assertCloudWriteAllowed } from '../providers/cloud/cloudConnectivity';\n${pres}`, /presentation runtime import/u);

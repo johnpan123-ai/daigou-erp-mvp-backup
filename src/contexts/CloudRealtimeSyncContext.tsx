@@ -146,6 +146,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const [realtimeRecovery, setRealtimeRecovery] = useState<RealtimeRecoveryView | null>(null);
   const realtimeReconnectRef = useRef<(() => void) | null>(null);
   const [realtimeUnproven, setRealtimeUnproven] = useState(false);
+  // Background pause: 'paused' while hidden > BACKGROUND_PAUSE_MS, 'resuming' until the new channel proves itself.
+  const [realtimePhase, setRealtimePhase] = useState<'active' | 'paused' | 'resuming'>('active');
   const [restorePendingAttempt, setRestorePendingAttempt] = useState<string | null>(() =>
     getProviderMode() === 'cloud' ? readCloudRestoreUnresolvedAttempt()?.attemptId ?? null : null);
   const connectivity = useSyncExternalStore(
@@ -172,7 +174,9 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
   const presentationRefresh = restorePendingAttempt
     ? { ...globalRefresh, busy: true, restorePending: true }
     : buyAnimeFlow.active || buyAnimeFlow.error ? { ...globalRefresh, busy: true } : globalRefresh;
-  const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, presentationRefresh, { unproven: realtimeUnproven });
+  const syncPresentation = resolveGlobalSyncPresentation(presentationMode, connectivity, presentationRefresh, {
+    unproven: realtimeUnproven, backgroundPaused: realtimePhase === 'paused', resuming: realtimePhase === 'resuming',
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -471,6 +475,21 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     let readinessWatchdog: ReturnType<typeof setTimeout> | null = null;
     let readinessTimedOut = false;
     let subscribedGeneration: number | null = null;
+    // Background pause (tab hidden > BACKGROUND_PAUSE_MS): channel and recovery stop; on return one
+    // channel is re-established and must earn the normal proof. Never marks anything Fresh.
+    const BACKGROUND_PAUSE_MS = 5 * 60_000;
+    let backgroundPaused = false;
+    let resumingFromBackground = false;
+    let backgroundPauseTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearBackgroundPauseTimer = () => {
+      if (backgroundPauseTimer !== null) clearTimeout(backgroundPauseTimer);
+      backgroundPauseTimer = null;
+    };
+    const endResumePhase = () => {
+      if (!resumingFromBackground) return;
+      resumingFromBackground = false;
+      setRealtimePhase('active');
+    };
     let lastChannelFailure: 'channel-error' | 'timed-out' | 'closed' | null = null;
     const realtimeTopic = `erp-live-${user!.id}`;
     // C1f: channels whose leave has not completed yet; removed before any new channel is built.
@@ -491,8 +510,11 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       completenessMode = effective;
       holdCloudFresh(COMPLETENESS_HOLD, effective, reason);
       setRealtimeUnproven(effective === 'unproven');
+      // A real failure while resuming is shown as such (unproven banner + recovery).
+      if (effective === 'unproven') endResumePhase();
     };
     const releaseCompleteness = () => {
+      endResumePhase();
       resetFullReadBudget();
       completenessHeld = false;
       completenessMode = null;
@@ -796,7 +818,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         random: () => Math.random(),
         setTimer: (callback, ms) => setTimeout(callback, ms),
         clearTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
-        shouldRecover: () => !disposed && !faultDisconnected && completenessHeld,
+        shouldRecover: () => !disposed && !faultDisconnected && !backgroundPaused && completenessHeld,
         recover: async cause => {
           // Listening confirmed: only a complete catch-up started now can prove it (never a release
           // by this scheduler). Otherwise the channel itself is replaced and must prove itself.
@@ -901,8 +923,64 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       const { readStatus } = getCloudConnectivitySnapshot();
       return reconnect.isPending() && readStatus !== 'fresh-online' && readStatus !== 'fresh-empty';
     };
+    const removePendingChannels = async () => {
+      for (const old of [...channelsPendingRemoval]) {
+        try { await supabase.removeChannel(old); } catch { /* verified below */ }
+        if (!supabase.getChannels().includes(old)) channelsPendingRemoval.delete(old);
+      }
+    };
+    const pauseForBackground = async () => {
+      backgroundPauseTimer = null;
+      if (disposed || faultDisconnected || backgroundPaused || !isTabHidden()) return;
+      backgroundPaused = true;
+      resumingFromBackground = false;
+      recovery?.cancel();
+      const previous = channel;
+      channel = null;
+      channelGeneration += 1;
+      clearReadinessWatchdog();
+      if (readinessGeneration !== null) disarmRealtimeReadiness(readinessGeneration);
+      // No current generation while paused: aborted catch-ups of the removed channel are superseded
+      // (they neither prove nor flip the pause into 'unproven').
+      readinessGeneration = null;
+      // Not listening any more: Fresh is withheld (writes blocked) and a catch-up is required on return.
+      completenessHeld = true;
+      completenessMode = 'pending';
+      holdCloudFresh(COMPLETENESS_HOLD, 'pending', 'realtime-background-paused');
+      setRealtimeUnproven(false);
+      setRealtimePhase('paused');
+      reconnect.markNeeded('channel-interrupted');
+      emitRecovery({ kind: 'background-pause', generation: channelGeneration });
+      if (previous) channelsPendingRemoval.add(previous);
+      await removePendingChannels();
+    };
+    const resumeFromBackground = () => {
+      if (!backgroundPaused || disposed || faultDisconnected) return;
+      backgroundPaused = false;
+      resumingFromBackground = true;
+      setRealtimePhase('resuming');
+      recovery?.resetBackoff();
+      grantUserFullRead(true);
+      emitRecovery({ kind: 'background-resume' });
+      void (async () => {
+        await removePendingChannels();
+        if (disposed || faultDisconnected || backgroundPaused) return;
+        if (supabase.getChannels().some(existing => existing.topic === `realtime:${realtimeTopic}`)) {
+          emitRecovery({ kind: 'replace-blocked', cause: 'background-resume', reason: 'previous-channel-not-removed' });
+          endResumePhase();
+          holdCompleteness('unproven', 'realtime-recovering-closed');
+          recovery?.request('closed');
+          return;
+        }
+        // One channel; the subscribed path waits for readiness and runs the single proving catch-up.
+        void subscribeRealtimeChannel(true).catch(() => { /* status handlers keep the fail-closed state */ });
+      })();
+    };
     const handleFocus = (userInitiated = true) => {
       if (faultDisconnected) return;
+      if (backgroundPaused) { if (userInitiated) resumeFromBackground(); return; }
+      // The resumed channel runs the proving catch-up after readiness; an earlier read could not prove it.
+      if (resumingFromBackground) return;
       if (userInitiated) grantUserFullRead();
       // C1c: a withheld Fresh can be proven by a complete catch-up once listening is confirmed.
       if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) { void completeCatchUp(readinessGeneration, 'focus'); return; }
@@ -912,7 +990,13 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     };
     const handleVisibility = () => {
       if (faultDisconnected) return;
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        if (!backgroundPaused && backgroundPauseTimer === null) backgroundPauseTimer = setTimeout(() => { void pauseForBackground(); }, BACKGROUND_PAUSE_MS);
+        return;
+      }
+      clearBackgroundPauseTimer();
+      if (backgroundPaused) { resumeFromBackground(); return; }
+      if (resumingFromBackground) return;
       grantUserFullRead();
       wakeFullReadAdmission();
       if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) { void completeCatchUp(readinessGeneration, 'visibility'); return; }
@@ -920,7 +1004,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       else void coordinator.fallback('visibility', activeResources());
     };
     const handleOnline = () => {
-      if (faultDisconnected) return;
+      if (faultDisconnected || backgroundPaused || resumingFromBackground) return;
       requestRealtimeReconnect('online');
       void reconnect.request('online', activeResources());
     };
@@ -931,8 +1015,11 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     window.addEventListener('cloud-cross-tab-change', handleCrossTabChange);
     window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleVisibility);
+    if (isTabHidden()) backgroundPauseTimer = setTimeout(() => { void pauseForBackground(); }, BACKGROUND_PAUSE_MS);
 
     return () => {
+      clearBackgroundPauseTimer();
+      setRealtimePhase('active');
       unregisterBuyAnimeRefresh();
       disposed = true;
       channelGeneration += 1;

@@ -133,6 +133,15 @@ export class RealtimeRecoveryScheduler {
     this.publish();
   }
 
+  /** Background pause ended (tab visible again): restart the backoff from zero. Proves nothing. */
+  resetBackoff(): void {
+    this.attempt = 0;
+    this.followUp = null;
+    this.lastError = null;
+    this.clear();
+    this.publish();
+  }
+
   /** A replacement was performed outside this scheduler (Staging fault control). */
   noteExternalReplacement(): void {
     this.lastReplacementAt = this.host.now();
