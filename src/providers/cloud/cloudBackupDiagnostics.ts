@@ -1,7 +1,7 @@
 import { formatStructuredError } from '../../utils/structuredError';
 
 export type BackupPhase = 'RPC_REQUEST' | 'MANIFEST_AND_CHECKSUMS' | 'DEADLINE_SIDECAR' | 'DOWNLOAD_PREPARATION' | 'COMPLETE';
-export type BackupErrorCode = 'BACKUP_STATEMENT_TIMEOUT' | 'BACKUP_SERVER_ERROR' | 'BACKUP_PERMISSION_ERROR' | 'BACKUP_VALIDATION_ERROR' | 'BACKUP_NETWORK_ERROR' | 'BACKUP_CLIENT_PARSE_ERROR';
+export type BackupErrorCode = 'BACKUP_ALREADY_RUNNING' | 'BACKUP_STATEMENT_TIMEOUT' | 'BACKUP_SERVER_ERROR' | 'BACKUP_PERMISSION_ERROR' | 'BACKUP_VALIDATION_ERROR' | 'BACKUP_NETWORK_ERROR' | 'BACKUP_CLIENT_PARSE_ERROR';
 export interface CloudBackupDiagnostic {
   requestId: string;
   rpc: string;
@@ -20,6 +20,7 @@ export interface CloudBackupDiagnostic {
 }
 
 const messages: Record<BackupErrorCode, string> = {
+  BACKUP_ALREADY_RUNNING: '另一個雲端備份正在進行中，本次沒有修改任何資料，請稍後再試一次。',
   BACKUP_STATEMENT_TIMEOUT: '雲端備份查詢逾時，本次沒有修改任何資料。',
   BACKUP_SERVER_ERROR: '雲端備份服務失敗，本次沒有修改任何資料。',
   BACKUP_PERMISSION_ERROR: '目前權限無法執行雲端備份，本次沒有修改任何資料。',
@@ -53,7 +54,9 @@ export function classifyCloudBackupError(error: unknown, diagnostic: CloudBackup
   const text = parsed.message ?? '';
   const sqlstate = /^[0-9A-Z]{5}$/.test(code) ? code : null;
   let category: BackupErrorCode;
-  if (code === '57014' || /statement timeout/i.test(text)) category = 'BACKUP_STATEMENT_TIMEOUT';
+  // 080 single-flight: another export holds the lock (fail closed, nothing returned).
+  if (/CLOUD_BACKUP_ALREADY_RUNNING/.test(text)) category = 'BACKUP_ALREADY_RUNNING';
+  else if (code === '57014' || /statement timeout/i.test(text)) category = 'BACKUP_STATEMENT_TIMEOUT';
   else if (diagnostic.httpStatus === 401 || diagnostic.httpStatus === 403 || /^(42501|PGRST30[12])$/.test(code) || /permission denied|owner.required|unauthori[sz]ed/i.test(text)) category = 'BACKUP_PERMISSION_ERROR';
   else if (error instanceof SyntaxError || /invalid json|json.*pars|unexpected.*json/i.test(text)) category = 'BACKUP_CLIENT_PARSE_ERROR';
   else if (/fetch|network|abort|connection|failed to load/i.test(text)) category = 'BACKUP_NETWORK_ERROR';
