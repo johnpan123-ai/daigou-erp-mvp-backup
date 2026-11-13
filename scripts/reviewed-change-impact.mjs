@@ -116,9 +116,15 @@ export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = nul
     }
     git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.beforeHead, review.reviewedHead]);
     const registryFile = 'config/erp2-reviewed-change-impacts.json';
+    const registrySelfScope = new Set([
+      'erp2-post080-product-release-flow-v1',
+      'erp2-post080-product-baseline-anchor-v1',
+      'erp2-post080-registry-scope-v1',
+    ]);
     const changed = git(['diff', '--name-only', '--no-renames', review.beforeHead, review.reviewedHead, '--'])
       .trim().split(/\r?\n/u).filter(Boolean)
-      .filter(file => review.id === 'erp2-pre-adoption-maintenance-080-realtime-v1' ? file !== registryFile : true)
+      .filter(file => (review.id === 'erp2-pre-adoption-maintenance-080-realtime-v1' || registrySelfScope.has(review.id))
+        ? file !== registryFile : true)
       .sort();
     if (impactHash(changed) !== impactHash(review.files.map(row => row.file).sort())) fail('review patch scope mismatch');
     for (const row of review.files) {
