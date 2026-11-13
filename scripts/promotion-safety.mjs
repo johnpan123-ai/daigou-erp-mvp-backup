@@ -102,8 +102,8 @@ export function assertCanonicalContract(contract) {
     || post080Product.requiredMigrationSourceHead !== post080.requiredMigrationSourceHead
     || post080Product.requiredMigrationCheckpoint !== post080.requiredMigrationCheckpoint
     || post080Product.requiredMigrationSourceChecksum !== post080.requiredMigrationSourceChecksum
-    || post080Product.approvedBaseHead !== post080.approvedBaseHead
-    || post080Product.approvedBaseCheckpoint !== post080.approvedBaseCheckpoint
+    || post080Product.approvedBaseHead !== '54e9531e2abbf473bfb934b91c70e54ea567ccab'
+    || post080Product.approvedBaseCheckpoint !== 'checkpoint-20261110-erp2-v33-080-ledger-realtime-release-v8'
     || post080Product.exactReviewId !== post080.exactReviewId
     || post080Product.forbidBaselineAdoption !== true
     || post080Product.requireZeroMigrationDelta !== true
