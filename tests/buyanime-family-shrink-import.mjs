@@ -59,9 +59,19 @@ try {
   assert.ok(plan1.operations.every(op => imported.has(op.id)), 'every operation targets an imported row');
   await record(plan1, B1);
 
-  // T2: same non-empty code under a different key (renamed variant) -> pre-write SKU_REKEY_CONFLICT, VALIDATION_ERROR.
+  // T2a: same SKU, same parent, same product, only the variant label corrected (Owner-approved option B,
+  // 2026-11-13): a patch of the existing row, same UUID, never a second row.
+  const renamePlan = planCloudInventoryImport(authoritative, [incomingRow('GX01', 'A-renamed', 1, 2, 1, B1)]);
+  assert.equal(kinds(renamePlan.operations).create ?? 0, 0, 'a corrected label is not a new SKU');
+  const renameOp = renamePlan.operations.find(op => op.id === uuid(1));
+  assert.equal(renameOp?.kind, 'patch');
+  assert.equal(renameOp.changes.inventory_key, `${NORM}::GX01::A-renamed`);
+  assert.equal(renameOp.expected.inventory_key, authoritative[0].inventory_key, 'CAS on the current key');
+  assert.equal(renamePlan.inventory.filter(r => r.myacg_item_code === 'GX01').length, 1);
+  // T2: same non-empty code under a different key that cannot be proven to be the same SKU (here: another
+  // parent code) -> pre-write SKU_REKEY_CONFLICT, VALIDATION_ERROR.
   let rekey;
-  try { planCloudInventoryImport(authoritative, [incomingRow('GX01', 'A-renamed', 1, 2, 1, B1)]); } catch (error) { rekey = error; }
+  try { planCloudInventoryImport(authoritative, [{ ...incomingRow('GX01', 'A-renamed', 1, 2, 1, B1), myacg_parent_code: 'GPX9999' }]); } catch (error) { rekey = error; }
   assert.equal(rekey?.message, 'BUYANIME_INVENTORY_SKU_REKEY_CONFLICT');
   assert.deepEqual(rekey.details, ['GX01']);
   const failure = classifyMyAcgImportError(rekey, 'commit');

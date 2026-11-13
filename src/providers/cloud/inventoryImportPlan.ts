@@ -1,4 +1,4 @@
-import { prepareInventoryUpsert, type InventoryItem } from '../../lib/db';
+import { normalizeProductTitle, prepareInventoryUpsert, type InventoryItem } from '../../lib/db';
 import { canonicalCloudId, toCloudFieldRow } from './cloudEntityPayload';
 import { buildCloudCollectionMutationPlan } from './cloudFieldCas';
 import { markBuyAnimeTrace } from '../../diagnostics/buyAnimeProductionTrace';
@@ -31,12 +31,22 @@ export function planCloudInventoryImport(
   }
   const active = authoritative.filter(row => !row.deleted_at);
   const projection = prepareInventoryUpsert(active, incoming);
+  const renames = detectVariantRenames(authoritative, active, projection.inventory, byKey);
   // BuyAnime import is create/patch only. The shared projection replaces a whole
   // family (same parent code/title); active rows it dropped whose key is absent
   // from this file are retained exactly as stored: no delete, no field change.
   const projectedKeys = new Set(projection.inventory.map(row => row.inventory_key));
-  const retained = active.filter(row => !projectedKeys.has(row.inventory_key));
+  // A renamed row's previous key is not retained: the same row (same UUID) carries the new key.
+  const renamedFrom = new Set([...renames.values()].map(row => row.inventory_key));
+  const retained = active.filter(row => !projectedKeys.has(row.inventory_key) && !renamedFrom.has(row.inventory_key));
   const projected = projection.inventory.map(row => {
+    const renamed = renames.get(row.inventory_key!);
+    if (renamed) {
+      // Same SKU, variant label corrected on BuyAnime: patch the existing row in place (same UUID, CAS on
+      // its current version). The server refuses the key if any row, tombstones included, holds it.
+      const id = canonicalCloudId('inventory_items', renamed as unknown as Record<string, unknown>);
+      return { ...row, id, database_id: id, version: renamed.version, updated_at: renamed.updated_at };
+    }
     const existing = byKey.get(row.inventory_key!);
     if (existing?.deleted_at) throw new Error('CLOUD_INVENTORY_KEY_SOFT_DELETED');
     if (existing) {
@@ -68,7 +78,7 @@ export function planCloudInventoryImport(
   const newCodes = new Set<string>();
   const rekeyed = new Set<string>();
   for (const row of projected) {
-    if (byKey.has(row.inventory_key!)) continue;
+    if (byKey.has(row.inventory_key!) || renames.has(row.inventory_key!)) continue;
     const code = skuCode(row);
     if (!code) continue;
     if (activeCodes.has(code) || newCodes.has(code)) rekeyed.add(code);
@@ -110,4 +120,52 @@ export function planCloudInventoryImport(
   markBuyAnimeTrace('T09_INDEX_BUILD_DONE', { authoritativeRows: authoritative.length, incomingRows: incoming.length });
   return { inventory, imported, operations, batchId: incoming[0]?.latest_catalog_import_id, stats: { ...projection.stats, newCount, updatedCount,
     unchangedCount: importedKeys.size - newCount - updatedCount } };
+}
+
+const skuText = (value: unknown) => String(value ?? '').trim().toUpperCase();
+
+/**
+ * BuyAnime corrected a variant label of an existing SKU (same item code, same parent code, same product):
+ * the file's row gets a new inventory_key (title::code::variant) while its code is held by exactly one
+ * active row. Returns new key -> that row, only when every condition proves it is the same SKU:
+ * - the new key is held by no row at all (active or tombstone), and the file has no other row with this code;
+ * - exactly one row in the whole table (active or tombstone) has this code, and it is active;
+ * - parent code is non-empty and equal, normalized product title is equal, only the variant label differs;
+ * - the file does not also carry the holder's current key (old and new label in one file).
+ * Anything else is left to BUYANIME_INVENTORY_SKU_REKEY_CONFLICT (fail closed).
+ */
+function detectVariantRenames(
+  authoritative: AuthoritativeInventory[], active: AuthoritativeInventory[], projected: InventoryItem[],
+  byKey: Map<string, AuthoritativeInventory>,
+): Map<string, AuthoritativeInventory> {
+  const renames = new Map<string, AuthoritativeInventory>();
+  const allByCode = new Map<string, AuthoritativeInventory[]>();
+  for (const row of authoritative) {
+    const code = skuText(row.myacg_item_code);
+    if (code) allByCode.set(code, [...(allByCode.get(code) ?? []), row]);
+  }
+  const fileByCode = new Map<string, InventoryItem[]>();
+  for (const row of projected) {
+    const code = skuText(row.myacg_item_code);
+    if (code) fileByCode.set(code, [...(fileByCode.get(code) ?? []), row]);
+  }
+  const fileKeys = new Set(projected.map(row => row.inventory_key));
+  const activeIds = new Set(active.map(row => row.id));
+  for (const row of projected) {
+    const key = row.inventory_key!;
+    const code = skuText(row.myacg_item_code);
+    if (!code || byKey.has(key)) continue;
+    const holders = allByCode.get(code) ?? [];
+    if (holders.length !== 1 || (fileByCode.get(code) ?? []).length !== 1) continue;
+    const holder = holders[0];
+    if (holder.deleted_at || !activeIds.has(holder.id) || !holder.inventory_key || fileKeys.has(holder.inventory_key)) continue;
+    const parent = skuText(row.myacg_parent_code);
+    if (!parent || parent !== skuText(holder.myacg_parent_code)) continue;
+    const title = normalizeProductTitle(row.product_title);
+    if (!title || title !== normalizeProductTitle(holder.product_title)) continue;
+    if (String(row.raw_variant_name ?? '').trim() === String(holder.raw_variant_name ?? '').trim()) continue;
+    if (typeof holder.version !== 'number') continue;
+    renames.set(key, holder);
+  }
+  return renames;
 }
