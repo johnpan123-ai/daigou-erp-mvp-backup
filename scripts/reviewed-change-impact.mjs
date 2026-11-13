@@ -106,6 +106,14 @@ export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = nul
   return reviewedImpacts.reviews.filter(review => {
     try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, candidateHead]); }
     catch { return false; }
+    // A schema-adopted baseline already seals every review wholly contained
+    // in that tree. Historical rows remain audit evidence, but revalidating
+    // their old source hashes would incorrectly reopen the adopted boundary.
+    // Reviews after the boundary still go through the exact checks below.
+    if (adoptedBaselineHead) {
+      try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, adoptedBaselineHead]); return false; }
+      catch { /* review is post-baseline; continue with exact validation */ }
+    }
     git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.beforeHead, review.reviewedHead]);
     const registryFile = 'config/erp2-reviewed-change-impacts.json';
     const changed = git(['diff', '--name-only', '--no-renames', review.beforeHead, review.reviewedHead, '--'])
