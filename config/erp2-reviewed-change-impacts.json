@@ -10026,6 +10026,16 @@
       "files": [
         {"file":"config/erp-environment-identity.json","beforeHash":"e9b84d64b464aeb6ebfe4f4f375f2dcb44c8443e0c4ad2187ab16b148cdd7e47","afterHash":"b5d83af8728df86f983de5e97e347f4e9220f49fce54cf27f5d2fc802888fe13","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["post080ProductRelease approved baseline anchor"],"dataFlow":"Pins normal Post-080 releases to the finalized 080 release checkpoint.","persistenceBehavior":"Release metadata only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"The dedicated product lane cannot reopen the 080 maintenance base.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-adopted-review-boundary-v1",
+      "beforeHead": "61d8c4b44d4bead5453cdd3f38da7b423baa3230",
+      "reviewedHead": "090f61ebd1ebf23ad9e990829e453e6789f61f0c",
+      "patchSha256": "6ad04e2c8857915b7d49bff07d527230ee58a6e64828495f428e8d9178d95089",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"baae97483b3f6b06ad8e0704ea0b15c542d95d4236983ad725557a22a943c2e1","afterHash":"4017bc4cd0e6bc9ce243401dd5a97c333e3a20d3bab61b42bf91d0b0f6be9bc1","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["adopted baseline review boundary"],"dataFlow":"Reviews fully contained in the adopted baseline are consumed as historical evidence; post-baseline reviews remain exact.","persistenceBehavior":"Read-only release verification.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Historical hash drift cannot reopen an adopted boundary; new drift still fails closed.","schemaExpectation":"No schema mutation."}
+      ]
     }
   ]
 }
