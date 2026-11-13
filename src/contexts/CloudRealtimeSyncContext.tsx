@@ -53,7 +53,7 @@ import {
   markRealtimeUnavailable,
 } from '../providers/cloud/cloudRealtimeReadiness';
 import { holdCloudFresh, markCloudReconnectPending as markCloudResyncPending, releaseCloudFresh } from '../providers/cloud/cloudConnectivity';
-import { markAllCloudTablesUnresolved } from '../providers/cloud/cloudTargetedCache';
+import { adoptCoreSnapshotBaseline, getKeyVersionBaselineEpoch, markAllCloudTablesUnresolved } from '../providers/cloud/cloudTargetedCache';
 import { raiseCloudCacheEpochBarrier } from '../providers/cloud/cloudCacheWriteFence';
 import { noteCloudSyncEvent } from '../providers/cloud/cloudSyncObservability';
 import {
@@ -95,6 +95,8 @@ const CLOUD_RESTORE_EPOCH_TABLE = 'erp_cloud_restore_epoch';
 const REALTIME_READINESS_WAIT_MS = 3000;
 /** C1c: longest wait for readiness before a catch-up runs anyway (unproven, Fresh stays withheld). */
 const UNPROVEN_CATCH_UP_MS = 10_000;
+/** Returning to the page during a (re)join: how long the catch-up waits for the listening confirmation. */
+const RESUME_LISTENING_WAIT_MS = 6_000;
 /** C1c: a readiness confirmation arriving this late still triggers the proving catch-up. */
 const LATE_READINESS_WATCH_MS = 6 * 60 * 60 * 1000;
 /** C1e: bounded re-reads when a completed catch-up cannot prove the current generation. */
@@ -356,20 +358,40 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
      * never shown as synced). The user (focus, visible again, manual reconnect) may grant one more
      * read at most every 30 s; a Restore epoch change always re-opens the budget. The proof itself,
      * the epoch barrier and the write fence are unchanged.
+     * A catch-up that verifies the cache by key/version (about a tenth of the egress) is charged
+     * FULL_READ_VERIFY_COST of one read against the same limits; the moment it has to download complete
+     * rows it must obtain the remaining share here first, so the egress bound is the same.
      */
     const FULL_READ_UNPROVEN_LIMIT = 1;
     const FULL_READ_HELD_LIMIT = 3;
     const FULL_READ_WINDOW_MS = 60 * 60 * 1000;
     const FULL_READ_WINDOW_LIMIT = 6;
     const FULL_READ_USER_GRANT_INTERVAL_MS = 30_000;
+    const FULL_READ_VERIFY_COST = 0.125;
     let heldFullReads = 0;
-    let automaticFullReadTimes: number[] = [];
+    let automaticFullReadTimes: Array<{ at: number; cost: number }> = [];
     let userFullReadGranted = false;
+    let userGrantCoversRest = false;
     let lastUserFullReadGrantAt = Number.NEGATIVE_INFINITY;
     const isTabHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    // A return that came sooner than 30 s after the previous grant is not dropped: the same single grant
+    // is given when the 30 s have passed, if the person is still on the page (visible) and a read is
+    // still waiting. The rule "at most one user-triggered read every 30 s" is unchanged; without this a
+    // helper switching apps quickly could stay blocked until the hourly window re-opened.
+    let deferredUserGrantTimer: ReturnType<typeof setTimeout> | null = null;
     const grantUserFullRead = (force = false) => {
       const now = Date.now();
-      if (!force && now - lastUserFullReadGrantAt < FULL_READ_USER_GRANT_INTERVAL_MS) return;
+      if (!force && now - lastUserFullReadGrantAt < FULL_READ_USER_GRANT_INTERVAL_MS) {
+        if (deferredUserGrantTimer === null) {
+          deferredUserGrantTimer = setTimeout(() => {
+            deferredUserGrantTimer = null;
+            if (disposed || isTabHidden() || fullReadAdmissionWaiters.size === 0) return;
+            grantUserFullRead();
+          }, FULL_READ_USER_GRANT_INTERVAL_MS - (now - lastUserFullReadGrantAt) + 50);
+        }
+        return;
+      }
+      if (deferredUserGrantTimer !== null) { clearTimeout(deferredUserGrantTimer); deferredUserGrantTimer = null; }
       lastUserFullReadGrantAt = now;
       userFullReadGranted = true;
       wakeFullReadAdmission();
@@ -381,25 +403,27 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     const fullReadAdmissionWaiters = new Set<() => void>();
     const wakeFullReadAdmission = () => { [...fullReadAdmissionWaiters].forEach(wake => wake()); };
     const resetFullReadBudget = () => { heldFullReads = 0; wakeFullReadAdmission(); };
-    function admitFullRead(): 'allow' | 'hidden-tab' | 'held-budget' | 'hourly-budget' {
+    function admitFullRead(cost = 1): 'allow' | 'hidden-tab' | 'held-budget' | 'hourly-budget' {
       if (isTabHidden()) return 'hidden-tab';
-      if (userFullReadGranted) { userFullReadGranted = false; return 'allow'; }
+      // A user grant covers one whole catch-up: its verification share and, if needed, the rest.
+      if (userFullReadGranted) { userFullReadGranted = false; userGrantCoversRest = cost < 1; return 'allow'; }
+      if (cost < 1 && cost + FULL_READ_VERIFY_COST === 1 && userGrantCoversRest) { userGrantCoversRest = false; return 'allow'; }
       const now = Date.now();
-      automaticFullReadTimes = automaticFullReadTimes.filter(at => now - at < FULL_READ_WINDOW_MS);
-      if (automaticFullReadTimes.length >= FULL_READ_WINDOW_LIMIT) return 'hourly-budget';
+      automaticFullReadTimes = automaticFullReadTimes.filter(entry => now - entry.at < FULL_READ_WINDOW_MS);
+      if (automaticFullReadTimes.reduce((sum, entry) => sum + entry.cost, 0) + cost > FULL_READ_WINDOW_LIMIT) return 'hourly-budget';
       if (completenessHeld) {
         const listening = readinessGeneration !== null && isRealtimeReadyGeneration(readinessGeneration);
-        if (heldFullReads >= (listening ? FULL_READ_HELD_LIMIT : FULL_READ_UNPROVEN_LIMIT)) return 'held-budget';
-        heldFullReads += 1;
+        if (heldFullReads + cost > (listening ? FULL_READ_HELD_LIMIT : FULL_READ_UNPROVEN_LIMIT)) return 'held-budget';
+        heldFullReads += cost;
       }
-      automaticFullReadTimes.push(now);
+      automaticFullReadTimes.push({ at: now, cost });
       return 'allow';
     }
-    const waitForFullReadAdmission = async (signal: AbortSignal) => {
+    const waitForFullReadAdmission = async (signal: AbortSignal, cost = 1) => {
       let reported: string | null = null;
       for (;;) {
         signal.throwIfAborted();
-        const admission = admitFullRead();
+        const admission = admitFullRead(cost);
         if (admission === 'allow') return;
         if (reported !== admission) {
           reported = admission;
@@ -417,7 +441,14 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
     };
     const reconnect = new CloudReconnectCatchUp({
       refresh: async (resources, signal) => {
-        await waitForFullReadAdmission(signal);
+        // With a verification baseline the catch-up is admitted at the verification share; the cache asks
+        // for the rest (completeRowReadGate) before it downloads complete rows of any table.
+        const verifying = getKeyVersionBaselineEpoch() !== null;
+        userGrantCoversRest = false;
+        await waitForFullReadAdmission(signal, verifying ? FULL_READ_VERIFY_COST : 1);
+        const completeRowReadGate = verifying
+          ? (gateSignal?: AbortSignal) => waitForFullReadAdmission(gateSignal ?? signal, 1 - FULL_READ_VERIFY_COST)
+          : undefined;
         // C1e: one evidence record per actual attempt (attempts are strictly serialized).
         const attempt: CatchUpAttemptEvidence = {
           id: ++attemptIds, requestedAt: Date.now(), readStartSeq: null, readStartedAt: null,
@@ -425,7 +456,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         };
         activeAttempt = attempt;
         try {
-          const completed = await coordinator.fallback('reconnect', resources, signal);
+          const completed = await coordinator.fallback('reconnect', resources, signal, completeRowReadGate);
           attempt.readCompletedAt = Date.now();
           attempt.completed = completed === true && !signal.aborted;
           if (attempt.completed) lastCompletedAttempt = attempt;
@@ -721,6 +752,8 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
                   && !reconnect.isPending() && isRealtimeReadyGeneration(gen) && epochChanges === epochAtJoin) {
                   noteCloudSyncEvent('catch-up-skipped-after-readiness');
                   emitProof({ kind: 'core-snapshot', generation: gen, readySeq: readySeqByGeneration.get(gen)?.seq ?? null, proven: true, epochNow: epochChanges, current: true });
+                  // The proven core snapshot is a complete authoritative state: later catch-ups may verify it.
+                  adoptCoreSnapshotBaseline();
                   releaseCompleteness();
                   settle(true);
                   return;
@@ -976,6 +1009,30 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
         void subscribeRealtimeChannel(true).catch(() => { /* status handlers keep the fail-closed state */ });
       })();
     };
+    /**
+     * Return to the page while the channel is being (re)joined and has not confirmed listening yet: a
+     * catch-up started now cannot prove completeness and would be read again right after the
+     * confirmation. Wait (bounded) for the confirmation; the subscribed path then runs the single proving
+     * catch-up. Past the bound the earlier behaviour applies (an unproven read still updates the screen).
+     */
+    let deferredResumeCatchUp = false;
+    const awaitingListening = () => completenessHeld && !isRealtimeReadyGeneration(readinessGeneration);
+    const deferCatchUpUntilListening = (trigger: 'focus' | 'visibility' | 'online') => {
+      if (deferredResumeCatchUp) return;
+      deferredResumeCatchUp = true;
+      const startedAt = Date.now();
+      const check = () => {
+        if (disposed || faultDisconnected || backgroundPaused) { deferredResumeCatchUp = false; return; }
+        // Proven meanwhile, or listening confirmed (the subscribed path owns the proving catch-up).
+        if (!awaitingListening()) { deferredResumeCatchUp = false; return; }
+        if (Date.now() - startedAt < RESUME_LISTENING_WAIT_MS) { setTimeout(check, 150); return; }
+        deferredResumeCatchUp = false;
+        emitRecovery({ kind: 'resume-catch-up-unproven', trigger });
+        if (trigger === 'online' || needsAuthoritativeCatchUp()) void reconnect.request(trigger, activeResources());
+        else void coordinator.fallback(trigger, activeResources());
+      };
+      setTimeout(check, 150);
+    };
     const handleFocus = (userInitiated = true) => {
       if (faultDisconnected) return;
       if (backgroundPaused) { if (userInitiated) resumeFromBackground(); return; }
@@ -985,6 +1042,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       // C1c: a withheld Fresh can be proven by a complete catch-up once listening is confirmed.
       if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) { void completeCatchUp(readinessGeneration, 'focus'); return; }
       requestRealtimeReconnect('focus');
+      if (awaitingListening()) { deferCatchUpUntilListening('focus'); return; }
       if (needsAuthoritativeCatchUp()) void reconnect.request('focus', activeResources());
       else void coordinator.fallback('focus', activeResources());
     };
@@ -1000,12 +1058,26 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       grantUserFullRead();
       wakeFullReadAdmission();
       if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) { void completeCatchUp(readinessGeneration, 'visibility'); return; }
+      if (awaitingListening()) { deferCatchUpUntilListening('visibility'); return; }
       if (needsAuthoritativeCatchUp()) void reconnect.request('visibility', activeResources());
       else void coordinator.fallback('visibility', activeResources());
     };
     const handleOnline = () => {
       if (faultDisconnected || backgroundPaused || resumingFromBackground) return;
       requestRealtimeReconnect('online');
+      // Withheld and listening: join the one complete catch-up (same resources, same attempt) instead of
+      // starting a narrower read that could not prove completeness and would be read again.
+      if (completenessHeld && isRealtimeReadyGeneration(readinessGeneration)) {
+        void completeCatchUp(readinessGeneration, 'focus').then(() => {
+          // The browser's online event asks for a read that starts after it. When the catch-up it joined
+          // had already read everything, that read is still owed: run it once (same complete resources).
+          const { readStatus } = getCloudConnectivitySnapshot();
+          if (disposed || completenessHeld || readStatus === 'fresh-online' || readStatus === 'fresh-empty') return;
+          void reconnect.request('online', GLOBAL_REFRESH_RESOURCES);
+        });
+        return;
+      }
+      if (awaitingListening()) { deferCatchUpUntilListening('online'); return; }
       void reconnect.request('online', activeResources());
     };
     // Another tab's write marker is not a user action: it never grants an extra full read.
@@ -1022,6 +1094,7 @@ export function CloudRealtimeSyncBoundary({ children }: { children: React.ReactN
       setRealtimePhase('active');
       unregisterBuyAnimeRefresh();
       disposed = true;
+      if (deferredUserGrantTimer !== null) { clearTimeout(deferredUserGrantTimer); deferredUserGrantTimer = null; }
       channelGeneration += 1;
       if (readinessGeneration !== null) disarmRealtimeReadiness(readinessGeneration);
       recovery?.dispose();

@@ -732,7 +732,8 @@ const P02_CTX_REVIEWED_PINS = Object.freeze({
       'realtimePhase,setRealtimePhase': 'de2efd7a3975ea10cf5b0128241e31fcb2fb088a67f4737811f9e5659d925a86',
       syncPresentation: 'b8d8ac945c2ba28a58d764a80afb3582695aef34ede76a26ed524f3497488677',
     }),
-    banner: 'a43eba5be35f46e2ce1db5b6da730ea6bf42842672cabb9ca664c0f8a7bf5107',
+    // The deployed 54e9531 background-resume source keeps the adopted banner markup.
+    banner: '26fec02e4bef842eb0a1c7714dbf4aea0f325dd1f36d633fc17a63d897e9d43c',
   }),
   presentation: Object.freeze({
     ...P02_CTX_PINS.presentation,
@@ -740,6 +741,39 @@ const P02_CTX_REVIEWED_PINS = Object.freeze({
   }),
   policy: '675287fbd4799549591b93fe05422e511a6e710b936dcca3a237ba5e3616014f',
 });
+// Exact reviewed successor for the mobile return-to-app patch. Historical C1f and
+// background-resume pins remain authoritative: this exact overlay is checked, removed,
+// and the immutable 54e9531 source is then checked by those predecessor contracts.
+const MOBILE_RESUME_CONTEXT_PIN = Object.freeze({
+  before: '803de29a306f4af02d717a8bcd5aa429126f1ef567cebfcadc935215f7652173',
+  after: '46cf72ead879e1cb817eb05a76aa089d29aed6503151a1fd3b5c233eb0986c40',
+});
+const mobileResumeContextBase = () => {
+  const source = execFileSync('git', ['--no-replace-objects', '-C', fileURLToPath(new URL('..', import.meta.url)), 'show', `${MOBILE_RESUME_BASE}:src/contexts/CloudRealtimeSyncContext.tsx`], { encoding: 'utf8' })
+    .replace(/\r\n?/gu, '\n');
+  if (sourceHash(source) !== MOBILE_RESUME_CONTEXT_PIN.before) fail('mobile-resume immutable context baseline mismatch');
+  return source;
+};
+export function assertMobileResumeContextSemantics(before, after) {
+  const prior = mobileResumeIo(before, P02_CTX_CONTEXT); const next = mobileResumeIo(after, P02_CTX_CONTEXT);
+  if (JSON.stringify(prior.writes) !== JSON.stringify(next.writes)
+    || JSON.stringify(prior.rpcs) !== JSON.stringify(next.rpcs)) fail('mobile-resume context changed Cloud I/O boundaries');
+  for (const required of [
+    'const RESUME_LISTENING_WAIT_MS = 6_000;',
+    'const FULL_READ_VERIFY_COST = 0.125;',
+    'await waitForFullReadAdmission(signal, verifying ? FULL_READ_VERIFY_COST : 1);',
+    'waitForFullReadAdmission(gateSignal ?? signal, 1 - FULL_READ_VERIFY_COST)',
+    "coordinator.fallback('reconnect', resources, signal, completeRowReadGate)",
+    'const deferCatchUpUntilListening =',
+    "if (awaitingListening()) { deferCatchUpUntilListening('focus'); return; }",
+    "if (awaitingListening()) { deferCatchUpUntilListening('visibility'); return; }",
+    "if (awaitingListening()) { deferCatchUpUntilListening('online'); return; }",
+  ]) if (!after.includes(required)) fail(`mobile-resume context safety invariant missing: ${required.slice(0, 52)}`);
+  if (!after.includes("holdCompleteness('pending', 'realtime-readiness-pending');")
+    || !after.includes('if (!result.proven) throw new Error(\'P0_2_REALTIME_CATCH_UP_NOT_PROVEN\');')) {
+    fail('mobile-resume context weakened completeness/write protection');
+  }
+}
 const p02CtxBindingNames = (tree, statement) => {
   if (ts.isVariableStatement(statement)) {
     const names = [];
@@ -821,6 +855,11 @@ const p02PresentationSemantics = (file, after) => {
 };
 export function assertP02RealtimeContextContract(file, after) {
   if (after === null) fail('p02 1a realtime context source missing');
+  if (file === P02_CTX_CONTEXT && sourceHash(after) === MOBILE_RESUME_CONTEXT_PIN.after) {
+    const before = mobileResumeContextBase();
+    assertMobileResumeContextSemantics(before, after);
+    return;
+  }
   const tree = parse(file, after);
   const all = nodes(tree);
   if (all.some(node => ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)) fail('p02 1a realtime context dynamic import');
@@ -1184,7 +1223,86 @@ export function restoreReviewedNineUiProviderPatch(file, source) {
   return before;
 }
 
+// Exact successor review for the mobile app-resume optimization. It is bound to the
+// deployed 54e9531 source and to the four immutable product-file results reviewed in
+// 93f23dd. The Provider overlay is removed before every historical Provider/WACA/CAS
+// rule runs, so this cannot be reused for another base or a nearby patch.
+const MOBILE_RESUME_BASE = '54e9531';
+const MOBILE_RESUME_PROVIDER_PINS = Object.freeze({
+  'src/providers/cloud/cloudSyncDomain.ts': Object.freeze({
+    before: '774301e2450759301dfccf59dd7f7fdb8c2d1b11014dbbae21dd415901938c28',
+    after: '1bb88c22d0a6a6db9206283ee545b4af0832c8e08ee2b3c951b51f0fde1ef2a7',
+  }),
+  'src/providers/cloud/cloudTargetedCache.ts': Object.freeze({
+    before: '5d87ac6db9c6c82a729747f736c081c36c1dffc7c9bf167d6de1099552176318',
+    after: '31a43b721a927ada39b5511a50a42a3143a4a13d12d233b860caf1c28db0aae8',
+  }),
+  'src/providers/cloud/supabaseProvider.ts': Object.freeze({
+    before: '639d47dccb652b9819c8e70075ac2b52beb1d56d0f11934c61539450d83ad3c2',
+    after: '740f31653e27e8178707b5014500b821be060f5efc7a426f61de89b02f957fd7',
+  }),
+});
+const mobileResumeBaseSource = file => {
+  const pin = MOBILE_RESUME_PROVIDER_PINS[file];
+  if (!pin) return null;
+  const source = execFileSync('git', ['--no-replace-objects', '-C', NINE_UI_REVIEW_ROOT, 'show', `${MOBILE_RESUME_BASE}:${file}`], { encoding: 'utf8' })
+    .replace(/\r\n?/gu, '\n');
+  if (sourceHash(source) !== pin.before) fail(`mobile-resume immutable Provider baseline mismatch: ${file}`);
+  return source;
+};
+const mobileResumeIo = (source, file = 'mobile-resume-provider.ts') => {
+  const tree = parse(file, source);
+  const writes = [];
+  const rpcs = [];
+  for (const call of nodes(tree).filter(ts.isCallExpression)) {
+    if (!ts.isPropertyAccessExpression(call.expression)) continue;
+    const name = call.expression.name.text;
+    if (['insert', 'update', 'upsert', 'delete'].includes(name)) writes.push(canonical(tree, call));
+    if (name === 'rpc') rpcs.push(ts.isStringLiteral(call.arguments[0]) ? call.arguments[0].text : '<dynamic>');
+  }
+  return { writes: writes.sort(), rpcs: rpcs.sort() };
+};
+export function assertMobileResumeProviderSemantics(file, before, after) {
+  const prior = mobileResumeIo(before); const next = mobileResumeIo(after);
+  if (JSON.stringify(prior.writes) !== JSON.stringify(next.writes)) fail(`mobile-resume changed a Cloud write boundary: ${file}`);
+  if (file === 'src/providers/cloud/cloudTargetedCache.ts') {
+    const extraRpcs = [...next.rpcs];
+    for (const name of prior.rpcs) { const at = extraRpcs.indexOf(name); if (at < 0) fail('mobile-resume removed an existing RPC'); else extraRpcs.splice(at, 1); }
+    if (JSON.stringify(extraRpcs) !== JSON.stringify(['erp_sync_capabilities'])) fail('mobile-resume targeted cache RPC scope changed');
+    for (const required of [
+      "const KEY_VERSION_VERIFIABLE_TABLES = new Set(['product_groups', 'product_categories', 'product_variants', 'purchase_batches', 'purchase_batch_items', 'private_orders', 'private_order_items', 'japan_packages', 'japan_package_items', 'bundle_components', 'outbound_shipment_items', 'sales_orders', 'sales_order_items'])",
+      "result.error.code === 'PGRST202' || result.status === 404",
+      'if (epochAtRead !== null && keyVersionBaselineEpoch !== null && epochAtRead !== keyVersionBaselineEpoch) keyVersionBaselineEpoch = null;',
+      'if (tables.some(table => TABLES[table] && !verifiable(table))) await completeRowReadGate();',
+      'if (!(error instanceof CloudKeyVersionVerificationStaleError)) throw error;',
+    ]) if (!after.includes(required)) fail(`mobile-resume targeted cache fail-closed invariant missing: ${required.slice(0, 48)}`);
+  } else if (JSON.stringify(prior.rpcs) !== JSON.stringify(next.rpcs)) {
+    fail(`mobile-resume changed an RPC boundary: ${file}`);
+  }
+  if (file === 'src/providers/cloud/cloudSyncDomain.ts') {
+    if (!after.includes('completeRowReadGate?: (signal?: AbortSignal) => Promise<void>;')
+      || !after.includes('...(completeRowReadGate ? { completeRowReadGate } : {})')) fail('mobile-resume complete-row admission contract changed');
+  }
+  if (file === 'src/providers/cloud/supabaseProvider.ts') {
+    if (!after.includes('readCloudRestoreEpochForBaseline(CORE_SNAPSHOT_EPOCH_READ_MS)')
+      || !after.includes('noteCoreSnapshotEpoch(snapshotEpoch);')) fail('mobile-resume core snapshot epoch evidence changed');
+  }
+}
+export function restoreReviewedMobileResumeProviderPatch(file, source) {
+  const pin = MOBILE_RESUME_PROVIDER_PINS[file];
+  if (!pin || source === null || sourceHash(source) !== pin.after) return source;
+  const before = mobileResumeBaseSource(file);
+  assertMobileResumeProviderSemantics(file, before, source);
+  return before;
+}
+
 export function assertReviewedProviderContract(file, before, after) {
+  const mobileResumePin = MOBILE_RESUME_PROVIDER_PINS[file];
+  if (mobileResumePin && after !== null && sourceHash(after) === mobileResumePin.after) {
+    if (before === null || sourceHash(before) !== mobileResumePin.before) fail(`mobile-resume Provider baseline mismatch: ${file}`);
+    restoreReviewedMobileResumeProviderPatch(file, after);
+    return;
+  }
   const nineUiPin = NINE_UI_PROVIDER_PINS[file];
   if (nineUiPin && after !== null && sourceHash(after) === nineUiPin.after) {
     const restored = restoreReviewedNineUiProviderPatch(file, after);

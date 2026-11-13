@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PackageOpen, Plus, Search } from 'lucide-react';
 import { dataProvider } from '../providers/dataProvider';
@@ -64,13 +64,16 @@ export default function OutboundShipmentsList() {
   const [bundleComponents, setBundleComponents] = useState<BundleComponent[]>(() => cached?.[5] ?? []);
   const statusFilter = parseOutboundStatusFilter(searchParams.get('status'));
   const searchTerm = searchParams.get('q') ?? '';
+  const [searchDraft, setSearchDraft] = useState(searchTerm);
+  const searchCompositionRef = useRef(false);
+  const committedSearchRef = useRef(searchTerm);
   const sortMode = searchParams.has('sort')
     ? parseOutboundSortMode(searchParams.get('sort'))
     : statusFilter === 'received' ? 'status-recent' : 'date-desc';
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTitle, setNewTitle] = useState('');
 
-  const updateListState = (updates: { status?: OutboundStatusFilter; q?: string; sort?: OutboundSortMode }) => {
+  const updateListState = useCallback((updates: { status?: OutboundStatusFilter; q?: string; sort?: OutboundSortMode }) => {
     const next = new URLSearchParams(searchParams);
     if (updates.status !== undefined) {
       if (updates.status === 'all') next.delete('status');
@@ -85,7 +88,18 @@ export default function OutboundShipmentsList() {
       next.set('sort', updates.sort);
     }
     setSearchParams(next, { replace: true });
-  };
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    committedSearchRef.current = searchTerm;
+    if (!searchCompositionRef.current) setSearchDraft(searchTerm);
+  }, [searchTerm]);
+
+  const commitSearch = useCallback((value: string) => {
+    if (committedSearchRef.current === value) return;
+    committedSearchRef.current = value;
+    updateListState({ q: value });
+  }, [updateListState]);
 
   const openShipment = (shipmentId: string) => {
     const search = searchParams.toString();
@@ -312,9 +326,20 @@ export default function OutboundShipmentsList() {
         <Search size={16} style={{ position: 'absolute', left: 12, top: 12, color: '#94a3b8' }} />
         <input
           placeholder="搜尋出庫單名稱、追蹤號碼、商品名稱..."
-          value={searchTerm}
+          value={searchDraft}
           data-testid="outbound-search"
-          onChange={e => updateListState({ q: e.target.value })}
+          onCompositionStart={() => { searchCompositionRef.current = true; }}
+          onCompositionEnd={event => {
+            searchCompositionRef.current = false;
+            const value = event.currentTarget.value;
+            setSearchDraft(value);
+            commitSearch(value);
+          }}
+          onChange={event => {
+            const value = event.currentTarget.value;
+            setSearchDraft(value);
+            if (!searchCompositionRef.current) commitSearch(value);
+          }}
           style={{
             width: '100%', padding: '10px 14px 10px 36px', border: '1px solid #e2e8f0',
             borderRadius: 10, fontSize: 14, outline: 'none', boxSizing: 'border-box',

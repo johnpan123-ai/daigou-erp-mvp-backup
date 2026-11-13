@@ -188,6 +188,102 @@ const tablesForResources = (resources: CloudResource[]): string[] => (
 );
 
 const AUTHORITATIVE_PAGE_SIZE = 1000;
+/**
+ * Key/version verification read (authoritative catch-up without re-downloading unchanged rows).
+ * On these tables every UPDATE is forced by the BEFORE UPDATE row trigger sync_audit_columns() to
+ * version = OLD.version + 1 and a new updated_at (tests/cloud-version-invariant-isolated.mjs), so a cached
+ * row whose (id, version, updated_at) equals the server's is the server's current row. The read is still
+ * complete: every active row's key is read; rows that are new or differ are read in full, rows absent on
+ * the server are removed. Anything that cannot be decided this way (no baseline, Restore epoch changed or
+ * unknown, missing version, too many differences, cache moved during the read) uses the
+ * complete row read.
+ * Not listed: outbound_shipments (the trigger deliberately leaves version unchanged for a system-managed
+ * status_changed_at correction) and inventory_items (no such trigger unless the server reports it, see
+ * SERVER_FORCED_VERSION_CAPABILITY).
+ */
+const KEY_VERSION_VERIFIABLE_TABLES = new Set(['product_groups', 'product_categories', 'product_variants', 'purchase_batches', 'purchase_batch_items', 'private_orders', 'private_order_items', 'japan_packages', 'japan_package_items', 'bundle_components', 'outbound_shipment_items', 'sales_orders', 'sales_order_items']);
+/**
+ * inventory_items is verified by key/version only while the server itself reports (erp_sync_capabilities,
+ * read with every verification) that the forcing trigger is installed and enabled on it. A server without
+ * that function, any error or any other answer means the complete row read.
+ */
+const SERVER_FORCED_VERSION_CAPABILITY: Readonly<Record<string, string>> = { inventory_items: 'inventoryItemsVersionForced' };
+let syncCapabilitiesRpcAbsent = false;
+const readServerForcedVersionTables = async (timeoutMs: number, signal?: AbortSignal): Promise<Set<string>> => {
+  const forced = new Set<string>();
+  if (syncCapabilitiesRpcAbsent) return forced;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, Math.max(0, timeoutMs));
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (supabase as any).rpc('erp_sync_capabilities').abortSignal(controller.signal);
+    if (result?.error) {
+      // Function not deployed on this server: do not ask again in this page session.
+      if (result.error.code === 'PGRST202' || result.status === 404) syncCapabilitiesRpcAbsent = true;
+      return forced;
+    }
+    const data = result?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return forced;
+    for (const [table, capability] of Object.entries(SERVER_FORCED_VERSION_CAPABILITY)) {
+      if ((data as Record<string, unknown>)[capability] === true) forced.add(table);
+    }
+    return forced;
+  } catch {
+    return forced;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+};
+const KEY_VERSION_COLUMNS = 'id,version,updated_at';
+/** Above this many differing rows in one table the complete row read is cheaper and simpler. */
+const KEY_VERSION_MAX_CHANGED_ROWS = 600;
+const VERIFICATION_EPOCH_READ_TIMEOUT_MS = 8_000;
+/**
+ * Restore epoch under which the whole cache was last proven (complete authoritative state published as
+ * Fresh). null = no baseline in this page session. A Restore epoch event clears it.
+ */
+let keyVersionBaselineEpoch: number | null = null;
+export const getKeyVersionBaselineEpoch = (): number | null => keyVersionBaselineEpoch;
+/**
+ * Restore epoch read before the core bootstrap snapshot started reading its tables. It becomes the
+ * baseline only when the Realtime context proves that snapshot complete (adoptCoreSnapshotBaseline).
+ */
+let coreSnapshotEpochCandidate: number | null = null;
+export const noteCoreSnapshotEpoch = (epoch: number | null): void => { coreSnapshotEpochCandidate = epoch; };
+export const adoptCoreSnapshotBaseline = (): void => {
+  if (coreSnapshotEpochCandidate !== null) keyVersionBaselineEpoch = coreSnapshotEpochCandidate;
+  coreSnapshotEpochCandidate = null;
+};
+/** One small read of the Restore epoch; null when unknown (error, timeout, invalid). Never throws. */
+export const readCloudRestoreEpochForBaseline = async (timeoutMs: number, signal?: AbortSignal): Promise<number | null> => {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, Math.max(0, timeoutMs));
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (supabase as any).from('erp_cloud_restore_epoch').select('epoch').eq('singleton', true).abortSignal(controller.signal).single();
+    const epoch = Number(result?.data?.epoch);
+    return !result?.error && result?.data && Number.isSafeInteger(epoch) && epoch >= 0 ? epoch : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+};
+interface KeyVersionRow { id: string; version: number; updated_at: string }
+interface KeyVersionEvidence { keys: KeyVersionRow[]; changed: Map<string, Row>; differing: Set<string> }
+const cachedDatabaseId = (row: { id: string }): string => String((row as Row).database_id ?? row.id);
+const cachedRowMatchesKey = (row: Row | undefined, key: KeyVersionRow): boolean => Boolean(row) && row!.version === key.version && row!.updated_at === key.updated_at;
+class CloudKeyVersionVerificationStaleError extends Error {
+  constructor() { super('CLOUD_KEY_VERSION_VERIFICATION_STALE'); this.name = 'CloudKeyVersionVerificationStaleError'; }
+}
+const keyVersionMetrics = { verifiedTables: 0, completeTables: 0, keyRows: 0, changedRows: 0, staleRetries: 0 };
+export const getKeyVersionVerificationMetrics = () => ({ ...keyVersionMetrics, baselineEpoch: keyVersionBaselineEpoch });
 /** Tables without a deleted_at column (matches the core bootstrap read). */
 const TABLES_WITHOUT_SOFT_DELETE = new Set(['bundle_components']);
 
@@ -200,9 +296,9 @@ const TABLES_WITHOUT_SOFT_DELETE = new Set(['bundle_components']);
 const unresolvedTables = new Set<string>();
 export const getUnresolvedCloudTables = (): string[] => [...unresolvedTables].sort();
 /** C1c: a Restore epoch change makes every cached table unresolved until re-read. */
-export const markAllCloudTablesUnresolved = (): void => { Object.keys(TABLES).forEach(table => unresolvedTables.add(table)); };
+export const markAllCloudTablesUnresolved = (): void => { keyVersionBaselineEpoch = null; coreSnapshotEpochCandidate = null; Object.keys(TABLES).forEach(table => unresolvedTables.add(table)); };
 /** Test-only reset (never called by application code). */
-export const __resetUnresolvedCloudTablesForTests = (): void => { unresolvedTables.clear(); };
+export const __resetUnresolvedCloudTablesForTests = (): void => { unresolvedTables.clear(); keyVersionBaselineEpoch = null; coreSnapshotEpochCandidate = null; syncCapabilitiesRpcAbsent = false; };
 
 class CloudAuthoritativeRefreshSupersededError extends Error {
   constructor() {
@@ -343,7 +439,7 @@ export class CloudTargetedCache {
       if (this.prepareDraftProtection) this.protectsDraft = await this.prepareDraftProtection();
       signal?.throwIfAborted();
       const rowCounts = isAuthoritativeResourceRead
-        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal, conflicts, comparison)
+        ? await this.refreshAuthoritativeTables(tables, generation, request.authoritativeEpoch, signal, conflicts, comparison, request.completeRowReadGate)
         : await Promise.all(tables.map(table => this.runSingleFlight(table, async () => {
           const changes = byTable.get(table) || [];
           if (changes.length > 0) return this.refreshChanges(table, changes, generation, signal, conflicts);
@@ -510,7 +606,7 @@ export class CloudTargetedCache {
     return rows.length;
   }
 
-  private async queryAllPartitioned(table: string, run: ReturnType<typeof startCloudSyncRun> | null, signal?: AbortSignal): Promise<Row[]> {
+  private async queryAllPartitioned(table: string, run: ReturnType<typeof startCloudSyncRun> | null, signal?: AbortSignal, columns = '*'): Promise<Row[]> {
     const activeOnly = !TABLES_WITHOUT_SOFT_DELETE.has(table);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const base = (columns: string, options?: object): any => {
@@ -544,7 +640,7 @@ export class CloudTargetedCache {
       pageSize: AUTHORITATIVE_PAGE_SIZE,
       page: async request => {
         await beforeRequest('page');
-        let query = request.count ? base('*', { count: 'exact' }) : base('*');
+        let query = request.count ? base(columns, { count: 'exact' }) : base(columns);
         if (request.gt) query = query.gt('id', request.gt);
         if (request.gte) query = query.gte('id', request.gte);
         if (request.lt) query = query.lt('id', request.lt);
@@ -578,6 +674,74 @@ export class CloudTargetedCache {
     return rows.length;
   }
 
+  /** Restore epoch for the key/version verification (one small read); null = unknown, so no verification. */
+  private readVerificationEpoch(signal?: AbortSignal): Promise<number | null> {
+    return this.queryOverride ? Promise.resolve(null) : readCloudRestoreEpochForBaseline(VERIFICATION_EPOCH_READ_TIMEOUT_MS, signal);
+  }
+
+  /**
+   * Complete read of every active row's (id, version, updated_at), then of the rows that are new or differ
+   * from the cache. null = this table needs the complete row read.
+   */
+  private async readKeyVersionEvidence<T extends { id: string }>(table: string, adapter: TableCacheAdapter<T>, signal?: AbortSignal): Promise<KeyVersionEvidence | null> {
+    const run = startCloudSyncRun('authoritative-refresh');
+    try {
+      const raw = await this.queryAllPartitioned(table, run, signal, KEY_VERSION_COLUMNS);
+      const keys: KeyVersionRow[] = [];
+      for (const row of raw) {
+        if (typeof row.id !== 'string' || !row.id || typeof row.version !== 'number' || typeof row.updated_at !== 'string' || !row.updated_at) {
+          finishCloudSyncRun(run, 'committed');
+          return null;
+        }
+        keys.push({ id: row.id, version: row.version, updated_at: row.updated_at });
+      }
+      const cached = new Map((await adapter.get()).map(row => [cachedDatabaseId(row), row as Row]));
+      const differing = keys.filter(key => !cachedRowMatchesKey(cached.get(key.id), key)).map(key => key.id);
+      if (differing.length > KEY_VERSION_MAX_CHANGED_ROWS) {
+        finishCloudSyncRun(run, 'committed');
+        return null;
+      }
+      const changed = new Map<string, Row>();
+      if (differing.length > 0) {
+        // An id read a moment ago may be gone (deleted) by now: absent is a valid answer here.
+        const rows = await readCloudRowsByIds({
+          table, ids: differing, signal, allowMissing: new Set(differing),
+          load: (ids, chunkSignal) => this.query({ table, databaseIds: ids, signal: chunkSignal }),
+        });
+        for (const row of rows) changed.set(String(row.id), row);
+      }
+      finishCloudSyncRun(run, 'committed');
+      keyVersionMetrics.keyRows += keys.length;
+      keyVersionMetrics.changedRows += differing.length;
+      return { keys, changed, differing: new Set(differing) };
+    } catch (error) {
+      finishCloudSyncRun(run, 'failed');
+      throw error;
+    }
+  }
+
+  /**
+   * Rows of a verified table at commit time: full rows for the differing ids, the cached row where it still
+   * equals the server key (or is newer: a later read owns it, see the snapshot overlay). A cached row that
+   * can no longer be explained makes the whole refresh fall back to the complete row read.
+   */
+  private assembleVerifiedRows<T extends { id: string }>(adapter: TableCacheAdapter<T>, evidence: KeyVersionEvidence, current: T[]): T[] {
+    const cached = new Map(current.map(row => [cachedDatabaseId(row), row]));
+    const incoming: T[] = [];
+    for (const key of evidence.keys) {
+      if (evidence.differing.has(key.id)) {
+        const full = evidence.changed.get(key.id);
+        if (full && !full.deleted_at) incoming.push(adapter.map(full));
+        continue;
+      }
+      const row = cached.get(key.id);
+      const version = (row as Row | undefined)?.version;
+      if (row && (cachedRowMatchesKey(row as Row, key) || (typeof version === 'number' && version > key.version))) incoming.push(row);
+      else throw new CloudKeyVersionVerificationStaleError();
+    }
+    return incoming;
+  }
+
   private async refreshAuthoritativeTables(
     tables: string[],
     generation: number,
@@ -585,24 +749,68 @@ export class CloudTargetedCache {
     signal?: AbortSignal,
     conflicts: CloudChange[] = [],
     comparison = { changed: false },
+    completeRowReadGate?: CloudRefreshRequest['completeRowReadGate'],
+  ): Promise<number[]> {
+    // The caller's admission for downloading complete rows is asked at most once per refresh.
+    let admitted: Promise<void> | null = null;
+    const gate = completeRowReadGate ? () => (admitted ??= completeRowReadGate(signal)) : async () => undefined;
+    try {
+      return await this.refreshAuthoritativeTablesOnce(tables, generation, authoritativeEpoch, signal, conflicts, comparison, true, gate);
+    } catch (error) {
+      if (!(error instanceof CloudKeyVersionVerificationStaleError)) throw error;
+      // Thrown before any cache write or draft conflict was recorded: read every row instead.
+      keyVersionMetrics.staleRetries += 1;
+      return this.refreshAuthoritativeTablesOnce(tables, generation, authoritativeEpoch, signal, conflicts, comparison, false, gate);
+    }
+  }
+
+  private async refreshAuthoritativeTablesOnce(
+    tables: string[],
+    generation: number,
+    authoritativeEpoch: number | undefined,
+    signal: AbortSignal | undefined,
+    conflicts: CloudChange[],
+    comparison: { changed: boolean },
+    allowKeyVersionVerification: boolean,
+    completeRowReadGate: () => Promise<void>,
   ): Promise<number[]> {
     const attemptController = new AbortController();
     const abortAttempt = () => attemptController.abort();
     signal?.addEventListener('abort', abortAttempt, { once: true });
     signal?.throwIfAborted();
+    // Read before any table: a Restore that this client did not see as an event is seen here.
+    const [epochAtRead, serverForced] = allowKeyVersionVerification && !this.queryOverride
+      ? await Promise.all([this.readVerificationEpoch(signal), readServerForcedVersionTables(VERIFICATION_EPOCH_READ_TIMEOUT_MS, signal)])
+      : [null, new Set<string>()];
+    if (epochAtRead !== null && keyVersionBaselineEpoch !== null && epochAtRead !== keyVersionBaselineEpoch) keyVersionBaselineEpoch = null;
+    const verifiable = (table: string) => epochAtRead !== null && keyVersionBaselineEpoch === epochAtRead
+      && (KEY_VERSION_VERIFIABLE_TABLES.has(table) || serverForced.has(table));
+    // Known up front that complete rows are needed: ask for the admission before the snapshot starts.
+    if (tables.some(table => TABLES[table] && !verifiable(table))) await completeRowReadGate();
+    signal?.throwIfAborted();
     // P0-2 Phase 1a: snapshot token taken before the first page request.
     const snapshotToken = beginCloudSnapshot();
     let committing = false;
-    let fetched;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let fetched: Array<{ table: string; adapter: TableCacheAdapter<any> | null; incoming: Array<{ id: string }>; newest: string | undefined; evidence: KeyVersionEvidence | null }>;
     try {
       fetched = await Promise.all(tables.map(async table => {
         const adapter = TABLES[table];
-        if (!adapter) return { table, adapter: null, rows: [] as Row[], incoming: [] as Array<{ id: string }>, newest: undefined };
+        if (!adapter) return { table, adapter: null, incoming: [] as Array<{ id: string }>, newest: undefined, evidence: null };
+        const evidence = verifiable(table) ? await this.readKeyVersionEvidence(table, adapter, attemptController.signal) : null;
+        attemptController.signal.throwIfAborted();
+        if (evidence) {
+          keyVersionMetrics.verifiedTables += 1;
+          return { table, adapter, incoming: [] as Array<{ id: string }>, newest: evidence.keys.map(key => key.updated_at).sort().at(-1), evidence };
+        }
+        keyVersionMetrics.completeTables += 1;
+        await completeRowReadGate();
+        attemptController.signal.throwIfAborted();
         const rows = await this.queryAll(table, attemptController.signal);
         attemptController.signal.throwIfAborted();
         const incoming = rows.filter(row => !row.deleted_at).map(row => adapter.map(row));
         const newest = rows.map(row => row.updated_at).filter(Boolean).sort().at(-1);
-        return { table, adapter, rows, incoming, newest };
+        return { table, adapter, incoming, newest, evidence: null };
       }));
       signal?.throwIfAborted();
       if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
@@ -623,13 +831,21 @@ export class CloudTargetedCache {
         if (generation !== this.authoritativeGeneration) throw new CloudAuthoritativeRefreshSupersededError();
         const writes: Array<{ storageKey: string; value: unknown[] }> = [];
         const activeCounts: number[] = [];
+        // Verified tables first, before anything is written or any draft conflict is recorded.
+        const currentByTable = new Map<string, Array<{ id: string }>>();
+        for (const entry of fetched) {
+          if (!entry.adapter || !entry.evidence) continue;
+          const current = await entry.adapter.get();
+          currentByTable.set(entry.table, current);
+          entry.incoming = this.assembleVerifiedRows(entry.adapter, entry.evidence, current);
+        }
         for (const entry of fetched) {
           if (!entry.adapter) {
             activeCounts.push(0);
             continue;
           }
           const storageKey = TABLE_STORAGE_KEYS[entry.table];
-          const current = await entry.adapter.get();
+          const current = currentByTable.get(entry.table) ?? await entry.adapter.get();
           const collectionPlan = storageKey ? plan(storageKey) : null;
           if (collectionPlan?.superseded) {
             // A newer-started snapshot already owns this collection.
@@ -643,7 +859,9 @@ export class CloudTargetedCache {
           }
           const activeRows = this.protectRows(entry.table, current, incoming, conflicts);
           activeCounts.push(activeRows.length);
-          if (storageKey) writes.push({ storageKey, value: activeRows });
+          // A verified table whose rows are the very same cached rows needs no rewrite.
+          const untouched = Boolean(entry.evidence) && activeRows.length === current.length && activeRows.every(row => previous.get(row.id) === row);
+          if (storageKey && !untouched) writes.push({ storageKey, value: activeRows });
         }
         if (writes.length > 0) await db.replaceAuthoritativeCloudCollections(writes);
         return activeCounts;
@@ -654,6 +872,9 @@ export class CloudTargetedCache {
       if (entry.adapter) this.cursors.set(entry.table, entry.newest || this.now().toISOString());
     }
     if (authoritativeEpoch !== undefined) this.committedAuthoritativeEpoch = authoritativeEpoch;
+    // Baseline for later verification reads: every cached table was just committed from a complete
+    // authoritative read (rows or keys) that started under this Restore epoch.
+    if (epochAtRead !== null && Object.keys(TABLES).every(table => tables.includes(table))) keyVersionBaselineEpoch = epochAtRead;
     return counts;
   }
 

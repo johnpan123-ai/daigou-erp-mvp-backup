@@ -19,7 +19,11 @@ const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--mode',
 let vout = ''; vite.stdout.on('data', c => { vout += c; }); vite.stderr.on('data', c => { vout += c; });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fake = new FakeSupabase(loadTables(backupPath));
-const fullReads = () => fake.log.filter(e => e.kind === 'rest' && e.table === 'purchase_batches').length;
+// The current-schema backup contract omits `version`, so the new client first performs the
+// fail-closed key/version probe and then one complete-row read. Count complete reads, not the
+// preceding lightweight verification request; the one-catch-up assertion remains unchanged.
+const fullReads = () => fake.log.filter(e => e.kind === 'rest' && e.table === 'purchase_batches' && e.select === '*').length;
+const verificationReads = () => fake.log.filter(e => e.kind === 'rest' && e.table === 'purchase_batches' && e.select === 'id,version,updated_at').length;
 const mb = () => +(fake.log.reduce((s, e) => s + (e.kind === 'rest' ? e.raw : 0), 0) / 1e6).toFixed(2);
 async function settle(maxMs = 90000, idleMs = 5000) {
   const start = Date.now(); let last = -1; let since = Date.now();
@@ -60,7 +64,8 @@ try {
   // (5) normal rejoin: one completeness re-read, synced again
   fake.reset(); fake.dropAllSockets(); await sleep(40000); await settle();
   assert.equal(fullReads(), 1, 'rejoin: exactly one authoritative re-read'); assert.equal(await status(), 'synced');
-  report.rejoin = { fullReads: fullReads(), mb: mb() };
+  assert.equal(verificationReads(), 1, 'rejoin: one fail-closed key/version probe before the complete read');
+  report.rejoin = { fullReads: fullReads(), verificationReads: verificationReads(), mb: mb() };
 
   // (1) listening never confirmed: bounded (<= 1 unproven read in 3 min), never synced
   fake.reset(); fake.systemMode = 'none'; fake.dropAllSockets(); await sleep(180000);

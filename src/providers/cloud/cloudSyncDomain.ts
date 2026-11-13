@@ -72,6 +72,11 @@ export interface CloudRefreshRequest {
   resources: CloudResource[];
   /** Server Restore epoch whose complete cache generation this read must commit. */
   authoritativeEpoch?: number;
+  /**
+   * Awaited (once) before this refresh downloads complete rows of a table instead of verifying it by
+   * key/version: the caller's egress admission for a complete read.
+   */
+  completeRowReadGate?: (signal?: AbortSignal) => Promise<void>;
 }
 
 export interface CloudSyncMetrics {
@@ -225,7 +230,7 @@ export class CloudSyncCoordinator {
     return true;
   }
 
-  async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[], signal?: AbortSignal): Promise<boolean> {
+  async fallback(reason: 'focus' | 'visibility' | 'reconnect', resources: CloudResource[], signal?: AbortSignal, completeRowReadGate?: CloudRefreshRequest['completeRowReadGate']): Promise<boolean> {
     if (this.disposed) return false;
     const now = this.now();
     if (reason !== 'reconnect' && now - this.lastFallbackAt < 15_000) return false;
@@ -242,7 +247,7 @@ export class CloudSyncCoordinator {
     this.metrics.fallbackRefreshes += 1;
     if (this.inFlight) await this.inFlight;
     if (this.resumeInFlight) await this.resumeInFlight;
-    const result = await this.options.refresh({ reason, changes: [], resources: refreshable }, signal);
+    const result = await this.options.refresh({ reason, changes: [], resources: refreshable, ...(completeRowReadGate ? { completeRowReadGate } : {}) }, signal);
     signal?.throwIfAborted();
     [...this.deferred.entries()].forEach(([key, change]) => {
       // An incremental catch-up may not return the conflicting record again.

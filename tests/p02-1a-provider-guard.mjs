@@ -7,9 +7,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  assertMobileResumeProviderSemantics,
   assertNineUiProviderSemantics,
   assertReviewedProviderContract,
   restoreReviewedBuyAnimeV33ProviderPatch,
+  restoreReviewedMobileResumeProviderPatch,
   restoreReviewedNineUiProviderPatch,
 } from '../scripts/post-adoption-descendant.mjs';
 
@@ -27,6 +29,10 @@ const mutate = (source, from, to) => { assert.ok(source.includes(from), `mutatio
 
 // ---- positive: the exact reviewed C1/C1a/C1b sources pass every provider rule
 for (const file of FILES) pass(`POS exact reviewed source accepted: ${file}`, () => {
+  if (file === 'src/providers/cloud/supabaseProvider.ts' || file === 'src/providers/cloud/cloudTargetedCache.ts') {
+    assertReviewedProviderContract(file, showAt('54e9531', file), read(file));
+    return;
+  }
   const after = restoreReviewedBuyAnimeV33ProviderPatch(file, restoreReviewedNineUiProviderPatch(file, read(file)));
   assertReviewedProviderContract(file, show(file), after);
 });
@@ -52,7 +58,24 @@ const fence = 'src/providers/cloud/cloudCacheWriteFence.ts';
 const readiness = 'src/providers/cloud/cloudRealtimeReadiness.ts';
 const provider = 'src/providers/cloud/supabaseProvider.ts';
 const cache = 'src/providers/cloud/cloudTargetedCache.ts';
+const syncDomain = 'src/providers/cloud/cloudSyncDomain.ts';
 const data = 'src/providers/dataProvider.ts';
+
+// ---- exact mobile-resume successor: immutable 54e9531 base, positive and negative proof
+for (const file of [provider, cache, syncDomain]) pass(`POS exact mobile-resume successor accepted: ${file}`, () =>
+  assertReviewedProviderContract(file, showAt('54e9531', file), read(file)));
+rejects('mobile-resume Provider source drift', provider, showAt('54e9531', provider),
+  mutate(read(provider), 'const CORE_SNAPSHOT_EPOCH_READ_MS = 2500;', 'const CORE_SNAPSHOT_EPOCH_READ_MS = 2501;'), /FAILED_CLOSED/u);
+rejects('mobile-resume cache source drift', cache, showAt('54e9531', cache),
+  mutate(read(cache), 'const KEY_VERSION_MAX_CHANGED_ROWS = 600;', 'const KEY_VERSION_MAX_CHANGED_ROWS = 601;'), /FAILED_CLOSED/u);
+rejects('mobile-resume coordinator source drift', syncDomain, showAt('54e9531', syncDomain),
+  mutate(read(syncDomain), '...(completeRowReadGate ? { completeRowReadGate } : {})', '{}'), /FAILED_CLOSED/u);
+pass('NEG mobile-resume semantic review rejects a weakened capability fallback under a hypothetical re-pin', () =>
+  assert.throws(() => assertMobileResumeProviderSemantics(cache, showAt('54e9531', cache),
+    mutate(read(cache), "result.error.code === 'PGRST202' || result.status === 404", 'false')), /fail-closed invariant missing/u));
+pass('NEG mobile-resume semantic review rejects a new Cloud write under a hypothetical re-pin', () =>
+  assert.throws(() => assertMobileResumeProviderSemantics(provider, showAt('54e9531', provider),
+    mutate(read(provider), 'syncRun.realtimeReadiness = readiness.state;', "await supabase.from('inventory_items').delete().neq('id', '');\n          syncRun.realtimeReadiness = readiness.state;")), /Cloud write boundary/u));
 
 // ---- negative: new modules are pinned byte-for-byte and must stay I/O free
 rejects('fence module one-byte drift', fence, null, read(fence) + ' ', /p02 1a module differs/u);
@@ -65,7 +88,8 @@ pass('POS sources without any p02 piece fall through to the pre-existing rules (
 
 // ---- negative: modified provider files
 const pBefore = show(provider), pCurrent = read(provider);
-const pAfter = restoreReviewedBuyAnimeV33ProviderPatch(provider, restoreReviewedNineUiProviderPatch(provider, pCurrent));
+const pMobileBase = restoreReviewedMobileResumeProviderPatch(provider, pCurrent);
+const pAfter = restoreReviewedBuyAnimeV33ProviderPatch(provider, restoreReviewedNineUiProviderPatch(provider, pMobileBase));
 pass('POS exact BuyAnime patch restores before historical P02 review', () => {
   assert.notEqual(pAfter, pCurrent);
   assert.match(pCurrent, /import_sort_index: r\.import_sort_index \?\? undefined,/u);
@@ -73,7 +97,7 @@ pass('POS exact BuyAnime patch restores before historical P02 review', () => {
 });
 pass('POS exact BuyAnime patch remains accepted against its deployed v33 baseline', () =>
   assertReviewedProviderContract(provider,
-    showAt('ea0d5c7faca6e8522a27f2e08d44edf80b742ee2', provider), pCurrent));
+    showAt('ea0d5c7faca6e8522a27f2e08d44edf80b742ee2', provider), pMobileBase));
 rejects('BuyAnime import_sort_index differs from the exact reviewed patch', provider,
   showAt('ea0d5c7faca6e8522a27f2e08d44edf80b742ee2', provider),
   mutate(pCurrent, 'import_sort_index: r.import_sort_index ?? undefined,',
@@ -90,7 +114,7 @@ rejects('new unreviewed provider member', provider, pBefore, mutate(pAfter, '  a
 // ---- nine-change overlay: exact identity plus semantic positive/negative proof
 const keyset = 'src/providers/cloud/cloudKeysetParallel.ts';
 pass('POS exact nine-ui Provider overlay restores to the immutable formal baseline', () => {
-  assert.equal(restoreReviewedNineUiProviderPatch(provider, pCurrent), showAt('6a266ffd63bc97f84440883a3d56de5245fb2bea', provider));
+  assert.equal(restoreReviewedNineUiProviderPatch(provider, pMobileBase), showAt('6a266ffd63bc97f84440883a3d56de5245fb2bea', provider));
   assertReviewedProviderContract(keyset, null, read(keyset));
 });
 rejects('nine-ui Provider overlay rejects any non-reviewed source drift', provider,
@@ -103,10 +127,10 @@ pass('NEG nine-ui semantic guard rejects Cloud writes even under a hypothetical 
 pass('NEG nine-ui semantic guard rejects unrelated Provider member drift even under a hypothetical re-pin', () => {
   const baseline = showAt('6a266ffd63bc97f84440883a3d56de5245fb2bea', provider);
   assert.throws(() => assertNineUiProviderSemantics(provider, baseline,
-    mutate(pCurrent, 'async canWriteCloud(): Promise<boolean> {', 'async canWriteCloud(): Promise<boolean> {\n    void 0;')), /unreviewed Provider member changed/u);
+    mutate(pMobileBase, 'async canWriteCloud(): Promise<boolean> {', 'async canWriteCloud(): Promise<boolean> {\n    void 0;')), /unreviewed Provider member changed/u);
 });
 
-const cBefore = show(cache), cAfter = restoreReviewedNineUiProviderPatch(cache, read(cache));
+const cBefore = show(cache), cAfter = restoreReviewedNineUiProviderPatch(cache, restoreReviewedMobileResumeProviderPatch(cache, read(cache)));
 rejects('merge (pinned) drift', cache, cBefore, mutate(cAfter, 'noteSkippedStaleDelete();\n            continue;', 'continue;'), /reviewed member drifted: merge/u);
 rejects('performRefresh (pinned) publishes Fresh without the barrier check', cache, cBefore, mutate(cAfter, "if (!cloudReadPassesEpochBarrier(refreshToken, request.authoritativeEpoch)) {", 'if (false) {'), /reviewed member drifted: performRefresh/u);
 rejects('absorbVerifiedRows performs a Supabase read (existing rule)', cache, cBefore, mutate(cAfter, 'const readToken = takeCloudReadToken();', "const readToken = takeCloudReadToken();\n    await supabase.from('inventory_items').select('id');"), /unreviewed read/u);
@@ -170,7 +194,7 @@ await probeCase('observability gains network I/O', observability, `${oSrc}\nexpo
 
 // ---- waca-counted-transition-provider-v1 (exact review): positive + negative proof
 const wsp = 'src/providers/cloud/supabaseProvider.ts', wdp = 'src/providers/dataProvider.ts';
-const wspAfter = restoreReviewedBuyAnimeV33ProviderPatch(wsp, restoreReviewedNineUiProviderPatch(wsp, read(wsp)));
+const wspAfter = restoreReviewedBuyAnimeV33ProviderPatch(wsp, restoreReviewedNineUiProviderPatch(wsp, restoreReviewedMobileResumeProviderPatch(wsp, read(wsp))));
 const wdpAfter = read(wdp), wspBefore = show(wsp), wdpBefore = show(wdp);
 const WACA_DRIFT = name => new RegExp(`waca counted reviewed member drifted: ${name}`, 'u');
 // Mutations of the counted write are scoped to that member (the legacy commitWacaSnapshot shares some lines).

@@ -10,7 +10,12 @@ const read = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'
 const CTX = 'src/contexts/CloudRealtimeSyncContext.tsx';
 const PRES = 'src/contexts/globalSyncPresentation.ts';
 const POL = 'src/contexts/realtimeRecoveryPolicy.ts';
-const ctx = read(CTX), pres = read(PRES), pol = read(POL);
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ctxFinal = read(CTX);
+// Historical C1f negatives continue to exercise the immutable predecessor; the exact
+// mobile-resume overlay is tested separately below and restores to this source.
+const ctx = execFileSync('git', ['-C', ROOT, 'show', '54e9531:' + CTX], { encoding: 'utf8' }).replace(/\r\n?/gu, '\n');
+const pres = read(PRES), pol = read(POL);
 const results = [];
 const check = (name, fn) => { try { fn(); results.push({ name, ok: true }); console.log('PASS', name); } catch (error) { results.push({ name, ok: false, error: String(error.message) }); console.log('FAIL', name, error.message); } };
 // Preserve the reviewed file's materialized line endings while making mutation anchors portable.
@@ -25,7 +30,13 @@ const rejects = (name, file, source, pattern) => check(`NEG ${name}`, () => asse
 
 // ---- positive: the exact reviewed C1f sources
 assert.deepEqual([...P02_REALTIME_CONTEXT_FILES], [CTX, PRES, POL]);
-for (const file of P02_REALTIME_CONTEXT_FILES) accepts(`exact reviewed source accepted: ${file}`, file, read(file));
+for (const file of P02_REALTIME_CONTEXT_FILES) accepts(`exact reviewed source accepted: ${file}`, file, file === CTX ? ctxFinal : read(file));
+rejects('mobile-resume exact successor rejects a changed resume wait', CTX,
+  mutate(ctxFinal, 'const RESUME_LISTENING_WAIT_MS = 6_000;', 'const RESUME_LISTENING_WAIT_MS = 6_001;'), /FAILED_CLOSED/u);
+rejects('mobile-resume exact successor rejects a changed verification cost', CTX,
+  mutate(ctxFinal, 'const FULL_READ_VERIFY_COST = 0.125;', 'const FULL_READ_VERIFY_COST = 0.25;'), /FAILED_CLOSED/u);
+rejects('mobile-resume exact successor rejects removal of the complete-read admission', CTX,
+  mutate(ctxFinal, 'waitForFullReadAdmission(gateSignal ?? signal, 1 - FULL_READ_VERIFY_COST)', 'Promise.resolve()'), /FAILED_CLOSED/u);
 
 // ---- negative: completeness hold / readiness proof / fresh / epoch (N1-N8)
 const ENGINE = /realtime sync engine drifted/u;

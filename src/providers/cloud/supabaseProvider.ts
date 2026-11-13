@@ -137,7 +137,7 @@ import {
   markCloudRequestFailed,
   waitForCloudFreshRead,
 } from './cloudConnectivity';
-import { CloudTargetedCache } from './cloudTargetedCache';
+import { CloudTargetedCache, noteCoreSnapshotEpoch, readCloudRestoreEpochForBaseline } from './cloudTargetedCache';
 import { getProviderMode } from '../providerMode';
 import { awaitRealtimeReadiness, isRealtimeReadyGeneration } from './cloudRealtimeReadiness';
 import { beginCloudSnapshot, commitCloudSnapshot, endCloudSnapshot } from './cloudCacheWriteFence';
@@ -432,6 +432,8 @@ const BUYANIME_SYNC_WAIT_MS = 30_000;
 
 /** Bounded wait for Realtime postgres_changes readiness before the core snapshot. */
 const CORE_REALTIME_READINESS_WAIT_MS = 3000;
+/** Bound of the Restore epoch read that precedes the core snapshot (unknown epoch = no verification baseline). */
+const CORE_SNAPSHOT_EPOCH_READ_MS = 2500;
 
 const CORE_SNAPSHOT_STORAGE_KEYS: Readonly<Record<string, string>> = {
   inventory: 'erp_inventory', salesOrders: 'erp_sales_orders', salesOrderItems: 'erp_sales_order_items',
@@ -1195,9 +1197,14 @@ export class SupabaseProvider implements IDataProvider {
           // page request is also delivered as an event. If readiness is not shown,
           // the snapshot still runs and the Realtime context keeps its authoritative
           // catch-up (Wave B); nothing here trusts SUBSCRIBED alone.
-          const readiness = getProviderMode() === 'cloud'
-            ? await awaitRealtimeReadiness(CORE_REALTIME_READINESS_WAIT_MS, { waitForArm: true })
-            : { state: 'not-armed' as const, generation: null, readyAt: null };
+          // The Restore epoch is read before the first table request (during the readiness wait, bounded):
+          // it is the epoch this snapshot's rows can later be verified against by key/version.
+          const [readiness, snapshotEpoch] = await Promise.all([
+            getProviderMode() === 'cloud'
+              ? awaitRealtimeReadiness(CORE_REALTIME_READINESS_WAIT_MS, { waitForArm: true })
+              : Promise.resolve({ state: 'not-armed' as const, generation: null, readyAt: null }),
+            getProviderMode() === 'cloud' ? readCloudRestoreEpochForBaseline(CORE_SNAPSHOT_EPOCH_READ_MS) : Promise.resolve(null),
+          ]);
           syncRun.realtimeReadiness = readiness.state;
           snapshotToken = beginCloudSnapshot();
           const readStartedAt = Date.now();
@@ -1494,6 +1501,7 @@ export class SupabaseProvider implements IDataProvider {
                 readStartedAt,
               };
               this.isPulled = true;
+              noteCoreSnapshotEpoch(snapshotEpoch);
               markCloudReadFresh(completeCloudRowCount);
               finishCloudSyncRun(syncRun, 'committed');
             },

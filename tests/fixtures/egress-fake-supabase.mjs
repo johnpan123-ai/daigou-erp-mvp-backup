@@ -36,6 +36,8 @@ function applyFilters(rows, params) {
     else if (op === 'eq') out = out.filter(row => String(row[key]) === arg);
     else if (op === 'gt') out = out.filter(row => row[key] != null && String(row[key]) > arg);
     else if (op === 'gte') out = out.filter(row => row[key] != null && String(row[key]) >= arg);
+    else if (op === 'lt') out = out.filter(row => row[key] != null && String(row[key]) < arg);
+    else if (op === 'lte') out = out.filter(row => row[key] != null && String(row[key]) <= arg);
     else if (op === 'in') { const set = new Set(arg.replace(/^\(|\)$/gu, '').split(',').map(s => s.replace(/^"|"$/gu, ''))); out = out.filter(row => set.has(String(row[key]))); }
     else if (op === 'not' && arg === 'is.null') out = out.filter(row => row[key] != null);
   }
@@ -109,7 +111,10 @@ export class FakeSupabase {
       const single = accept.includes('vnd.pgrst.object');
       const body = single ? (rows[0] ?? null) : rows;
       if (single && !rows[0]) return send(406, { code: 'PGRST116', message: 'no rows' }, {}, { kind: 'rest', table, rows: 0 });
-      return send(200, method === 'HEAD' ? '' : body, { 'content-range': `0-${Math.max(rows.length - 1, 0)}/${total}` }, { kind: 'rest', table, rows: Array.isArray(body) ? body.length : 1, caller: request.headers()['x-erp-caller'] });
+      return send(200, method === 'HEAD' ? '' : body, { 'content-range': `0-${Math.max(rows.length - 1, 0)}/${total}` }, {
+        kind: 'rest', table, rows: Array.isArray(body) ? body.length : 1,
+        select: decode(url.searchParams.get('select') ?? '*'), caller: request.headers()['x-erp-caller'],
+      });
     }
     return send(404, { message: 'unknown' }, {}, { kind: 'other' });
   }
