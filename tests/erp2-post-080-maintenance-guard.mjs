@@ -27,10 +27,21 @@ console.log('PASS 080 bootstrap: exact candidate and Owner audit runner, no ledg
 const applied = { eventType: 'MIGRATION_APPLIED', eventKey: '080', result: 'PASS', sourceHead: maintenance.requiredMigrationSourceHead,
   checkpoint: maintenance.requiredMigrationCheckpoint, sourceChecksum: maintenance.requiredMigrationSourceChecksum,
   schemaFingerprintBefore: maintenance.previousFingerprint, schemaFingerprintAfter: maintenance.requiredFingerprint,
-  supabaseProjectRef: 'rhfdjsklfrgpoqsaqpkn', environmentRole: 'PRODUCTION', metadata: { historicalMigrationExecutionClaimed: false } };
+  supabaseProjectRef: 'rhfdjsklfrgpoqsaqpkn', environmentRole: 'PRODUCTION', recordedAt: '2026-11-10T03:34:47.819716+00:00',
+  metadata: { historicalMigrationExecutionClaimed: false } };
 verifyPost080MaintenanceEvidence({ evidence: { ...baseEvidence, mode: maintenance.mode,
   migrationHistory: { available: true, records: [applied] } }, contract, candidate, migrationsById: registry });
 console.log('PASS 080 final: exactly one matching Owner ledger event');
+const historicalBaseline = { eventType: 'BASELINE_ADOPTED', eventKey: 'erp2-canonical-schema-v33-r5-source-capacity-receiving', result: 'PASS',
+  recordedAt: '2026-10-23T05:12:19.611914+00:00', schemaFingerprintAfter: 'a5387d8513f2f1aab7eba16ab2f0b10a43a21fdbfeb85d8ac0686a6fc7878ac5',
+  supabaseProjectRef: 'rhfdjsklfrgpoqsaqpkn', environmentRole: 'PRODUCTION' };
+verifyPost080MaintenanceEvidence({ evidence: { ...baseEvidence, mode: maintenance.mode, baselineRecord: historicalBaseline,
+  migrationHistory: { available: true, records: [historicalBaseline, applied] } }, contract, candidate, migrationsById: registry });
+console.log('PASS 080 final: historical pre-080 baseline adoption retained');
+const post080Baseline = { ...historicalBaseline, recordedAt: '2026-11-10T04:00:00.000Z' };
+assert.throws(() => verifyPost080MaintenanceEvidence({ evidence: { ...baseEvidence, mode: maintenance.mode, baselineRecord: post080Baseline,
+  migrationHistory: { available: true, records: [applied, post080Baseline] } }, contract, candidate, migrationsById: registry }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
+console.log('PASS fail-closed: post-080 baseline adoption');
 const rejects = [
   ['wrong fingerprint', { ...bootstrap, currentFingerprint: 'a'.repeat(64) }],
   ['wrong SQL checksum', { ...bootstrap, auditBootstrap: { ...bootstrap.auditBootstrap, sourceChecksum: 'b'.repeat(64) } }],

@@ -274,7 +274,7 @@ export const verifyPost080MaintenanceEvidence = ({ evidence, contract, candidate
     || evidence.migrationHistoryProvenance !== 'AVAILABLE'
     || !Array.isArray(evidence.migrations) || !Array.isArray(evidence.applyPlan)
     || evidence.applyPlan.length !== 0 || !Array.isArray(evidence.migrationHistory?.records)
-    || evidence.baselineRecord) {
+    || (bootstrap && evidence.baselineRecord)) {
     failClosed('080 maintenance evidence is not canonical');
   }
   for (const item of evidence.migrations) {
@@ -320,7 +320,19 @@ export const verifyPost080MaintenanceEvidence = ({ evidence, contract, candidate
   }
   const adoptionRecords = records.filter(record => record.eventType === 'BASELINE_ADOPTED'
     && record.result === 'PASS');
-  if (maintenance.forbidBaselineAdoption && adoptionRecords.length > 0) {
+  const applied080At = bootstrap ? null : Date.parse(applied080[0]?.recordedAt ?? '');
+  if (!bootstrap && evidence.baselineRecord) {
+    const baselineAt = Date.parse(evidence.baselineRecord.recordedAt ?? '');
+    if (!Number.isFinite(applied080At) || !Number.isFinite(baselineAt) || baselineAt >= applied080At) {
+      failClosed('080 maintenance contains a post-080 baseline adoption');
+    }
+  }
+  const disallowedAdoptions = adoptionRecords.filter(record => {
+    if (bootstrap) return true;
+    const recordedAt = Date.parse(record.recordedAt ?? '');
+    return !Number.isFinite(applied080At) || !Number.isFinite(recordedAt) || recordedAt >= applied080At;
+  });
+  if (maintenance.forbidBaselineAdoption && disallowedAdoptions.length > 0) {
     failClosed('080 maintenance cannot contain baseline adoption');
   }
   return { migration: applied080[0] ?? null, baselineAdoption: 'NOT_ADOPTED', migrationDelta: [] };
