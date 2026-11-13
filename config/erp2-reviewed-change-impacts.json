@@ -10057,6 +10057,16 @@
         {"file":"scripts/promotion-safety.mjs","beforeHash":"e06916bb2661f7ba833a9e36e4e44483014dcb11271198bfa255648e469a3437","afterHash":"3a9333b7988f06e221470d7dd546e038de80bac9a78de002ba17aa39d887533c","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["Windows long-path read-only Git guard"],"dataFlow":"Release evidence Git reads only.","persistenceBehavior":"Read-only Guard evaluation.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Git writes and Force operations remain unavailable to the guard.","schemaExpectation":"No schema mutation."},
         {"file":"config/erp2-reviewed-change-impacts.json","beforeHash":"698585cfc0c4e680b500309f9a2d224ab2f7c0c2c0bbf2e9d0f833823369bf50","afterHash":"04c8663b71a4874d4d1c3c71dd9a7167f8d1dde873ac6367f9e5feae97b2a6d7","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["exact Post-080 guard compatibility review"],"dataFlow":"Immutable release metadata only.","persistenceBehavior":"Release metadata only.","writePath":"No database or product write.","providerPath":"No Provider change.","externalContract":"Exact hashes and named regressions remain pinned.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post080-contract-anchor-v1",
+      "beforeHead": "759f0f70c0cc5edf9f482702d47bfa02e7f2d52e",
+      "reviewedHead": "c1ceed3a7a36b12c22f003d85dc1744dacae7e39",
+      "patchSha256": "c8ef6ebbf9dc9dfb61754e7135d42d21271fb34db8f27916487de815ed444cac",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {"file":"scripts/promotion-safety.mjs","beforeHash":"3a9333b7988f06e221470d7dd546e038de80bac9a78de002ba17aa39d887533c","afterHash":"113a3a852716d19314afabc46ba85e0c308e44d1ee7ac30219bc12b310e14241","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["PRE_ADOPTION_POST080 contract anchor"],"dataFlow":"Read-only release contract validation binds the product lane to the finalized post-080 baseline.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"The product lane cannot reuse the 080 maintenance base or baseline adoption.","schemaExpectation":"No schema mutation."}
+      ]
     }
   ]
 }
