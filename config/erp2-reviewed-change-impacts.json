@@ -10045,6 +10045,18 @@
       "files": [
         {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"dcc7a8731979c22d5f20917fece842c5e520b29aecf35b5da4d06f13ba5d3235","afterHash":"f40ff4fe324662f17afa99d161ff1d65f30f24141e8081b1c25df7e5b804354a","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["review registry self-scope"],"dataFlow":"Release-control review evaluation only; registry self-change is scoped to named Post-080 review IDs.","persistenceBehavior":"Read-only Guard evaluation.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Unlisted registry self-changes remain fail-closed.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post080-guard-compatibility-v1",
+      "beforeHead": "a4eba403a5befffe6ed17d6b2055010a9080b1b1",
+      "reviewedHead": "dbe169ff287097f2109a7a9d2d407c1e40fd401a",
+      "patchSha256": "83a83d4130b38c3df592a6820ebbdba3c3947edc84b181a7cf64d8446385eb36",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {"file":"scripts/post-adoption-descendant.mjs","beforeHash":"da05c561f363529cafd220d4675bf2cc971e96d56f56ed91859289d2fbc71531","afterHash":"bd3c93c730188bb76d28b3cbb5e99e2a4055df0b4e2fd4e7e3deb2f50b691108","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["Post-080 canonical/provider compatibility checks"],"dataFlow":"Read-only release inspection; exact reviewed product and reconciliation contracts only.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"Provider API, CAS, Epoch, Journal and Realtime contracts remain fail-closed.","externalContract":"Unreviewed canonical, provider or inventory changes remain rejected.","schemaExpectation":"No schema mutation."},
+        {"file":"scripts/promotion-safety.mjs","beforeHash":"e06916bb2661f7ba833a9e36e4e44483014dcb11271198bfa255648e469a3437","afterHash":"3a9333b7988f06e221470d7dd546e038de80bac9a78de002ba17aa39d887533c","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["Windows long-path read-only Git guard"],"dataFlow":"Release evidence Git reads only.","persistenceBehavior":"Read-only Guard evaluation.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Git writes and Force operations remain unavailable to the guard.","schemaExpectation":"No schema mutation."},
+        {"file":"config/erp2-reviewed-change-impacts.json","beforeHash":"698585cfc0c4e680b500309f9a2d224ab2f7c0c2c0bbf2e9d0f833823369bf50","afterHash":"04c8663b71a4874d4d1c3c71dd9a7167f8d1dde873ac6367f9e5feae97b2a6d7","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["exact Post-080 guard compatibility review"],"dataFlow":"Immutable release metadata only.","persistenceBehavior":"Release metadata only.","writePath":"No database or product write.","providerPath":"No Provider change.","externalContract":"Exact hashes and named regressions remain pinned.","schemaExpectation":"No schema mutation."}
+      ]
     }
   ]
 }
