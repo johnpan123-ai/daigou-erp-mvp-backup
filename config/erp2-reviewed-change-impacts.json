@@ -3668,8 +3668,7 @@
           "schemaExpectation": "Unchanged adopted canonical v9."
         }
       ]
-    }
-    ,
+    },
     {
           "id": "waca-resolver-v3-full-match-v1",
           "beforeHead": "b58184f053c4a549901a19ca7ecf18b2f3fbf133",
@@ -10016,6 +10015,16 @@
         {"file":"src/providers/cloud/inventoryImportPlan.ts","beforeHash":"8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9", "afterHash":"8f6c3b24e73a65b1819af834c39138e0aa42a0c5ba621993fb58244472e96bcf", "classification":"APPLICATION_DOMAIN_ONLY","functions":["same-SKU variant rename preserves inventory identity"],"dataFlow":"Patches the existing inventory row by stable inventory UUID when a same-SKU variant label changes.","persistenceBehavior":"Existing BuyAnime import transaction only; no new persistence path.","writePath":"Existing guarded catalog/import RPC path.","providerPath":"No CAS, Epoch, Journal, Realtime or Restore contract change.","externalContract":"Same SKU retains inventory UUID and rejects unsafe family shrink.","schemaExpectation":"No schema, migration or Ledger change."},
         {"file":"tests/buyanime-family-shrink-import.mjs","beforeHash":"3822683f2bb89e9164ba489a93b9cb15617a886293f4d75fbde13177bcef06d4", "afterHash":"9aefd6a15e690e0f3f75e3b24a71513991fb873ef3ffdc93efe05b36c303e2c6", "classification":"APPLICATION_DOMAIN_ONLY","functions":["family-shrink safety regression"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Isolated fixture only.","providerPath":"No Provider change.","externalContract":"Unsafe family shrink remains rejected.","schemaExpectation":"No schema, migration or Ledger change."},
         {"file":"tests/buyanime-variant-rename-isolated.mjs","beforeHash":null,"afterHash":"c76fa055ffb002543d55ca35a80cb014c6d81825923f719094e53f62e31d36fb", "classification":"APPLICATION_DOMAIN_ONLY","functions":["same-SKU variant rename isolated regression"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Isolated PostgreSQL fixture only.","providerPath":"No Provider change.","externalContract":"Duplicate SKU and inventory UUID replacement are rejected.","schemaExpectation":"No schema, migration or Ledger change."}
+      ]
+    },
+    {
+      "id": "erp2-post080-product-baseline-anchor-v1",
+      "beforeHead": "e1f225f07596f9b251bc87364f967f07e690bd64",
+      "reviewedHead": "35b63580d0b365bb19fd4445ba8c76b4ccfa8a2e",
+      "patchSha256": "eefb4108d8f9b36ecd5bca5ae31eed33a985cd284db50100055e6b6b7c9ea30f",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {"file":"config/erp-environment-identity.json","beforeHash":"e9b84d64b464aeb6ebfe4f4f375f2dcb44c8443e0c4ad2187ab16b148cdd7e47","afterHash":"b5d83af8728df86f983de5e97e347f4e9220f49fce54cf27f5d2fc802888fe13","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["post080ProductRelease approved baseline anchor"],"dataFlow":"Pins normal Post-080 releases to the finalized 080 release checkpoint.","persistenceBehavior":"Release metadata only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"The dedicated product lane cannot reopen the 080 maintenance base.","schemaExpectation":"No schema mutation."}
       ]
     }
   ]
