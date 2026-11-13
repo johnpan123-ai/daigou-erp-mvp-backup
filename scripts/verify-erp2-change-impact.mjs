@@ -45,8 +45,25 @@ export async function runChangeImpact(argv = process.argv.slice(2)) {
   const schemaEvidence = JSON.parse(await readFile(resolve(root, args.get('--schema-evidence')), 'utf8'));
   if (schemaEvidence.schemaEvidenceIdentity !== buildSchemaEvidenceIdentity(schemaEvidence)) throw new Error('Invalid schema evidence identity');
   const post080Modes = new Set(['PRE_ADOPTION_MAINTENANCE_080', 'PRE_ADOPTION_AUDIT_BOOTSTRAP_080']);
+  const post080ProductMode = schemaEvidence.mode === contract.schemaBaseline.post080ProductRelease?.mode;
   const inspection = post080Modes.has(schemaEvidence.mode)
     ? inspectPost080Maintenance({ git, candidate, contract })
+    : post080ProductMode
+    ? (() => {
+      const release = contract.schemaBaseline.post080ProductRelease;
+      const baselineRecord = {
+        eventType: 'POST_080_RELEASE_BASELINE', result: 'PASS',
+        sourceHead: release.approvedBaseHead,
+        checkpoint: release.approvedBaseCheckpoint,
+        schemaFingerprintAfter: release.requiredFingerprint,
+        supabaseProjectRef: contract.environments.erp2.supabaseProject,
+        environmentRole: 'PRODUCTION',
+        metadata: { historicalMigrationExecutionClaimed: false },
+      };
+      const base = inspectSafeDescendant({ git, candidate, baselineRecord });
+      return { ...base, mode: release.mode,
+        requiredRegressions: [...new Set([...base.requiredRegressions, ...release.requiredRegressions])] };
+    })()
     : schemaEvidence.mode === 'PRE_ADOPTION_MAINTENANCE'
     ? inspectPreAdoptionMaintenance({ git, candidate, contract })
     : (() => {

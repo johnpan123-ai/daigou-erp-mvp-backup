@@ -95,6 +95,22 @@ export function assertCanonicalContract(contract) {
     || post080.forbidBaselineAdoption !== true || post080.requireZeroMigrationDelta !== true) {
     failClosed('invalid PRE_ADOPTION_MAINTENANCE_080 contract');
   }
+  const post080Product = contract.schemaBaseline.post080ProductRelease;
+  if (!post080Product || post080Product.mode !== 'PRE_ADOPTION_POST080'
+    || post080Product.migrationId !== post080.migrationId
+    || post080Product.requiredFingerprint !== post080.requiredFingerprint
+    || post080Product.requiredMigrationSourceHead !== post080.requiredMigrationSourceHead
+    || post080Product.requiredMigrationCheckpoint !== post080.requiredMigrationCheckpoint
+    || post080Product.requiredMigrationSourceChecksum !== post080.requiredMigrationSourceChecksum
+    || post080Product.approvedBaseHead !== post080.approvedBaseHead
+    || post080Product.approvedBaseCheckpoint !== post080.approvedBaseCheckpoint
+    || post080Product.exactReviewId !== post080.exactReviewId
+    || post080Product.forbidBaselineAdoption !== true
+    || post080Product.requireZeroMigrationDelta !== true
+    || !Array.isArray(post080Product.requiredRegressions)
+    || post080Product.requiredRegressions.some(id => typeof id !== 'string' || id.length === 0)) {
+    failClosed('invalid PRE_ADOPTION_POST080 contract');
+  }
   return { account, target, gate };
 }
 
@@ -338,6 +354,22 @@ export const verifyPost080MaintenanceEvidence = ({ evidence, contract, candidate
   return { migration: applied080[0] ?? null, baselineAdoption: 'NOT_ADOPTED', migrationDelta: [] };
 };
 
+// Normal post-080 product releases stay in PRE-ADOPTION. They reuse the
+// exact 080 ledger/fingerprint proof, but are inspected by the immutable
+// reviewed-descendant path instead of the one-shot 080 maintenance panel.
+export const verifyPost080ProductEvidence = ({ evidence, contract, candidate, migrationsById }) => {
+  const release = contract.schemaBaseline.post080ProductRelease;
+  if (evidence.mode !== release.mode) failClosed('post-080 product evidence mode is invalid');
+  const maintenanceContract = {
+    ...contract,
+    schemaBaseline: {
+      ...contract.schemaBaseline,
+      post080Maintenance: { ...contract.schemaBaseline.post080Maintenance, mode: release.mode },
+    },
+  };
+  return verifyPost080MaintenanceEvidence({ evidence, contract: maintenanceContract, candidate, migrationsById });
+};
+
 const verifyPostAdoption = ({ evidence, required, candidate, candidateGit, changeImpactEvidence, now,
   baselineExceptionConfig, evidenceRoot }) => {
   if (evidence.currentFingerprint !== evidence.expectedFingerprint
@@ -369,13 +401,15 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
   const required = contract.schemaBaseline.requiredBaselineId;
   const maintenance079 = contract.schemaBaseline.preAdoptionMaintenance;
   const maintenance080 = contract.schemaBaseline.post080Maintenance;
+  const post080Product = contract.schemaBaseline.post080ProductRelease;
   const expectedFingerprint = evidence?.mode === maintenance079?.mode
     ? maintenance079.requiredFingerprint : contract.schemaBaseline.canonicalFingerprint;
   if (!evidence || evidence.contractVersion !== contract.schemaBaseline.evidenceContractVersion
     || evidence.fingerprintContractVersion !== SCHEMA_FINGERPRINT_CONTRACT_VERSION
     || evidence.canonicalContract !== SCHEMA_CANONICAL_CONTRACT
     || evidence.canonicalAlgorithm !== SQL_CANONICAL_ALGORITHM
-    || !['PRE_ADOPTION', 'POST_ADOPTION', 'PRE_ADOPTION_MAINTENANCE', maintenance080?.mode, maintenance080?.bootstrapMode].includes(evidence.mode)
+    || !['PRE_ADOPTION', 'POST_ADOPTION', 'PRE_ADOPTION_MAINTENANCE', maintenance080?.mode, maintenance080?.bootstrapMode,
+      post080Product?.mode].includes(evidence.mode)
     || evidence.requiredBaselineId !== required
     || evidence.projectRef !== CANONICAL_ERP2_TARGET.supabaseProject
     || evidence.sourceHead !== candidate.head || evidence.checkpoint !== candidate.checkpointTag
@@ -418,6 +452,29 @@ export function verifySchemaBaselineEvidence({ evidence, contract, candidate, li
         baselineExceptionConfig, evidenceRoot }) : null;
     if (!regressionEvidence) failClosed('080 maintenance change-impact evidence is required');
     deploymentLineage = { ...inspection, regressionEvidence };
+  } else if (evidence.mode === post080Product?.mode) {
+    verifyPost080ProductEvidence({ evidence, contract, candidate, migrationsById });
+    if (typeof candidateGit !== 'function') failClosed('post-080 product deployment requires actual Git evidence');
+    const baselineRecord = {
+      eventType: 'POST_080_RELEASE_BASELINE', result: 'PASS',
+      sourceHead: post080Product.approvedBaseHead,
+      checkpoint: post080Product.approvedBaseCheckpoint,
+      schemaFingerprintAfter: post080Product.requiredFingerprint,
+      supabaseProjectRef: CANONICAL_ERP2_TARGET.supabaseProject,
+      environmentRole: 'PRODUCTION',
+      metadata: { historicalMigrationExecutionClaimed: false },
+    };
+    const inspection = inspectSafeDescendant({ git: candidateGit, candidate, baselineRecord });
+    const requiredRegressions = [...new Set([
+      ...inspection.requiredRegressions,
+      ...post080Product.requiredRegressions,
+    ])];
+    const productInspection = { ...inspection, mode: post080Product.mode, requiredRegressions };
+    const regressionEvidence = changeImpactEvidence
+      ? verifyImpactEvidence({ evidence: changeImpactEvidence, inspection: productInspection, git: candidateGit, now,
+        baselineExceptionConfig, evidenceRoot }) : null;
+    if (!regressionEvidence) failClosed('post-080 product change-impact evidence is required');
+    deploymentLineage = { ...productInspection, regressionEvidence };
   } else {
     verifyPreAdoption({ evidence, migrationsById });
   }

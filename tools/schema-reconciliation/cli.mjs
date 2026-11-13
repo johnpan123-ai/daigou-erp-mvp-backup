@@ -44,7 +44,7 @@ const expectedSnapshot = args.has('expected')
   ? unwrapCell(await readJson(args.get('expected')), 'erp_schema_snapshot') : null;
 if (expectedSnapshot) assertSnapshotShape(expectedSnapshot);
 const mode = args.get('mode') ?? 'PRE_ADOPTION';
-if (!['PRE_ADOPTION', 'POST_ADOPTION', 'PRE_ADOPTION_MAINTENANCE', 'PRE_ADOPTION_MAINTENANCE_080', 'PRE_ADOPTION_AUDIT_BOOTSTRAP_080'].includes(mode)) throw new Error('SCHEMA_RECONCILIATION_MODE_INVALID');
+if (!['PRE_ADOPTION', 'POST_ADOPTION', 'PRE_ADOPTION_MAINTENANCE', 'PRE_ADOPTION_MAINTENANCE_080', 'PRE_ADOPTION_AUDIT_BOOTSTRAP_080', 'PRE_ADOPTION_POST080'].includes(mode)) throw new Error('SCHEMA_RECONCILIATION_MODE_INVALID');
 const registry = await buildMigrationEffectRegistry();
 const snapshotToolSource = await readFile(new URL('./sql/live-schema-snapshot-readonly.sql', import.meta.url));
 const snapshotToolChecksum = createHash('sha256').update(snapshotToolSource.toString('utf8').replaceAll('\r\n', '\n')).digest('hex');

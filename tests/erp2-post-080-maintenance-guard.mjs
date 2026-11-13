@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { verifyPost080MaintenanceEvidence } from '../scripts/promotion-safety.mjs';
+import { verifyPost080MaintenanceEvidence, verifyPost080ProductEvidence } from '../scripts/promotion-safety.mjs';
 
 const contract = JSON.parse(await readFile(new URL('../config/erp-environment-identity.json', import.meta.url), 'utf8'));
 const maintenance = contract.schemaBaseline.post080Maintenance;
@@ -38,6 +38,13 @@ const historicalBaseline = { eventType: 'BASELINE_ADOPTED', eventKey: 'erp2-cano
 verifyPost080MaintenanceEvidence({ evidence: { ...baseEvidence, mode: maintenance.mode, baselineRecord: historicalBaseline,
   migrationHistory: { available: true, records: [historicalBaseline, applied] } }, contract, candidate, migrationsById: registry });
 console.log('PASS 080 final: historical pre-080 baseline adoption retained');
+const productRelease = contract.schemaBaseline.post080ProductRelease;
+const productEvidence = { ...baseEvidence, mode: productRelease.mode,
+  migrationHistory: { available: true, records: [historicalBaseline, applied] } };
+verifyPost080ProductEvidence({ evidence: productEvidence, contract, candidate, migrationsById: registry });
+console.log('PASS post-080 product lane: exact 080 ledger and 922a fingerprint, PRE-ADOPTION retained');
+assert.throws(() => verifyPost080ProductEvidence({ evidence: { ...productEvidence, mode: 'PRE_ADOPTION_MAINTENANCE_080' }, contract, candidate, migrationsById: registry }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
+console.log('PASS fail-closed: product lane cannot impersonate 080 maintenance mode');
 const post080Baseline = { ...historicalBaseline, recordedAt: '2026-11-10T04:00:00.000Z' };
 assert.throws(() => verifyPost080MaintenanceEvidence({ evidence: { ...baseEvidence, mode: maintenance.mode, baselineRecord: post080Baseline,
   migrationHistory: { available: true, records: [applied, post080Baseline] } }, contract, candidate, migrationsById: registry }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
@@ -53,4 +60,4 @@ for (const [name, evidence] of rejects) {
   assert.throws(() => verifyPost080MaintenanceEvidence({ evidence, contract, candidate, migrationsById: registry }), /DEPLOYMENT_GUARD_FAILED_CLOSED/u);
   console.log(`PASS fail-closed: ${name}`);
 }
-console.log(JSON.stringify({ result: 'PASS', cases: rejects.length + 2, liveMutation: 0 }));
+console.log(JSON.stringify({ result: 'PASS', cases: rejects.length + 4, liveMutation: 0 }));
