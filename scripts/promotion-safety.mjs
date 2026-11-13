@@ -624,7 +624,10 @@ export function verifyPromotionIdentity({ contract, checkpointTag, candidateGit,
 
 export const runGitAt = cwd => args => {
   try {
-    return execFileSync('git', args, {
+    // Windows repositories may contain legacy backup paths whose tree lookups
+    // exceed the default Win32 path handling. Keep the guard read-only while
+    // enabling Git's long-path resolver; no policy or repository writes change.
+    return execFileSync('git', ['-c', 'core.longpaths=true', ...args], {
       cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
       env: { ...process.env, GIT_NO_REPLACE_OBJECTS: '1' },
     });

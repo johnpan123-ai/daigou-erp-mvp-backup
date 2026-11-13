@@ -10035,6 +10035,16 @@
       "files": [
         {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"28e2d750a043742f5cf54aeb091fb189a0c628dfc3ab76d1d1d631399edbbbc5","afterHash":"dcc7a8731979c22d5f20917fece842c5e520b29aecf35b5da4d06f13ba5d3235","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["adopted baseline review boundary"],"dataFlow":"Reviews fully contained in the adopted baseline are consumed as historical evidence; post-baseline reviews remain exact.","persistenceBehavior":"Read-only release verification.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Historical hash drift cannot reopen an adopted boundary; new drift still fails closed.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post080-registry-scope-v1",
+      "beforeHead": "7ce52e7711df01774a00269c4b388881f79acf8c",
+      "reviewedHead": "a4eba403a5befffe6ed17d6b2055010a9080b1b1",
+      "patchSha256": "0074aa70aed037ab02a2e5b30b95877cb08ef271215bbff3f28e07b622504120",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"dcc7a8731979c22d5f20917fece842c5e520b29aecf35b5da4d06f13ba5d3235","afterHash":"f40ff4fe324662f17afa99d161ff1d65f30f24141e8081b1c25df7e5b804354a","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["review registry self-scope"],"dataFlow":"Release-control review evaluation only; registry self-change is scoped to named Post-080 review IDs.","persistenceBehavior":"Read-only Guard evaluation.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Unlisted registry self-changes remain fail-closed.","schemaExpectation":"No schema mutation."}
+      ]
     }
   ]
 }

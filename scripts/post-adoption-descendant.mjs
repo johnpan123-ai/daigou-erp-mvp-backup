@@ -1369,9 +1369,15 @@ export function assertReviewedProviderContract(file, before, after) {
   if (file === 'src/providers/cloud/inventoryImportPlan.ts') {
     // Only the exact immutable review can select this helper. It has no new
     // provider API, serializer, SQL fields or network/persistence calls.
+    if (sourceHash(before) !== '8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9'
+      || sourceHash(after) !== '8f6c3b24e73a65b1819af834c39138e0aa42a0c5ba621993fb58244472e96bcf') {
+      fail('inventory planner changed outside the exact approved variant-rename patch');
+    }
     const tree = parse(file, after);
     const declarations = tree.statements.filter(ts.isFunctionDeclaration);
-    if (declarations.length !== 1 || declarations[0].name?.text !== 'planCloudInventoryImport') {
+    const declarationNames = declarations.map(node => node.name?.text).sort();
+    if (declarationNames.length !== 2 || declarationNames[0] !== 'detectVariantRenames'
+      || declarationNames[1] !== 'planCloudInventoryImport') {
       fail('unreviewed inventory planner API');
     }
     for (const call of nodes(tree).filter(ts.isCallExpression)) {
@@ -1501,8 +1507,22 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
     && hash(source(baseline, file, true)) === hash(source(candidate.head, file, true)));
   const canonicalFiles = [...new Set([...oldFiles, ...newFiles].filter(file =>
     file.startsWith('tools/schema-reconciliation/') || policy.schemaContractFiles.includes(file)))];
-  const canonicalParity = canonicalFiles.every(file => oldSet.has(file) && newSet.has(file)
-    && hash(source(baseline, file, true)) === hash(source(candidate.head, file, true)));
+  const canonicalParity = canonicalFiles.every(file => {
+    if (!oldSet.has(file) || !newSet.has(file)) return false;
+    if (hash(source(baseline, file, true)) === hash(source(candidate.head, file, true))) return true;
+    // The reusable Post-080 lane adds only a named, read-only reconciliation
+    // mode. Keep the canonical contract fail-closed for every other file or
+    // unreviewed edit; this exact review is the sole compatibility allowance.
+    if (file === 'config/erp-environment-identity.json') {
+      const reviewed = classifyReviewedFile({ file, after: source(candidate.head, file, true), reviews });
+      return ['erp2-post080-product-release-flow-v1', 'erp2-post080-product-baseline-anchor-v1'].includes(reviewed?.review.id)
+        && reviewed.row.classification === 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL';
+    }
+    if (file !== 'tools/schema-reconciliation/cli.mjs') return false;
+    const reviewed = classifyReviewedFile({ file, after: source(candidate.head, file, true), reviews });
+    return reviewed?.review.id === 'erp2-post080-product-release-flow-v1'
+      && reviewed.row.classification === 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL';
+  });
   if (!checksumParity) fail('migration/source SQL checksum changed since adopted baseline');
   if (!canonicalParity) fail('canonical schema/fingerprint contract changed since adopted baseline');
   if (sensitive.length) fail(`schema-sensitive or unreviewed descendant diff: ${sensitive.map(row => row.file).join(', ')}`);
@@ -1551,7 +1571,10 @@ export function inspectSafeDescendant({ git, candidate, baselineRecord }) {
     const before = source(baseline, file, oldSet.has(file)); const after = source(candidate.head, file, true);
     if (sourceHash(before) === sourceHash(after)) return true;
     const reviewed = classifyReviewedFile({ file, after, reviews });
-    if (!reviewed || reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL') return false;
+    const exactApplicationProvider = file === 'src/providers/cloud/inventoryImportPlan.ts'
+      && reviewed?.review.id === 'erp2-buyanime-variant-rename-v1'
+      && reviewed.row.classification === 'APPLICATION_DOMAIN_ONLY';
+    if (!reviewed || (reviewed.row.classification !== 'PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL' && !exactApplicationProvider)) return false;
     assertReviewedProviderContract(file, before, after);
     return true;
   });
