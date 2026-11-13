@@ -1908,19 +1908,6 @@
       ]
     },
     {
-      "id": "erp2-buyanime-variant-rename-v1",
-      "beforeHead": "54e9531e2abbf473bfb934b91c70e54ea567ccab",
-      "reviewedHead": "9edfc84776141c21d6e9f4ad2d64d1ab8ebfdd13",
-      "patchSha256": "083d9b44284c8d1f5b8fcccea54ee385ee80201a373cd8958b6bffec1f148703",
-      "requiredRegressions": ["guard", "promotion", "buyanime-family-shrink-import", "buyanime-variant-rename-isolated"],
-      "files": [
-        {"file":"src/providers/cloud/inventoryImportPlan.ts","beforeHash":"8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9", "afterHash":"8f6c3b24e73a65b1819af834c39138e0aa42a0c5ba621993fb58244472e96bcf", "classification":"APPLICATION_DOMAIN_ONLY","functions":["same-SKU variant rename preserves inventory identity"],"dataFlow":"Patches the existing inventory row by stable inventory UUID when a same-SKU variant label changes.","persistenceBehavior":"Existing BuyAnime import transaction only; no new persistence path.","writePath":"Existing guarded catalog/import RPC path.","providerPath":"No CAS, Epoch, Journal, Realtime or Restore contract change.","externalContract":"Same SKU retains inventory UUID and rejects unsafe family shrink.","schemaExpectation":"No schema, migration or Ledger change."},
-        {"file":"tests/buyanime-family-shrink-import.mjs","beforeHash":"3822683f2bb89e9164ba489a93b9cb15617a886293f4d75fbde13177bcef06d4", "afterHash":"9aefd6a15e690e0f3f75e3b24a71513991fb873ef3ffdc93efe05b36c303e2c6", "classification":"APPLICATION_DOMAIN_ONLY","functions":["family-shrink safety regression"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Isolated fixture only.","providerPath":"No Provider change.","externalContract":"Unsafe family shrink remains rejected.","schemaExpectation":"No schema, migration or Ledger change."},
-        {"file":"tests/buyanime-variant-rename-isolated.mjs","beforeHash":null,"afterHash":"c76fa055ffb002543d55ca35a80cb014c6d81825923f719094e53f62e31d36fb", "classification":"APPLICATION_DOMAIN_ONLY","functions":["same-SKU variant rename isolated regression"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Isolated PostgreSQL fixture only.","providerPath":"No Provider change.","externalContract":"Duplicate SKU and inventory UUID replacement are rejected.","schemaExpectation":"No schema, migration or Ledger change."}
-      ]
-    }
-    ,
-    {
       "id": "buyanime-simple-flow-performance-v1",
       "beforeHead": "3347ef8a82cd809e43e1059a71485dedb6685006",
       "reviewedHead": "e7185e8be1ae9787d488b6b5f6e689048e4296e8",
@@ -10017,6 +10004,18 @@
         {"file":"tests/erp2-post-080-maintenance-guard.mjs","beforeHash":"83178baec0a109412bd8bc555e8a58d0feedd83d50954de91956325b2decad44","afterHash":"04411a10a181255a1ec118014334a103e0f5d0c2023569c4e199d83576a94d8e","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["Post-080 product lane positive and negative cases"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Test only.","providerPath":"No Provider change.","externalContract":"Product mode cannot impersonate 080 maintenance mode.","schemaExpectation":"No schema mutation."},
         {"file":"tools/schema-reconciliation/cli.mjs","beforeHash":"e68c6c35df63413ed463c25780af89c8f979610bf0a2f695e3198cc766913c58","afterHash":"39aaa345115aa2923708bef1f23c267aeb5a30f7dc2140c34803826b7088052a","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["PRE_ADOPTION_POST080 evidence mode"],"dataFlow":"Accepts the explicit named mode for read-only reconciliation only.","persistenceBehavior":"Read-only snapshot processing.","writePath":"No database write.","providerPath":"No Provider change.","externalContract":"Other reconciliation modes remain unchanged.","schemaExpectation":"No schema mutation."},
         {"file":"config/erp2-reviewed-change-impacts.json","beforeHash":"d165f4266afa705c63b441c2f3a82f9f892bead6112187b93b151509427b93fc","afterHash":"8599170234b33c6081e379de63c7c2be20d2090dcc90fd2403f818818f502e50","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["exact Post-080 product flow review record"],"dataFlow":"Immutable review metadata only.","persistenceBehavior":"Release metadata only.","writePath":"No database or product write.","providerPath":"No Provider change.","externalContract":"Exact file hashes and regression scope are pinned.","schemaExpectation":"No schema mutation."}
+      ]
+    },
+    {
+      "id": "erp2-buyanime-variant-rename-v1",
+      "beforeHead": "54e9531e2abbf473bfb934b91c70e54ea567ccab",
+      "reviewedHead": "9edfc84776141c21d6e9f4ad2d64d1ab8ebfdd13",
+      "patchSha256": "083d9b44284c8d1f5b8fcccea54ee385ee80201a373cd8958b6bffec1f148703",
+      "requiredRegressions": ["guard", "promotion", "buyanime-family-shrink-import", "buyanime-variant-rename-isolated"],
+      "files": [
+        {"file":"src/providers/cloud/inventoryImportPlan.ts","beforeHash":"8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9", "afterHash":"8f6c3b24e73a65b1819af834c39138e0aa42a0c5ba621993fb58244472e96bcf", "classification":"APPLICATION_DOMAIN_ONLY","functions":["same-SKU variant rename preserves inventory identity"],"dataFlow":"Patches the existing inventory row by stable inventory UUID when a same-SKU variant label changes.","persistenceBehavior":"Existing BuyAnime import transaction only; no new persistence path.","writePath":"Existing guarded catalog/import RPC path.","providerPath":"No CAS, Epoch, Journal, Realtime or Restore contract change.","externalContract":"Same SKU retains inventory UUID and rejects unsafe family shrink.","schemaExpectation":"No schema, migration or Ledger change."},
+        {"file":"tests/buyanime-family-shrink-import.mjs","beforeHash":"3822683f2bb89e9164ba489a93b9cb15617a886293f4d75fbde13177bcef06d4", "afterHash":"9aefd6a15e690e0f3f75e3b24a71513991fb873ef3ffdc93efe05b36c303e2c6", "classification":"APPLICATION_DOMAIN_ONLY","functions":["family-shrink safety regression"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Isolated fixture only.","providerPath":"No Provider change.","externalContract":"Unsafe family shrink remains rejected.","schemaExpectation":"No schema, migration or Ledger change."},
+        {"file":"tests/buyanime-variant-rename-isolated.mjs","beforeHash":null,"afterHash":"c76fa055ffb002543d55ca35a80cb014c6d81825923f719094e53f62e31d36fb", "classification":"APPLICATION_DOMAIN_ONLY","functions":["same-SKU variant rename isolated regression"],"dataFlow":"Test only.","persistenceBehavior":"No production write.","writePath":"Isolated PostgreSQL fixture only.","providerPath":"No Provider change.","externalContract":"Duplicate SKU and inventory UUID replacement are rejected.","schemaExpectation":"No schema, migration or Ledger change."}
       ]
     }
   ]
