@@ -9980,6 +9980,17 @@
         {"file":"tests/realtime-background-presentation.mjs","beforeHash":null,"afterHash":"a452f96d892082718c203e42afb2e4a00b71de04d6b4e19a6a756add623298e2","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["background presentation regression"],"dataFlow":"Verifies sync status presentation without write changes.","persistenceBehavior":"Test only.","writePath":"No production write.","providerPath":"No Provider change.","externalContract":"Existing UI status expectations.","schemaExpectation":"No schema mutation."},
         {"file":"tools/schema-reconciliation/cli.mjs","beforeHash":"b602525a0b64498d083c606b66b567a4b57914a9f66e9eba9ab9795b3a95b6e4","afterHash":"cf193c6438422357e1928977a080dec6535d337ac21c9203d3de45dfbd38f0c0","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["named 080 reconciliation modes"],"dataFlow":"Accepts exact bootstrap/final mode names for read-only evidence generation.","persistenceBehavior":"Read-only snapshot processing.","writePath":"No database write.","providerPath":"No Provider change.","externalContract":"Other modes remain unchanged.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post-080-historical-baseline-guard-fix-v1",
+      "beforeHead": "9edfc84776141c21d6e9f4ad2d64d1ab8ebfdd13",
+      "reviewedHead": "43193c53027caa51a599dd3f6b4bacd6256ab282",
+      "patchSha256": "4afa3bee75391504c0db53400806f31865315055be0a8e11e48585c911fd47b0",
+      "requiredRegressions": ["pre-adoption-maintenance-guard"],
+      "files": [
+        {"file":"scripts/promotion-safety.mjs","beforeHash":"4c61f39df33ab272ec70132e516443fa836189a3009d45d702bd31aa321dc9f8","afterHash":"2bfe5b178bf9c4e537f8c699f5dcaa5e5cb7fe6c5438b4a14487088846f15adf","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["verifyPost080MaintenanceEvidence historical baseline ordering"],"dataFlow":"Release evidence only; retains pre-080 historical baseline records while rejecting post-080 or malformed adoption timestamps.","persistenceBehavior":"Read-only Guard evaluation.","writePath":"No database or product write.","providerPath":"CAS, Epoch, Realtime, Provider and Restore contracts unchanged.","externalContract":"Bootstrap remains strict; post-080 adoptions fail closed.","schemaExpectation":"No schema, migration or Ledger mutation."},
+        {"file":"tests/erp2-post-080-maintenance-guard.mjs","beforeHash":"e6b045d9b38947f4791a1bea432c177682ef9f3705dfe7a95066918c086038b1","afterHash":"83178baec0a109412bd8bc555e8a58d0feedd83d50954de91956325b2decad44","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["historical pre-080 baseline positive case","post-080 baseline negative case"],"dataFlow":"Test only; preserves existing strict bootstrap and mismatch assertions.","persistenceBehavior":"No production write.","writePath":"Test only.","providerPath":"No Provider change.","externalContract":"Historical pre-080 adoption is retained; post-080 or malformed adoption fails closed.","schemaExpectation":"No schema, migration or Ledger mutation."}
+      ]
     }
   ]
 }
