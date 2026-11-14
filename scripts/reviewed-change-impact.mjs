@@ -41,6 +41,7 @@ export const regressionScripts = Object.freeze({
   'buyanime-variant-rename-isolated': 'tests/buyanime-variant-rename-isolated.mjs',
   'mobile-app-switch-resume': 'tests/mobile-app-switch-resume.mjs',
   'outbound-search-ime': 'tests/outbound-search-ime.mjs',
+  'realtime-full-read-budget': 'tests/realtime-full-read-budget.mjs',
   'baseline-exception-control': 'tests/erp2-one-time-baseline-exception.mjs',
   'pre-adoption-maintenance-guard': 'tests/erp2-pre-adoption-maintenance-guard.mjs',
   'owner-080-audit-runner-contract': 'tests/owner-080-audit-runner-contract.mjs',

@@ -10105,11 +10105,11 @@
     {
       "id": "erp2-post080-regression-registry-completeness-v1",
       "beforeHead": "ab9488c57bddaef61427407e2ea74e128837642c",
-      "reviewedHead": "1db276cad14f1e349a34c0c5d7298c0a63b6b057",
+      "reviewedHead": "e17ea1ee90ce60e1593b84ed5a91497cb0271693",
       "patchSha256": "05c12e419c95c612452a681c72dd3d921932ba9cbc4f2d55f51758d3df3580fe",
       "requiredRegressions": ["guard", "promotion", "buyanime-family-shrink-import", "buyanime-variant-rename-isolated", "mobile-app-switch-resume", "outbound-search-ime"],
       "files": [
-        {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"7097d508fad6620a7d787555803f01fe044a0957285b785a09e20a6d1bb22778","afterHash":"7d27b9874649bc2eb29ac8fc8d031ea6139bb1a6ac4a41c8b79e20a4023ee415","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["explicit regression registry bindings"],"dataFlow":"Read-only release regression dispatch.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Required reviewed regression IDs resolve to their exact existing test files; unknown IDs remain fail closed.","schemaExpectation":"No schema mutation."}
+        {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"7097d508fad6620a7d787555803f01fe044a0957285b785a09e20a6d1bb22778","afterHash":"399902fdf596bccae004a422b244188341543d32b91b56b363e6023979d65ee1","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["explicit regression registry bindings"],"dataFlow":"Read-only release regression dispatch.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Required reviewed regression IDs resolve to their exact existing test files; unknown IDs remain fail closed.","schemaExpectation":"No schema mutation."}
       ]
     }
   ]
