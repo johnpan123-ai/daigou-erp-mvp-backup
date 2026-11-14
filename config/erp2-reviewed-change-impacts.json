@@ -10111,6 +10111,28 @@
       "files": [
         {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"7097d508fad6620a7d787555803f01fe044a0957285b785a09e20a6d1bb22778","afterHash":"399902fdf596bccae004a422b244188341543d32b91b56b363e6023979d65ee1","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["explicit regression registry bindings"],"dataFlow":"Read-only release regression dispatch.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Required reviewed regression IDs resolve to their exact existing test files; unknown IDs remain fail closed.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post080-promotion-inspector-import-v1",
+      "beforeHead": "8f724f8e73a1470e943687d86a33f049d41979f6",
+      "reviewedHead": "b4fe8f1186d1060bffae121fc44ecbbcb2a10cc5",
+      "patchSha256": "c951b399fb024a3f53f535ad993c87cf027b8815b551204ce286c5dde31b88e9",
+      "requiredRegressions": ["promotion"],
+      "files": [
+        {
+          "file": "scripts/promotion-safety.mjs",
+          "beforeHash": "a536c5b7d374d7bca7fe34315055fadf1832142ecf31b58311a61db2c6003c6d",
+          "afterHash": "cb69ed1dd498db1f8c53b485b77465fbf39c0ef976a1283eb423556ba69daea6",
+          "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
+          "functions": ["verifySchemaBaselineEvidence post-080 descendant inspection import"],
+          "dataFlow": "Release Guard only; imports the existing exact descendant inspector before lineage checks.",
+          "persistenceBehavior": "No database or product write.",
+          "writePath": "No runtime write.",
+          "providerPath": "No Provider/CAS/Realtime change.",
+          "externalContract": "Promotion Guard continues fail-closed; only resolves the existing inspector symbol.",
+          "schemaExpectation": "No schema mutation."
+        }
+      ]
     }
   ]
 }
