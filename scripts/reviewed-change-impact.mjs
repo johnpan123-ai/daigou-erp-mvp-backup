@@ -113,6 +113,11 @@ export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = nul
     if (adoptedBaselineHead) {
       try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.reviewedHead, adoptedBaselineHead]); return false; }
       catch { /* review is post-baseline; continue with exact validation */ }
+      // A post-baseline review must start on top of the adopted baseline. Skipping the sealed historical rows
+      // above removed the only earlier place where this was checked (the gap path below), so a claimed
+      // adoption boundary that the review does not descend from would otherwise be accepted.
+      try { git(['--no-replace-objects', 'merge-base', '--is-ancestor', adoptedBaselineHead, review.beforeHead]); }
+      catch { fail(`post-baseline review does not descend from the adopted baseline: ${review.id}`); }
     }
     git(['--no-replace-objects', 'merge-base', '--is-ancestor', review.beforeHead, review.reviewedHead]);
     const registryFile = 'config/erp2-reviewed-change-impacts.json';

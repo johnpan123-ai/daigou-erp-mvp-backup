@@ -148,6 +148,20 @@ const plannerSource = realGit(['show', `${buyAnimeCandidate.head}:${plannerFile}
 assertReviewedProviderContract(plannerFile, null, plannerSource);
 assert.throws(() => assertReviewedProviderContract(plannerFile, null,
   plannerSource.replace('const byKey =', "fetch('/unsafe'); const byKey =")), /FAILED_CLOSED/u);
+// Planner contract keeps exactly two reviewed states: the canonical-identity state (one function) and the exact
+// variant-rename patch (detectVariantRenames added). An extra helper or a non-exact rename variant fails closed.
+assert.throws(() => assertReviewedProviderContract(plannerFile, null, `${plannerSource}\nfunction unreviewedHelper() { return 1; }\n`),
+  /unreviewed inventory planner API/u);
+const renameReview = reviewedImpacts.reviews.find(review => review.id === 'erp2-buyanime-variant-rename-v1');
+assert.ok(renameReview, 'variant-rename review is registered');
+const renameBefore = realGit(['show', `${renameReview.beforeHead}:${plannerFile}`]);
+const renameAfter = realGit(['show', `${renameReview.reviewedHead}:${plannerFile}`]);
+assert.doesNotThrow(() => assertReviewedProviderContract(plannerFile, renameBefore, renameAfter), 'exact variant-rename patch');
+assert.throws(() => assertReviewedProviderContract(plannerFile, renameBefore, renameAfter.replace('holders.length !== 1', 'holders.length > 1')),
+  /outside the exact approved variant-rename patch/u, 'a loosened rename condition is not the reviewed patch');
+assert.throws(() => assertReviewedProviderContract(plannerFile, null, renameAfter),
+  /outside the exact approved variant-rename patch/u, 'the rename helper needs the exact before state too');
+console.log('PASS false adoption boundary fails closed; planner keeps only the two reviewed states');
 const beforeProvider = realGit(['show', `${buyAnimeReview.beforeHead}:${provider}`]);
 const afterProvider = realGit(['show', `${buyAnimeReview.reviewedHead}:${provider}`]);
 assertReviewedProviderContract(provider, beforeProvider, afterProvider);

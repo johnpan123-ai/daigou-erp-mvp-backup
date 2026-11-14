@@ -1487,16 +1487,19 @@ export function assertReviewedProviderContract(file, before, after) {
   if (file === 'src/providers/cloud/inventoryImportPlan.ts') {
     // Only the exact immutable review can select this helper. It has no new
     // provider API, serializer, SQL fields or network/persistence calls.
-    if (sourceHash(before) !== '8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9'
-      || sourceHash(after) !== '8f6c3b24e73a65b1819af834c39138e0aa42a0c5ba621993fb58244472e96bcf') {
-      fail('inventory planner changed outside the exact approved variant-rename patch');
-    }
+    // Two reviewed planner states exist: the earlier canonical-identity review (exactly one function, the
+    // contract this rule had before the variant-rename review) and the exact variant-rename patch, which alone
+    // may add detectVariantRenames. Any other combination fails closed.
+    const exactVariantRename = sourceHash(before) === '8a678842a78ea3c9b09de446c2f911c7e606d91aca75dc46052c5203ea0260f9'
+      && sourceHash(after) === '8f6c3b24e73a65b1819af834c39138e0aa42a0c5ba621993fb58244472e96bcf';
     const tree = parse(file, after);
     const declarations = tree.statements.filter(ts.isFunctionDeclaration);
     const declarationNames = declarations.map(node => node.name?.text).sort();
-    if (declarationNames.length !== 2 || declarationNames[0] !== 'detectVariantRenames'
-      || declarationNames[1] !== 'planCloudInventoryImport') {
-      fail('unreviewed inventory planner API');
+    const expectedNames = exactVariantRename ? ['detectVariantRenames', 'planCloudInventoryImport'] : ['planCloudInventoryImport'];
+    if (JSON.stringify(declarationNames) !== JSON.stringify(expectedNames)) {
+      fail(declarationNames.includes('detectVariantRenames')
+        ? 'inventory planner changed outside the exact approved variant-rename patch'
+        : 'unreviewed inventory planner API');
     }
     for (const call of nodes(tree).filter(ts.isCallExpression)) {
       if (/supabase|fetch|indexedDB|localStorage|\bdb\b|\.rpc|\.from/u.test(canonical(tree, call.expression))) {
