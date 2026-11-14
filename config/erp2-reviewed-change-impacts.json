@@ -10089,6 +10089,18 @@
         {"file":"tests/p02-1a-provider-guard.mjs","beforeHash":"c94e17bfa5cfb29f5a0c4ecf3c62b48d516db394c9c53af7f2cf1df9bae4b63f","afterHash":"6aaf576ccaec204b1e8ace4f212957fed2d841de29f08cb638b1b4900dfe4d33","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["P02 provider guard mobile resume cases"],"dataFlow":"Guard test only.","persistenceBehavior":"No production write.","writePath":"Test only.","providerPath":"Provider writes/RPCs remain exact.","externalContract":"Unreviewed Provider drift fails closed.","schemaExpectation":"No schema mutation."},
         {"file":"tests/realtime-full-read-budget.mjs","beforeHash":"71662915e1cda961443780e288804b2b57fbbec132048c6aea4e376c8feac798","afterHash":"6d5d867f13eb864d48c99ad30e43258cbbeb5d04bc91b75ba9d1e8887efb8b1a","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["mobile resume read budget regression"],"dataFlow":"Guard test only.","persistenceBehavior":"No production write.","writePath":"Test only.","providerPath":"Read verification is bounded to 1/8 budget.","externalContract":"No migration or RPC change.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post080-guard-negative-boundary-v1",
+      "beforeHead": "67192afa32da3787d713a8d0ee5196e39bd7cf03",
+      "reviewedHead": "2c310ed405f54732bb1482827fc7d5c88f32f38a",
+      "patchSha256": "a198456d53384d9174439d3ac19fb5200add98c36461110e8c5d62d95cc05877",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {"file":"scripts/post-adoption-descendant.mjs","beforeHash":"fa8567a8e96c3814c81240aebcc57f19ba4a76b4c1e9e828fb4e5f4fcf1e5b1b","afterHash":"b08473dfbc37bf7766fcf85c8e2bbaf175b8a961b4a18902db677a4a251fcadd","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["adoption-boundary ancestry validation"],"dataFlow":"Read-only release Guard ancestry checks.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"False adoption baselines fail closed.","schemaExpectation":"No schema mutation."},
+        {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"f40ff4fe324662f17afa99d161ff1d65f30f24141e8081b1c25df7e5b804354a","afterHash":"7097d508fad6620a7d787555803f01fe044a0957285b785a09e20a6d1bb22778","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["reviewed inventory planner contract validation"],"dataFlow":"Read-only exact review-chain validation.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"Unreviewed Provider and inventory changes remain fail closed.","externalContract":"Only the two reviewed planner states are accepted.","schemaExpectation":"No schema mutation."},
+        {"file":"tests/erp2-reviewed-change-impact.mjs","beforeHash":"bb1ef0773a6cc52a45a35305e6d4868ec7e3df11a99860e431b29d1d0d546966","afterHash":"c738a644b8b5bdf8231bc771b73789296815ee8997aa351f09c2b154d6bbb4be","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["false adoption boundary and planner positive/negative regressions"],"dataFlow":"Guard test fixtures only.","persistenceBehavior":"No production write.","writePath":"Test-only isolated fixtures.","providerPath":"No Provider change.","externalContract":"Valid reviewed states pass; false boundaries and unreviewed planner states fail closed.","schemaExpectation":"No schema mutation."}
+      ]
     }
   ]
 }
