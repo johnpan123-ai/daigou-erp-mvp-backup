@@ -10101,6 +10101,16 @@
         {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"f40ff4fe324662f17afa99d161ff1d65f30f24141e8081b1c25df7e5b804354a","afterHash":"7097d508fad6620a7d787555803f01fe044a0957285b785a09e20a6d1bb22778","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["reviewed inventory planner contract validation"],"dataFlow":"Read-only exact review-chain validation.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"Unreviewed Provider and inventory changes remain fail closed.","externalContract":"Only the two reviewed planner states are accepted.","schemaExpectation":"No schema mutation."},
         {"file":"tests/erp2-reviewed-change-impact.mjs","beforeHash":"bb1ef0773a6cc52a45a35305e6d4868ec7e3df11a99860e431b29d1d0d546966","afterHash":"c738a644b8b5bdf8231bc771b73789296815ee8997aa351f09c2b154d6bbb4be","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["false adoption boundary and planner positive/negative regressions"],"dataFlow":"Guard test fixtures only.","persistenceBehavior":"No production write.","writePath":"Test-only isolated fixtures.","providerPath":"No Provider change.","externalContract":"Valid reviewed states pass; false boundaries and unreviewed planner states fail closed.","schemaExpectation":"No schema mutation."}
       ]
+    },
+    {
+      "id": "erp2-post080-regression-registry-completeness-v1",
+      "beforeHead": "ab9488c57bddaef61427407e2ea74e128837642c",
+      "reviewedHead": "708d3d10b07f8b4f5b7d7a71b4d4a5155b0aa7c7",
+      "patchSha256": "05c12e419c95c612452a681c72dd3d921932ba9cbc4f2d55f51758d3df3580fe",
+      "requiredRegressions": ["guard", "promotion", "buyanime-family-shrink-import", "buyanime-variant-rename-isolated", "mobile-app-switch-resume", "outbound-search-ime"],
+      "files": [
+        {"file":"scripts/reviewed-change-impact.mjs","beforeHash":"7097d508fad6620a7d787555803f01fe044a0957285b785a09e20a6d1bb22778","afterHash":"7d27b9874649bc2eb29ac8fc8d031ea6139bb1a6ac4a41c8b79e20a4023ee415","classification":"PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL","functions":["explicit regression registry bindings"],"dataFlow":"Read-only release regression dispatch.","persistenceBehavior":"Guard evaluation only.","writePath":"No database or product write.","providerPath":"No Provider or CAS change.","externalContract":"Required reviewed regression IDs resolve to their exact existing test files; unknown IDs remain fail closed.","schemaExpectation":"No schema mutation."}
+      ]
     }
   ]
 }

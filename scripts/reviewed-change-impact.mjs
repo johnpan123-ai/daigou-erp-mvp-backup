@@ -37,6 +37,10 @@ export const regressionScripts = Object.freeze({
   'buyanime-recovery-epoch': 'tests/buyanime-recovery-epoch.mjs',
   'buyanime-recovery-review': 'tests/buyanime-recovery-change-impact.mjs',
   'post-restore-business-release': 'tests/buyanime-post-restore-isolated.mjs',
+  'buyanime-family-shrink-import': 'tests/buyanime-family-shrink-import.mjs',
+  'buyanime-variant-rename-isolated': 'tests/buyanime-variant-rename-isolated.mjs',
+  'mobile-app-switch-resume': 'tests/mobile-app-switch-resume.mjs',
+  'outbound-search-ime': 'tests/outbound-search-ime.mjs',
   'baseline-exception-control': 'tests/erp2-one-time-baseline-exception.mjs',
   'pre-adoption-maintenance-guard': 'tests/erp2-pre-adoption-maintenance-guard.mjs',
   'owner-080-audit-runner-contract': 'tests/owner-080-audit-runner-contract.mjs',
@@ -125,6 +129,7 @@ export function reviewForCandidate(git, candidateHead, adoptedBaselineHead = nul
       'erp2-post080-product-release-flow-v1',
       'erp2-post080-product-baseline-anchor-v1',
       'erp2-post080-registry-scope-v1',
+      'erp2-post080-regression-registry-completeness-v1',
     ]);
     const changed = git(['diff', '--name-only', '--no-renames', review.beforeHead, review.reviewedHead, '--'])
       .trim().split(/\r?\n/u).filter(Boolean)
