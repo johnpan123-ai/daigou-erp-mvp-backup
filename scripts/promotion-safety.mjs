@@ -8,7 +8,7 @@ import {
   buildPlannerIdentity,
   buildSchemaEvidenceIdentity,
 } from '../tools/schema-reconciliation/evidenceContract.mjs';
-import { inspectPreAdoptionMaintenance, inspectPost080Maintenance, verifySafeDescendant } from './post-adoption-descendant.mjs';
+import { inspectPreAdoptionMaintenance, inspectPost080Maintenance, inspectSafeDescendant, verifySafeDescendant } from './post-adoption-descendant.mjs';
 import { verifyImpactEvidence } from './reviewed-change-impact.mjs';
 import { SCHEMA_FINGERPRINT_CONTRACT_VERSION, SCHEMA_CANONICAL_CONTRACT,
   SQL_CANONICAL_ALGORITHM } from '../tools/schema-reconciliation/schemaContract.mjs';
