@@ -10105,7 +10105,7 @@
     {
       "id": "erp2-post080-regression-registry-completeness-v1",
       "beforeHead": "ab9488c57bddaef61427407e2ea74e128837642c",
-      "reviewedHead": "e17ea1ee90ce60e1593b84ed5a91497cb0271693",
+      "reviewedHead": "39723926b27b041d92ce6761d4ae6e2ca04257f0",
       "patchSha256": "05c12e419c95c612452a681c72dd3d921932ba9cbc4f2d55f51758d3df3580fe",
       "requiredRegressions": ["guard", "promotion", "buyanime-family-shrink-import", "buyanime-variant-rename-isolated", "mobile-app-switch-resume", "outbound-search-ime"],
       "files": [
