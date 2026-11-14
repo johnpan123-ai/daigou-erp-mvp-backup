@@ -10115,7 +10115,7 @@
     {
       "id": "erp2-post080-promotion-inspector-import-v1",
       "beforeHead": "8f724f8e73a1470e943687d86a33f049d41979f6",
-      "reviewedHead": "b4fe8f1186d1060bffae121fc44ecbbcb2a10cc5",
+      "reviewedHead": "b4fe8f1186d1060bffae121fc44ecbcbb2a10cc5",
       "patchSha256": "c951b399fb024a3f53f535ad993c87cf027b8815b551204ce286c5dde31b88e9",
       "requiredRegressions": ["promotion"],
       "files": [
