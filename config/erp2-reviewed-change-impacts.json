@@ -10114,15 +10114,15 @@
     },
     {
       "id": "erp2-post080-promotion-inspector-import-v1",
-      "beforeHead": "8f724f8e73a1470e943687d86a33f049d41979f6",
+      "beforeHead": "c1ceed3a7a36b12c22f003d85dc1744dacae7e39",
       "reviewedHead": "b4fe8f1186d1060bffae121fc44ecbcbb2a10cc5",
-      "patchSha256": "c951b399fb024a3f53f535ad993c87cf027b8815b551204ce286c5dde31b88e9",
+      "patchSha256": "345c86b052ab46bd0077d15f79bfd3a294c4d00fc40c3560aee4118447bd74ae",
       "requiredRegressions": ["promotion"],
       "files": [
         {
           "file": "scripts/promotion-safety.mjs",
-          "beforeHash": "a536c5b7d374d7bca7fe34315055fadf1832142ecf31b58311a61db2c6003c6d",
-          "afterHash": "cb69ed1dd498db1f8c53b485b77465fbf39c0ef976a1283eb423556ba69daea6",
+          "beforeHash": "113a3a852716d19314afabc46ba85e0c308e44d1ee7ac30219bc12b310e14241",
+          "afterHash": "5866ed639fb26bfea8d61025ce32959626e9108af105fd3e7f4ab8b17177d20f",
           "classification": "PERSISTENCE_BEHAVIOR_SCHEMA_NEUTRAL",
           "functions": ["verifySchemaBaselineEvidence post-080 descendant inspection import"],
           "dataFlow": "Release Guard only; imports the existing exact descendant inspector before lineage checks.",
