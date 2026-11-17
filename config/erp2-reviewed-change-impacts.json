@@ -10133,6 +10133,78 @@
           "schemaExpectation": "No schema mutation."
         }
       ]
+    },
+    {
+      "id": "erp2-post080-closing-date-calendar-v1",
+      "beforeHead": "89b4006b873b16a01cb0fc318f741d74d9a48d7b",
+      "reviewedHead": "879e3376f04f80ac48d4f30d4dcbdaf1b4074bc0",
+      "patchSha256": "4faaeb781334ab690f01f9760a8a5df84387605c9930b01b9a089b8a1d7208f7",
+      "requiredRegressions": ["guard", "promotion"],
+      "files": [
+        {
+          "file": "src/components/ClosingDateCalendar.tsx",
+          "beforeHash": null,
+          "afterHash": "86927f8f066219733ca9fc6999b3f4148ba6129b69d9c32de4de3a517bce933c",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["official closing-date calendar popover"],
+          "changedInputs": "User clicks the closing-date field or calendar icon; existing YYYY/MM/DD draft remains the source of truth.",
+          "changedOutputs": "Calendar navigation and day selection present a slash-formatted date without taking focus from the text field.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Local UI state only; selected date is passed to the existing PurchaseManagement draft/commit path.",
+          "persistenceBehavior": "No new persistence path; existing single-field commit is reused.",
+          "writePath": "Existing product-group closing_date write only after an explicit day selection.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: no migration or schema change.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "src/pages/PurchaseManagement.tsx",
+          "beforeHash": "d37b834e8d49d61b10f58295f826764816b09ff97bc8d2282574e3b97b47fa81",
+          "afterHash": "1212b42cea473a4a60a8647620d98924837ef59488d6565596f0caf3a7c46fa4",
+          "classification": "PRESENTATION_ONLY",
+          "functions": ["official closing-date field and calendar integration"],
+          "changedInputs": "Clicks on the existing closing-date field/icon; manual text, Enter, Escape and blur remain supported.",
+          "changedOutputs": "A calendar opens without changing the existing draft semantics; explicit selection commits exactly once through the existing handler.",
+          "changedProviderContract": "NONE: no Provider, CAS, Realtime or RPC change.",
+          "dataFlow": "Existing product-group draft -> calendar presentation -> existing basic-info commit handler.",
+          "persistenceBehavior": "Schema-neutral UI enhancement; no automatic date fill and no duplicate write on blur.",
+          "writePath": "Existing closing_date field update only; no new write path.",
+          "providerPath": "Unchanged.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: no migration or schema change.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        },
+        {
+          "file": "tests/purchase-group-closing-date-picker.mjs",
+          "beforeHash": null,
+          "afterHash": "24440decb241ea84a03a7e73e4be558805e4a87cd868366dfcd03be2fc4fed6d",
+          "classification": "APPLICATION_DOMAIN_ONLY",
+          "functions": ["closing-date calendar UI regression"],
+          "changedInputs": "Isolated synthetic fixture only; desktop/mobile, timezone and calendar-icon interactions.",
+          "changedOutputs": "Asserts manual entry, single-write selection, empty-date behavior, re-entry and no timezone shift with zero Supabase requests.",
+          "changedProviderContract": "NONE.",
+          "dataFlow": "Test harness only.",
+          "persistenceBehavior": "No production write.",
+          "writePath": "Isolated fixture only.",
+          "providerPath": "No production Provider change.",
+          "changedDurableFields": "NONE.",
+          "changedRpcContract": "NONE.",
+          "changedBackupContract": "NONE.",
+          "changedSchemaExpectations": "NONE: no migration or schema change.",
+          "changedIdentitySemantics": "NONE.",
+          "externalContract": "NONE.",
+          "schemaExpectation": "Schema-neutral; no migration."
+        }
+      ]
     }
   ]
 }
