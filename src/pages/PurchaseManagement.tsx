@@ -524,6 +524,17 @@ export default function PurchaseManagement() {
   // 官方結單日 / 發售月份 / 官網網址: same shared rule as level 1 (local draft; save once on Blur / Enter).
   const basicInfo = useProductGroupBasicInfoDrafts();
   const [closingDateCalendarOpen, setClosingDateCalendarOpen] = useState(false);
+  const closingDateFieldRef = useRef<HTMLSpanElement | null>(null);
+  // Opened from the calendar icon the text field may not have focus (no phone keyboard over the calendar):
+  // a tap / click outside the field closes it then.
+  useEffect(() => {
+    if (!closingDateCalendarOpen) return;
+    const closeOnOutside = (event: PointerEvent) => {
+      if (!closingDateFieldRef.current?.contains(event.target as Node)) setClosingDateCalendarOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutside);
+    return () => document.removeEventListener('pointerdown', closeOnOutside);
+  }, [closingDateCalendarOpen]);
   const [notFoundId, setNotFoundId] = useState<string | null>(null);
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -2126,14 +2137,25 @@ export default function PurchaseManagement() {
             <div style={{ fontSize: '13px', fontWeight: 700, color: '#334155', marginBottom: '10px' }}>商品基本資訊</div>
             <div style={{ display: 'flex', alignItems: 'flex-end', flexWrap: 'wrap', gap: '10px 16px' }}>
               <label style={basicInfoLabel}>官方結單日
-                <span style={{ position: 'relative', display: 'inline-block' }}>
+                <span ref={closingDateFieldRef} style={{ position: 'relative', display: 'inline-block' }}>
                   <input className="input" data-testid="purchase-group-closing-date" type="text" placeholder="YYYY/MM/DD"
                     aria-haspopup="dialog" aria-expanded={closingDateCalendarOpen}
                     onChange={handleBasicInfoChange}
                     onBlur={event => { setClosingDateCalendarOpen(false); handleBasicInfoBlur(event); }}
                     onKeyDown={event => { if (event.key === 'Escape' || event.key === 'Enter' || event.key === 'Tab') setClosingDateCalendarOpen(false); handleBasicInfoKeyDown(event); }}
                     onClick={() => setClosingDateCalendarOpen(true)}
-                    {...basicInfoProps('closing_date', { ...basicInfoField, width: '140px', cursor: 'pointer' })} />
+                    {...basicInfoProps('closing_date', { ...basicInfoField, width: '140px', cursor: 'pointer', paddingRight: '34px' })} />
+                  <button type="button" data-testid="purchase-group-closing-date-calendar-button" aria-label="開啟日曆選擇官方結單日"
+                    aria-haspopup="dialog" aria-expanded={closingDateCalendarOpen}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={event => { event.preventDefault(); setClosingDateCalendarOpen(open => !open); }}
+                    style={{ position: 'absolute', right: '2px', top: '50%', transform: 'translateY(-50%)', width: '30px', height: '30px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent',
+                      color: '#475569', cursor: 'pointer', padding: 0, borderRadius: '6px' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3" y="4.5" width="18" height="16.5" rx="2" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" />
+                    </svg>
+                  </button>
                   {closingDateCalendarOpen && (
                     <ClosingDateCalendar value={basicInfo.valueOf(group, 'closing_date')} onPick={handleClosingDatePicked}
                       onClose={() => setClosingDateCalendarOpen(false)} />

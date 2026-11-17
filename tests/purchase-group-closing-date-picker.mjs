@@ -1,4 +1,4 @@
-// Purchase Records level 2 · 商品基本資訊 · 官方結單日: clicking the field opens the calendar popover;
+// Purchase Records level 2 · 商品基本資訊 · 官方結單日: clicking the field or the calendar icon opens the calendar popover;
 // a pick saves YYYY/MM/DD once through the existing draft/commit path; empty stays empty (no "today").
 // Synthetic React harness (experimental mode), no Supabase. Port: CLOSING_DATE_PICKER_PORT (default 4726).
 import assert from 'node:assert/strict';
@@ -16,8 +16,8 @@ let output = ''; vite.stdout.on('data', c => { output += c; }); vite.stderr.on('
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const result = {};
 
-const open = async (browser, width, height = 900) => {
-  const context = await browser.newContext({ viewport: { width, height } });
+const open = async (browser, width, height = 900, timezoneId = undefined) => {
+  const context = await browser.newContext({ viewport: { width, height }, ...(timezoneId ? { timezoneId } : {}), ...(width < 500 ? { isMobile: true, hasTouch: true } : {}) });
   await context.addInitScript(() => {
     localStorage.setItem('erp_provider_mode', 'experimental');
     localStorage.setItem('purchase_management_edit_mode', 'true');
@@ -116,6 +116,27 @@ try {
       await field(page).press('Control+A'); await page.keyboard.type('20271224', { delay: 10 }); await field(page).press('Enter');
       await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productGroups.find(row => row.id === window.__P0_REACT_HARNESS__.fixtureId('g-holo')).closing_date === '2027/12/24');
       assert.equal(await calendar(page).count(), 0, `${label}: Enter closes the calendar`);
+      // Calendar icon: opens the same calendar without moving focus into the text field (no phone keyboard
+      // over the calendar); a second press or a tap outside closes it; a pick saves once.
+      const icon = page.getByTestId('purchase-group-closing-date-calendar-button');
+      await page.getByText('商品基本資訊').first().click(); await sleep(200);
+      assert.equal(await icon.getAttribute('aria-label'), '開啟日曆選擇官方結單日');
+      await icon.click();
+      r.iconOpens = await calendarState(page);
+      assert.deepEqual(r.iconOpens, { month: '2027/12', selected: '2027/12/24' }, `${label}: icon opens the calendar on the saved date`);
+      assert.equal(await page.evaluate(() => document.activeElement?.dataset?.testid ?? null) === 'purchase-group-closing-date', false, `${label}: icon does not focus the text field`);
+      await icon.click(); await sleep(200);
+      assert.equal(await calendar(page).count(), 0, `${label}: icon toggles the calendar closed`);
+      await icon.click(); await page.getByText('商品基本資訊').first().click(); await sleep(200);
+      assert.equal(await calendar(page).count(), 0, `${label}: tap outside closes the calendar`);
+      const w3 = await writes(page);
+      await icon.click(); await pick(page, '2027/12/30');
+      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productGroups.find(row => row.id === window.__P0_REACT_HARNESS__.fixtureId('g-holo')).closing_date === '2027/12/30');
+      await sleep(400); assert.equal((await writes(page)) - w3, 1, `${label}: icon pick writes once`);
+      assert.equal(await field(page).inputValue(), '2027/12/30');
+      // Manual entry still works next to the icon (full form).
+      await field(page).click(); await field(page).press('Control+A'); await page.keyboard.type('2027/12/24'); await field(page).press('Enter');
+      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productGroups.find(row => row.id === window.__P0_REACT_HARNESS__.fixtureId('g-holo')).closing_date === '2027/12/24');
       // Re-enter the page: saved value shown.
       const detailPath = await page.evaluate(() => location.pathname);
       await page.evaluate(() => window.__P0_REACT_HARNESS__.navigate('/purchase-records'));
@@ -128,7 +149,20 @@ try {
       result[label] = r;
       await context.close();
     }
+    // Time zones far from Taipei: the picked calendar day is stored as that same YYYY/MM/DD (no UTC shift).
+    for (const timezoneId of ['Pacific/Honolulu', 'Pacific/Kiritimati']) {
+      const { context, page, errors } = await open(browser, 1366, 900, timezoneId);
+      await remoteGroupPatch(page, { closing_date: '2027/03/01' });
+      await page.waitForFunction(() => document.querySelector('[data-testid="purchase-group-closing-date"]').value === '2027/03/01');
+      await page.getByTestId('purchase-group-closing-date-calendar-button').click();
+      assert.deepEqual(await calendarState(page), { month: '2027/03', selected: '2027/03/01' }, `${timezoneId}: saved day shown as is`);
+      await pick(page, '2027/03/31');
+      await page.waitForFunction(() => window.__P0_REACT_HARNESS__.server.productGroups.find(row => row.id === window.__P0_REACT_HARNESS__.fixtureId('g-holo')).closing_date === '2027/03/31');
+      assert.deepEqual(errors, []);
+      result[timezoneId] = 'picked 2027/03/31 -> stored 2027/03/31';
+      await context.close();
+    }
   } finally { await browser.close(); }
   console.log(JSON.stringify(result));
-  console.log('PASS closing-date field opens the calendar on click; pick saves YYYY/MM/DD once; empty stays empty');
+  console.log('PASS closing-date field and calendar icon open the calendar; manual entry kept; pick saves YYYY/MM/DD once; empty stays empty; no time-zone shift; desktop + mobile');
 } finally { vite.kill('SIGTERM'); }
